@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from agentloom.tools.search.glob_tool.glob_tool import glob_search
+from agentloom.runtimes.smolagents.tools.search.glob_tool.glob_tool import glob_search
 
 
 # ---------------------------------------------------------------------------

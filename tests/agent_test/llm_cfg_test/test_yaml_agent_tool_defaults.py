@@ -2,17 +2,17 @@ import copy
 import json
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_agent_factory
+import agentloom.application.factory as yaml_agent_factory
 import pytest
 import yaml
-from agentloom.runtime.factory import (
+from agentloom.application.factory import (
     YamlAgentFactory,
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
-from agentloom.runtime.logging import get_global_logger, initialize_global_logger_once, set_global_logger
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import ModelTurnResult
+from agentloom.execution.logging import get_global_logger, initialize_global_logger_once, set_global_logger
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import ModelTurnResult
 
 
 class _NoopAdapter:
@@ -45,12 +45,15 @@ WORKFLOW_GUIDANCE = yaml_agent_factory.TASK_SPEC_WORKFLOW_GUIDANCE
 
 
 def _make_worker(config: dict) -> YamlConfiguredAgent:
-    worker = object.__new__(YamlConfiguredAgent)
-    worker._config = config
-    worker._normalized = None
-    worker.run = lambda q, additional_args=None: f"RUN::{q}"
-    worker.process_tool_query = lambda q: q
-    return worker
+    class WorkerFixture(YamlConfiguredAgent):
+        def __init__(self, config, **kwargs):
+            self._config = config
+            self._normalized = None
+
+        def run(self, query, additional_args=None):
+            return f"RUN::{query}"
+
+    return WorkerFixture(config)
 
 
 def _basic_schema(description: str = "callable tool doc") -> dict:
@@ -355,7 +358,7 @@ def test_generated_tool_serializes_structured_agent_results_as_json():
         "agent_function_schema": _basic_schema(),
     }
     worker = _make_worker(config)
-    worker.run = lambda _query, additional_args=None: {
+    type(worker).run = lambda self, _query, additional_args=None: {
         "answer": '用户说"拍照"，工具返回成功。',
     }
     worker._validate_config()

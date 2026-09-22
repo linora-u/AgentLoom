@@ -1,9 +1,9 @@
 import pytest
 
-from agentloom.runtime.checkpoint import CheckpointManager
-from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
-from agentloom.runtime.goal import GoalConfig, GoalState, normalize_goal_config
-from agentloom.runtime.goal.provider import (
+from agentloom.execution.checkpoint import CheckpointManager
+from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.execution.goal import GoalConfig, GoalState, normalize_goal_config
+from agentloom.execution.goal.provider import (
     GoalCompleteError,
     GoalStateProvider,
     bind_goal_state_provider,

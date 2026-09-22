@@ -20,21 +20,21 @@ _AUDIT_WORKERS = {
 }
 _EVIDENCE_FILES = {
     "contract": (
-        "src/runtime/goal/model.py",
-        "src/runtime/goal/provider.py",
+        "src/execution/goal/model.py",
+        "src/execution/goal/provider.py",
         "src/application/readiness.py",
-        "src/runtime/factory.py",
+        "src/application/factory.py",
         "tests/goal_test/test_goal_config.py",
         "tests/goal_test/test_goal_state.py",
         "tests/agent_test/llm_cfg_test/test_supervisor_task_spec_format.py",
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
     ),
     "lifecycle": (
-        "src/runtime/goal/model.py",
-        "src/runtime/goal/provider.py",
-        "src/runtime/agent.py",
-        "src/runtime/checkpoint/checkpoint_manager.py",
-        "src/runtime/checkpoint/coordinator.py",
+        "src/execution/goal/model.py",
+        "src/execution/goal/provider.py",
+        "src/application/agent.py",
+        "src/execution/checkpoint/checkpoint_manager.py",
+        "src/execution/checkpoint/coordinator.py",
         "src/application/runner.py",
         "tests/goal_test/test_goal_model_accounting.py",
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
@@ -44,13 +44,13 @@ _EVIDENCE_FILES = {
         "src/application/runner.py",
         "src/schedules/runner.py",
         "src/schedules/store.py",
-        "src/tui_bridge/bridge.py",
-        "src/tui_bridge/domain_cli.py",
-        "agentloom-tui/src/app/presentation.ts",
-        "agentloom-tui/src/domain/status.ts",
+        "studio/python/agentloom_studio_adapter/__main__.py",
+        "studio/python/agentloom_studio_adapter/domain_cli.py",
+        "studio/src/app/presentation.ts",
+        "studio/src/domain/status.ts",
         "tests/schedules_test/test_schedule_runner_cli.py",
-        "tests/tui_bridge_test/test_runtime_summary.py",
-        "agentloom-tui/test/app/view.test.tsx",
+        "tests/application_studio_test/test_runtime_summary.py",
+        "studio/test/app/view.test.tsx",
     ),
     "documentation": (
         "README.md",
@@ -66,7 +66,7 @@ _EVIDENCE_FILES = {
 }
 _EVIDENCE_PATTERN = re.compile(
     r"goal|workflow|continu|resume|checkpoint|"
-    r"supervisor|worker|manifest|schedule|status|tui|jsonl|目标|恢复",
+    r"supervisor|worker|manifest|schedule|status|studio|jsonl|目标|恢复",
     re.IGNORECASE,
 )
 _EVIDENCE_LINES_PER_FILE = 4
@@ -169,7 +169,7 @@ def run_goal_audit_batch(
             }
         )
 
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
 
     worker_path = _APP_ROOT / "workflows" / "worker_agents" / filename
     results = YamlAgentFactory.run_agents_parallel(
@@ -200,7 +200,7 @@ def run_parallel_goal_probe(tasks_json: str, concurrency: int = 6) -> str:
         concurrency: Positive Worker concurrency for this batch.
     """
 
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     provider = get_current_goal_provider(required=True)
     existing = json.loads(inspect_parallel_goal_report())
@@ -267,7 +267,7 @@ def run_parallel_goal_probe(tasks_json: str, concurrency: int = 6) -> str:
 def inspect_parallel_goal_report() -> str:
     """Report whether persisted parallel evidence belongs to the current Goal."""
 
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     state = get_current_goal_provider(required=True).snapshot()
     target = _OUTPUT_ROOT / "parallel.md"

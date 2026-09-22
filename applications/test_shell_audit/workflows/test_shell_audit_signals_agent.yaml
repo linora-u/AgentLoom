@@ -71,4 +71,6 @@ workflow: |
      NOT_APPLICABLE.
 
 worker_agents: []
-max_steps: 40
+runtime_options:
+  max_steps: 40
+  smart_summary: false

@@ -2,8 +2,8 @@ import json
 from inspect import signature
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_agent_factory
-from agentloom.runtime.factory import YamlAgentFactory, YamlConfiguredAgent
+import agentloom.application.factory as yaml_agent_factory
+from agentloom.application.factory import YamlAgentFactory, YamlConfiguredAgent
 from smolagents.tools import get_json_schema
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
@@ -12,13 +12,16 @@ WORKFLOW_GUIDANCE = yaml_agent_factory.TASK_SPEC_WORKFLOW_GUIDANCE
 
 
 def _build_worker(config: dict) -> YamlConfiguredAgent:
-    worker = object.__new__(YamlConfiguredAgent)
-    worker._config = config
-    worker._normalized = None
-    worker._validate_config()
-    worker.run = lambda q, additional_args=None: f"RUN::{q}"
-    worker.process_tool_query = lambda q: q
-    return worker
+    class WorkerFixture(YamlConfiguredAgent):
+        def __init__(self, config, **kwargs):
+            self._config = config
+            self._normalized = None
+            self._validate_config()
+
+        def run(self, query, additional_args=None):
+            return f"RUN::{query}"
+
+    return WorkerFixture(config)
 
 
 def test_generated_function_signature_from_schema():

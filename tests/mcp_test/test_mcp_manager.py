@@ -1,11 +1,13 @@
-"""Unit tests for agentloom.adapters.mcp.manager — McpManager lifecycle, tool aggregation, graceful degradation."""
+"""Unit tests for agentloom.integrations.mcp.manager — McpManager lifecycle, tool aggregation, graceful degradation."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from agentloom.adapters.mcp.config import McpServerConfig, McpSettings
-from agentloom.adapters.mcp.manager import McpManager
+from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
+from agentloom.integrations.mcp.manager import McpManager
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolBinding
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -19,11 +21,12 @@ def _settings(*configs: McpServerConfig, prefix: bool = True) -> McpSettings:
     return McpSettings(configs=list(configs), tool_name_prefix=prefix)
 
 
-def _fake_tool(name: str = "tool_a") -> MagicMock:
-    tool = MagicMock()
-    tool.name = name
-    tool.description = "A tool"
-    return tool
+def _fake_tool(name: str = "tool_a") -> ToolBinding:
+    return ToolBinding(
+        definition=ToolDefinition(name=name, description="A tool", parameters={"type": "object", "properties": {}}),
+        forward=lambda: "called",
+        inputs_schema={},
+    )
 
 
 def _mock_mcp_client(tools: list | None = None):
@@ -39,8 +42,8 @@ def _mock_mcp_client(tools: list | None = None):
 
 class TestConnectAll:
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient")
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient")
     def test_success(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         fake_tools = [_fake_tool("t1"), _fake_tool("t2")]
@@ -54,8 +57,8 @@ class TestConnectAll:
         assert len(manager._raw_tools["srv"]) == 2
         assert not manager._errors
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient", side_effect=RuntimeError("boom"))
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient", side_effect=RuntimeError("boom"))
     def test_failure_graceful(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
 
@@ -67,8 +70,8 @@ class TestConnectAll:
         assert "bad" in manager._errors
         assert "boom" in manager._errors["bad"]
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient")
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient")
     def test_partial_failure(self, MockMCPClient, mock_params):
         """One server succeeds, one fails — both recorded correctly."""
         mock_params.return_value = MagicMock()
@@ -103,8 +106,8 @@ class TestConnectAll:
 
 class TestGetAllTools:
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient")
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient")
     def test_tools_from_multiple_servers(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         call_count = [0]
@@ -123,7 +126,7 @@ class TestGetAllTools:
 
         tools = manager.get_all_tools()
         assert len(tools) == 2
-        names = {t.name for t in tools}
+        names = {t.definition.name for t in tools}
         assert "mcp__srv_a__tool_a" in names
         assert "mcp__srv_b__tool_b" in names
 
@@ -138,8 +141,8 @@ class TestGetAllTools:
 
 class TestGetServerStatus:
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient")
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient")
     def test_status_mixed(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         call_count = [0]
@@ -172,8 +175,8 @@ class TestGetServerStatus:
 
 class TestDisconnectAll:
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient")
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient")
     def test_disconnect_cleans_up(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         mock_client = _mock_mcp_client()
@@ -194,8 +197,8 @@ class TestDisconnectAll:
         manager.disconnect_all()
         manager.disconnect_all()  # second call — should not error
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient")
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient")
     def test_disconnect_error_suppressed(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         mock_client = _mock_mcp_client()
@@ -217,8 +220,8 @@ class TestDisconnectAll:
 
 class TestContextManager:
 
-    @patch("agentloom.adapters.mcp.manager.to_mcp_client_params")
-    @patch("agentloom.adapters.mcp.manager.MCPClient")
+    @patch("agentloom.integrations.mcp.manager.to_mcp_client_params")
+    @patch("agentloom.integrations.mcp.manager.MCPClient")
     def test_context_manager(self, MockMCPClient, mock_params):
         mock_params.return_value = MagicMock()
         MockMCPClient.return_value = _mock_mcp_client()

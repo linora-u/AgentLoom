@@ -13,7 +13,7 @@ workflow: |
   Verify: output contains "grep_search" and parameter types.
 
   ## Step 2: Hover on a class
-  Use lsp_hover on "src/adapters/lsp/lsp_server_instance.py", line=30, character=7.
+  Use lsp_hover on "src/integrations/lsp/lsp_server_instance.py", line=30, character=7.
   Expected: return class information for LSPServerState.
   Verify: output is non-empty and contains "LSPServerState".
 
@@ -24,4 +24,6 @@ tools:
   - name: "lsp_hover"
 
 worker_agents: []
-max_steps: 10
+runtime_options:
+  max_steps: 10
+  smart_summary: false

@@ -8,8 +8,8 @@ import pytest
 from click.testing import CliRunner
 
 from agentloom.__main__ import main
-from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
-from agentloom.runtime import RuntimeHome
+from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.execution import RuntimeHome
 
 
 @pytest.fixture()
@@ -18,7 +18,7 @@ def populated_runtime(tmp_path: Path, monkeypatch):
     runtime_root = tmp_path / ".agentloom"
     ckpt_root = runtime_root / "checkpoints"
     monkeypatch.setattr(
-        "agentloom.__main__._configured_runtime_home",
+        "agentloom.execution.cli._configured_runtime_home",
         lambda: RuntimeHome(runtime_root),
     )
 
@@ -46,7 +46,7 @@ class TestListTasks:
     def test_empty(self, tmp_path: Path, monkeypatch):
         runtime_root = tmp_path / ".agentloom"
         monkeypatch.setattr(
-            "agentloom.__main__._configured_runtime_home",
+            "agentloom.execution.cli._configured_runtime_home",
             lambda: RuntimeHome(runtime_root),
         )
         runner = CliRunner()
@@ -120,7 +120,7 @@ def test_checkpoint_cli_rejects_symlinked_runtime_root_without_deleting_external
     runtime_link = tmp_path / ".agentloom"
     runtime_link.symlink_to(external, target_is_directory=True)
     monkeypatch.setattr(
-        "agentloom.__main__._configured_runtime_home",
+        "agentloom.execution.cli._configured_runtime_home",
         lambda: RuntimeHome(runtime_link),
     )
 

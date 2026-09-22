@@ -1,8 +1,10 @@
 name: "goal_observability_auditor"
 agent_runtime: smolagents
-description: "Audit agreement across Python API, CLI, JSONL, schedule, bridge, and TUI."
+description: "Audit agreement across Python API, CLI, JSONL, schedule, adapter, and Studio."
 model_type: "summary"
-max_steps: 2
+runtime_options:
+  max_steps: 2
+  smart_summary: false
 concurrency: 1
 
 workflow: |

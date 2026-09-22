@@ -2,10 +2,10 @@ from __future__ import annotations
 
 
 def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
-    from agentloom.runtime.hooks import HookHandler, HookPlan, HookRun
-    from agentloom.runtime.hooks.types import HookEvent, HookResult
-    from agentloom.runtime.tool_gateway import AgentLoomToolGateway
-    from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
+    from agentloom.execution.hooks import HookHandler, HookPlan, HookRun
+    from agentloom.execution.hooks.types import HookEvent, HookResult
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway
+    from agentloom.execution.trace import ExplicitExecutionContext, bind_explicit_execution_context
     from agentloom.self_learning.session_recorder import event_from_hook_context
 
     observed = []
@@ -75,10 +75,10 @@ def test_wrapped_tool_reuses_one_call_id_for_call_and_result_events() -> None:
 
 
 def test_wrapped_tool_uses_provider_call_id_when_bound_by_executor() -> None:
-    from agentloom.runtime.hooks import HookHandler, HookPlan, HookRun
-    from agentloom.runtime.hooks.types import HookEvent, HookResult
-    from agentloom.runtime.tool_gateway import AgentLoomToolGateway
-    from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
+    from agentloom.execution.hooks import HookHandler, HookPlan, HookRun
+    from agentloom.execution.hooks.types import HookEvent, HookResult
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway
+    from agentloom.execution.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
     observed = []
     run = HookRun(

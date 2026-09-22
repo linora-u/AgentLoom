@@ -5,16 +5,16 @@ import threading
 
 import pytest
 
-from agentloom.runtime.context_engine import ContextEngine, ContextEngineConfig
-from agentloom.runtime.context_engine.compressors import compress_content
-from agentloom.runtime.context_engine.config import ContextStoreConfig
-from agentloom.runtime.context_engine.models import ContentKind
-from agentloom.runtime.context_engine.router import route_content
-from agentloom.runtime import RuntimeHome
+from agentloom.execution.context_engine import ContextEngine, ContextEngineConfig
+from agentloom.execution.context_engine.compressors import compress_content
+from agentloom.execution.context_engine.config import ContextStoreConfig
+from agentloom.execution.context_engine.models import ContentKind
+from agentloom.execution.context_engine.router import route_content
+from agentloom.execution import RuntimeHome
 
 
 def test_context_engine_requires_explicit_thread_context_propagation(tmp_path):
-    from agentloom.runtime.context_engine.runtime import (
+    from agentloom.execution.context_engine.runtime import (
         clear_current_context_engine,
         get_current_context_engine,
         set_current_context_engine,
@@ -132,7 +132,7 @@ def test_context_store_ttl_expires_entries(monkeypatch, tmp_path):
     entry = engine.get_entry(ref)
     assert entry is not None
 
-    monkeypatch.setattr("agentloom.runtime.context_engine.store.time.time", lambda: entry.created_at + 2)
+    monkeypatch.setattr("agentloom.execution.context_engine.store.time.time", lambda: entry.created_at + 2)
 
     assert engine.retrieve(ref) is None
 

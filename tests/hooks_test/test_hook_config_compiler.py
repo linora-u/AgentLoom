@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agentloom.runtime.hooks import (
+from agentloom.execution.hooks import (
     HookConfigLayer,
     HookEvent,
     HookPlanCompiler,

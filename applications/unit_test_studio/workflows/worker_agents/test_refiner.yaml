@@ -4,7 +4,9 @@ description: |
   Validate generated pytest files and attach refinement results.
 
 model_type: "powerful"
-max_steps: 30
+runtime_options:
+  max_steps: 30
+  smart_summary: false
 
 workflow: |
   # 0) Structured Tool Execution Contract

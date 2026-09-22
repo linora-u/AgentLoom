@@ -6,9 +6,9 @@ import inspect
 
 import pytest
 
-from agentloom.runtime import factory as yaml_agent_factory
-from agentloom.runtime.factory import YamlAgentFactory
-from agentloom.adapters.smolagents.tools.tools import ensure_tool_wrapped
+from agentloom.application import factory as yaml_agent_factory
+from agentloom.application.factory import YamlAgentFactory
+from agentloom.runtimes.smolagents.tools.tools import ensure_tool_wrapped
 
 
 def sample_tool(prompt: str, cwd: str = ".", sandbox: str = "", search: str = "") -> str:
@@ -33,7 +33,7 @@ def test_fixed_args_are_hidden_from_llm_schema_and_applied(monkeypatch):
         {
             "tools": [
                 {
-                    "name": "codex",
+                    "name": "sample_tool",
                     "fixed_args": {
                         "cwd": "/repo",
                         "sandbox": "workspace-write",
@@ -55,48 +55,40 @@ def test_fixed_args_are_hidden_from_llm_schema_and_applied(monkeypatch):
     assert result == "prompt=summarize;cwd=/repo;sandbox=workspace-write;search=false"
 
 
-def test_explicit_tool_config_overrides_same_named_default_toolset(monkeypatch):
-    monkeypatch.setattr(
-        yaml_agent_factory,
-        "resolve_toolsets",
-        lambda names: ["sample_tool"],
-    )
-    monkeypatch.setattr(
-        yaml_agent_factory,
-        "resolve_tool_function",
-        lambda name: sample_tool,
-    )
-
+def test_explicit_tool_config_overrides_same_named_default_toolset(tmp_path):
+    target = tmp_path / "configured.txt"
     tools, _ = YamlAgentFactory.get_tools_from_config(
         {
             "tools": [
                 {
-                    "name": "sample_tool",
-                    "fixed_args": {"cwd": "/explicit"},
+                    "name": "write_file",
+                    "fixed_args": {"file_path": str(target)},
                 }
             ]
         },
-        effective_agent_config={"default_toolsets": ["defaults"]},
+        effective_agent_config={"default_toolsets": ["core_file"]},
     )
 
-    assert len(tools) == 1
-    tool_func = tools[0]
-    assert "cwd" not in inspect.signature(tool_func).parameters
-    assert tool_func(prompt="run") == (
-        "prompt=run;cwd=/explicit;sandbox=;search="
-    )
+    selected = [tool for tool in tools if tool.__name__ == "write_file"]
+    assert len(selected) == 1
+    tool_func = selected[0]
+    assert "file_path" not in inspect.signature(tool_func).parameters
+    tool_func(content="configured target", file_path=str(tmp_path / "ignored.txt"))
+    assert target.read_text() == "configured target"
+    assert not (tmp_path / "ignored.txt").exists()
+    from agentloom.execution.tool_gateway import bind_tool
+    manifest = bind_tool(tool_func).manifest_entry
+    assert manifest.fixed_arguments == {"file_path": str(target)}
 
 
-def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch):
-    monkeypatch.setattr(yaml_agent_factory, "load_function", lambda module, function: sample_tool)
-
+def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name():
     tools, _ = YamlAgentFactory.get_tools_from_config(
         {
             "tools": [
                 {
-                    "name": "codex1",
-                    "module": "agentloom.tools.codex.codex_tool",
-                    "function": "codex",
+                    "name": "first_task",
+                    "module": __name__,
+                    "function": "sample_tool",
                     "fixed_args": {
                         "prompt": "first prompt",
                         "cwd": "/repo",
@@ -105,9 +97,9 @@ def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch)
                     },
                 },
                 {
-                    "name": "codex2",
-                    "module": "agentloom.tools.codex.codex_tool",
-                    "function": "codex",
+                    "name": "second_task",
+                    "module": __name__,
+                    "function": "sample_tool",
                     "fixed_args": {
                         "prompt": "second prompt",
                         "cwd": "/repo",
@@ -120,11 +112,11 @@ def test_dynamic_tool_fixed_args_use_yaml_name_as_exposed_tool_name(monkeypatch)
         effective_agent_config={"default_toolsets": []},
     )
 
-    assert [tool.__name__ for tool in tools] == ["codex1", "codex2"]
+    assert [tool.__name__ for tool in tools] == ["first_task", "second_task"]
     assert all(list(inspect.signature(tool).parameters) == [] for tool in tools)
 
     wrapped_tools = ensure_tool_wrapped(tools)
-    assert [tool.name for tool in wrapped_tools] == ["codex1", "codex2"]
+    assert [tool.name for tool in wrapped_tools] == ["first_task", "second_task"]
     assert all(tool.inputs == {} for tool in wrapped_tools)
 
     assert tools[0](prompt="ignored") == "prompt=first prompt;cwd=/repo;sandbox=read-only;search=false"
@@ -139,7 +131,7 @@ def test_fixed_args_reject_unknown_parameters(monkeypatch):
             {
                 "tools": [
                     {
-                        "name": "codex",
+                        "name": "sample_tool",
                         "fixed_args": {"missing_arg": "value"},
                     }
                 ]
@@ -154,7 +146,7 @@ def test_fixed_args_must_be_a_mapping():
             {
                 "tools": [
                     {
-                        "name": "codex",
+                        "name": "sample_tool",
                         "fixed_args": ["cwd", "/repo"],
                     }
                 ]

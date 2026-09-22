@@ -1,5 +1,7 @@
 name: "documentation_review"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Evaluates documentation quality: function/class docs, README completeness, API documentation, and inline comments."
 model_type: "powerful"
 toolsets:

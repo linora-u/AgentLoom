@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
+from agentloom.execution.skills.catalog import SkillCatalog, SkillSource
 
 
 def _write_skill(root: Path, frontmatter_line: str = "") -> Path:

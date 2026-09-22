@@ -146,9 +146,14 @@ class TestMissingFieldsDefault:
         with pytest.raises(ValueError, match="greater than or equal to 24"):
             RootSettings(runtime={"cleanup_interval_hours": 23})
 
-    def test_smart_summary_defaults_true(self):
+    def test_smart_summary_default_belongs_to_smol_options(self, tmp_path):
+        from agentloom.runtimes.smolagents.options import normalize_runtime_options
+
         settings = RootSettings()
-        assert settings.smart_summary is True
+        assert "smart_summary" not in settings.model_dump()
+        options, sources = normalize_runtime_options({}, agent_root=tmp_path)
+        assert options["smart_summary"] is True
+        assert sources["smart_summary"] == "default:smolagents"
 
     def test_tool_access_control_defaults(self):
         settings = RootSettings()
@@ -166,7 +171,7 @@ class TestExistingFieldsCoexistence:
     def test_all_fields_together(self):
         """All fields can be set simultaneously without conflicts."""
         settings = RootSettings(
-            smart_summary=False,
+            runtime_options={"smart_summary": False},
             model={"provider": "openai"},
             tools=[{"name": "bash_tool"}],
             context_engine={"min_chars": 2000},
@@ -177,7 +182,7 @@ class TestExistingFieldsCoexistence:
                 path_validation=[],
             ),
         )
-        assert settings.smart_summary is False
+        assert settings.model_dump()["runtime_options"]["smart_summary"] is False
         assert settings.model["provider"] == "openai"
         assert settings.context_engine["min_chars"] == 2000
         assert settings.tool_metadata["bash_tool"]["label"] == "Shell"

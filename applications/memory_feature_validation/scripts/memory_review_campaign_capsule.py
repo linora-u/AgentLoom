@@ -275,8 +275,17 @@ def _clean_python_env(root: Path, *, token: str, uv: Path) -> dict[str, str]:
     return env
 
 
+_SUPPORTED_MAPPED_PACKAGE_DIRS = (
+    {"agentloom": "src"},
+    {
+        "agentloom": "src",
+        "agentloom_studio_adapter": "studio/python/agentloom_studio_adapter",
+    },
+)
+
+
 def _capsule_runtime_layout(root: Path) -> tuple[str, str]:
-    """Resolve the three supported layouts from the verified source snapshot."""
+    """Resolve a supported runtime layout from the verified source snapshot."""
     try:
         with (root / "pyproject.toml").open("rb") as handle:
             project = tomllib.load(handle)
@@ -285,7 +294,10 @@ def _capsule_runtime_layout(root: Path) -> tuple[str, str]:
         if package_dirs == {}:
             package = {"src.__main__:main": "src", "agentloom.__main__:main": "agentloom"}[configured]
             return package, package
-        if configured == "agentloom.__main__:main" and package_dirs == {"agentloom": "src"}:
+        if (
+            configured == "agentloom.__main__:main"
+            and package_dirs in _SUPPORTED_MAPPED_PACKAGE_DIRS
+        ):
             return "agentloom", "src"
         raise ValueError("unsupported package mapping")
     except (AttributeError, KeyError, OSError, TypeError, ValueError) as exc:

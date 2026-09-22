@@ -2,7 +2,7 @@
 
 import pytest
 
-from agentloom.runtime.goal import GoalConfig, normalize_goal_config, validate_goal_state
+from agentloom.execution.goal import GoalConfig, normalize_goal_config, validate_goal_state
 
 
 @pytest.mark.parametrize("budget", [1, 0, -1, None, True, "ignored", {"old": "format"}])

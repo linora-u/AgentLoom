@@ -1,5 +1,7 @@
 name: "shell_worker"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   一个工作 agent，负责演示 shell 的持久性和独立性。
 model_type: "powerful"

@@ -1,4 +1,4 @@
-"""Tests for ``agentloom.runtime.heartbeat.HeartbeatWriter``."""
+"""Tests for ``agentloom.execution.heartbeat.HeartbeatWriter``."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from agentloom.runtime.heartbeat import HeartbeatWriter
-from agentloom.runtime import RuntimeHome
+from agentloom.execution.heartbeat import HeartbeatWriter
+from agentloom.execution import RuntimeHome
 
 
 @pytest.fixture()

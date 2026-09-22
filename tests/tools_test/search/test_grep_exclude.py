@@ -2,7 +2,7 @@
 
 import pytest
 
-from agentloom.tools.search.search_utils import (
+from agentloom.runtimes.smolagents.tools.search.search_utils import (
     get_search_exclude_patterns as _get_search_exclude_patterns,
     get_python_exclude_dirs as _get_python_exclude_dirs,
     SKIP_DIRS as _SKIP_DIRS,
@@ -17,7 +17,7 @@ from agentloom.tools.search.search_utils import (
 # inside _get_search_exclude_patterns.  We mock it at its origin module so
 # the import inside the function picks up the mock.
 _RESOLVE_MOCK_TARGET = (
-    "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config"
+    "agentloom.execution.permissions.workspace._resolve_tool_access_control_config"
 )
 
 
@@ -256,7 +256,7 @@ class TestBuildRgArgsIntegration:
 
     def test_exclude_patterns_in_rg_args(self, monkeypatch):
         """Exclude patterns from config should appear as --glob args."""
-        from agentloom.tools.search.grep_tool.grep_tool import _build_rg_args, _RG_PATH
+        from agentloom.runtimes.smolagents.tools.search.grep_tool.grep_tool import _build_rg_args, _RG_PATH
         if _RG_PATH is None:
             pytest.skip("ripgrep not available")
 
@@ -284,7 +284,7 @@ class TestBuildRgArgsIntegration:
 
     def test_no_config_no_extra_globs(self, monkeypatch):
         """Without config, only VCS exclude globs should be present."""
-        from agentloom.tools.search.grep_tool.grep_tool import _build_rg_args, _RG_PATH
+        from agentloom.runtimes.smolagents.tools.search.grep_tool.grep_tool import _build_rg_args, _RG_PATH
         if _RG_PATH is None:
             pytest.skip("ripgrep not available")
 

@@ -45,7 +45,7 @@ When loading an Agent YAML, the system automatically searches upward for its par
 
 #### Level 3: Agent-level Override
 In addition to defining its own workflow, a single Agent's YAML file can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
-- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `prompt`, `mcp_servers`, `self_learning`, `hooks`.
+- `system`, `model_request_headers`, `runtime_options`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`.
 
 `context_engine` is intentionally small. It is enabled by the task runtime and uses the task-scoped checkpoint context store; normal overrides should only tune:
 
@@ -79,9 +79,9 @@ logging:
   backup_count: 3
 ```
 
-Every attempt writes `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`. Completed attempts also retain `artifacts/result.txt`, `audit/task_tree.json`, and `audit/task_events.jsonl` when that evidence exists; `manifest.json` records their paths before a successful checkpoint is cleaned up. Resume creates a new `run_id` but keeps the logical task's `task_id`, `.agentloom/checkpoints/<application_id>/<task_id>/`, and `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/`. The Agent workspace and Application-owned `output_dir` remain separate storage domains.
+Every attempt writes `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`. Completed attempts also retain `artifacts/result.txt`, `audit/task_tree.json`, and `audit/task_events.jsonl` when that evidence exists; `manifest.json` records their paths before a successful checkpoint is cleaned up. Resume creates a new `run_id` but keeps the logical task's `task_id`, `.agentloom/checkpoints/<application_id>/<task_id>/`, and `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/`. Durable schedules use `.agentloom/schedules/` and move with the same root override. The Agent workspace and Application-owned `output_dir` remain separate storage domains.
 
-File logging follows `logging.file_enabled` and is bounded by size/backup count. `loom run --no-file-log` disables only the current attempt's file log; it does not disable checkpoints or Shell audit. `loom clean-runtime` applies run retention, while `loom migrate-runtime --dry-run|--apply` handles one-time legacy `.logs` migration.
+File logging follows `logging.file_enabled` and is bounded by size/backup count. `loom run --no-file-log` disables only the current attempt's file log; it does not disable checkpoints or Shell audit. `loom clean-runtime` applies run retention within the canonical runtime home.
 
 ## 3. Complete Isolation of LLM Configuration
 
@@ -114,7 +114,7 @@ from agentloom.configuration import C
 
 # 1. Access system configuration
 tools_list = C.get_nested("tools", "default", default=[])
-is_summary_enabled = C.get("smart_summary")
+context_preview_chars = C.get_nested("context_engine", "preview_max_chars", default=3000)
 
 # 2. Access LLM configuration
 api_key = C.llm_api_key                # Reads api_key from the default model type

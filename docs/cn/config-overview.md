@@ -45,7 +45,7 @@ flowchart TD
 
 #### Level 3: Agent 级覆盖
 单个 Agent 的 YAML 文件除了定义自身的工作流外，还可以覆盖系统的部分配置。支持覆盖的白名单字段（`_WORKFLOW_OVERLAY_KEYS`）包含：
-- `system`, `model_request_headers`, `smart_summary`, `context_engine`, `tool_access_control`, `tools`, `prompt`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
+- `system`, `model_request_headers`, `runtime_options`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
 
 ### Runtime 存储归属
 
@@ -69,9 +69,9 @@ logging:
   backup_count: 3
 ```
 
-每次 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`。完成的 attempt 在存在对应证据时还会保留 `artifacts/result.txt`、`audit/task_tree.json` 与 `audit/task_events.jsonl`；成功清理 checkpoint 前，`manifest.json` 会先记录这些路径。Resume 会创建新的 `run_id`，但保持逻辑任务的 `task_id`、`.agentloom/checkpoints/<application_id>/<task_id>/` 和 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/` 不变。Agent 工作区与 Application 自有 `output_dir` 仍属于独立存储域。
+每次 attempt 写入 `.agentloom/runs/<application_id>/<run_id>/{manifest.json,logs,audit,artifacts}`。完成的 attempt 在存在对应证据时还会保留 `artifacts/result.txt`、`audit/task_tree.json` 与 `audit/task_events.jsonl`；成功清理 checkpoint 前，`manifest.json` 会先记录这些路径。Resume 会创建新的 `run_id`，但保持逻辑任务的 `task_id`、`.agentloom/checkpoints/<application_id>/<task_id>/` 和 `.agentloom/workspaces/agents/<application_id>/<agent_path>/tasks/<task_id>/` 不变。持久 Schedule 使用 `.agentloom/schedules/`，并随同一个 root 覆盖一起移动。Agent 工作区与 Application 自有 `output_dir` 仍属于独立存储域。
 
-文件日志由 `logging.file_enabled` 控制，并按大小和备份数有界轮转。`loom run --no-file-log` 只关闭本次 attempt 的文件日志，不会关闭 checkpoint 或 Shell audit。`loom clean-runtime` 应用 run retention；`loom migrate-runtime --dry-run|--apply` 用于一次性迁移旧 `.logs`。
+文件日志由 `logging.file_enabled` 控制，并按大小和备份数有界轮转。`loom run --no-file-log` 只关闭本次 attempt 的文件日志，不会关闭 checkpoint 或 Shell audit。`loom clean-runtime` 在 canonical runtime home 内应用 run retention。
 
 ## 3. LLM 配置的完全隔离
 
@@ -103,7 +103,7 @@ from agentloom.configuration import C
 
 # 1. 访问系统配置
 tools_list = C.get_nested("tools", "default", default=[])
-is_summary_enabled = C.get("smart_summary")
+context_preview_chars = C.get_nested("context_engine", "preview_max_chars", default=3000)
 
 # 2. 访问 LLM 配置
 api_key = C.llm_api_key                # 读取默认模型类型的 api_key

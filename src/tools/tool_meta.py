@@ -6,7 +6,7 @@ from dataclasses import fields, replace
 from typing import Any
 
 from agentloom.configuration import C
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from .catalog import ToolSpec, get_tool_spec
 
@@ -65,3 +65,20 @@ def get_tool_meta(
 
 
 __all__ = ["get_tool_meta"]
+
+
+def tool_is_concurrency_safe(tool_name: str, agent_config: dict[str, Any] | None = None) -> bool:
+    """Apply catalog and effective Agent metadata to registered or dynamic tools."""
+    from .catalog import list_tool_specs
+    specs = {spec.name: spec for spec in list_tool_specs()}
+    safe = specs[tool_name].is_concurrency_safe if tool_name in specs else True
+    metadata = (agent_config or {}).get("tool_metadata", _load_tool_metadata_from_config())
+    if not isinstance(metadata, dict):
+        raise ValueError("tool_metadata must be a mapping")
+    for key in ("default", tool_name):
+        value = metadata.get(key, {})
+        if isinstance(value, dict) and value.get("is_concurrency_safe") is not None:
+            safe = value["is_concurrency_safe"]
+    if not isinstance(safe, bool):
+        raise ValueError(f"tool_metadata.{tool_name}.is_concurrency_safe must be a boolean")
+    return safe

@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from agentloom.runtime.hooks import HookContext, HookEvent, HookPlanCompiler, HookRun
-from agentloom.runtime.hooks.config import HookConfigLayer
-from agentloom.runtime.hooks.shell import ShellHookExecutionError
+from agentloom.execution.hooks import HookContext, HookEvent, HookPlanCompiler, HookRun
+from agentloom.execution.hooks.config import HookConfigLayer
+from agentloom.execution.hooks.shell import ShellHookExecutionError
 
 
 def _command(script: Path) -> str:

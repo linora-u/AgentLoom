@@ -7,7 +7,7 @@ from uuid import UUID
 import agentloom.configuration.config as config_module
 import pytest
 import yaml
-from agentloom.adapters.litellm.request_headers import (
+from agentloom.configuration.model_request_headers import (
     AGENTLOOM_SESSION_TOKEN_TOKEN,
     AGENTLOOM_SESSION_UUID_TOKEN,
     GENERIC_MODEL_USER_AGENT,
@@ -15,10 +15,10 @@ from agentloom.adapters.litellm.request_headers import (
     get_system_model_request_headers,
     merge_headers,
 )
-from agentloom.adapters.smolagents.models import (
+from agentloom.runtimes.smolagents.models import (
     model_manager as model_manager_module,
 )
-from agentloom.adapters.smolagents.models import model_types
+from agentloom.runtimes.smolagents.models import model_types
 from agentloom.configuration.config_validation import RootSettings, validate_system_snapshot
 from agentloom.configuration.model_request_header_profiles import (
     MODEL_REQUEST_HEADER_PROFILES,

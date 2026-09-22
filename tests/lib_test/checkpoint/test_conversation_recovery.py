@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from agentloom.adapters.smolagents.conversation_recovery import (
+from agentloom.runtimes.smolagents.conversation_recovery import (
     TurnInterruptionState,
     detect_turn_interruption,
     filter_empty_steps,

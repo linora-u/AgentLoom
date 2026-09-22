@@ -1,0 +1,15 @@
+name: inspect_note
+agent_runtime: pi
+description: Read the requested release note using your native read tool.
+workflow: Read the file in query using read.
+toolsets: []
+tools:
+- name: read
+agent_function_schema:
+  description: Read a release note with a separate Agent runtime.
+  inputs:
+    query:
+      description: Path of the requested note.
+      required: true
+  output:
+    description: Actual verification token from the file.

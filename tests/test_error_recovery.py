@@ -1,12 +1,12 @@
 """
-Tests for agentloom.runtime.error_recovery module.
+Tests for agentloom.runtimes.smolagents.error_recovery module.
 
 Covers error classification, tool info extraction, progressive recovery
 message generation, error message consolidation, and exception safety.
 """
 
 
-from agentloom.runtime.error_recovery import (
+from agentloom.runtimes.smolagents.error_recovery import (
     NOW_LETS_RETRY_PREFIX,
     RUNTIME_FEEDBACK_RAW_KEY,
     ErrorCategory,

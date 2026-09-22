@@ -4,25 +4,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
 from agentloom.configuration.model_request_header_profiles import (
     MODEL_REQUEST_HEADER_PROFILE_NAMES,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-TodoMode = Literal["auto", "on", "off"]
-TODO_MODES = frozenset(get_args(TodoMode))
-
-
-def normalize_todo_mode_value(value: Any) -> Any:
-    """Undo PyYAML 1.1's implicit conversion of unquoted on/off values."""
-
-    if value is True:
-        return "on"
-    if value is False:
-        return "off"
-    return value
 
 
 class BoolParser:
@@ -55,9 +42,7 @@ class BoolParser:
             return default
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised boolean for '%s': %r — defaulting to %s",
                 field_name,
                 value,
@@ -94,9 +79,7 @@ class IntParser:
                 pass
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised integer for '%s': %r — defaulting to %s",
                 field_name,
                 value,
@@ -131,9 +114,7 @@ class FloatParser:
                 pass
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised float for '%s': %r — defaulting to %s",
                 field_name,
                 value,
@@ -173,9 +154,7 @@ class EnumParser:
             pass
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised choice for '%s': %r — defaulting to %r",
                 field_name,
                 value,
@@ -211,9 +190,7 @@ class LogLevelParser:
                 return int(logging._nameToLevel[normalized])
 
         if logger is not None:
-            from agentloom.runtime.logging.logger_manager import get_logger
-            log = get_logger(logger, __name__)
-            log.warning(
+            logger.warning(
                 "Unrecognised log level for '%s': %r — defaulting to %r",
                 field_name,
                 value,
@@ -406,18 +383,6 @@ class SelfLearningSettings(BaseModel):
     review: SelfLearningReviewSettings = Field(default_factory=SelfLearningReviewSettings)
 
 
-class TodoSettings(BaseModel):
-    """Current-task Todo capability policy."""
-
-    model_config = ConfigDict(extra="forbid")
-    mode: TodoMode = "auto"
-
-    @field_validator("mode", mode="before")
-    @classmethod
-    def normalize_yaml_boolean_mode(cls, value: Any) -> Any:
-        return normalize_todo_mode_value(value)
-
-
 class SkillsSettings(BaseModel):
     """Additional local Skill discovery roots."""
 
@@ -432,7 +397,6 @@ class RootSettings(BaseModel):
     tool_access_control: ToolAccessControlSettings = Field(default_factory=ToolAccessControlSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
-    smart_summary: bool = True
     context_engine: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any] = Field(default_factory=dict)
     tools: list[Any] = Field(default_factory=list)
@@ -443,7 +407,6 @@ class RootSettings(BaseModel):
     tool_output_limits: dict[str, Any] = Field(default_factory=dict)
     self_learning: SelfLearningSettings = Field(default_factory=SelfLearningSettings)
     hooks: dict[str, Any] = Field(default_factory=dict)
-    todo: TodoSettings = Field(default_factory=TodoSettings)
     skills: SkillsSettings = Field(default_factory=SkillsSettings)
 
 

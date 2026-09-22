@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from agentloom.runtime.trusted_memory_evidence import (  # noqa: E402
+from agentloom.execution.trusted_memory_evidence import (  # noqa: E402
     extract_trusted_memory_evidence,
 )
 
@@ -71,6 +71,12 @@ from applications.memory_feature_validation.scripts.run_memory_review_campaign i
     _sanitize_text,
     _write_inbox_decision,
 )
+
+
+def test_campaign_default_output_is_application_owned() -> None:
+    assert campaign_runner._default_output_root() == (
+        REPO_ROOT / "applications" / "memory_feature_validation" / "outputs"
+    )
 
 
 def _empty_v6_database() -> dict:
@@ -874,13 +880,13 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
         "applications/memory_feature_validation/variants/on/workflows/analyze_without_memory.yaml",
         "src/self_learning/reviewer.py",
         "src/self_learning/persistence/memory_store.py",
-        "src/runtime/agent.py",
-        "src/runtime/trusted_memory_evidence.py",
+        "src/application/agent.py",
+        "src/execution/trusted_memory_evidence.py",
         "src/application/runner.py",
-        "src/runtime/factory.py",
-        "src/adapters/smolagents/models/model_manager.py",
-        "src/adapters/smolagents/model_turn_bridge.py",
-        "src/runtime/model_protocol.py",
+        "src/application/factory.py",
+        "src/runtimes/smolagents/models/model_manager.py",
+        "src/runtimes/smolagents/model_turn_bridge.py",
+        "src/execution/model_protocol.py",
         "src/configuration/llm_config.py",
         "pyproject.toml",
         "uv.lock",
@@ -970,12 +976,12 @@ from pathlib import Path
 
 import yaml
 
-from agentloom.runtime.workspace import ensure_workspace_mounted_once
+from agentloom.execution.workspace import ensure_workspace_mounted_once
 
 ensure_workspace_mounted_once()
 workflow = yaml.safe_load(Path({workflow_relative!r}).read_text(encoding="utf-8"))
 tool = next(item for item in workflow["tools"] if item["name"] == "validation_memory_case")
-from agentloom.utils.dynamic_import import load_function
+from agentloom.application.imports.dynamic_import import load_function
 function = load_function(tool["module"], tool["function"])
 payload = json.loads(function())
 assert payload["case_id"] == {spec.case_id!r}

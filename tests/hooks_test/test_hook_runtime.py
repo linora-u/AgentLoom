@@ -8,9 +8,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agentloom.adapters.smolagents.tools.tools import tool
-from agentloom.runtime import process as process_runtime
-from agentloom.runtime.hooks import (
+from agentloom.runtimes.smolagents.tools.tools import tool
+from agentloom.execution import process as process_runtime
+from agentloom.execution.hooks import (
     HOOK_EVENT_NAMES,
     HookConfigLayer,
     HookEvent,
@@ -20,8 +20,8 @@ from agentloom.runtime.hooks import (
     HookResult,
     HookRun,
 )
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway
-from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+from agentloom.execution.tool_gateway import AgentLoomToolGateway
+from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
 
 def _run(*handlers: HookHandler) -> HookRun:

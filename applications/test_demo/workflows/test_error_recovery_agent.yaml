@@ -3,7 +3,9 @@ agent_runtime: smolagents
 description: "Validate native tool-call enforcement, error classification, progressive recovery messages, and error consolidation"
 
 model_type: "powerful"
-max_steps: 4
+runtime_options:
+  max_steps: 4
+  smart_summary: false
 
 workflow: |
   # Error Recovery Validation Workflow
@@ -17,19 +19,19 @@ workflow: |
   from pathlib import Path
 
   checks = []
-  error_recovery = Path("src/runtime/error_recovery.py").read_text()
-  bridge = Path("src/adapters/smolagents/model_turn_bridge.py").read_text()
-  loom_mixin = Path("src/adapters/smolagents/loom_mixin.py").read_text()
-  compression = Path("src/adapters/smolagents/context_compression.py").read_text()
+  error_recovery = Path("src/runtimes/smolagents/error_recovery.py").read_text()
+  bridge = Path("src/runtimes/smolagents/model_turn_bridge.py").read_text()
+  loom_mixin = Path("src/runtimes/smolagents/loom_mixin.py").read_text()
+  compression = Path("src/runtimes/smolagents/context_compression.py").read_text()
 
   categories = ["NATIVE_TOOL_CALL_REQUIRED", "UNKNOWN_TOOL", "ARGUMENT_ERROR"]
   checks.append(("native_error_categories", all(item in error_recovery for item in categories)))
   checks.append(("strict_native_tool_calls", "assistant text is not interpreted as a tool call" in bridge))
   checks.append(("canonical_model_items", "MODEL_ITEMS_RAW_KEY" in bridge))
-  checks.append(("no_text_parser_module", not Path("src/adapters/smolagents/models/tool_call_parser.py").exists()))
+  checks.append(("no_text_parser_module", not Path("src/runtimes/smolagents/models/tool_call_parser.py").exists()))
   checks.append(("consolidate_error_messages", "_consolidate_error_messages" in loom_mixin))
   checks.append(("circuit_breaker_removed", "_inject_parse_error_circuit_breaker" not in loom_mixin))
-  checks.append(("error_recovery_imports", "agentloom.runtime.error_recovery" in loom_mixin))
+  checks.append(("error_recovery_imports", "agentloom.runtimes.smolagents.error_recovery" in loom_mixin))
   checks.append(("recent_error_exempt_count", "RECENT_ERROR_EXEMPT_COUNT" in compression))
 
   for name, ok in checks:

@@ -5,26 +5,26 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-from agentloom.adapters.smolagents.agents import ToolCallingAgentV2
-from agentloom.adapters.smolagents.checkpoint_codec import (
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.checkpoint_codec import (
     SmolagentsCheckpointCodec,
 )
-from agentloom.adapters.smolagents.model_turn_bridge import (
+from agentloom.runtimes.smolagents.model_turn_bridge import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
     SmolagentsModelTurnBridge,
 )
-from agentloom.adapters.smolagents.recoverable_errors import (
+from agentloom.runtimes.smolagents.recoverable_errors import (
     is_recoverable_agent_error,
 )
-from agentloom.adapters.smolagents.runtime_adapter import (
+from agentloom.runtimes.smolagents.runtime_adapter import (
     MODEL_ADAPTER_AUDIT_KEY,
     SmolagentsRuntimeAdapter,
 )
-from agentloom.adapters.smolagents.tool_protocol import (
+from agentloom.runtimes.smolagents.tool_protocol import (
     action_step_to_protocol_messages,
 )
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     RuntimeCapabilities,
@@ -32,10 +32,10 @@ from agentloom.runtime.agent_runtime import (
     RuntimeEvent,
     RuntimeRequirements,
 )
-from agentloom.runtime.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.goal import GoalCompleteError, GoalState
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
+from agentloom.execution.goal import GoalCompleteError, GoalState
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     MessageItem,
@@ -45,7 +45,7 @@ from agentloom.runtime.model_protocol import (
     ReasoningItem,
     ToolDefinition,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import ToolCallRecord
 from smolagents.agents import (
     AgentError,
     AgentExecutionError,
@@ -307,7 +307,7 @@ def test_adapter_emits_runtime_events_with_canonical_identity_and_typed_usage() 
 def test_adapter_event_sink_failure_is_visible_but_does_not_fail_run(
     monkeypatch,
 ) -> None:
-    from agentloom.adapters.smolagents import runtime_adapter as adapter_module
+    from agentloom.runtimes.smolagents import runtime_adapter as adapter_module
 
     native = _NativeRuntime(_NativeResult(output="done"))
     runtime = _runtime(native)

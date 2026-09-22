@@ -1,5 +1,7 @@
 name: "test_read_file"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Validate read_file tool: line-numbered output, offset/limit, error handling"
 
 model_type: "powerful"

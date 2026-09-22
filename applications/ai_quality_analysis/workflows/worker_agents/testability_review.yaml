@@ -1,5 +1,7 @@
 name: "testability_review"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "Assesses code testability: test structure, mock-friendliness, coverage gaps, and test quality."
 model_type: "powerful"
 toolsets:

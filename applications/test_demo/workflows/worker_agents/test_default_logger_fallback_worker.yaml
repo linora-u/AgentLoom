@@ -1,5 +1,7 @@
 name: "fallback_demo_worker"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: |
   默认 logger 回退演示用子 agent。
 

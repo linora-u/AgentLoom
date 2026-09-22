@@ -21,7 +21,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentloom.application.definition import prepare_application_definition
+from agentloom.application.definition import (
+    inspect_supervisor_definition,
+    prepare_application_definition,
+)
+from agentloom.application.factory import (
+    YamlAgentFactory,
+    YamlConfiguredSupervisorAgent,
+)
+from agentloom.application.lifecycle import (
+    ApplicationRunFinalization,
+    ApplicationRunLifecycle,
+    ApplicationRunResources,
+    _run_event_chunks,  # noqa: F401 - public compatibility re-export
+    _task_events_size,
+)
+from agentloom.application.readiness import (
+    validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
+    validate_runtime_agent_config,  # noqa: F401 - public compatibility re-export
+)
 from agentloom.application.revision import application_revision
 from agentloom.application.run import (
     ApplicationRunError,
@@ -34,38 +52,23 @@ from agentloom.application.run import (
     RunRejectedEvent,
     RunRejection,
 )
-from agentloom.application.lifecycle import (
-    ApplicationRunFinalization,
-    ApplicationRunLifecycle,
-    ApplicationRunResources,
-    _run_event_chunks,  # noqa: F401 - public compatibility re-export
-    _task_events_size,
-)
-from agentloom.runtime.checkpoint import CheckpointManager
-from agentloom.runtime.checkpoint.file_history import FileHistoryManager
 from agentloom.configuration import C, build_effective_agent_config, get_config
 from agentloom.configuration.config import bind_config, fresh_invocation_config
-from agentloom.runtime.goal import normalize_goal_config
-from agentloom.runtime.heartbeat import SupervisorHeartbeat
-from agentloom.runtime.logging import (
-    LoggingConfigBuilder,
-    bind_logger_backend,
-    get_logger,
-    initialize_run_logger,
-)
-from agentloom.runtime import (
+from agentloom.execution import (
     bind_run_context,
     generate_runtime_id,
     resolve_application_id,
     resolve_runtime_home,
 )
-from agentloom.application.readiness import (
-    validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
-    validate_runtime_agent_config,  # noqa: F401 - public compatibility re-export
-)
-from agentloom.runtime.factory import (
-    YamlAgentFactory,
-    YamlConfiguredSupervisorAgent,
+from agentloom.execution.checkpoint import CheckpointManager
+from agentloom.execution.checkpoint.file_history import FileHistoryManager
+from agentloom.execution.goal import normalize_goal_config
+from agentloom.execution.heartbeat import SupervisorHeartbeat
+from agentloom.execution.logging import (
+    LoggingConfigBuilder,
+    bind_logger_backend,
+    get_logger,
+    initialize_run_logger,
 )
 
 _TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
@@ -180,11 +183,8 @@ def _checkpoint_age_seconds(created_at: Any) -> float:
         parsed = datetime.fromisoformat(created_at.strip().replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError("checkpoint created_at is invalid") from exc
-    # Legacy migration interprets naive timestamps as UTC. Resume must use the
-    # same rule so a migrated task is not selected and then rejected solely
-    # because its original timestamp omitted an offset.
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        raise ValueError("checkpoint created_at must include a timezone offset")
     return (datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()
 
 
@@ -216,6 +216,7 @@ def execute_app(
     file_logging: bool | None = None,
     *,
     event_sink: RunEventSink | None = None,
+    require_valid_supervisor_target: bool = False,
 ) -> ApplicationRunResult:
     """Execute against current configuration, pinned for the lifetime of the Run."""
     try:
@@ -225,7 +226,12 @@ def execute_app(
         raise
     with bind_config(invocation_config):
         return _execute_app(
-            yaml_path, resume_task_id, task_override, file_logging, event_sink=event_sink,
+            yaml_path,
+            resume_task_id,
+            task_override,
+            file_logging,
+            event_sink=event_sink,
+            require_valid_supervisor_target=require_valid_supervisor_target,
         )
 
 
@@ -236,6 +242,7 @@ def _execute_app(
     file_logging: bool | None = None,
     *,
     event_sink: RunEventSink | None = None,
+    require_valid_supervisor_target: bool = False,
 ) -> ApplicationRunResult:
     """Execute one Application and return its output plus canonical run receipt.
 
@@ -244,11 +251,33 @@ def _execute_app(
     """
 
     try:
-        resolved_path = _resolve_yaml_path(yaml_path)
-        config = YamlAgentFactory._load_config_from_file(resolved_path)
-        config = prepare_application_definition(
-            Path(C.agent_root), resolved_path, config, base_config=get_config(),
-        )
+        validated_application_id: str | None = None
+        definition_snapshot_revision: str | None = None
+        if require_valid_supervisor_target:
+            inspection = inspect_supervisor_definition(
+                Path(C.agent_root),
+                str(yaml_path),
+                base_config=get_config(),
+            )
+            if inspection.errors:
+                raise ValueError("\n".join(inspection.errors))
+            resolved_path = inspection.path
+            if inspection.prepared_definition is None:
+                raise ValueError(
+                    "Supervisor target did not produce a prepared definition"
+                )
+            config = inspection.prepared_definition
+            validated_application_id = inspection.application_id
+            definition_snapshot_revision = inspection.definition_snapshot_revision
+        else:
+            resolved_path = _resolve_yaml_path(yaml_path)
+            config = YamlAgentFactory._load_config_from_file(resolved_path)
+            config = prepare_application_definition(
+                Path(C.agent_root),
+                resolved_path,
+                config,
+                base_config=get_config(),
+            )
         effective_config = build_effective_agent_config(
             config,
             source_name=str(config.get("_yaml_file_path") or resolved_path),
@@ -270,7 +299,7 @@ def _execute_app(
         effective_task = (
             task_override.strip() if task_override else config["description"].strip()
         )
-        application_id = resolve_application_id(
+        application_id = validated_application_id or resolve_application_id(
             config,
             resolved_path,
             agent_root=C.agent_root,
@@ -325,15 +354,19 @@ def _execute_app(
         run_attempt_lease = runtime_context.run_lease()
         run_attempt_lease.acquire()
         try:
+            manifest_metadata = {}
+            manifest_metadata["application_revision"] = running_revision
+            if definition_snapshot_revision is not None:
+                manifest_metadata["definition_snapshot_revision"] = definition_snapshot_revision
             runtime_context.write_manifest(
                 yaml_path=str(resolved_path),
                 agent_name=agent_name,
-                application_revision=running_revision,
                 mode="resume" if is_resume else "new",
                 task_tree_observation={
                     "enabled": bool(ckpt_enabled),
                     "worker_agents_configured": bool(config.get("worker_agents")),
                 },
+                **manifest_metadata,
             )
         except BaseException:
             # write_manifest persists the manifest before removing its starting
@@ -362,7 +395,7 @@ def _execute_app(
                     log.info("Loading supervisor config: %s", resolved_path)
 
                     try:
-                        from agentloom.runtime.retention import prune_runtime_if_due
+                        from agentloom.execution.retention import prune_runtime_if_due
 
                         prune_runtime_if_due(
                             runtime_home.root_dir,
@@ -426,7 +459,7 @@ def _execute_app(
                                 )
                         tree_status = tree.get("status", "unknown")
                         if tree_status == "running":
-                            from agentloom.runtime.heartbeat.status import detect_crashed_status
+                            from agentloom.execution.heartbeat.status import detect_crashed_status
 
                             heartbeat_payload = checkpoint_mgr._read_json(
                                 runtime_context.heartbeat_path
@@ -510,7 +543,7 @@ def _execute_app(
                         )
                         heartbeat.start()
 
-                        from agentloom.runtime.checkpoint.coordinator import (
+                        from agentloom.execution.checkpoint.coordinator import (
                             CheckpointCoordinator as _CC,
                         )
 
@@ -519,20 +552,6 @@ def _execute_app(
                         log.info(
                             "File history manager prepared for pre-edit backups"
                         )
-
-                    try:
-                        from agentloom.adapters.lsp import LSPServerManager
-                        from agentloom.adapters.lsp.config import LSPConfig
-
-                        lsp_config = LSPConfig.from_yaml(
-                            C.get("lsp_servers", {})
-                        )
-                        LSPServerManager.get_instance().initialize(
-                            lsp_config,
-                            project_root=str(C.agent_root),
-                        )
-                    except Exception as exc:
-                        log.debug("LSP pre-warm skipped: %s", exc)
 
                     supervisor = YamlConfiguredSupervisorAgent(
                         config=config,

@@ -1,13 +1,21 @@
 from pathlib import Path
 
-import agentloom.runtime.factory as yaml_factory_module
+import agentloom.application.factory as yaml_factory_module
 import pytest
+from agentloom.application.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
 from agentloom.application.validation import (
     AgentConfigNormalizer,
     NormalizedAgentConfig,
-    normalize_execution_prompt_template_path,
 )
-from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+from agentloom.runtimes.smolagents.options import normalize_runtime_options
+
+
+@pytest.fixture(autouse=True)
+def isolated_project_config(tmp_path):
+    from agentloom.configuration.config import LLMConfig, UnifiedConfig, bind_config
+
+    with bind_config(UnifiedConfig({}, agent_root=tmp_path, llm_config=LLMConfig())):
+        yield
 
 
 def _make_worker(config: dict) -> YamlConfiguredAgent:
@@ -75,41 +83,43 @@ def test_build_supervisor_normalized_config_defaults(tmp_path: Path):
     assert normalized.agent_function_schema is None
 
 
-def test_normalize_prompt_template_path_supports_string_and_mapping(tmp_path: Path):
+def test_canonical_prompt_template_path_resolves_relative_string(tmp_path: Path):
     prompt_file = tmp_path / "prompts" / "agent_prompt.yaml"
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt_file.write_text("system_prompt: test", encoding="utf-8")
-
-    by_string = normalize_execution_prompt_template_path(
-        {"prompt": "prompts/agent_prompt.yaml"},
-        "worker.prompt",
+    options, _ = normalize_runtime_options(
+        {"runtime_options": {"prompt_template_path": "prompts/agent_prompt.yaml"}},
         agent_root=tmp_path,
     )
-    by_mapping = normalize_execution_prompt_template_path(
-        {"prompt": {"path": "prompts/agent_prompt.yaml"}},
-        "worker.prompt",
-        agent_root=tmp_path,
-    )
-
-    assert by_string == str(prompt_file.resolve())
-    assert by_mapping == str(prompt_file.resolve())
+    assert options["prompt_template_path"] == str(prompt_file.resolve())
 
 
-@pytest.mark.parametrize(
-    "raw_prompt",
-    [
-        ["bad"],
-        {"name": "missing_path"},
-        {"path": ""},
-    ],
-)
-def test_normalize_prompt_template_path_rejects_invalid_shape(tmp_path: Path, raw_prompt):
-    with pytest.raises(ValueError, match="prompt"):
-        normalize_execution_prompt_template_path(
-            {"prompt": raw_prompt},
-            "worker.prompt",
-            agent_root=tmp_path,
+@pytest.mark.parametrize("raw_prompt", [["bad"], {"name": "missing_path"},
+                                        {"path": "prompts/agent.yaml"}, "", 12])
+def test_canonical_prompt_template_path_rejects_invalid_shape(tmp_path: Path, raw_prompt):
+    with pytest.raises(ValueError, match="prompt_template_path"):
+        normalize_runtime_options(
+            {"runtime_options": {"prompt_template_path": raw_prompt}}, agent_root=tmp_path,
         )
+
+
+@pytest.mark.parametrize("raw_prompt", ["prompts/agent.yaml", {"path": "prompts/agent.yaml"},
+                                        ["bad"], {"name": "missing_path"}, {"path": ""}])
+def test_legacy_prompt_is_ignored_without_path_resolution(tmp_path: Path, raw_prompt):
+    options, sources = normalize_runtime_options({"prompt": raw_prompt}, agent_root=tmp_path)
+    assert options["prompt_template_path"] is None
+    assert sources["prompt_template_path"] == "default:smolagents"
+
+
+@pytest.mark.parametrize("maker,config_builder", [
+    (_make_worker, _worker_config),
+    (_make_supervisor, _supervisor_config),
+])
+def test_common_validation_ignores_malformed_old_smol_fields(maker, config_builder):
+    config = {**config_builder(), "max_steps": [], "planning_interval": "bad",
+              "smart_summary": {}, "todo": "bad", "prompt": {"path": ""},
+              "max_consecutive_parse_errors": False}
+    assert maker(config)._validate_config() is not None
 
 
 def test_validate_agent_function_schema_normalizes_and_rejects():
@@ -144,7 +154,7 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     worker = object.__new__(YamlConfiguredAgent)
     worker._config = {
         **_worker_config(),
-        "prompt": {"path": "prompts/worker_prompt.yaml"},
+        "runtime_options": {"prompt_template_path": "prompts/worker_prompt.yaml"},
         "agent_function_schema": {
             "description": "desc",
             "inputs": {"query": {"description": "q"}},
@@ -161,7 +171,7 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     supervisor = object.__new__(YamlConfiguredSupervisorAgent)
     supervisor._config = {
         **_supervisor_config(),
-        "prompt": "prompts/worker_prompt.yaml",
+        "runtime_options": {"prompt_template_path": "prompts/worker_prompt.yaml"},
     }
     supervisor._normalized = None
     normalized_supervisor = supervisor._validate_config()
@@ -357,7 +367,7 @@ def test_validate_config_accepts_missing_tools_field(maker, config_builder):
 ])
 def test_get_tools_from_config_returns_list_when_tools_missing(config_builder):
     """When ``tools`` key is absent, ``get_tools_from_config`` should return a (list, manager) tuple."""
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
 
     result = YamlAgentFactory.get_tools_from_config(config_builder())
     assert isinstance(result, tuple)

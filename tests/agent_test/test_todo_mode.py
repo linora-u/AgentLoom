@@ -3,44 +3,45 @@
 from __future__ import annotations
 
 import pytest
-from agentloom.application.validation import validate_todo_config
-from agentloom.runtime.prompts.prompt_builder import todo_policy_for_mode
+from agentloom.runtimes.smolagents.options import normalize_runtime_options
+from agentloom.runtimes.smolagents.prompts.prompt_builder import todo_policy_for_mode
 
 
 @pytest.mark.parametrize("mode", ["auto", "on", "off"])
-def test_todo_mode_accepts_supported_values(mode: str) -> None:
-    assert validate_todo_config({"todo": {"mode": mode}}, source="agent") == mode
+def test_todo_mode_accepts_supported_values(mode: str, tmp_path) -> None:
+    options, _ = normalize_runtime_options(
+        {"runtime_options": {"todo_mode": mode}}, agent_root=tmp_path,
+    )
+    assert options["todo_mode"] == mode
 
 
-@pytest.mark.parametrize(("raw", "expected"), [(True, "on"), (False, "off")])
-def test_todo_mode_normalizes_pyyaml_on_off_booleans(raw: bool, expected: str) -> None:
-    assert validate_todo_config({"todo": {"mode": raw}}, source="agent") == expected
+def test_todo_mode_defaults_to_auto(tmp_path) -> None:
+    options, _ = normalize_runtime_options({}, agent_root=tmp_path)
+    assert options["todo_mode"] == "auto"
 
 
-def test_todo_mode_defaults_to_auto() -> None:
-    assert validate_todo_config({}, source="agent") == "auto"
-
-
-@pytest.mark.parametrize(
-    "value",
-    [None, "always", "enabled", 1, {}, []],
-)
-def test_todo_mode_rejects_invalid_values(value) -> None:
-    with pytest.raises(ValueError, match="todo.mode"):
-        validate_todo_config({"todo": {"mode": value}}, source="agent")
-
-
-def test_todo_config_must_be_mapping() -> None:
-    with pytest.raises(ValueError, match="todo"):
-        validate_todo_config({"todo": "auto"}, source="agent")
-
-
-def test_todo_config_rejects_unknown_fields() -> None:
-    with pytest.raises(ValueError, match="unsupported field"):
-        validate_todo_config(
-            {"todo": {"mode": "auto", "first_step": True}},
-            source="agent",
+@pytest.mark.parametrize("value", [None, "always", "enabled", True, False, 1, {}, []])
+def test_todo_mode_rejects_invalid_canonical_values(value, tmp_path) -> None:
+    with pytest.raises(ValueError, match="todo_mode"):
+        normalize_runtime_options(
+            {"runtime_options": {"todo_mode": value}}, agent_root=tmp_path,
         )
+
+
+@pytest.mark.parametrize("value", ["auto", None, {"mode": "on"}, {"mode": True},
+                                   {"mode": "invalid", "first_step": True}, []])
+def test_legacy_todo_is_ignored_without_conversion(value, tmp_path) -> None:
+    options, sources = normalize_runtime_options({"todo": value}, agent_root=tmp_path)
+    assert options["todo_mode"] == "auto"
+    assert sources["todo_mode"] == "default:smolagents"
+
+
+def test_legacy_todo_does_not_conflict_with_canonical_mode(tmp_path) -> None:
+    options, _ = normalize_runtime_options(
+        {"todo": {"mode": "on"}, "runtime_options": {"todo_mode": "off"}},
+        agent_root=tmp_path,
+    )
+    assert options["todo_mode"] == "off"
 
 
 def test_auto_policy_is_advisory() -> None:
@@ -69,9 +70,9 @@ def test_off_policy_is_empty() -> None:
 def test_current_snapshot_is_injected_as_trusted_system_context() -> None:
     from dataclasses import replace
 
-    from agentloom.adapters.smolagents.loom_mixin import append_current_todo_state
-    from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
-    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.runtimes.smolagents.loom_mixin import append_current_todo_state
+    from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
+    from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
     from smolagents.models import ChatMessage, MessageRole
 
     provider = TodoStateProvider()
@@ -97,8 +98,8 @@ def test_current_snapshot_is_injected_as_trusted_system_context() -> None:
 
 
 def test_current_snapshot_is_not_injected_when_off_or_empty() -> None:
-    from agentloom.adapters.smolagents.loom_mixin import append_current_todo_state
-    from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
+    from agentloom.runtimes.smolagents.loom_mixin import append_current_todo_state
+    from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
     from smolagents.models import ChatMessage, MessageRole
 
     messages = [ChatMessage(role=MessageRole.USER, content="continue")]
@@ -111,9 +112,9 @@ def test_current_snapshot_is_not_injected_when_off_or_empty() -> None:
 def test_summary_mode_model_context_also_receives_current_snapshot() -> None:
     from dataclasses import replace
 
-    from agentloom.adapters.smolagents.loom_mixin import LoomAgentMixin
-    from agentloom.runtime.todo import TodoStateProvider, bind_todo_state_provider
-    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
+    from agentloom.runtimes.smolagents.todo import TodoStateProvider, bind_todo_state_provider
+    from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
     from smolagents.models import ChatMessage, MessageRole
 
     class MemoryWriter:

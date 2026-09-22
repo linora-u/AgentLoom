@@ -28,12 +28,13 @@ from agentloom.configuration.config import load_project_config
 
 def _discover_project_root(start: Path) -> Path | None:
     candidates = [start.resolve(), *start.resolve().parents]
-    # Application overlays can also have system.yaml; prefer the model catalog
-    # at the project root. The fallback lets canonical preflight report its absence.
-    for filename in ("llm.yaml", "system.yaml"):
-        for candidate in candidates:
-            if (candidate / "config" / filename).is_file():
-                return candidate
+    # The nearest AgentLoom config directory owns validation. If llm.yaml is
+    # missing there, shared preflight should report that absence instead of
+    # accidentally borrowing a model catalog from a parent temp/workspace tree.
+    for candidate in candidates:
+        config_dir = candidate / "config"
+        if (config_dir / "llm.yaml").is_file() or (config_dir / "system.yaml").is_file():
+            return candidate
     return None
 
 

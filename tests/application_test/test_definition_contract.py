@@ -12,12 +12,7 @@ def write(path: Path, content: str) -> Path:
     return path
 
 
-BASE = (
-    "name: demo\n"
-    "agent_runtime: smolagents\n"
-    "description: Demo\n"
-    "workflow: Run the task.\n"
-)
+BASE = "name: demo\nagent_runtime: smolagents\ndescription: Demo\nworkflow: Run the task.\n"
 SCHEMA = """agent_function_schema:
   description: Work on one task.
   inputs:
@@ -102,7 +97,7 @@ def project_config(root):
 
     write(
         root / "config/system.yaml",
-        'todo: {mode: auto}\nsmart_summary: "true"\ncontext_engine: {min_chars: 123, preview_max_chars: 456}\ntoolsets: [core_file]\n',
+        'runtime_options: {todo_mode: "auto", smart_summary: true}\ncontext_engine: {min_chars: 123, preview_max_chars: 456}\ntoolsets: [core_file]\n',
     )
     write(
         root / "config/llm.yaml",
@@ -113,18 +108,20 @@ def project_config(root):
 
 def test_effective_values_sources_and_secret_projection_are_independent(tmp_path):
     from agentloom.configuration.config import build_effective_agent_config_snapshot
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.application.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/group/demo"
     write(
-        app / "config/system.yaml", "todo: {mode: on}\ncontext_engine: {min_chars: 789}\ntoolsets: [markdown_report]\n"
+        app / "config/system.yaml",
+        'runtime_options: {todo_mode: "on"}\ncontext_engine: {min_chars: 789}\ntoolsets: [markdown_report]\n',
     )
     path = write(
         app / "workflows/root.yaml",
         BASE
-        + """todo: {mode: off}
-smart_summary: "false"
+        + """runtime_options:
+  todo_mode: "off"
+  smart_summary: false
 toolsets: []
 model_request_headers:
   headers: {Authorization: private-header-token}
@@ -136,13 +133,12 @@ model_request_headers:
         tmp_path, "group/demo", systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "group/demo"}]
     )
     public = detail["agents"][0]["effective_config"]
-    assert snapshot.values["todo"] == {"mode": "off"}
-    assert snapshot.values["smart_summary"] is False
+    assert snapshot.values["runtime_options"] == {"todo_mode": "off", "smart_summary": False}
     assert snapshot.values["toolsets"] == []
     assert snapshot.values["context_engine"] == {"min_chars": 789, "preview_max_chars": 456}
-    assert public["values"]["todo"] == {"mode": "off"}
+    assert public["values"]["runtime_options"] == {"todo_mode": "off", "smart_summary": False}
     assert public["values"]["context_engine"] == {"min_chars": 789, "preview_max_chars": 456}
-    assert public["sources"]["todo.mode"]["source"] == "agent"
+    assert public["sources"]["runtime_options.todo_mode"]["source"] == "agent"
     assert public["sources"]["context_engine.min_chars"]["source"] == "application"
     assert public["sources"]["context_engine.preview_max_chars"]["source"] == "global"
     assert "private-header-token" not in str(detail) and "hidden-key" not in str(detail)
@@ -150,17 +146,15 @@ model_request_headers:
     public["values"]["context_engine"]["min_chars"] = -1
     snapshot.values["context_engine"]["min_chars"] = -2
     assert base.raw["context_engine"]["min_chars"] == 123
-    assert parsed["todo"]["mode"] is False  # Original YAML source retained.
+    assert parsed["runtime_options"] == {"todo_mode": "off", "smart_summary": False}
 
 
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("todo", "[]"),
         ("context_engine", "wrong"),
         ("skills", "[]"),
         ("hooks", "null"),
-        ("smart_summary", "wrong"),
         ("tool_access_control", "false"),
     ],
 )
@@ -174,6 +168,48 @@ def test_invalid_overrides_are_never_dropped(tmp_path, field, value):
         build_effective_agent_config_snapshot(parsed, base_config=base)
     errors = validate_agent_definition(tmp_path, str(path), parsed)
     assert any(field in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["[]", "wrong", "{todo_mode: unsupported}", "{todo_mode: off}", "{smart_summary: wrong}"],
+)
+def test_invalid_runtime_options_are_preserved_for_backend_validation(tmp_path, value):
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
+
+    base = project_config(tmp_path)
+    path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + f"runtime_options: {value}\n")
+    parsed = load_agent_definition(path)
+    snapshot = build_effective_agent_config_snapshot(parsed, base_config=base)
+    invalid = parsed["runtime_options"]
+    if isinstance(invalid, dict):
+        for key, setting in invalid.items():
+            assert snapshot.values["runtime_options"][key] == setting
+    else:
+        assert snapshot.values["runtime_options"] == invalid
+    errors = validate_agent_definition(tmp_path, str(path), parsed)
+    assert any("runtime_options" in error for error in errors), errors
+
+
+@pytest.mark.parametrize("field,value", [("todo", "[]"), ("smart_summary", "wrong")])
+def test_historical_smol_fields_are_ignored_without_conversion_or_rejection(tmp_path, field, value):
+    from agentloom.application.runtime_options import normalize_runtime_options
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
+
+    base = project_config(tmp_path)
+    path = write(
+        tmp_path / "applications/demo/workflows/root.yaml",
+        BASE + f'{field}: {value}\nruntime_options: {{todo_mode: "off", smart_summary: false}}\n',
+    )
+    parsed = load_agent_definition(path)
+    snapshot = build_effective_agent_config_snapshot(parsed, base_config=base)
+    assert field not in snapshot.values
+    options, sources = normalize_runtime_options(parsed, snapshot=snapshot, agent_root=tmp_path)
+    assert options["todo_mode"] == "off"
+    assert options["smart_summary"] is False
+    assert sources["todo_mode"].endswith(":runtime_options.todo_mode")
+    assert sources["smart_summary"].endswith(":runtime_options.smart_summary")
+    assert validate_agent_definition(tmp_path, str(path), parsed) == []
 
 
 def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
@@ -215,17 +251,17 @@ def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(t
     app = tmp_path / "applications/nested/demo"
     path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: child.md}]\n")
     worker = write(path.parent / "worker_agents/child.md", "```yaml\n" + BASE + SCHEMA + "```\nOriginal task.\n")
-    app_config = write(app / "config/system.yaml", "todo: {mode: on}\n")
+    app_config = write(app / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\n')
     first = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
     worker.write_text("```yaml\n" + BASE + SCHEMA + "```\nEdited task.\n")
-    app_config.write_text("todo: {mode: off}\n")
+    app_config.write_text('runtime_options: {todo_mode: "off"}\n')
     second = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
     first_worker = first["_worker_definitions"][str(worker)]
     second_worker = second["_worker_definitions"][str(worker)]
     assert first_worker["workflow"] == "Original task."
     assert second_worker["workflow"] == "Edited task."
-    assert first_worker["_effective_agent_config_snapshot"].values["todo"]["mode"] == "on"
-    assert second_worker["_effective_agent_config_snapshot"].values["todo"]["mode"] == "off"
+    assert first_worker["_effective_agent_config_snapshot"].values["runtime_options"]["todo_mode"] == "on"
+    assert second_worker["_effective_agent_config_snapshot"].values["runtime_options"]["todo_mode"] == "off"
 
 
 def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypatch):
@@ -250,7 +286,10 @@ def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypa
 @pytest.mark.parametrize(
     "manifests,message",
     [
-        ({"agent-skills/bad_name": "---\nname: bad_name\ndescription: Invalid name.\n---\nInstructions.\n"}, "kebab-case"),
+        (
+            {"agent-skills/bad_name": "---\nname: bad_name\ndescription: Invalid name.\n---\nInstructions.\n"},
+            "kebab-case",
+        ),
         ({"agent-skills/broken": "---\nname: [unterminated\n---\nInstructions.\n"}, "Invalid skill frontmatter"),
         ({"agent-skills/missing": "---\nname: missing\n---\nInstructions.\n"}, "field 'description'"),
         (
@@ -263,11 +302,13 @@ def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypa
     ],
     ids=["invalid-name", "malformed-frontmatter", "missing-description", "duplicate-name"],
 )
-def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(tmp_path, monkeypatch, target, manifests, message):
+def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(
+    tmp_path, monkeypatch, target, manifests, message
+):
     from types import SimpleNamespace
 
     import agentloom.application.runner as runner
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.application.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/demo"
@@ -280,7 +321,9 @@ def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(tmp_path
     for directory, content in manifests.items():
         write(app / directory / "SKILL.md", content)
 
-    detail = application_detail(tmp_path, "demo", systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}])
+    detail = application_detail(
+        tmp_path, "demo", systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}]
+    )
     assert detail["application"]["health"] == "invalid"
     agent = detail["agents"][0]
     assert any(message in error for error in agent["validation"]["errors"])
@@ -299,14 +342,16 @@ def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(tmp_path
     assert len(events) == 1 and events[0].event == "run.rejected"
 
 
-def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_on_next_preparation(tmp_path, monkeypatch):
+def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_on_next_preparation(
+    tmp_path, monkeypatch
+):
     import json
     import logging
 
+    from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
     from agentloom.application.definition import prepare_application_definition
     from agentloom.application.presentation import configuration_projection
-    from agentloom.runtime.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-    from agentloom.runtime.skills.catalog import SkillCatalog
+    from agentloom.execution.skills.catalog import SkillCatalog
 
     class SnapshotAgent(RoleDrivenAgent):
         def _role_profile(self):
@@ -347,13 +392,16 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
 def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(tmp_path, monkeypatch):
     import json
 
-    from agentloom.runtime.skills.catalog import SkillCatalog
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.execution.skills.catalog import SkillCatalog
+    from agentloom.application.studio.application_studio import application_detail
 
     project_config(tmp_path)
     app = tmp_path / "applications/demo"
     path = write(app / "workflows/root.yaml", BASE)
-    manifest = write(app / "skills/review/SKILL.md", "---\nname: review\ndescription: Original summary.\n---\nPrivate instructions.\n")
+    manifest = write(
+        app / "skills/review/SKILL.md",
+        "---\nname: review\ndescription: Original summary.\n---\nPrivate instructions.\n",
+    )
     discover = SkillCatalog.discover
     calls = []
 
@@ -375,7 +423,7 @@ def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(
 
 
 def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
-    from agentloom.runtime.factory import YamlAgentFactory
+    from agentloom.application.factory import YamlAgentFactory
 
     class DefinitionTool:
         def __init__(self, config, **kwargs):
@@ -433,13 +481,16 @@ mcp_servers: config/test.mcp.json
 """,
     )
     write(tmp_path / "config/test.mcp.json", '{"mcpServers":{"test":{"type":"http","url":"http://127.0.0.1:9/mcp"}}}')
-    write(tmp_path / "applications/demo/skills/review/SKILL.md", "---\nname: review\ndescription: Review.\n---\nPrivate review instructions.\n")
+    write(
+        tmp_path / "applications/demo/skills/review/SKILL.md",
+        "---\nname: review\ndescription: Review.\n---\nPrivate review instructions.\n",
+    )
     program = """
 import json, sys
 from pathlib import Path
-from agentloom.tui_bridge.bridge import TuiBridge
+from agentloom.application.studio.query_service import StudioQueryService
 root = Path(sys.argv[1])
-detail = TuiBridge(root).dispatch('application.detail', {'application_id':'demo'})
+detail = StudioQueryService(root).application_detail('demo')
 assert detail['agents'][0]['validation']['valid'], detail
 assert detail['agents'][0]['skills'][0]['name'] == 'review'
 assert 'Private review instructions.' not in json.dumps(detail)
@@ -448,7 +499,7 @@ from agentloom.configuration.config import load_project_config
 path = root / 'applications/demo/workflows/root.yaml'
 prepared = prepare_application_definition(root, path, load_agent_definition(path), base_config=load_project_config(root))
 assert prepared['_skill_catalog_snapshot'].activate('review').instructions == 'Private review instructions.\\n'
-for prefix in ('litellm', 'agentloom.runtime.agent', 'agentloom.tools.file_ops', 'agentloom.tools.shell', 'agentloom.tools.search'):
+for prefix in ('litellm', 'agentloom.application.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
 assert not (root / 'must-not-exist').exists()
@@ -525,9 +576,9 @@ def test_hook_projection_uses_complete_id_replacement_and_disabling(tmp_path):
 def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 
-    import agentloom.adapters.mcp.manager as manager_module
-    from agentloom.runtime.factory import YamlAgentFactory
-    from agentloom.adapters.mcp.config import McpServerConfig, McpSettings
+    import agentloom.integrations.mcp.manager as manager_module
+    from agentloom.application.factory import YamlAgentFactory
+    from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
 
     manager = MagicMock()
     manager.get_server_status.return_value = {
@@ -565,10 +616,15 @@ def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read
 
     def inspect_allocation(kind):
         current = config_module.get_config()
-        seen.append(config_module.build_effective_agent_config(load_agent_definition(path))["todo"]["mode"])
-        write(tmp_path / "config/system.yaml", "todo: {mode: on}\ntoolsets: []\n")
+        seen.append(
+            config_module.build_effective_agent_config(load_agent_definition(path))["runtime_options"]["todo_mode"]
+        )
+        write(tmp_path / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\ntoolsets: []\n')
         assert config_module.get_config() is current
-        assert config_module.build_effective_agent_config(load_agent_definition(path))["todo"]["mode"] == seen[-1]
+        assert (
+            config_module.build_effective_agent_config(load_agent_definition(path))["runtime_options"]["todo_mode"]
+            == seen[-1]
+        )
         raise StopAfterPreflight
 
     monkeypatch.setattr(runner, "generate_runtime_id", inspect_allocation)
@@ -577,24 +633,24 @@ def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read
             runner.execute_app(path)
     assert seen == ["auto", "on"]
     assert config_module.get_config() is base
-    assert base.raw["todo"]["mode"] == "auto"
+    assert base.raw["runtime_options"]["todo_mode"] == "auto"
 
 
 def test_programmatic_config_override_remains_authoritative(tmp_path):
     from agentloom.configuration.config import fresh_invocation_config
 
     base = project_config(tmp_path)
-    base.raw["todo"]["mode"] = "off"
-    write(tmp_path / "config/system.yaml", "todo: {mode: on}\n")
+    base.raw["runtime_options"]["todo_mode"] = "off"
+    write(tmp_path / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\n')
     snapshot = fresh_invocation_config(base)
-    assert snapshot.raw["todo"]["mode"] == "off"
+    assert snapshot.raw["runtime_options"]["todo_mode"] == "off"
     assert snapshot is not base
 
 
 def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
     from agentloom.configuration.config import bind_config, fresh_invocation_config
-    from agentloom.adapters.smolagents.models.model_manager import ModelManager
-    from agentloom.adapters.smolagents.models.model_types import ModelType
+    from agentloom.runtimes.smolagents.models.model_manager import ModelManager
+    from agentloom.runtimes.smolagents.models.model_types import ModelType
 
     base = project_config(tmp_path)
     with bind_config(fresh_invocation_config(base)):
@@ -616,38 +672,40 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
 def test_public_connection_urls_never_expose_authentication(tmp_path):
     import json
     from agentloom.configuration.config import build_effective_agent_config_snapshot
-    from agentloom.tui_bridge.application_studio import application_detail
+    from agentloom.application.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
-    url = 'https://synthetic-user:synthetic-password@example.invalid/mcp?access_token=synthetic-token'
+    url = "https://synthetic-user:synthetic-password@example.invalid/mcp?access_token=synthetic-token"
     path = write(
-        tmp_path / 'applications/demo/workflows/root.yaml',
-        BASE + f'mcp_servers:\n  remote:\n    url: {url}\n    headers:\n      Authorization: synthetic-header\n',
+        tmp_path / "applications/demo/workflows/root.yaml",
+        BASE + f"mcp_servers:\n  remote:\n    url: {url}\n    headers:\n      Authorization: synthetic-header\n",
     )
     snapshot = build_effective_agent_config_snapshot(load_agent_definition(path), base_config=base)
     detail = application_detail(
-        tmp_path, 'demo', systems=[{'path': str(path.relative_to(tmp_path)), 'application_id': 'demo'}],
+        tmp_path,
+        "demo",
+        systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}],
     )
-    public = detail['agents'][0]['effective_config']
-    for secret in ('synthetic-user', 'synthetic-password', 'synthetic-token', 'synthetic-header'):
+    public = detail["agents"][0]["effective_config"]
+    for secret in ("synthetic-user", "synthetic-password", "synthetic-token", "synthetic-header"):
         assert secret not in json.dumps(public)
-    assert public['values']['mcp_servers']['remote']['url'] == '[redacted]'
-    assert snapshot.values['mcp_servers']['remote']['url'] == url
-    assert snapshot.values['mcp_servers']['remote']['headers']['Authorization'] == 'synthetic-header'
+    assert public["values"]["mcp_servers"]["remote"]["url"] == "[redacted]"
+    assert snapshot.values["mcp_servers"]["remote"]["url"] == url
+    assert snapshot.values["mcp_servers"]["remote"]["headers"]["Authorization"] == "synthetic-header"
 
 
 @pytest.mark.parametrize("target", ["supervisor", "worker"])
 @pytest.mark.parametrize("suffix", [".yaml", ".md"])
-def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monkeypatch, capsys, target, suffix):
+def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monkeypatch, target, suffix):
     import json
     from types import SimpleNamespace
 
     import agentloom.application.runner as runner
     from agentloom.application.definition import prepare_application_definition
     from agentloom.application.readiness import validate_runtime_agent_config, validate_runtime_worker_config
-    from agentloom.runtime.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
-    from agentloom.tui_bridge.bridge import TuiBridge
-    from agentloom.tui_bridge.domain_cli import main as domain_main
+    from agentloom.application.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+    from agentloom.application.studio.domain_actions import execute_domain_action
+    from agentloom.application.studio.query_service import StudioQueryService
 
     base = project_config(tmp_path)
     path = tmp_path / f"applications/demo/workflows/root{suffix}"
@@ -673,17 +731,19 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     with pytest.raises(ValueError, match="tools_mapping was removed"):
         prepare_application_definition(tmp_path, path, definition, base_config=base)
 
-    detail = TuiBridge(tmp_path).dispatch("application.detail", {"application_id": "demo"})
+    detail = StudioQueryService(tmp_path).application_detail("demo")
     assert detail["application"]["health"] == "invalid"
     entry = detail["agents"][0]
     if target == "worker":
         entry = entry["workers"][0]
     assert f"{invalid_path}: {message}" in entry["validation"]["errors"]
-    assert domain_main(["--project", str(tmp_path), "application.validate", '{"application_id":"demo"}']) == 0
-    public = json.loads(capsys.readouterr().out)
-    assert public["ok"] is True
-    assert public["result"]["valid"] is False
-    assert f"{invalid_path}: {message}" in public["result"]["errors"]
+    public = execute_domain_action(
+        tmp_path,
+        "application.validate",
+        {"application_id": "demo"},
+    )
+    assert public["valid"] is False
+    assert f"{invalid_path}: {message}" in public["errors"]
 
     # Exercise the existing runtime validation entry, without constructing a model.
     cls = YamlConfiguredSupervisorAgent if target == "supervisor" else YamlConfiguredAgent
@@ -727,5 +787,47 @@ def test_removed_fields_in_markdown_supervisor_reject_before_run(tmp_path, monke
     events = []
     with pytest.raises(ValueError, match="tools_mapping was removed"):
         runner.execute_app(path, event_sink=events.append)
+    assert not (tmp_path / ".agentloom").exists()
+    assert len(events) == 1 and events[0].event == "run.rejected"
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "invalid"])
+def test_scheduled_supervisor_target_is_revalidated_before_run_allocation(
+    tmp_path,
+    monkeypatch,
+    replacement,
+):
+    from types import SimpleNamespace
+
+    import agentloom.application.runner as runner
+
+    base = project_config(tmp_path)
+    path = write(
+        tmp_path / "applications/demo/workflows/root.yaml",
+        BASE,
+    )
+    if replacement == "symlink":
+        outside = write(tmp_path.parent / f"{tmp_path.name}-outside.yaml", BASE)
+        path.unlink()
+        path.symlink_to(outside)
+    else:
+        path.write_text("name: invalid\n", encoding="utf-8")
+
+    monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
+    monkeypatch.setattr(runner, "get_config", lambda: base)
+    monkeypatch.setattr(
+        runner,
+        "generate_runtime_id",
+        lambda *args: pytest.fail("allocated a Run for an invalid target"),
+    )
+    events = []
+
+    with pytest.raises(ValueError):
+        runner.execute_app(
+            path.relative_to(tmp_path).as_posix(),
+            event_sink=events.append,
+            require_valid_supervisor_target=True,
+        )
+
     assert not (tmp_path / ".agentloom").exists()
     assert len(events) == 1 and events[0].event == "run.rejected"

@@ -27,7 +27,8 @@ name: "<app_name>"
 agent_runtime: "smolagents"
 description: "<Supervisor 角色>"
 model_type: "powerful"
-max_steps: 80
+runtime_options:
+  max_steps: 80
 worker_agents:
   - path: "applications/<app_name>/workflows/worker_agents/<worker>.yaml"
 workflow: |
@@ -39,7 +40,7 @@ workflow: |
 
 - `worker_agents` 只支持 `path`，不要写 `name`。
 - `path` 支持绝对路径、AgentLoom 根目录相对路径、`worker_agents/` 下文件名、或不带后缀的 Worker 名；生成时推荐写完整项目相对路径。
-- `agent_runtime` 必填；当前唯一已注册值为 `smolagents`。缺失、`langgraph` 或其他值都会在预检阶段失败，不会回退。
+- `agent_runtime` 必填；当前注册值为 `smolagents` 和 `pi`，需安装所选基座。缺失或未知值在预检阶段失败，不会回退。
 - Agent 只通过 provider 原生结构化工具调用执行 Tool。
 
 长期目标可在顶层 Supervisor 配置：
@@ -60,9 +61,9 @@ name: "<worker_name>"
 agent_runtime: "smolagents"
 description: "<Worker 职责>"
 model_type: "powerful"
-max_steps: 40
-todo:
-  mode: "auto"
+runtime_options:
+  max_steps: 40
+  todo_mode: "auto"
 agent_function_schema:
   description: "<作为工具被 Supervisor 调用时的说明>"
   inputs:
@@ -83,8 +84,25 @@ workflow: |
 - `inputs.<name>.required` 只能是布尔值；可选参数用 `required: false` 表达，不要在 type 里写 `Optional[...]`。
 - runtime 会把输入类型归一为 `string`；不要依赖复杂类型声明。
 - 输出应是可被下游 Worker 或 Supervisor 直接使用的文本。
-- `todo.mode` 支持 `auto`、`on`、`off`；默认 `auto`。它与 `planning_interval` 独立，不要在 `tools` 中重复声明 `todo_write`。
+- smol 使用 `runtime_options.todo_mode`，只接受字符串 `"auto"`、`"on"`、`"off"`；默认 `"auto"`。`on` / `off` 必须加引号。它与 `runtime_options.planning_interval` 独立，不要在 `tools` 中重复声明 `todo_write`。
 - Worker YAML 禁止配置 `goal`，包括 `goal: false`；Goal 工具与生命周期只属于根 Supervisor。
+
+## 后端参数
+
+生成定义时只使用 `runtime_options`。旧顶层 `max_steps`、`planning_interval`、`smart_summary`、`todo`、`prompt`、`max_consecutive_parse_errors` 静默忽略，不转换、不拒绝；不要输出这些旧字段。
+
+```yaml
+agent_runtime: smolagents
+runtime_options:
+  max_steps: 40
+  planning_interval: 3
+  smart_summary: false
+  todo_mode: "off"
+  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  max_consecutive_model_errors: 5
+```
+
+`prompt_template_path` 只接受非空字符串，不接受 `{path: ...}`；模板可省略，内置参考资源位于 `src/runtimes/smolagents/prompts/`。整数参数只接受正整数；`planning_interval` 还可省略或设 `null`。切换到 Pi 时删除 smol `runtime_options` 并按 Pi 契约配置，不能透传整份旧参数。
 
 ## 模型与配置
 
@@ -101,9 +119,9 @@ workflow: |
 Agent YAML 当前可覆盖的系统配置白名单：
 
 ```text
-system, model_request_headers, smart_summary, context_engine,
+system, model_request_headers, runtime_options, context_engine,
 tool_access_control, tools, shell_settings,
-default_toolsets, toolsets, prompt, mcp_servers, self_learning, hooks
+default_toolsets, toolsets, mcp_servers, self_learning, hooks
 ```
 
 Worker 的有效配置由 Worker YAML 自己重建，不继承 Supervisor 的权限覆盖；需要相同路径权限或 shell 权限时，Worker YAML 或应用级 `config/system.yaml` 也要写。

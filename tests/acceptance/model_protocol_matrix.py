@@ -204,8 +204,7 @@ def _workflow(profile: str) -> dict[str, object]:
         "agent_runtime": "smolagents",
         "description": "Validate one configured model wire protocol.",
         "model_type": profile,
-        "max_steps": 4,
-        "todo": {"mode": "off"},
+        "runtime_options": {"max_steps": 4, "todo_mode": "off", "smart_summary": False},
         "checkpoint": {"enabled": True, "cleanup_on_success": False},
         "workflow": (
             "Use native structured tool calls only. "

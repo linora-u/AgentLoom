@@ -1,5 +1,7 @@
 name: "step0_preparation"
 agent_runtime: smolagents
+runtime_options:
+  smart_summary: false
 description: "代码质量检查智能体，负责分析模块级代码质量、依赖关系及潜在问题。"
 model_type: "powerful"
 tools: []
@@ -45,10 +47,10 @@ workflow: |
   - `/workspace/src/services/cache_service.py`
 
   **工具模块：**
-  - `/workspace/src/utils/validators.py`
-  - `/workspace/src/utils/serializers.py`
-  - `/workspace/src/utils/pagination.py`
-  - `/workspace/src/utils/logging_config.py`
+  - `/workspace/src/application/imports/validators.py`
+  - `/workspace/src/application/imports/serializers.py`
+  - `/workspace/src/application/imports/pagination.py`
+  - `/workspace/src/application/imports/logging_config.py`
 
   **配置文件：**
   - `/workspace/config/settings.yaml`

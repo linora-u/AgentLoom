@@ -3,10 +3,11 @@ agent_runtime: smolagents
 description: "Return a fixed one-step result"
 
 model_type: "powerful"
-max_steps: 4
+runtime_options:
+  max_steps: 4
+  todo_mode: "auto"
+  smart_summary: false
 
-todo:
-  mode: "auto"
 
 workflow: |
   Return exactly: TODO_AUTO_TRIVIAL_OK

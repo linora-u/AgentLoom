@@ -10,7 +10,7 @@ def _clear_shell_detection_cache():
     Tests that monkeypatch $SHELL or mock shutil.which need a fresh
     detection run; the per-process cache must not leak across tests.
     """
-    from agentloom.tools.shell.process import find_suitable_shell
+    from agentloom.runtimes.smolagents.tools.shell.process import find_suitable_shell
     find_suitable_shell.cache_clear()
     yield
     find_suitable_shell.cache_clear()
@@ -24,10 +24,10 @@ def bypass_shell_security(monkeypatch):
     env isolation, etc.) and do NOT need the security/path validation layer.
     """
     monkeypatch.setattr(
-        "agentloom.tools.shell.validator.validate_command_security",
+        "agentloom.execution.tool_governance.shell.validator.validate_command_security",
         lambda cmd: None,
     )
     monkeypatch.setattr(
-        "agentloom.tools.shell.validator.check_path_constraints",
+        "agentloom.execution.tool_governance.shell.validator.check_path_constraints",
         lambda cmd, **kwargs: None,
     )

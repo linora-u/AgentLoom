@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-from agentloom.adapters.smolagents.tool_argument_coercion import coerce_tool_arguments
+from agentloom.runtimes.smolagents.tool_argument_coercion import coerce_tool_arguments
 
 
 def _tool_with_input(key: str, expected_type: str):

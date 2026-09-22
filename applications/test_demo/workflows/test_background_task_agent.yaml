@@ -53,4 +53,6 @@ tools:
   - name: "list_background_tasks"
 
 worker_agents: []
-max_steps: 20
+runtime_options:
+  max_steps: 20
+  smart_summary: false

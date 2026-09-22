@@ -114,7 +114,7 @@ shell_settings:
 
 ```bash
 .venv/bin/python -m pytest tests/tools_test/shell -q
-.venv/bin/python -m py_compile src/tools/shell/*.py src/runtime/trace/task_context.py
+.venv/bin/python -m py_compile src/runtimes/smolagents/tools/shell/*.py src/execution/trace/task_context.py
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py --app-root applications/test_shell_audit
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py --app-root applications/test_shell_allowlist_matrix
 ```

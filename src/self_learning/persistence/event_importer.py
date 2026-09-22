@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 from ..event_schema import CanonicalSessionEvent, safe_run_id
 from ..paths import session_events_dir

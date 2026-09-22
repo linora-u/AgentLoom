@@ -7,30 +7,30 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from agentloom.adapters.smolagents import runtime_factory as factory_module
-from agentloom.adapters.smolagents.model_turn_bridge import (
+from agentloom.runtimes.smolagents import runtime_factory as factory_module
+from agentloom.runtimes.smolagents.model_turn_bridge import (
     SmolagentsModelTurnBridge,
 )
-from agentloom.adapters.smolagents.runtime_adapter import (
+from agentloom.runtimes.smolagents.runtime_adapter import (
     SmolagentsRuntimeAdapter,
 )
-from agentloom.adapters.smolagents.runtime_factory import (
+from agentloom.runtimes.smolagents.runtime_factory import (
     SmolagentsRuntimeFactory,
 )
-from agentloom.adapters.smolagents.tool_proxy import (
+from agentloom.runtimes.smolagents.tool_proxy import (
     SmolagentsToolGatewayProxy,
 )
-from agentloom.runtime.agent_runtime import RuntimeDefinition
-from agentloom.runtime.logging import RichLoggerBackend
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.agent_runtime import RuntimeDefinition
+from agentloom.execution.logging import RichLoggerBackend
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
     ToolDefinition,
 )
-from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 from rich.console import Console
 from smolagents import AgentLogger
 
@@ -130,13 +130,8 @@ def _definition(
             requests_per_minute=30,
         ),
         tool_gateway=resolved_gateway,
-        max_steps=7,
-        planning_interval=planning_interval,
-        smart_summary=False,
-        todo_mode="on",
-        prompt_template_path=prompt_template_path,
+        runtime_options={'max_steps': 7, 'planning_interval': planning_interval, 'smart_summary': False, 'todo_mode': "on", 'prompt_template_path': prompt_template_path, 'max_consecutive_model_errors': max_consecutive_model_errors},
         project_root=project_root or str(Path.cwd()),
-        max_consecutive_model_errors=max_consecutive_model_errors,
         metadata=metadata or {},
     )
 
@@ -167,7 +162,7 @@ def test_factory_builds_native_runtime_from_complete_definition(
 
     assert isinstance(runtime, SmolagentsRuntimeAdapter)
     assert runtime._model_binding is definition.model
-    assert captured["tool_gateway"] is definition.tool_gateway
+    assert {tool.name for tool in captured["tool_gateway"].definitions} == {"proof_tool", "final_answer", "todo_write"}
     assert isinstance(captured["model"], SmolagentsModelTurnBridge)
     assert captured["model"].binding is definition.model
     assert captured["model"].model_id == "provider/opaque-model"
@@ -237,7 +232,7 @@ def test_factory_uses_smolagents_default_prompt_and_exact_proxy_definitions(
     assert native.prompt_templates["system_prompt"].count(
         definition.instructions
     ) == 1
-    assert tuple(native.tools) == ("proof_tool", "final_answer")
+    assert tuple(native.tools) == ("proof_tool", "final_answer", "todo_write")
     proof_proxy = native.tools["proof_tool"]
     assert isinstance(proof_proxy, SmolagentsToolGatewayProxy)
     assert proof_proxy._agentloom_tool_definition is (
@@ -359,9 +354,9 @@ def test_runtime_close_releases_gateway_after_native_close_failure() -> None:
     "value",
     [0, True, "5"],
 )
-def test_definition_rejects_invalid_model_error_limit(value) -> None:
+def test_adapter_rejects_invalid_model_error_limit(value) -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        _definition(max_consecutive_model_errors=value)
+        SmolagentsRuntimeFactory()(_definition(max_consecutive_model_errors=value))
 
 
 def test_factory_loads_explicit_prompt_and_appends_instructions_once(
@@ -398,9 +393,10 @@ def test_factory_loads_explicit_prompt_and_appends_instructions_once(
     SmolagentsRuntimeFactory()(definition)
 
     assert "instructions" not in captured
-    assert captured["prompt_templates"]["system_prompt"] == (
+    assert captured["prompt_templates"]["system_prompt"].startswith(
         "Custom base prompt.\n\nRuntime-owned instructions."
     )
+    assert captured["prompt_templates"]["system_prompt"].count("## Task Tracking") == 1
 
 
 def test_factory_uses_native_instructions_only_when_implicit_prompt_load_fails(
@@ -431,7 +427,8 @@ def test_factory_uses_native_instructions_only_when_implicit_prompt_load_fails(
 
     SmolagentsRuntimeFactory()(definition)
 
-    assert captured["instructions"] == "Fallback instructions."
+    assert captured["instructions"].startswith("Fallback instructions.")
+    assert captured["instructions"].count("## Task Tracking") == 1
     assert "prompt_templates" not in captured
 
 
@@ -444,8 +441,27 @@ def test_factory_rejects_non_smolagents_definition() -> None:
         instructions=definition.instructions,
         model=definition.model,
         tool_gateway=definition.tool_gateway,
-        max_steps=definition.max_steps,
+        runtime_options=definition.runtime_options,
     )
 
     with pytest.raises(ValueError, match="runtime_id='smolagents'"):
         SmolagentsRuntimeFactory()(wrong)
+
+
+@pytest.mark.parametrize("mode,present", [("auto", True), ("on", True), ("off", False)])
+def test_smol_adapter_owns_todo_and_terminal_tools(mode, present):
+    from dataclasses import replace
+    from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
+    from agentloom.runtimes.smolagents.tools.todo import todo_write
+
+    definition = _definition()
+    definition = replace(definition, runtime_options={**definition.runtime_options, "todo_mode": mode},
+                         tool_gateway=AgentLoomToolGateway([bind_tool(todo_write)]))
+    runtime = SmolagentsRuntimeFactory()(definition)
+    try:
+        tools = runtime._native_runtime.tools
+        assert ("todo_write" in tools) is present
+        assert "final_answer" in tools
+        assert ("## Task Tracking" in runtime._native_runtime.prompt_templates["system_prompt"]) is present
+    finally:
+        runtime.close()
