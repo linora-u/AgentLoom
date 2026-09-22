@@ -200,7 +200,7 @@ def _policy_definition(attempt: Path, request: dict) -> Path:
 def _rejection_child(attempt: Path, request: dict) -> int:
     """Negative case: audit network attempts and require run-less preflight rejection."""
     from agentloom.application.runner import execute_app
-    from agentloom.application.studio.domain_cli import _dispatch
+    from agentloom.application.studio.domain_actions import execute_domain_action
 
     project = Path(request["project"])
     base = Path(request["definition"])
@@ -223,7 +223,11 @@ def _rejection_child(attempt: Path, request: dict) -> int:
             invalid = yaml.safe_load(original)
             invalid["worker_agents"][0]["path"] = "worker_agents/does_not_exist.yaml"
             definition.write_text(yaml.safe_dump(invalid, sort_keys=False))
-        studio = _dispatch(project, "application.validate", {"application_id": application_id})
+        studio = execute_domain_action(
+            project,
+            "application.validate",
+            {"application_id": application_id},
+        )
         events = []
         error = None
         network = []

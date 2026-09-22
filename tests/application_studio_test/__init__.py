@@ -1,1 +1,1 @@
-"""Tests for the public AgentLoom TUI bridge seam."""
+"""Tests for AgentLoom Studio's Application services."""

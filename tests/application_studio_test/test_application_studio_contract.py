@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from agentloom.application.studio.application_studio import application_detail
-from agentloom.application.studio.bridge import TuiBridge
+from agentloom.application.studio.query_service import StudioQueryService
 
 
 def _write(path: Path, content: str) -> None:
@@ -95,10 +95,7 @@ agent_function_schema:
 
     _write(tmp_path / "config/reports-mcp.json", '{"mcpServers":{}}')
 
-    detail = TuiBridge(tmp_path).dispatch(
-        "application.detail",
-        {"application_id": "reports"},
-    )
+    detail = StudioQueryService(tmp_path).application_detail("reports")
 
     assert detail["application"]["id"] == "reports"
     assert detail["working_revision"].startswith("sha256:")
@@ -183,7 +180,7 @@ def test_versioned_domain_cli_returns_json_envelopes_and_safe_errors(tmp_path: P
     command = [
         sys.executable,
         "-m",
-        "agentloom.application.studio.domain_cli",
+        "agentloom_studio_adapter.domain_cli",
         "--project",
         str(tmp_path),
     ]
@@ -256,7 +253,7 @@ def test_domain_application_detail_is_paginated_and_bounded_for_large_apps(
     command = [
         sys.executable,
         "-m",
-        "agentloom.application.studio.domain_cli",
+        "agentloom_studio_adapter.domain_cli",
         "--project",
         str(tmp_path),
         "application.detail",
@@ -299,7 +296,7 @@ def test_domain_impact_distinguishes_one_application_from_global_changes(tmp_pat
     command = [
         sys.executable,
         "-m",
-        "agentloom.application.studio.domain_cli",
+        "agentloom_studio_adapter.domain_cli",
         "--project",
         str(tmp_path),
         "application.impact",

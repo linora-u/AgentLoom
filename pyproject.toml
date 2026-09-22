@@ -26,7 +26,7 @@ dependencies = [
     # MCP is a platform capability, independent of the selected Agent runtime.
     "mcp>=1.26.0,<2",
     "mcpadapt>=0.1.0,<1",
-    # TUI chat uses the OpenAI-compatible SDK directly; runtime Agents still
+    # Studio chat uses the OpenAI-compatible SDK directly; runtime Agents still
     # use the framework dependencies above.
     "openai>=2.8.1,<3.0.0",
     # Monitoring and tracing
@@ -119,7 +119,7 @@ include-package-data = true
 
 [tool.setuptools.package-dir]
 agentloom = "src"
-agentloom_tui_bridge = "agentloom-tui/python/agentloom_tui_bridge"
+agentloom_studio_adapter = "studio/python/agentloom_studio_adapter"
 
 [tool.setuptools.package-data]
 agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm",
@@ -129,7 +129,7 @@ agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm",
 agentloom = ["**/node_modules/**", "**/dist/**", "**/.agentloom-install.*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "agentloom-tui/python/tests"]
+testpaths = ["tests", "studio/python/tests"]
 python_files = ["test_*.py"]
 addopts = ["-v", "--tb=short"]
 markers = ["timeout(seconds): declare the maximum expected duration for a test"]

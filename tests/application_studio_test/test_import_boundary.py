@@ -29,15 +29,15 @@ def test_read_only_validation_import_does_not_load_agent_runtime() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_read_only_tui_bridge_import_does_not_load_model_runtime() -> None:
+def test_read_only_studio_query_import_does_not_load_model_runtime() -> None:
     completed = subprocess.run(
         [
             sys.executable,
             "-c",
             (
                 "import sys; "
-                "from agentloom.application.studio.bridge import TuiBridge; "
-                "assert TuiBridge; "
+                "from agentloom.application.studio.query_service import StudioQueryService; "
+                "assert StudioQueryService; "
                 "assert 'agentloom.application.agent' not in sys.modules; "
                 "assert 'litellm' not in sys.modules"
             ),

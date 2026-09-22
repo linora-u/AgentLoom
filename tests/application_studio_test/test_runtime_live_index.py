@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agentloom.execution.context import RuntimeRunLease
-from agentloom.application.studio.bridge import TuiBridge
+from agentloom.application.studio.query_service import StudioQueryService
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
 
@@ -20,7 +20,7 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
-def _bridge(tmp_path: Path) -> TuiBridge:
+def _bridge(tmp_path: Path) -> StudioQueryService:
     _write(tmp_path / "config/system.yaml", "runtime:\n  root_dir: .runtime-live\n")
     _write(
         tmp_path / "config/llm.yaml",
@@ -36,7 +36,7 @@ worker_agents: []
 workflow: Run the task.
 """,
     )
-    return TuiBridge(tmp_path)
+    return StudioQueryService(tmp_path)
 
 
 def _run(
@@ -81,7 +81,7 @@ def _run(
 
 
 def _count_runtime_reads(
-    bridge: TuiBridge,
+    bridge: StudioQueryService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[list[str], list[int], Callable[[], None]]:
     original = bridge._read_json_object_bounded_secure
@@ -130,7 +130,7 @@ def test_unchanged_live_refresh_reuses_bootstrap_index_and_bounds_response(
     assert len(bootstrap["runs"]) == 300
     reads, _, _ = _count_runtime_reads(bridge, monkeypatch)
 
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     assert reads == []
     assert live["runs_incomplete"] is True
@@ -152,7 +152,7 @@ def test_live_refresh_discovers_and_finishes_one_active_run_without_history_resc
     lease = RuntimeRunLease(run_dir)
     lease.acquire()
     try:
-        running = bridge.dispatch("runtime.summary", {})
+        running = bridge.runtime_summary()
         assert running["systems"][0]["state"] == "running"
         assert running["systems"][0]["latest_run"]["run_id"] == "run_1000"
         assert next(run for run in running["runs"] if run["run_id"] == "run_1000")["status"] == "running"
@@ -163,14 +163,14 @@ def test_live_refresh_discovers_and_finishes_one_active_run_without_history_resc
     finally:
         lease.release()
 
-    completed = bridge.dispatch("runtime.summary", {})
+    completed = bridge.runtime_summary()
     assert completed["systems"][0]["state"] == "completed"
     assert completed["systems"][0]["latest_run"]["run_id"] == "run_1000"
     assert next(run for run in completed["runs"] if run["run_id"] == "run_1000")["status"] == "completed"
     assert len(reads) <= 2
 
     clear_reads()
-    bridge.dispatch("runtime.summary", {})
+    bridge.runtime_summary()
     assert reads == []
 
 
@@ -184,7 +184,7 @@ def test_new_run_burst_has_a_per_refresh_manifest_and_task_read_budget(
     for index in range(300):
         _run(tmp_path, index)
 
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     # One bounded refresh may defer part of a pathological burst, but it must
     # still prioritize the lexically newest timestamped Run and say so.
@@ -206,7 +206,7 @@ def test_orphan_run_directories_do_not_starve_a_later_valid_run(tmp_path: Path) 
 
     observed = None
     for _ in range(30):
-        observed = bridge.dispatch("runtime.summary", {})
+        observed = bridge.runtime_summary()
         latest = observed["systems"][0]["latest_run"]
         if latest is not None and latest["run_id"] == "run_9000":
             break
@@ -223,12 +223,12 @@ def test_run_directory_remains_pending_when_manifest_arrives_after_directory_cur
     run_dir = tmp_path / ".runtime-live/runs/demo/run_2000"
     run_dir.mkdir(parents=True)
 
-    before_manifest = bridge.dispatch("runtime.summary", {})
+    before_manifest = bridge.runtime_summary()
     assert before_manifest["runs"] == []
     assert before_manifest["runs_incomplete"] is True
 
     _run(tmp_path, 2000)
-    after_manifest = bridge.dispatch("runtime.summary", {})
+    after_manifest = bridge.runtime_summary()
 
     assert after_manifest["systems"][0]["latest_run"]["run_id"] == "run_2000"
     assert after_manifest["runs"][0]["run_id"] == "run_2000"
@@ -267,7 +267,7 @@ workflow: Run nested task.
         ),
     )
 
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     nested = next(system for system in live["systems"] if system["id"] == nested_system_id)
     assert nested["state"] == "completed"
@@ -303,7 +303,7 @@ def test_stable_directory_reconciliation_removes_deleted_run_and_worker_truth(
     assert bootstrap["worker_invocations"][0]["run_id"] == "run_4000"
 
     shutil.rmtree(run_dir)
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     assert live["runs"] == []
     assert live["runs_incomplete"] is False
@@ -321,7 +321,7 @@ def test_missing_application_run_directory_is_a_complete_empty_snapshot(
     bridge.bootstrap()
 
     shutil.rmtree(run_dir.parent)
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     assert live["runs"] == []
     assert live["runs_incomplete"] is False
@@ -346,7 +346,7 @@ def test_unsafe_application_run_directory_does_not_delete_cached_truth(
     else:
         application_dir.write_text("not a directory", encoding="utf-8")
 
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     assert live["runs_incomplete"] is True
     assert live["removed_runs"] == []

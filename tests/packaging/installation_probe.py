@@ -224,7 +224,7 @@ def probe(workspace: Path) -> dict:
     (shadow / "__init__.py").write_text(f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\nraise RuntimeError('shadow')\n")
     shadow_env = env.copy()
     shadow_env["PYTHONPATH"] = str(project)
-    response = run([sys.executable, "-I", "-u", "-m", "agentloom_tui_bridge"], cwd=project, child_env=shadow_env,
+    response = run([sys.executable, "-I", "-u", "-m", "agentloom_studio_adapter"], cwd=project, child_env=shadow_env,
                    input=json.dumps({"id": "probe", "method": "bootstrap", "params": {}}) + "\n")
     rows = [json.loads(line) for line in response.splitlines()]
     assert rows and rows[0]["ok"] is True, rows

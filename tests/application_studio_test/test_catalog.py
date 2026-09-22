@@ -6,8 +6,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agentloom.application.studio.bridge import TuiBridge
 from agentloom.application.studio.catalog import project_catalog
+from agentloom.application.studio.query_service import StudioQueryService
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -170,7 +170,7 @@ agent_function_schema:
 
     monkeypatch.setattr(definition_module, "load_unique_yaml", count_definition_parse)
 
-    result = TuiBridge(tmp_path).bootstrap()
+    result = StudioQueryService(tmp_path).bootstrap()
 
     assert parse_counts == Counter({alpha: 1, beta: 1, worker: 1})
     assert [
