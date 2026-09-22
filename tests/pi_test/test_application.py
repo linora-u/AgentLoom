@@ -255,14 +255,19 @@ def test_profile_timeout_bounds_an_open_sse_stream(tmp_path):
     from threading import Event
     from agentloom.application.run import ApplicationRunError
     release = Event()
-    with model_service(stall=release, stall_stream=True) as (url, requests):
+    request_times = []
+    with model_service(
+        stall=release,
+        stall_stream=True,
+        on_request=lambda *_: request_times.append(time.monotonic()),
+    ) as (url, requests):
         app = project(tmp_path, url)
         change_model(tmp_path, timeout=1)
-        started = time.monotonic()
         try:
             with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match="timed out"):
                 execute_app(app, file_logging=False)
+            failed_at = time.monotonic()
         finally:
             release.set()
-        assert time.monotonic() - started < 4
-    assert len(requests) == 1
+    assert len(requests) == len(request_times) == 1
+    assert failed_at - request_times[0] < 4
