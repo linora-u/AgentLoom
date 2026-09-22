@@ -984,11 +984,11 @@ checkpoint:
 
 | 解析器 | 用途 | 位于 |
 |--------|------|------|
-| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/runtime/logging/logger_manager.py` / `src/configuration/llm_config.py` |
+| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/execution/logging/logger_manager.py` / `src/configuration/llm_config.py` |
 | `IntParser` | 宽容整数解析；旧配置 `max_tokens: "max"` 现在会解析为有限的模型默认值 | `config_validation.py` / `src/configuration/llm_config.py` |
 | `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/configuration/llm_config.py` |
 | `EnumParser` | 通用枚举归一化辅助函数，当前未在 system.yaml 主链路中直接消费 | `config_validation.py` |
-| `LogLevelParser` | 解析 `logging.level`，支持标准 `logging` 级别与 `OFF` | `config_validation.py` / `src/runtime/logging/logger_manager.py` |
+| `LogLevelParser` | 解析 `logging.level`，支持标准 `logging` 级别与 `OFF` | `config_validation.py` / `src/execution/logging/logger_manager.py` |
 
 ---
 

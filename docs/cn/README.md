@@ -294,7 +294,7 @@ result = execute_app("applications/release_review/workflows/release_review_agent
 print(result.output, result.run.run_id)
 ```
 
-框架源码直接放在 `src/application/`、`src/runtime/`、`src/runtimes/`、`src/integrations/` 等职责模块中。
+框架源码直接放在 `src/application/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等职责模块中。
 安装配置将 `src/` 映射为 Python 包名 `agentloom`，所以上面的导入实际加载
 `src/application/runner.py`，磁盘上不需要再套一层 `agentloom` 目录。
 先运行 `uv sync --python 3.12 --locked --all-groups` 安装项目，再调用 Python API。
