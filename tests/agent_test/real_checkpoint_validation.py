@@ -360,9 +360,9 @@ def _worker_ckpt(task_dir: Path, call_index: int = 0) -> dict:
 def _seed_resume_probes(task_dir: Path) -> tuple[str, Path]:
     """Add old ContextRef and file-history state before the real resume."""
 
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.file_history import FileHistoryManager
-    from agentloom.runtime.context_engine.engine import ContextEngine
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.file_history import FileHistoryManager
+    from agentloom.execution.context_engine.engine import ContextEngine
 
     manager = CheckpointManager("resume-probe", checkpoint_dir=task_dir)
     context_engine = ContextEngine(
@@ -397,9 +397,9 @@ def _seed_resume_probes(task_dir: Path) -> tuple[str, Path]:
 
 
 def _verify_resume_probes(task_dir: Path, ref: str, probe_path: Path) -> None:
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.file_history import FileHistoryManager
-    from agentloom.runtime.context_engine.store import ContextStore
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.file_history import FileHistoryManager
+    from agentloom.execution.context_engine.store import ContextStore
 
     manager = CheckpointManager("resume-probe", checkpoint_dir=task_dir)
     store = ContextStore(

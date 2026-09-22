@@ -10,7 +10,7 @@ long-running commands that have been promoted to background execution:
 
 import time
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
 
 logger = get_logger(__name__)

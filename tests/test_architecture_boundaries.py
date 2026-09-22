@@ -42,7 +42,7 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         import importlib.util
         import sys
         import agentloom
-        for name in ('src', 'src.application', 'src.runtime'):
+        for name in ('src', 'src.application', 'src.execution'):
             try:
                 importlib.import_module(name)
             except ImportError as exc:
@@ -54,8 +54,9 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         assert not any(name == 'src' or name.startswith('src.') for name in sys.modules)
     """)
     assert not (ROOT / 'agentloom').exists()
-    for package in ('application', 'configuration', 'runtime', 'runtimes', 'integrations', 'tools'):
+    for package in ('application', 'configuration', 'execution', 'runtimes', 'integrations', 'tools'):
         assert (ROOT / 'src' / package).is_dir()
+    assert not (ROOT / 'src' / 'runtime').exists()
     for removed in ('adapters', 'encoding', 'ui', 'utils', 'tui_bridge'):
         assert not (ROOT / 'src' / removed).exists()
     for removed in ("agent.py", "factory.py", "invocation.py"):
@@ -63,9 +64,9 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
     assert not (ROOT / "src" / "scaffold.py").exists()
     run_fresh("""
         import importlib.util
-        assert importlib.util.find_spec("agentloom.runtime.agent") is None
-        assert importlib.util.find_spec("agentloom.runtime.factory") is None
-        assert importlib.util.find_spec("agentloom.runtime.invocation") is None
+        assert importlib.util.find_spec("agentloom.execution.agent") is None
+        assert importlib.util.find_spec("agentloom.execution.factory") is None
+        assert importlib.util.find_spec("agentloom.execution.invocation") is None
         assert importlib.util.find_spec("agentloom.scaffold") is None
         assert importlib.util.find_spec("agentloom.application.scaffold") is not None
         assert importlib.util.find_spec("agentloom.application.agent") is not None
@@ -76,7 +77,7 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
 
 def test_runtime_contract_does_not_export_smolagents_capabilities() -> None:
     run_fresh("""
-        from agentloom.runtime import agent_runtime
+        from agentloom.execution import agent_runtime
         assert not hasattr(agent_runtime, "SMOLAGENTS_CAPABILITIES")
     """)
 
@@ -91,7 +92,7 @@ def test_configuration_does_not_load_runtime_implementations() -> None:
         assert model_adapters.MODEL_ADAPTERS
         assert runtime_options.runtime_config_layers
         assert not any(
-            name == "agentloom.runtime" or name.startswith("agentloom.runtime.")
+            name == "agentloom.execution" or name.startswith("agentloom.execution.")
             for name in sys.modules
         )
     """)
@@ -111,9 +112,7 @@ def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
                 if (
                     "configuration" in source_path.relative_to(ROOT / "src").parts
                     and (
-                        module == "agentloom.runtime"
-                        or module.startswith("agentloom.runtime.")
-                        or module == "agentloom.execution"
+                        module == "agentloom.execution"
                         or module.startswith("agentloom.execution.")
                     )
                 ):
@@ -121,7 +120,7 @@ def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
                         f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}"
                     )
                 if (
-                    module == "agentloom.runtime.model_protocol"
+                    module == "agentloom.execution.model_protocol"
                     and name in {"AdapterKind", "MODEL_ADAPTERS"}
                 ):
                     offenders.append(
@@ -141,7 +140,7 @@ def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
 def test_model_protocol_does_not_reexport_configuration_vocabulary() -> None:
     run_fresh("""
         from agentloom.application import runtime_options
-        from agentloom.runtime import model_protocol
+        from agentloom.execution import model_protocol
         assert not hasattr(runtime_options, "runtime_config_layers")
         assert not hasattr(model_protocol, "AdapterKind")
         assert not hasattr(model_protocol, "MODEL_ADAPTERS")
@@ -149,7 +148,7 @@ def test_model_protocol_does_not_reexport_configuration_vocabulary() -> None:
 
 def test_tool_gateway_does_not_export_smolagents_final_answer_binding() -> None:
     run_fresh("""
-        from agentloom.runtime import tool_gateway
+        from agentloom.execution import tool_gateway
         assert not hasattr(tool_gateway, "final_answer_binding")
     """)
 
@@ -219,8 +218,8 @@ def test_studio_bridge_does_not_assemble_schedule_business_dependencies() -> Non
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:
     run_fresh("""
         import sys
-        from agentloom.runtime.tool_protocol import ToolCallRecord, Blocked
-        from agentloom.runtime.hooks import HookPlan, HookRun
+        from agentloom.execution.tool_protocol import ToolCallRecord, Blocked
+        from agentloom.execution.hooks import HookPlan, HookRun
         record = ToolCallRecord.blocked(
             call_id='call', tool_name='write', input={'path': 'forbidden'},
             message='policy', stage='guard',
@@ -256,8 +255,8 @@ def test_definition_inspection_preserves_lazy_engine_patch_installation() -> Non
 def test_generic_runtime_modules_do_not_load_smolagents_adapter() -> None:
     run_fresh("""
         import sys
-        import agentloom.runtime.logging.levels
-        import agentloom.runtime.logging.logger_manager
+        import agentloom.execution.logging.levels
+        import agentloom.execution.logging.logger_manager
         assert 'smolagents' not in sys.modules
         assert not any(
             name == 'agentloom.runtimes.smolagents'
@@ -269,8 +268,8 @@ def test_generic_runtime_modules_do_not_load_smolagents_adapter() -> None:
 
 def test_smolagents_specific_implementations_have_no_generic_runtime_aliases() -> None:
     legacy_paths = (
-        ROOT / "src/runtime/loom_mixin.py",
-        ROOT / "src/runtime/memory/context_compression.py",
-        ROOT / "src/runtime/logging/agent_logger.py",
+        ROOT / "src/execution/loom_mixin.py",
+        ROOT / "src/execution/memory/context_compression.py",
+        ROOT / "src/execution/logging/agent_logger.py",
     )
     assert not any(path.exists() for path in legacy_paths)

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.runtime import SecureDirectory, resolve_runtime_home
+from agentloom.execution import SecureDirectory, resolve_runtime_home
 
 from .schedule import next_run, parse_datetime, validate_schedule
 from .schema import (

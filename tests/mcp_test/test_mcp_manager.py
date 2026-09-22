@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
 from agentloom.integrations.mcp.manager import McpManager
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_gateway import ToolBinding
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolBinding
 
 # ---------------------------------------------------------------------------
 # Helpers

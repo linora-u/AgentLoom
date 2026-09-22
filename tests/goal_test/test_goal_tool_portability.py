@@ -17,7 +17,7 @@ def test_goal_tools_construct_without_importing_a_runtime_sdk():
                         raise ImportError(f'Runtime dependency in platform Goal: {fullname}')
 
             sys.meta_path.insert(0, NoSmol())
-            from agentloom.runtime.tool_gateway import bind_tool
+            from agentloom.execution.tool_gateway import bind_tool
             from agentloom.tools.goal import get_goal, update_goal
 
             read = bind_tool(get_goal).definition

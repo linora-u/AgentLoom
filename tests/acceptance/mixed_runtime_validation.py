@@ -42,7 +42,7 @@ def review_settings(profile: str) -> dict:
 
 def recorded_review_model(workspace: Path, profile: str):
     """Retain real provider review output without request settings or credentials."""
-    from agentloom.runtime.model_protocol import MessageItem
+    from agentloom.execution.model_protocol import MessageItem
     from agentloom.integrations.litellm.model_binding import ModelProfileOverlay, resolve_litellm_model_turn_binding
     binding = resolve_litellm_model_turn_binding(profile, profile_overlay=ModelProfileOverlay(num_retries=0))
 

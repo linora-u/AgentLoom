@@ -14,16 +14,16 @@ from agentloom.runtimes.smolagents.model_turn_bridge import (
 from agentloom.runtimes.smolagents.runtime_adapter import (
     SmolagentsRuntimeAdapter,
 )
-from agentloom.runtime.agent_runtime import RuntimeDefinition
-from agentloom.runtime.logging import get_global_logger, get_logger
+from agentloom.execution.agent_runtime import RuntimeDefinition
+from agentloom.execution.logging import get_global_logger, get_logger
 from agentloom.runtimes.smolagents.options import options_from_definition
 from agentloom.runtimes.smolagents.prompts.prompt_builder import (
     _append_to_system_prompt,
     load_base_prompt_templates,
     todo_policy_for_mode,
 )
-from agentloom.runtime.trace import get_current_hook_run
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway, bind_tool, tool_manifest_snapshot
+from agentloom.execution.trace import get_current_hook_run
+from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool, tool_manifest_snapshot
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from agentloom.tools.loader import resolve_tool_function
 from smolagents import LogLevel

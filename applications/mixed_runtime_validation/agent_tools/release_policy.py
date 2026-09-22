@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from agentloom.configuration import C
-from agentloom.runtime.trusted_memory_evidence import trusted_memory_evidence
+from agentloom.execution.trusted_memory_evidence import trusted_memory_evidence
 
 
 def _policy_evidence(result: str):

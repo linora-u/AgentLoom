@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -160,7 +160,7 @@ class ReadFileState:
 
         Returns ``None`` when the edit is safe to proceed.
         """
-        from agentloom.runtime.tool_governance.files import check_staleness
+        from agentloom.execution.tool_governance.files import check_staleness
         with self._lock:
             entry = self._cache.get(self._key(path))
         return check_staleness(path, entry.mtime_ns if entry else None, entry.content if entry else None)
@@ -210,9 +210,9 @@ _instance_states: dict[tuple[tuple[str, str, str, str], str], ReadFileState] = {
 
 def get_read_file_state() -> ReadFileState:
     """Return this Agent's cache; direct tool callers retain standalone behavior."""
-    from agentloom.runtime import get_current_run_context
-    from agentloom.runtime.resources import register_resource
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution import get_current_run_context
+    from agentloom.execution.resources import register_resource
+    from agentloom.execution.trace import capture_explicit_execution_context
 
     context = get_current_run_context()
     if context is None:

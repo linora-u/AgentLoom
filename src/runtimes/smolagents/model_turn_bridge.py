@@ -9,8 +9,8 @@ from contextvars import ContextVar
 from typing import Any
 
 from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
     FunctionCallItem,
@@ -24,7 +24,7 @@ from agentloom.runtime.model_protocol import (
     model_item_from_dict,
     model_item_to_dict,
 )
-from agentloom.runtime.tool_protocol import TOOL_CALL_RAW_KEY, TOOL_RESULT_RAW_KEY, ToolCallRecord
+from agentloom.execution.tool_protocol import TOOL_CALL_RAW_KEY, TOOL_RESULT_RAW_KEY, ToolCallRecord
 from smolagents.models import (
     ChatMessage,
     ChatMessageToolCall,
@@ -255,8 +255,8 @@ class SmolagentsModelTurnBridge(Model):
         tools_to_call_from: list[Any] | None = None,
         **kwargs: Any,
     ) -> ChatMessage:
-        from agentloom.runtime.goal import get_current_goal_provider
-        from agentloom.runtime.trace import get_current_local_run_id
+        from agentloom.execution.goal import get_current_goal_provider
+        from agentloom.execution.trace import get_current_local_run_id
 
         goal_provider = get_current_goal_provider()
         if goal_provider is not None:

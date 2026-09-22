@@ -2,12 +2,12 @@ import logging
 from pathlib import Path
 from types import SimpleNamespace
 
-from agentloom.runtime import RuntimeHome, bind_run_context
+from agentloom.execution import RuntimeHome, bind_run_context
 from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.runtimes.smolagents.prompts.prompt_builder import build_prompt_templates
-from agentloom.runtime.skills.catalog import SkillCatalog, SkillSource
-from agentloom.runtime.skills.parser import build_skills_prompt
-from agentloom.runtime.trace.task_context import clear_current_skill_catalog, set_current_skill_catalog
+from agentloom.execution.skills.catalog import SkillCatalog, SkillSource
+from agentloom.execution.skills.parser import build_skills_prompt
+from agentloom.execution.trace.task_context import clear_current_skill_catalog, set_current_skill_catalog
 from agentloom.tools.skills import skill
 
 

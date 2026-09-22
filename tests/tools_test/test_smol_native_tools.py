@@ -20,9 +20,9 @@ def test_builtin_loader_selects_smol_owned_implementation(name):
 def test_read_cache_is_owned_by_one_agent_instance_and_closed_independently(tmp_path):
     from dataclasses import replace
 
-    from agentloom.runtime import RuntimeHome, bind_run_context
-    from agentloom.runtime.resources import close_instance_resources, close_run_resources
-    from agentloom.runtime.trace import bind_explicit_execution_context, capture_explicit_execution_context
+    from agentloom.execution import RuntimeHome, bind_run_context
+    from agentloom.execution.resources import close_instance_resources, close_run_resources
+    from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
 
     path = tmp_path / "shared.txt"
     path.write_text("each worker must see this content\n")

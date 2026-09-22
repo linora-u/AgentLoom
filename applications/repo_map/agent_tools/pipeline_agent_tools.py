@@ -29,7 +29,7 @@ from pathlib import Path
 
 import yaml
 
-from agentloom.runtime.logging import resolve_logger
+from agentloom.execution.logging import resolve_logger
 
 from .paths import repo_map_docs_root, repo_map_skill_name, repo_map_skill_root
 
@@ -794,7 +794,7 @@ def run_analysis_loop(
             results = tool.batch(batch_tasks)
         else:
             # Fallback: 逐个调用（测试中 tool 可能无 batch 方法）
-            from agentloom.runtime.concurrency.models import TaskResult
+            from agentloom.execution.concurrency.models import TaskResult
             import time as _time
             results = []
             for t in batch_tasks:

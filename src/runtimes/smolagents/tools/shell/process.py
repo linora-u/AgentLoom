@@ -36,14 +36,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 from agentloom.configuration import C
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime import get_current_run_context
+from agentloom.execution.logging import get_logger
+from agentloom.execution import get_current_run_context
 from agentloom.runtimes.smolagents.tools.shell.ansi_stripper import strip_ansi
 from agentloom.runtimes.smolagents.tools.shell.pipe_redirect import rearrange_pipe_command
 from agentloom.runtimes.smolagents.tools.shell.shell_session import ShellSession
 from agentloom.runtimes.smolagents.tools.shell.shell_snapshot import create_snapshot, remove_snapshot
 from agentloom.runtimes.smolagents.tools.shell.stall_watchdog import detect_stall_prompt
-from agentloom.runtime.subprocess_env import build_subprocess_env as _build_subprocess_env
+from agentloom.execution.subprocess_env import build_subprocess_env as _build_subprocess_env
 from agentloom.runtimes.smolagents.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
 logger = get_logger(__name__)
@@ -554,7 +554,7 @@ class ShellProcess:
         promoted = False  # True if promoted to background
 
         try:
-            from agentloom.runtime import get_current_run_context
+            from agentloom.execution import get_current_run_context
 
             runtime_context = get_current_run_context()
             if runtime_context is not None:
@@ -1010,7 +1010,7 @@ class ShellProcessRegistry:
                     load_profile=load_profile,
                 )
             process = self._registry[owner]
-            from agentloom.runtime.resources import register_resource
+            from agentloom.execution.resources import register_resource
 
             register_resource(
                 f"smol.shell.{id(process)}",

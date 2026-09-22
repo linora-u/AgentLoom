@@ -15,11 +15,11 @@ from uuid import uuid4
 
 import yaml
 from agentloom.application.composition import build_builtin_runtime_registry
-from agentloom.runtime.agent_runtime import AgentRuntimeResult, RuntimeCapabilities
-from agentloom.runtime.model_protocol import FunctionCallItem, FunctionCallOutputItem, MessageItem, ToolDefinition
-from agentloom.runtime.native_tool_host import NativeToolHost
-from agentloom.runtime.native_tools import NativeCallIdentity, NativeCommitAck, NativeExecutionOutcome, NativePrepareRequest
-from agentloom.runtime.tool_protocol import ToolErrorRecord
+from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities
+from agentloom.execution.model_protocol import FunctionCallItem, FunctionCallOutputItem, MessageItem, ToolDefinition
+from agentloom.execution.native_tool_host import NativeToolHost
+from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, NativeExecutionOutcome, NativePrepareRequest
+from agentloom.execution.tool_protocol import ToolErrorRecord
 from tests.application_test.native_read_support import READ
 from tests.lib_test.runtime.test_native_write_shell_host import write_manifest, shell_manifest
 

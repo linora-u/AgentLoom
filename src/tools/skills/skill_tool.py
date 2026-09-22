@@ -5,9 +5,9 @@ from __future__ import annotations
 import html
 import os
 
-from agentloom.runtime import get_current_run_context, portable_runtime_component
-from agentloom.runtime.skills.catalog import SkillCatalog
-from agentloom.runtime.trace.task_context import get_current_skill_catalog
+from agentloom.execution import get_current_run_context, portable_runtime_component
+from agentloom.execution.skills.catalog import SkillCatalog
+from agentloom.execution.trace.task_context import get_current_skill_catalog
 
 
 def _resolve_catalog() -> SkillCatalog:

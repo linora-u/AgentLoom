@@ -5,11 +5,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agentloom.runtime import RuntimeContext, bind_run_context
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.native_tool_host import NativeReadToolHost
-from agentloom.runtime.native_tools import NativeCallIdentity, NativePrepareRequest, ToolManifestEntry
-from agentloom.runtime.trace import ExplicitExecutionContext, bind_explicit_execution_context
+from agentloom.execution import RuntimeContext, bind_run_context
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.native_tool_host import NativeReadToolHost
+from agentloom.execution.native_tools import NativeCallIdentity, NativePrepareRequest, ToolManifestEntry
+from agentloom.execution.trace import ExplicitExecutionContext, bind_explicit_execution_context
 
 
 def read_manifest(**changes):
@@ -135,7 +135,7 @@ def test_execution_gate_checks_stored_grant_not_caller_copy(tmp_path, field, val
 
 
 def test_read_is_durable_before_success_and_duplicate_settlement_is_idempotent(tmp_path):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
+    from agentloom.execution.native_tools import NativeExecutionOutcome
 
     observations = []
 
@@ -166,7 +166,7 @@ def test_read_is_durable_before_success_and_duplicate_settlement_is_idempotent(t
 
 @pytest.mark.parametrize("started,expected", [(False, "cancelled"), (True, "uncertain")])
 def test_cancel_and_late_settlement_do_not_invent_a_terminal_result(tmp_path, started, expected):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
+    from agentloom.execution.native_tools import NativeExecutionOutcome
 
     with native_scope(tmp_path) as (host, request, _):
         grant = host.prepare(request).authorization
@@ -181,8 +181,8 @@ def test_cancel_and_late_settlement_do_not_invent_a_terminal_result(tmp_path, st
 
 @pytest.mark.parametrize("status", ["error", "uncertain"])
 def test_executor_error_and_unknown_result_have_distinct_states(tmp_path, status):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
-    from agentloom.runtime.tool_protocol import ToolErrorRecord
+    from agentloom.execution.native_tools import NativeExecutionOutcome
+    from agentloom.execution.tool_protocol import ToolErrorRecord
 
     with native_scope(tmp_path) as (host, request, _):
         grant = host.start_execution(host.prepare(request).authorization)
@@ -206,8 +206,8 @@ def test_executor_error_and_unknown_result_have_distinct_states(tmp_path, status
     ],
 )
 def test_only_registered_output_bound_memory_evidence_is_accepted(tmp_path, text, scope, expected):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
-    from agentloom.runtime.trusted_memory_evidence import (
+    from agentloom.execution.native_tools import NativeExecutionOutcome
+    from agentloom.execution.trusted_memory_evidence import (
         TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
         TrustedMemoryEvidenceEnvelope,
     )
@@ -231,7 +231,7 @@ def test_only_registered_output_bound_memory_evidence_is_accepted(tmp_path, text
 
 
 def test_json_evidence_claims_from_executor_are_not_trusted(tmp_path):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
+    from agentloom.execution.native_tools import NativeExecutionOutcome
 
     with native_scope(tmp_path) as (host, request, _):
         grant = host.start_execution(host.prepare(request).authorization)
@@ -241,8 +241,8 @@ def test_json_evidence_claims_from_executor_are_not_trusted(tmp_path):
 
 
 def test_disk_failure_never_acknowledges_success(tmp_path, monkeypatch):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
-    from agentloom.runtime.storage import SecureDirectory
+    from agentloom.execution.native_tools import NativeExecutionOutcome
+    from agentloom.execution.storage import SecureDirectory
 
     with native_scope(tmp_path) as (host, request, _):
         grant = host.start_execution(host.prepare(request).authorization)
@@ -258,8 +258,8 @@ def test_disk_failure_never_acknowledges_success(tmp_path, monkeypatch):
 def test_two_hosts_cannot_consume_the_same_authorization(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
 
-    from agentloom.runtime import get_current_run_context
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution import get_current_run_context
+    from agentloom.execution.trace import capture_explicit_execution_context
 
     with native_scope(tmp_path) as (host, request, _):
         grant = host.prepare(request).authorization
@@ -303,7 +303,7 @@ def test_a_host_with_different_selected_provider_cannot_consume_old_grant(tmp_pa
 
 
 def test_evidence_extractor_cannot_mutate_the_original_receipt(tmp_path):
-    from agentloom.runtime.native_tools import NativeExecutionOutcome
+    from agentloom.execution.native_tools import NativeExecutionOutcome
 
     def extract(output):
         output["text"] = "injected claim"
@@ -378,7 +378,7 @@ def test_new_journal_directory_is_durable_before_authorization(tmp_path, monkeyp
 
 
 def test_another_hook_run_cannot_reuse_the_same_application_call(tmp_path):
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution.trace import capture_explicit_execution_context
 
     with native_scope(tmp_path) as (host, request, run):
         grant = host.prepare(request).authorization

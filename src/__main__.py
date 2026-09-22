@@ -223,8 +223,8 @@ def runtime_uninstall(runtime: str) -> None:
 
 def _has_transient_provider_error(error: BaseException) -> bool:
     """Classify trusted provider failures without loading a provider SDK."""
-    from agentloom.runtime.agent_runtime import AgentRuntimeError
-    from agentloom.runtime.model_protocol import ModelProtocolError
+    from agentloom.execution.agent_runtime import AgentRuntimeError
+    from agentloom.execution.model_protocol import ModelProtocolError
 
     # These exception instances can only exist if their modules were loaded
     # during execution. Cold-importing LiteLLM here can fetch its cost map and
@@ -410,7 +410,7 @@ def run(
 
 def _configured_runtime_home():
     from agentloom.configuration import C
-    from agentloom.runtime import resolve_runtime_home
+    from agentloom.execution import resolve_runtime_home
 
     return resolve_runtime_home(C.raw, agent_root=C.agent_root)
 
@@ -426,7 +426,7 @@ def _configured_checkpoints_root():
 @click.option("--detail", is_flag=True, default=False, help="Show worker-level details.")
 def list_tasks(detail: bool):
     """List all retained checkpoint tasks."""
-    from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
+    from agentloom.execution.checkpoint.checkpoint_manager import list_all_tasks
 
     tasks = list_all_tasks(
         checkpoints_root=_configured_checkpoints_root()
@@ -476,11 +476,11 @@ def clean_tasks(clean_all: bool, before_days: int | None):
     """Clean old checkpoint data."""
     from pathlib import Path as _Path
 
-    from agentloom.runtime.checkpoint import (
+    from agentloom.execution.checkpoint import (
         cleanup_expired_tasks,
         delete_checkpoint_task_if_inactive,
     )
-    from agentloom.runtime.checkpoint.checkpoint_manager import list_all_tasks
+    from agentloom.execution.checkpoint.checkpoint_manager import list_all_tasks
 
     checkpoints_root = _configured_checkpoints_root()
     tasks = list_all_tasks(checkpoints_root=checkpoints_root)
@@ -510,7 +510,7 @@ def clean_tasks(clean_all: bool, before_days: int | None):
 def clean_runtime_command() -> None:
     """Apply bounded retention to run directories and raw artifacts."""
     from agentloom.configuration import C
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution.retention import clean_runtime
 
     runtime_config = C.get("runtime", {})
     if not isinstance(runtime_config, dict):

@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from agentloom.runtimes.smolagents.recoverable_errors import (
     is_recoverable_agent_error,
 )
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 if TYPE_CHECKING:
     from smolagents.memory import MemoryStep

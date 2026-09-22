@@ -2,7 +2,7 @@
 from collections.abc import Mapping
 import math
 
-from agentloom.runtime.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
+from agentloom.execution.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
 
 SDK_VERSION = "0.79.4"
 BRIDGE_VERSION = 1

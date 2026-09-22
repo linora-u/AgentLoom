@@ -16,8 +16,8 @@ from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
 from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from agentloom.runtimes.smolagents.tools.tools import tool
-from agentloom.runtime import RuntimeHome, bind_run_context
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution import RuntimeHome, bind_run_context
+from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeCapabilities,
@@ -27,11 +27,11 @@ from agentloom.runtime.agent_runtime import (
     RuntimeUsage,
     require_runtime_state,
 )
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import ModelTurnRequest, ModelTurnResult
-from agentloom.runtime.tool_gateway import AgentLoomToolGateway
-from agentloom.runtime.trace import (
+from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import ModelTurnRequest, ModelTurnResult
+from agentloom.execution.tool_gateway import AgentLoomToolGateway
+from agentloom.execution.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
     clear_current_hook_run,
@@ -358,8 +358,8 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
     tmp_path,
     monkeypatch,
 ):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime = RecordingAgentRuntime("reported-result")
@@ -385,7 +385,7 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
 
 
 def test_standalone_base_exception_is_persisted_as_failure(tmp_path, monkeypatch):
-    from agentloom.runtime.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint import CheckpointManager
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime = RecordingAgentRuntime(exc=SystemExit("runtime exited"))
@@ -616,7 +616,7 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
 
 
 def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session(monkeypatch):
-    from agentloom.runtime.trace import bind_root_run, get_current_session_run_id, require_root_run_id
+    from agentloom.execution.trace import bind_root_run, get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtimes: list[RecordingAgentRuntime] = []
@@ -668,7 +668,7 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
 
 
 def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> None:
-    from agentloom.runtime.trace import bind_root_run
+    from agentloom.execution.trace import bind_root_run
     from agentloom.self_learning.persistence.memory_store import MemoryStore
 
     config = {
@@ -708,7 +708,7 @@ def test_main_agent_and_worker_inject_the_same_frozen_root_memory_snapshot() -> 
 def test_failed_initial_memory_store_open_freezes_empty_for_workers(
     monkeypatch,
 ) -> None:
-    from agentloom.runtime.trace import bind_root_run
+    from agentloom.execution.trace import bind_root_run
     from agentloom.self_learning.persistence import (
         memory_store as memory_store_module,
     )
@@ -743,7 +743,7 @@ def test_failed_initial_memory_store_open_freezes_empty_for_workers(
 
 
 def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution.trace import capture_explicit_execution_context
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = RecordingAgentRuntime(output="ok")
@@ -762,7 +762,7 @@ def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
 
 
 def test_base_run_releases_owned_root_after_failure(monkeypatch):
-    from agentloom.runtime.trace import get_current_session_run_id, require_root_run_id
+    from agentloom.execution.trace import get_current_session_run_id, require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime_agent = RecordingAgentRuntime(exc=RuntimeError("boom-root"))
@@ -807,7 +807,7 @@ def test_runtime_close_failure_does_not_replace_run_failure(monkeypatch):
 
 
 def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch):
-    from agentloom.runtime.trace import bind_root_run, require_root_run_id
+    from agentloom.execution.trace import bind_root_run, require_root_run_id
     from agentloom.self_learning import reviewer
 
     agent = _make_review_agent(logger=DummyLoggerBackend())
@@ -962,8 +962,8 @@ def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
 
 
 def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypatch):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
     class MaxStepsWorkerRuntime:
         runtime_id = "test"
@@ -1022,8 +1022,8 @@ def test_max_steps_worker_is_failed_before_checkpoint_success(tmp_path, monkeypa
 
 @pytest.mark.parametrize("output", ["worker answer", "", None])
 def test_completed_worker_resume_replays_output_in_requested_shape(tmp_path, monkeypatch, output):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 
 
     class SuccessfulRuntime:
@@ -1086,8 +1086,8 @@ def test_max_steps_managed_worker_fails_before_call_discards_state(
     tmp_path,
     monkeypatch,
 ):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
     from smolagents import RunResult
 
     native_runtime = ToolCallingAgentV2(
@@ -1460,7 +1460,7 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
 
 
 def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypatch):
-    from agentloom.runtime.trace import (
+    from agentloom.execution.trace import (
         capture_explicit_execution_context,
         clear_current_task_id,
         set_current_task_id,
@@ -1720,7 +1720,7 @@ def test_subagent_lifecycle_belongs_to_parent_while_worker_tools_belong_to_child
 
 
 def test_worker_subtask_cannot_emit_root_task_lifecycle() -> None:
-    from agentloom.runtime.trace import sub_task_context
+    from agentloom.execution.trace import sub_task_context
 
     events: list[HookEvent] = []
     agent = _make_agent(logger=DummyLoggerBackend())
@@ -1755,7 +1755,7 @@ def test_worker_subtask_cannot_emit_root_task_lifecycle() -> None:
 
 
 def test_root_task_lifecycle_never_reads_legacy_subtask_fallback() -> None:
-    from agentloom.runtime.trace import clear_current_sub_task_id, set_current_sub_task_id
+    from agentloom.execution.trace import clear_current_sub_task_id, set_current_sub_task_id
 
     events: list[HookEvent] = []
     agent = _make_agent(logger=DummyLoggerBackend())
@@ -1831,7 +1831,7 @@ def test_each_run_rebinds_message_sink_for_fresh_runtime(monkeypatch):
 
 
 def test_same_base_agent_serializes_fresh_runtime_runs(monkeypatch):
-    from agentloom.runtime.trace import require_root_run_id
+    from agentloom.execution.trace import require_root_run_id
 
     agent = _make_agent(logger=DummyLoggerBackend())
 
@@ -2011,7 +2011,7 @@ def test_invocation_collects_ordered_runtime_events_without_sink_duplicates(
 
 
 def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2048,7 +2048,7 @@ def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
 
 
 def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2076,7 +2076,7 @@ def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
 
 
 def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2103,7 +2103,7 @@ def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatc
 
 
 def test_goal_mode_ignores_legacy_budget_and_continues_until_completed(monkeypatch):
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
@@ -2134,8 +2134,8 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
     tmp_path,
     monkeypatch,
 ):
-    from agentloom.runtime.checkpoint import CheckpointManager
-    from agentloom.runtime.goal import get_current_goal_provider
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.goal import get_current_goal_provider
 
     config = {
         "name": "goal-runtime",

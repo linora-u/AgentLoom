@@ -10,7 +10,7 @@ from __future__ import annotations
 import enum
 from typing import Any
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 
 _LOG = get_logger(__name__)
 

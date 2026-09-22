@@ -7,18 +7,18 @@ from agentloom.application.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
-from agentloom.runtime.hooks import HookPlan, HookRun
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.hooks import HookPlan, HookRun
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
 )
-from agentloom.runtime.skills.catalog import SkillCatalog
-from agentloom.runtime.tool_gateway import (
+from agentloom.execution.skills.catalog import SkillCatalog
+from agentloom.execution.tool_gateway import (
     AgentLoomToolGateway,
 )
-from agentloom.runtime.trace.task_context import (
+from agentloom.execution.trace.task_context import (
     clear_current_hook_run,
     set_current_hook_run,
 )
@@ -155,7 +155,7 @@ def _build_definition(agent, monkeypatch, root):
         lambda: "",
     )
     from agentloom.configuration.config import EffectiveAgentConfigSnapshot, ConfigLayerSnapshot
-    from agentloom.runtime.hooks import HookPlan
+    from agentloom.execution.hooks import HookPlan
     agent._effective_agent_config_snapshot = EffectiveAgentConfigSnapshot(
         values=agent._effective_agent_config,
         layers=(ConfigLayerSnapshot("agent", agent._effective_agent_config, root, root / "agent.yaml"),),

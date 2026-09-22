@@ -4,7 +4,7 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from agentloom.runtime.tool_governance.shell.sandbox.manager import (
+from agentloom.execution.tool_governance.shell.sandbox.manager import (
     SandboxManager,
     SandboxConfig,
     _match_excluded_command,
@@ -20,14 +20,14 @@ from agentloom.runtimes.smolagents.tools.shell.should_use_sandbox import should_
 class TestSandboxConfig:
     """Test sandbox configuration loading."""
 
-    @patch("agentloom.runtime.tool_governance.shell.sandbox.manager.C.get_nested", return_value=None)
+    @patch("agentloom.execution.tool_governance.shell.sandbox.manager.C.get_nested", return_value=None)
     def test_default_config_disabled(self, mock_config):
         config = _load_sandbox_config()
         assert config.enabled is False
         assert config.mode == "bwrap"
         assert "." in config.allow_write
 
-    @patch("agentloom.runtime.tool_governance.shell.sandbox.manager.C.get_nested", return_value={
+    @patch("agentloom.execution.tool_governance.shell.sandbox.manager.C.get_nested", return_value={
         "enabled": True, "mode": "docker",
         "allow_write": ["/workspace"], "deny_write": ["/etc"],
         "network_isolation": True, "excluded_commands": ["git push:*"],

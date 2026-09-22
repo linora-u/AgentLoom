@@ -8,9 +8,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -92,8 +92,8 @@ def test_tool_gateway_contract_imports_no_agent_engine() -> None:
             textwrap.dedent(
                 """
                 import sys
-                from agentloom.runtime.tool_gateway import ToolGateway
-                assert ToolGateway.__module__ == "agentloom.runtime.tool_gateway"
+                from agentloom.execution.tool_gateway import ToolGateway
+                assert ToolGateway.__module__ == "agentloom.execution.tool_gateway"
                 assert "smolagents" not in sys.modules
                 assert "litellm" not in sys.modules
                 assert "langgraph" not in sys.modules

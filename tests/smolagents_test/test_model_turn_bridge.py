@@ -6,13 +6,13 @@ from dataclasses import dataclass
 import pytest
 from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.goal import GoalCompleteError, GoalState
-from agentloom.runtime.goal.provider import (
+from agentloom.execution.goal import GoalCompleteError, GoalState
+from agentloom.execution.goal.provider import (
     GoalStateProvider,
     bind_goal_state_provider,
 )
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     MessageItem,
@@ -23,8 +23,8 @@ from agentloom.runtime.model_protocol import (
     ReasoningItem,
     ToolDefinition,
 )
-from agentloom.runtime.tool_protocol import TOOL_RESULT_RAW_KEY, ToolCallRecord
-from agentloom.runtime.trace import bind_local_run
+from agentloom.execution.tool_protocol import TOOL_RESULT_RAW_KEY, ToolCallRecord
+from agentloom.execution.trace import bind_local_run
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import TokenUsage
 

@@ -14,12 +14,12 @@ from agentloom.runtimes.smolagents.model_turn_bridge import (
     MODEL_RESPONSE_ID_RAW_KEY,
 )
 from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     ReasoningItem,
     model_item_to_dict,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord, ToolErrorRecord
+from agentloom.execution.tool_protocol import ToolCallRecord, ToolErrorRecord
 from smolagents.agents import (
     AgentExecutionError,
     AgentParsingError,

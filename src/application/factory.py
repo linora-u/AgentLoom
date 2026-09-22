@@ -15,11 +15,11 @@ from agentloom.configuration import C
 from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 from agentloom.configuration.yaml_loader import load_unique_yaml
 from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for_goal
-from agentloom.runtime.logging import (
+from agentloom.execution.goal import normalize_goal_config, normalize_workflow_for_goal
+from agentloom.execution.logging import (
     get_logger,
 )
-from agentloom.runtime.tool_gateway import ToolBinding, bind_tool
+from agentloom.execution.tool_gateway import ToolBinding, bind_tool
 from agentloom.tools.selection import resolve_runtime_toolsets
 from agentloom.tools.loader import resolve_tool_function
 from agentloom.application.imports.dynamic_import import load_function
@@ -572,7 +572,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 if isinstance(result, (dict, list))
                 else str(result)
             )
-            from agentloom.runtime.context_engine.runtime import get_active_context_engine
+            from agentloom.execution.context_engine.runtime import get_active_context_engine
 
             engine = get_active_context_engine()
             if engine is not None:
@@ -602,7 +602,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             Returns:
                 List[TaskResult]: One result per task.
             """
-            from agentloom.runtime.concurrency import ParallelAgentExecutor
+            from agentloom.execution.concurrency import ParallelAgentExecutor
 
             # Priority chain: param > YAML > None (auto)
             effective = concurrency if concurrency is not None else _yaml_concurrency
@@ -674,7 +674,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             binding = bind_tool(dynamic_agent_tool)
             if binding.definition.name != function_name:
                 raise ValueError("generated Tool name does not match its schema")
-            from agentloom.runtime.native_tools import ToolManifestEntry
+            from agentloom.execution.native_tools import ToolManifestEntry
 
             dynamic_agent_tool._agentloom_manifest_entry = ToolManifestEntry(  # type: ignore[attr-defined]
                 logical_name=function_name, visible_name=function_name,
@@ -989,7 +989,7 @@ class YamlAgentFactory:
                 append_tool=_append_tool,
                 log=log,
             )
-            from agentloom.runtime.permissions.policy_summary import patch_shell_tool_security
+            from agentloom.execution.permissions.policy_summary import patch_shell_tool_security
             patch_shell_tool_security(tools, log)
             return tools, mcp_manager
 
@@ -1032,7 +1032,7 @@ class YamlAgentFactory:
         )
 
         # Phase 4: Patch shell_tool description with dynamic security policy
-        from agentloom.runtime.permissions.policy_summary import patch_shell_tool_security
+        from agentloom.execution.permissions.policy_summary import patch_shell_tool_security
         patch_shell_tool_security(tools, log)
 
         return tools, mcp_manager
@@ -1207,7 +1207,7 @@ class YamlAgentFactory:
         Returns:
             List[TaskResult]: One result per task.
         """
-        from agentloom.runtime.concurrency import ParallelAgentExecutor
+        from agentloom.execution.concurrency import ParallelAgentExecutor
 
         agent_tool = YamlAgentFactory.create_agent_as_tool(config_path, logger=logger)
         if agent_tool is None:

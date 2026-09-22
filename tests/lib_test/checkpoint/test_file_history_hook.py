@@ -1,5 +1,5 @@
 """
-Tests for agentloom.runtime.checkpoint.file_history_hook.
+Tests for agentloom.execution.checkpoint.file_history_hook.
 
 Covers:
 - Hook intercepts file-modifying tools (edit_file, write_file, etc.)
@@ -14,11 +14,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentloom.runtime.checkpoint.file_history_hook import (
+from agentloom.execution.checkpoint.file_history_hook import (
     FileHistoryHook,
     record_active_file_history,
 )
-from agentloom.runtime.hooks.types import HookContext
+from agentloom.execution.hooks.types import HookContext
 from agentloom.tools.catalog import list_tool_specs
 
 
@@ -174,7 +174,7 @@ class TestFileHistoryHook:
         coordinator._file_history = mock_fh
 
         with patch(
-            "agentloom.runtime.checkpoint.coordinator.CheckpointCoordinator.current",
+            "agentloom.execution.checkpoint.coordinator.CheckpointCoordinator.current",
             return_value=coordinator,
         ):
             record_active_file_history(

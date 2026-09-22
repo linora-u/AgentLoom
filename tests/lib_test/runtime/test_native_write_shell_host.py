@@ -2,7 +2,7 @@
 from dataclasses import replace
 from pathlib import Path
 
-from agentloom.runtime.native_tools import NativeExecutionOutcome
+from agentloom.execution.native_tools import NativeExecutionOutcome
 from tests.lib_test.runtime.test_native_read_host import native_scope, read_manifest
 
 
@@ -38,8 +38,8 @@ def test_native_overwrite_without_read_is_blocked_before_dispatch(tmp_path):
 
 import subprocess
 import pytest
-from agentloom.runtime.hooks import HookEvent, HookHandler, HookResult
-from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
+from agentloom.execution.hooks import HookEvent, HookHandler, HookResult
+from agentloom.execution.tool_protocol import ToolPolicyBlockedError
 
 
 def read_then_write(host, request):

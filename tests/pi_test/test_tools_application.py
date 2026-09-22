@@ -20,8 +20,8 @@ def parallel_probe(label: str) -> str:
     Args:
         label: Label identifying this member of the batch.
     """
-    from agentloom.runtime import get_current_run_context
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution import get_current_run_context
+    from agentloom.execution.trace import capture_explicit_execution_context
     context = get_current_run_context(required=True)
     execution = capture_explicit_execution_context()
     assert execution.hook_run is not None
@@ -38,7 +38,7 @@ def wait_for_cleanup(marker: str) -> str:
     """
     from pathlib import Path
     from threading import Event
-    from agentloom.runtime.resources import register_resource
+    from agentloom.execution.resources import register_resource
     released = Event()
 
     def close():

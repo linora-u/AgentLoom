@@ -64,10 +64,10 @@ from agentloom.integrations.litellm.model_binding import (
     resolve_litellm_model_turn_binding,
 )
 from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
-from agentloom.runtime.context_engine.engine import CONTEXT_REF_PREFIX
-from agentloom.runtime.context_engine.runtime import get_current_context_engine
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.context_engine.engine import CONTEXT_REF_PREFIX
+from agentloom.execution.context_engine.runtime import get_current_context_engine
+from agentloom.execution.logging import get_logger
+from agentloom.execution.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     FunctionCallItem,
     FunctionCallOutputItem,
@@ -1285,8 +1285,8 @@ def summarize_conversation(
     # A completed Goal may owe the root exactly one final-delivery request.
     # Smart summary runs under the same ContextVars but is only scaffolding;
     # skip its model call so it cannot consume that ephemeral allowance.
-    from agentloom.runtime.goal import get_current_goal_provider
-    from agentloom.runtime.trace import get_current_local_run_id
+    from agentloom.execution.goal import get_current_goal_provider
+    from agentloom.execution.trace import get_current_local_run_id
 
     goal_provider = get_current_goal_provider()
     if goal_provider is not None and goal_provider.completion_settlement_pending(

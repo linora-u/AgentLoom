@@ -10,22 +10,22 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeCapabilities,
     RuntimeDefinition,
     RuntimeRegistry,
 )
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     MessageItem,
     ModelTurnRequest,
     ModelTurnResult,
     ToolDefinition,
 )
-from agentloom.runtime.tool_gateway import ToolGateway
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_OWNER = PROJECT_ROOT / "src" / "application" / "agent.py"
@@ -296,7 +296,7 @@ def test_fake_runtime_invokes_through_registry_with_the_same_definition() -> Non
 
 
 def test_native_runtime_definition_needs_model_selection_not_python_binding() -> None:
-    from agentloom.runtime.agent_runtime import RuntimeModelSelection
+    from agentloom.execution.agent_runtime import RuntimeModelSelection
 
     definition = RuntimeDefinition(
         runtime_id="native-fixture",
@@ -322,7 +322,7 @@ def test_native_runtime_definition_needs_model_selection_not_python_binding() ->
 def test_conflicting_model_selection_and_legacy_binding_are_rejected() -> None:
     import pytest
     from dataclasses import replace
-    from agentloom.runtime.agent_runtime import RuntimeModelSelection
+    from agentloom.execution.agent_runtime import RuntimeModelSelection
 
     with pytest.raises(ValueError, match="model_selection.*legacy model binding"):
         replace(_complete_runtime_definition(), model_selection=RuntimeModelSelection(
@@ -332,7 +332,7 @@ def test_conflicting_model_selection_and_legacy_binding_are_rejected() -> None:
 
 def test_registry_rejects_actual_tools_even_when_requirements_omitted() -> None:
     import pytest
-    from agentloom.runtime.agent_runtime import UnsupportedRuntimeError
+    from agentloom.execution.agent_runtime import UnsupportedRuntimeError
 
     calls = []
     registry = RuntimeRegistry()

@@ -12,7 +12,7 @@ from pathlib import Path
 from agentloom.application.validation import (
     AgentConfigNormalizer,
 )
-from agentloom.runtime.goal import normalize_goal_config
+from agentloom.execution.goal import normalize_goal_config
 
 REQUIRED_YAML_FIELDS = ("name", "agent_runtime", "workflow", "description")
 

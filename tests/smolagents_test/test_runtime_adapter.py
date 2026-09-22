@@ -24,7 +24,7 @@ from agentloom.runtimes.smolagents.runtime_adapter import (
 from agentloom.runtimes.smolagents.tool_protocol import (
     action_step_to_protocol_messages,
 )
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     RuntimeCapabilities,
@@ -33,9 +33,9 @@ from agentloom.runtime.agent_runtime import (
     RuntimeRequirements,
 )
 from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.goal import GoalCompleteError, GoalState
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.goal import GoalCompleteError, GoalState
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     MessageItem,
@@ -45,7 +45,7 @@ from agentloom.runtime.model_protocol import (
     ReasoningItem,
     ToolDefinition,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import ToolCallRecord
 from smolagents.agents import (
     AgentError,
     AgentExecutionError,

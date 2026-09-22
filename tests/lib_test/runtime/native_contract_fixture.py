@@ -10,7 +10,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-from agentloom.runtime.native_tools import (
+from agentloom.execution.native_tools import (
     NativeAuthorization,
     NativeCommitAck,
     NativeExecutionOutcome,
@@ -18,7 +18,7 @@ from agentloom.runtime.native_tools import (
     NativePreparation,
     NativePrepareRequest,
 )
-from agentloom.runtime.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import ToolCallRecord
 
 
 class ContractHostFixture:

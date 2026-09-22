@@ -1,12 +1,12 @@
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime import get_current_run_context
-from agentloom.runtime.tool_protocol import ToolPolicyBlockedError
+from agentloom.execution.logging import get_logger
+from agentloom.execution import get_current_run_context
+from agentloom.execution.tool_protocol import ToolPolicyBlockedError
 from agentloom.runtimes.smolagents.tools.shell.command_semantics import interpret_exit_code
 from agentloom.runtimes.smolagents.tools.shell.output_interceptor import OutputInterceptor
 from agentloom.runtimes.smolagents.tools.shell.process import ShellProcess, ShellProcessRegistry
 from agentloom.runtimes.smolagents.tools.shell.should_use_sandbox import get_sandbox_manager, should_use_sandbox
-from agentloom.runtime.tool_governance.shell.validator import validate_command
-from agentloom.runtime.trace import capture_explicit_execution_context
+from agentloom.execution.tool_governance.shell.validator import validate_command
+from agentloom.execution.trace import capture_explicit_execution_context
 
 logger = get_logger(__name__)
 
@@ -160,7 +160,7 @@ def shell_tool(
         session_cwd = registry.get_session_cwd(agent_id)
 
     try:
-        from agentloom.runtime.tool_governance.shell.audit import policy_audit
+        from agentloom.execution.tool_governance.shell.audit import policy_audit
         from agentloom.runtimes.smolagents.tools.shell.shell_audit_log import get_shell_audit_logger
         with policy_audit(get_shell_audit_logger()):
             validate_command(command, cwd=session_cwd)
@@ -278,10 +278,10 @@ def _run_in_background(
     import os
     import subprocess
 
-    from agentloom.runtime import get_current_run_context
+    from agentloom.execution import get_current_run_context
     from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
     from agentloom.runtimes.smolagents.tools.shell.process import _MAX_OUTPUT_BYTES, find_suitable_shell
-    from agentloom.runtime.subprocess_env import build_subprocess_env
+    from agentloom.execution.subprocess_env import build_subprocess_env
     from agentloom.runtimes.smolagents.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
     shell_path = find_suitable_shell()

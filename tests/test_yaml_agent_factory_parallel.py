@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentloom.runtime.concurrency.rate_limiter import GlobalRateLimiterRegistry
+from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ class TestRunAgentsParallel:
                 return_value=mock_tool,
             ),
             patch(
-                "agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch",
+                "agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch",
                 return_value=[MagicMock(status="completed")],
             ),
             mock_tool,
@@ -57,8 +57,8 @@ class TestRunAgentsParallel:
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=mock_tool):
-            with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
-                with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
+            with patch("agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
+                with patch("agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
                     YamlAgentFactory.run_agents_parallel(
                         config_path={"name": "test", "model_type": "summary"},
                         tasks=[],
@@ -73,8 +73,8 @@ class TestRunAgentsParallel:
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=mock_tool):
-            with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
-                with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
+            with patch("agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
+                with patch("agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
                     YamlAgentFactory.run_agents_parallel(
                         config_path={"name": "test"},  # no model_type
                         tasks=[],
@@ -97,8 +97,8 @@ class TestRunAgentsParallel:
         mock_tool = MagicMock()
         mock_tool.__name__ = "t"
         with patch.object(YamlAgentFactory, "create_agent_as_tool", return_value=mock_tool):
-            with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
-                with patch("agentloom.runtime.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
+            with patch("agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.__init__", return_value=None) as init_mock:
+                with patch("agentloom.execution.concurrency.parallel_executor.ParallelAgentExecutor.execute_batch", return_value=[]):
                     YamlAgentFactory.run_agents_parallel(
                         config_path={"name": "test"},
                         tasks=[],

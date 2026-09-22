@@ -8,7 +8,7 @@ from textwrap import dedent
 def test_checkpoint_import_does_not_load_backend_todo_state():
     result = subprocess.run([sys.executable, "-c", dedent('''
         import sys
-        from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
+        from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
         assert not any(name.startswith((
             "agentloom.runtimes.smolagents.todo", "agentloom.runtimes.smolagents.todo",
         )) for name in sys.modules)
@@ -19,8 +19,8 @@ def test_checkpoint_import_does_not_load_backend_todo_state():
 def test_platform_run_logging_does_not_load_smol_tools(tmp_path):
     result = subprocess.run([sys.executable, "-c", dedent('''
         import sys
-        from agentloom.runtime import RuntimeHome, bind_run_context
-        from agentloom.runtime.logging import bind_logger_backend, NullLoggerBackend
+        from agentloom.execution import RuntimeHome, bind_run_context
+        from agentloom.execution.logging import bind_logger_backend, NullLoggerBackend
         context = RuntimeHome(sys.argv[1]).context(application_id="native", task_id="task", run_id="run")
         with bind_run_context(context), bind_logger_backend(NullLoggerBackend(), context=context):
             pass

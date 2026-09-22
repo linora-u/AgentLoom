@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from agentloom.runtime.context import get_current_run_context, safe_application_id
+from agentloom.execution.context import get_current_run_context, safe_application_id
 
 
 @dataclass(frozen=True)
@@ -220,7 +220,7 @@ def resolve_application_scope(
 
 def current_application_scope() -> ApplicationScope:
     try:
-        from agentloom.runtime.trace import get_current_agent_config
+        from agentloom.execution.trace import get_current_agent_config
 
         return resolve_application_scope(get_current_agent_config())
     except Exception:

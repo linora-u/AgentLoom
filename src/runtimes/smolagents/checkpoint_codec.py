@@ -16,9 +16,9 @@ from agentloom.runtimes.smolagents.recoverable_errors import (
     is_recoverable_agent_error,
     rebuild_recoverable_agent_error,
 )
-from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
 from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
     FunctionCallItem,
@@ -540,7 +540,7 @@ class SmolagentsCheckpointCodec:
                 f"ActionStep {step_index} completed calls lack canonical outputs"
             )
 
-        from agentloom.runtime.tool_protocol import ToolCallRecord
+        from agentloom.execution.tool_protocol import ToolCallRecord
 
         records: list[ToolCallRecord] = []
         for output in output_items:
@@ -720,7 +720,7 @@ def _rebuild_action_step(value: dict[str, Any]) -> ActionStep:
     )
     raw_results = value.get("tool_results")
     if raw_results:
-        from agentloom.runtime.tool_protocol import ToolCallRecord
+        from agentloom.execution.tool_protocol import ToolCallRecord
 
         step.tool_results = [
             ToolCallRecord.from_dict(item) for item in raw_results

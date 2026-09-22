@@ -2,9 +2,9 @@
 from typing import Any
 from dataclasses import replace
 
-from agentloom.runtime.model_protocol import ToolDefinition
-from agentloom.runtime.tool_gateway import ToolBinding
-from agentloom.runtime.native_tools import ToolManifestEntry
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import ToolBinding
+from agentloom.execution.native_tools import ToolManifestEntry
 
 def _return_final_answer(answer: Any) -> Any:
     return answer

@@ -127,8 +127,8 @@ def inspect_invocation(label: str, synchronize: bool = False) -> str:
         label: File token returned by the real base tool.
         synchronize: Wait for the other concurrent Worker.
     """
-    from agentloom.runtime import get_current_run_context
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution import get_current_run_context
+    from agentloom.execution.trace import capture_explicit_execution_context
     context = get_current_run_context(required=True)
     assert context is not None
     execution = capture_explicit_execution_context()

@@ -9,24 +9,24 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from agentloom.configuration import C
-from agentloom.runtime import get_current_run_context
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution import get_current_run_context
+from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     RuntimeEvent,
     RuntimeEventSink,
     require_runtime_state,
 )
-from agentloom.runtime.goal import goal_completion_output as _goal_completion_output
-from agentloom.runtime.goal import goal_continuation_prompt as _goal_continuation_prompt
-from agentloom.runtime.hooks import HookEvent, HookRun
-from agentloom.runtime.trace import (
+from agentloom.execution.goal import goal_completion_output as _goal_completion_output
+from agentloom.execution.goal import goal_continuation_prompt as _goal_continuation_prompt
+from agentloom.execution.hooks import HookEvent, HookRun
+from agentloom.execution.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
     generate_id,
     require_root_run_id,
 )
-from agentloom.runtime.workspace import ensure_workspace_mounted_once
+from agentloom.execution.workspace import ensure_workspace_mounted_once
 
 if TYPE_CHECKING:
     from agentloom.application.lifecycle import ApplicationRunLifecycle
@@ -71,8 +71,8 @@ class AgentInvocation:
     owns_root_run: bool = False
 
     def run(self) -> str:
-        from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
-        from agentloom.runtime.goal import (
+        from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
+        from agentloom.execution.goal import (
             GoalStateProvider,
             build_goal_objective,
             goal_objective_fingerprint,
@@ -154,7 +154,7 @@ class AgentInvocation:
                 raise
 
         def execute() -> str:
-            from agentloom.runtime.context_engine.runtime import ensure_task_context_engine
+            from agentloom.execution.context_engine.runtime import ensure_task_context_engine
             with ensure_task_context_engine(owner._effective_agent_config or owner._config):
                 return self._execute_bound(
                     transformed_tasks=transformed_tasks,
@@ -184,7 +184,7 @@ class AgentInvocation:
         lifecycle: ApplicationRunLifecycle | None,
         owns_lifecycle: bool,
     ) -> str:
-        from agentloom.runtime.goal import bind_goal_state_provider
+        from agentloom.execution.goal import bind_goal_state_provider
 
         owner = self.owner
         lifecycle_task = "\n\n".join(lifecycle_tasks)
@@ -301,7 +301,7 @@ class AgentInvocation:
                         )
                 finally:
                     try:
-                        from agentloom.runtime.resources import close_instance_resources
+                        from agentloom.execution.resources import close_instance_resources
 
                         close_instance_resources(agent_id)
                     except BaseException as exc:
@@ -488,7 +488,7 @@ class AgentInvocation:
                     lifecycle=lifecycle,
                 )
             except Exception as exc:
-                from agentloom.runtime.goal import GoalCompleteError
+                from agentloom.execution.goal import GoalCompleteError
 
                 terminal_state = goal_provider.snapshot()
                 # A completion commit does not authorize hiding a rejected Stop

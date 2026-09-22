@@ -3,11 +3,11 @@ from dataclasses import replace
 
 import pytest
 
-from agentloom.runtime.goal import GoalState
-from agentloom.runtime.goal.provider import GoalStateProvider, bind_goal_state_provider
-from agentloom.runtime.hooks.runtime import HookPlan, HookRun
+from agentloom.execution.goal import GoalState
+from agentloom.execution.goal.provider import GoalStateProvider, bind_goal_state_provider
+from agentloom.execution.hooks.runtime import HookPlan, HookRun
 from agentloom.tools.goal import get_goal, update_goal
-from agentloom.runtime.trace import (
+from agentloom.execution.trace import (
     bind_explicit_execution_context,
     bind_local_run,
     bind_root_run,

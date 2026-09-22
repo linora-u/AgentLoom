@@ -31,7 +31,7 @@ from agentloom.runtimes.pi.protocol import (
     decode_message,
     encode_message,
 )
-from agentloom.runtime.subprocess_env import build_subprocess_env
+from agentloom.execution.subprocess_env import build_subprocess_env
 
 SDK_PACKAGE = "@earendil-works/pi-coding-agent"
 READY_MANIFEST = "ready.json"

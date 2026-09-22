@@ -43,7 +43,7 @@ def _make_run(
 def test_clean_runtime_applies_status_and_artifact_retention_without_touching_workspaces_or_outputs(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution.retention import clean_runtime
 
     runtime_root = tmp_path / ".agentloom"
     completed_old = _make_run(runtime_root, run_id="completed-old", status="completed", age=timedelta(days=8))
@@ -76,7 +76,7 @@ def test_clean_runtime_applies_status_and_artifact_retention_without_touching_wo
 
 
 def test_clean_runtime_ignores_manifest_named_raw_artifact(tmp_path: Path) -> None:
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution.retention import clean_runtime
 
     runtime_root = tmp_path / ".agentloom"
     run_dir = _make_run(
@@ -109,7 +109,7 @@ def test_clean_runtime_ignores_manifest_named_raw_artifact(tmp_path: Path) -> No
 
 
 def test_invalid_utf8_manifest_does_not_block_other_run_cleanup(tmp_path: Path) -> None:
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution.retention import clean_runtime
 
     runtime_root = tmp_path / ".agentloom"
     removable = _make_run(
@@ -146,7 +146,7 @@ def test_invalid_utf8_manifest_does_not_block_other_run_cleanup(tmp_path: Path) 
 
 
 def test_orphan_cleanup_requires_canonical_run_start_marker(tmp_path: Path) -> None:
-    from agentloom.runtime.retention import RetentionPolicy, clean_runtime
+    from agentloom.execution.retention import RetentionPolicy, clean_runtime
 
     runtime_root = tmp_path / ".agentloom"
     fake_run = runtime_root / "runs" / "demo" / "real-run"
@@ -174,7 +174,7 @@ def test_orphan_cleanup_requires_canonical_run_start_marker(tmp_path: Path) -> N
 
 
 def test_clean_runtime_rejects_symlinked_runs_root(tmp_path: Path) -> None:
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution.retention import clean_runtime
 
     runtime_root = tmp_path / ".agentloom"
     runtime_root.mkdir()
@@ -200,8 +200,8 @@ def test_clean_runtime_rejects_symlinked_runs_root(tmp_path: Path) -> None:
 def test_resolved_runtime_home_preserves_root_symlink_for_cleanup_rejection(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime import resolve_runtime_home
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution import resolve_runtime_home
+    from agentloom.execution.retention import clean_runtime
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -231,7 +231,7 @@ def test_resolved_runtime_home_preserves_root_symlink_for_cleanup_rejection(
 def test_orphaned_running_run_uses_failed_retention_but_live_lease_is_preserved(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution.retention import clean_runtime
 
     runtime_root = tmp_path / ".agentloom"
     orphan = _make_run(
@@ -266,8 +266,8 @@ def test_orphaned_running_run_uses_failed_retention_but_live_lease_is_preserved(
 def test_cleaner_does_not_remove_a_run_before_its_manifest_and_lease_exist(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime import RuntimeHome
-    from agentloom.runtime.retention import clean_runtime
+    from agentloom.execution import RuntimeHome
+    from agentloom.execution.retention import clean_runtime
 
     context = RuntimeHome(tmp_path / ".agentloom").context(
         application_id="demo",
@@ -286,8 +286,8 @@ def test_cleaner_does_not_remove_a_run_before_its_manifest_and_lease_exist(
 def test_cleaner_removes_old_crash_before_manifest_temp_but_not_unknown_data(
     tmp_path: Path,
 ) -> None:
-    from agentloom.runtime import RuntimeHome
-    from agentloom.runtime.retention import RetentionPolicy, clean_runtime
+    from agentloom.execution import RuntimeHome
+    from agentloom.execution.retention import RetentionPolicy, clean_runtime
 
     home = RuntimeHome(tmp_path / ".agentloom")
     orphan = home.context(application_id="demo", task_id="task", run_id="orphan")
@@ -317,7 +317,7 @@ def test_cleaner_removes_old_crash_before_manifest_temp_but_not_unknown_data(
 
 
 def test_maybe_clean_runtime_runs_at_most_once_per_24_hours(tmp_path: Path) -> None:
-    from agentloom.runtime.retention import prune_runtime_if_due
+    from agentloom.execution.retention import prune_runtime_if_due
 
     runtime_root = tmp_path / ".agentloom"
     first = _make_run(runtime_root, run_id="first", status="completed", age=timedelta(days=8))
@@ -347,14 +347,14 @@ def test_maybe_clean_runtime_runs_at_most_once_per_24_hours(tmp_path: Path) -> N
 
 
 def test_automatic_cleanup_interval_cannot_be_configured_below_24_hours() -> None:
-    from agentloom.runtime.retention import retention_policy_from_config
+    from agentloom.execution.retention import retention_policy_from_config
 
     with pytest.raises(ValueError, match="at least 24"):
         retention_policy_from_config({"cleanup_interval_hours": 23})
 
 
 def test_future_cleanup_state_does_not_throttle_maintenance_forever(tmp_path: Path) -> None:
-    from agentloom.runtime.retention import prune_runtime_if_due
+    from agentloom.execution.retention import prune_runtime_if_due
 
     runtime_root = tmp_path / ".agentloom"
     expired = _make_run(
@@ -375,7 +375,7 @@ def test_future_cleanup_state_does_not_throttle_maintenance_forever(tmp_path: Pa
 
 
 def test_runtime_cleanup_respects_concurrent_maintenance_lock(tmp_path: Path) -> None:
-    from agentloom.runtime.retention import maybe_clean_runtime
+    from agentloom.execution.retention import maybe_clean_runtime
 
     runtime_root = tmp_path / ".agentloom"
     expired = _make_run(

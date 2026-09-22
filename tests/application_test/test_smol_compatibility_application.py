@@ -10,8 +10,8 @@ import yaml
 from agentloom.application.run import RunEvent
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
-from agentloom.runtime.model_binding import ModelTurnBinding
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     ModelTurnRequest,
@@ -74,7 +74,7 @@ class _CompatibilityProvider:
             )
         name, arguments = self.calls[index]
         if name == "final_answer":
-            from agentloom.runtime import get_current_run_context
+            from agentloom.execution import get_current_run_context
             from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
             self.run_context = get_current_run_context()
             self.background_tasks = BackgroundTaskRegistry.get_instance().list_running()
@@ -166,7 +166,7 @@ def test_smol_runtime_options_execute_tools_todo_and_goal_through_application(
     assert len(provider.requests) == len(provider.calls) + int(goal)
     if shell:
         import os
-        from agentloom.runtime import bind_run_context
+        from agentloom.execution import bind_run_context
         from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
         from agentloom.runtimes.smolagents.tools.shell.process import ShellProcessRegistry
         assert len(provider.background_tasks) == 1

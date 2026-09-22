@@ -18,10 +18,10 @@ from datetime import UTC
 from agentloom.runtimes.smolagents.conversation_recovery import (
     prepare_steps_for_resume,
 )
-from agentloom.runtime.agent_runtime import RuntimeCheckpointEnvelope
-from agentloom.runtime.checkpoint.checkpoint_manager import CheckpointManager
-from agentloom.runtime.checkpoint.coordinator import CheckpointCoordinator
-from agentloom.runtime.checkpoint.file_history import FileHistoryManager
+from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.checkpoint.checkpoint_manager import CheckpointManager
+from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
+from agentloom.execution.checkpoint.file_history import FileHistoryManager
 
 # ---------------------------------------------------------------------------
 # Step stubs (duck-typed to match smolagents MemoryStep)
@@ -171,7 +171,7 @@ class TestCheckpointSaveAndResume:
 
         coord = CheckpointCoordinator.activate(cm, task_id, "task")
         try:
-            from agentloom.runtime.context_engine.runtime import get_current_context_engine
+            from agentloom.execution.context_engine.runtime import get_current_context_engine
 
             engine = get_current_context_engine()
             assert engine is not None
@@ -202,7 +202,7 @@ class TestCheckpointSaveAndResume:
 
         resumed = CheckpointCoordinator.activate(cm, task_id, "task", resume=True)
         try:
-            from agentloom.runtime.context_engine.runtime import get_current_context_engine
+            from agentloom.execution.context_engine.runtime import get_current_context_engine
 
             resumed_engine = get_current_context_engine()
             assert resumed_engine is not None
@@ -291,7 +291,7 @@ class TestHeartbeatCrashDetection:
 
     def test_stale_heartbeat_detected_as_crashed(self, tmp_path):
         """Heartbeat with old timestamp and dead PID is detected as crashed."""
-        from agentloom.runtime.heartbeat.status import detect_crashed_status
+        from agentloom.execution.heartbeat.status import detect_crashed_status
 
         heartbeat = {
             "pid": 999999999,  # Non-existent PID
@@ -303,7 +303,7 @@ class TestHeartbeatCrashDetection:
 
     def test_none_heartbeat_is_crashed(self):
         """Missing heartbeat file is treated as crashed."""
-        from agentloom.runtime.heartbeat.status import detect_crashed_status
+        from agentloom.execution.heartbeat.status import detect_crashed_status
 
         result = detect_crashed_status(None)
         assert result == "crashed"
@@ -312,7 +312,7 @@ class TestHeartbeatCrashDetection:
         """Heartbeat with status=stopped is treated as crashed."""
         import time
 
-        from agentloom.runtime.heartbeat.status import detect_crashed_status
+        from agentloom.execution.heartbeat.status import detect_crashed_status
 
         heartbeat = {
             "pid": os.getpid(),

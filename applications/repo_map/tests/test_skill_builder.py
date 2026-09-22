@@ -22,7 +22,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from applications.repo_map.agent_tools import pipeline_agent_tools as pat
 from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map
 from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
-from agentloom.runtime.skills.parser import parse_skill_file
+from agentloom.execution.skills.parser import parse_skill_file
 
 
 FIXTURE_PROJECT = Path(__file__).parent / "fixtures" / "sample_project"

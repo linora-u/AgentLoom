@@ -7,7 +7,7 @@ import pytest
 
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
-from agentloom.runtime.agent_runtime import (
+from agentloom.execution.agent_runtime import (
     AgentRuntimeResult, RuntimeCapabilities,
 )
 
@@ -43,7 +43,7 @@ def native_project(tmp_path, monkeypatch):
         def run(self, request):
             from agentloom.runtimes.smolagents.todo import get_current_todo_provider
             assert get_current_todo_provider() is None
-            from agentloom.runtime.trace import capture_explicit_execution_context
+            from agentloom.execution.trace import capture_explicit_execution_context
             context = capture_explicit_execution_context()
             requests.contexts.append((context.hook_run, context.local_run_id))
             if requests.barrier is not None:
@@ -90,7 +90,7 @@ def test_no_tools_no_goal_application_uses_native_model_selection(native_project
 def test_binding_free_workers_have_fresh_instances_and_hook_runs(native_project, monkeypatch):
     from agentloom.application.definition import load_agent_definition
     from agentloom.application.factory import YamlConfiguredAgent
-    from agentloom.runtime.logging import RichLoggerBackend
+    from agentloom.execution.logging import RichLoggerBackend
     from rich.console import Console
     from io import StringIO
 
@@ -105,7 +105,7 @@ def test_binding_free_workers_have_fresh_instances_and_hook_runs(native_project,
     requests.barrier = Barrier(2)
     agent = YamlConfiguredAgent(config=config, logger=RichLoggerBackend(console=Console(file=StringIO())))
     worker = agent.agent_as_tool()
-    from agentloom.runtime.tool_gateway import bind_tool
+    from agentloom.execution.tool_gateway import bind_tool
     manifest = bind_tool(worker).manifest_entry
     assert (manifest.owner, manifest.provider, manifest.capability) == ("platform", "agentloom", "worker.invoke")
     results = worker.batch([{"query": "one"}, {"query": "two"}], concurrency=2)

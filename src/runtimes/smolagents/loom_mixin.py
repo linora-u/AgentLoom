@@ -8,9 +8,9 @@ import json
 
 from agentloom.runtimes.smolagents.context_compression import ConversationHistoryManager
 from agentloom.runtimes.smolagents.tool_protocol import action_step_to_protocol_messages
-from agentloom.runtime.hooks import wrap_in_system_reminder
-from agentloom.runtime.logging import get_logger
-from agentloom.runtime.trace import (
+from agentloom.execution.hooks import wrap_in_system_reminder
+from agentloom.execution.logging import get_logger
+from agentloom.execution.trace import (
     get_current_agent_name,
     get_current_hook_run,
     get_current_runtime_agent_path,

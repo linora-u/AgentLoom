@@ -4,7 +4,7 @@ from unittest.mock import patch
 import subprocess
 
 from agentloom.runtimes.smolagents.tools.shell.shell_tool import shell_tool
-import agentloom.runtime.tool_governance.shell.validator as validator_module
+import agentloom.execution.tool_governance.shell.validator as validator_module
 import agentloom.runtimes.smolagents.tools.shell.process as process_module
 
 

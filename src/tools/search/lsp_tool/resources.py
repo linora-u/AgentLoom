@@ -6,7 +6,7 @@ import atexit
 from threading import RLock
 from typing import TYPE_CHECKING
 
-from agentloom.runtime.resources import RuntimeKey
+from agentloom.execution.resources import RuntimeKey
 
 if TYPE_CHECKING:
     from agentloom.integrations.lsp import LSPServerManager
@@ -24,9 +24,9 @@ def get_lsp_manager() -> LSPServerManager:
     from agentloom.integrations.lsp import LSPServerManager
     from agentloom.integrations.lsp.config import LSPConfig
     from agentloom.configuration import C
-    from agentloom.runtime import get_current_run_context
-    from agentloom.runtime.resources import register_resource
-    from agentloom.runtime.trace import capture_explicit_execution_context
+    from agentloom.execution import get_current_run_context
+    from agentloom.execution.resources import register_resource
+    from agentloom.execution.trace import capture_explicit_execution_context
 
     context = get_current_run_context()
     if context is None:

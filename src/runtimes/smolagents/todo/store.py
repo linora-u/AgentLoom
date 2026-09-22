@@ -12,8 +12,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from agentloom.runtime import SecureDirectory
-from agentloom.runtime.logging import get_logger
+from agentloom.execution import SecureDirectory
+from agentloom.execution.logging import get_logger
 from .model import TODO_SCHEMA_VERSION, empty_todo_snapshot, validate_todo_document, validate_todo_items
 
 _logger = get_logger(__name__)
@@ -105,7 +105,7 @@ class TodoStore:
     def load_todos(self, task_id: str, agent_path: str) -> dict[str, Any]:
         """Load one Agent's canonical current-task Todo snapshot."""
 
-        from agentloom.runtime import safe_agent_path
+        from agentloom.execution import safe_agent_path
 
         agent_path = safe_agent_path(agent_path)
         with self._lock:
@@ -136,7 +136,7 @@ class TodoStore:
     ) -> dict[str, Any]:
         """Atomically replace one Agent's complete current-task Todo list."""
 
-        from agentloom.runtime import safe_agent_path
+        from agentloom.execution import safe_agent_path
 
         agent_path = safe_agent_path(agent_path)
         canonical = validate_todo_items(items)

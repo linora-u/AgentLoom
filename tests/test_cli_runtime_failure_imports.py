@@ -20,7 +20,7 @@ def test_cold_cli_runtime_failures_never_import_provider_sdks():
 
             from agentloom.__main__ import main
             from agentloom.application import runner
-            from agentloom.runtime.agent_runtime import AgentRuntimeError
+            from agentloom.execution.agent_runtime import AgentRuntimeError
             from click.testing import CliRunner
 
             for category, retryable, expected in (

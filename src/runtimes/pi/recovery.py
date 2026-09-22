@@ -5,9 +5,9 @@ import json
 from typing import Any
 
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
-from agentloom.runtime.agent_runtime import AgentRuntimeError
-from agentloom.runtime.native_journal import snapshot
-from agentloom.runtime.native_tools import NativeCallIdentity
+from agentloom.execution.agent_runtime import AgentRuntimeError
+from agentloom.execution.native_journal import snapshot
+from agentloom.execution.native_tools import NativeCallIdentity
 
 
 def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, Any]:
@@ -102,7 +102,7 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
             if data["tool_name"] != call["tool_name"] or data["arguments"] != call["arguments"]:
                 raise ValueError("Pi platform journal inputs changed")
             if data["state"] == "executing":
-                from agentloom.runtime.tool_gateway import RecoverablePreparedToolGateway
+                from agentloom.execution.tool_gateway import RecoverablePreparedToolGateway
                 recovered = store.definition.tool_gateway.reconcile_committed(
                     call_id=identity.call_id,
                     tool_name=call["tool_name"],

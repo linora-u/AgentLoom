@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from agentloom.configuration.model_adapters import MODEL_ADAPTERS, AdapterKind
-from agentloom.runtime.model_protocol import (
+from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,
     MessageItem,

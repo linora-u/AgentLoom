@@ -21,10 +21,10 @@ from agentloom.runtimes.pi.protocol import (
     decode_message, encode_message,
 )
 from agentloom.runtimes.pi.install import find_node, installed_pi_entry
-from agentloom.runtime.agent_runtime import AgentRuntimeError, RuntimeErrorCategory
-from agentloom.runtime.resources import register_resource
-from agentloom.runtime.subprocess_env import build_subprocess_env
-from agentloom.runtime.process import terminate_process_tree
+from agentloom.execution.agent_runtime import AgentRuntimeError, RuntimeErrorCategory
+from agentloom.execution.resources import register_resource
+from agentloom.execution.subprocess_env import build_subprocess_env
+from agentloom.execution.process import terminate_process_tree
 
 
 @dataclass

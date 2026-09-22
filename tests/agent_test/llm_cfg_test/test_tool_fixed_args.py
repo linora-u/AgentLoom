@@ -76,7 +76,7 @@ def test_explicit_tool_config_overrides_same_named_default_toolset(tmp_path):
     tool_func(content="configured target", file_path=str(tmp_path / "ignored.txt"))
     assert target.read_text() == "configured target"
     assert not (tmp_path / "ignored.txt").exists()
-    from agentloom.runtime.tool_gateway import bind_tool
+    from agentloom.execution.tool_gateway import bind_tool
     manifest = bind_tool(tool_func).manifest_entry
     assert manifest.fixed_arguments == {"file_path": str(target)}
 

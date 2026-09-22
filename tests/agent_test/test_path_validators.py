@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import agentloom.configuration.config as config_module
-from agentloom.runtime.hooks.path_validators import (
+from agentloom.execution.hooks.path_validators import (
     DEFAULT_PATH_PARAM_PATTERNS,
     _find_rule_for_tool,
     _normalize_str_list,
@@ -12,7 +12,7 @@ from agentloom.runtime.hooks.path_validators import (
     enforce_core_tool_guard,
     validate_workspace_path,
 )
-from agentloom.runtime.hooks.types import HookContext
+from agentloom.execution.hooks.types import HookContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,14 +29,14 @@ def _patch_config(monkeypatch, raw: dict, root: Path) -> None:
     # Ensure workspace module reads from the same config (bypass agent context)
     tac = raw.get("tool_access_control", {})
     monkeypatch.setattr(
-        "agentloom.runtime.permissions.workspace._resolve_tool_access_control_config",
+        "agentloom.execution.permissions.workspace._resolve_tool_access_control_config",
         lambda: tac,
     )
 
 
 def _patch_no_agent(monkeypatch) -> None:
     monkeypatch.setattr(
-        "agentloom.runtime.hooks.path_validators.get_current_agent_config",
+        "agentloom.execution.hooks.path_validators.get_current_agent_config",
         lambda: None,
     )
 
