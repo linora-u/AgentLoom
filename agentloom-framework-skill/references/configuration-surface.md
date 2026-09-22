@@ -10,10 +10,10 @@
 - 系统配置加载：`src/configuration/config.py`、`layered_builder.py`、`config_validation.py`。
 - LLM 配置：`src/configuration/llm_config.py`、`src/runtimes/smolagents/models/model_types.py`、`model_manager.py`。
 - Agent 定义与校验：`src/application/definition.py`、`src/application/validation.py`；执行构造：`src/application/factory.py`、`src/application/agent.py`。
-- Skill/Hook：`src/runtime/skills/parser.py`、`src/runtime/skills/catalog.py`、`src/runtime/hooks/*`。
+- Skill/Hook：`src/execution/skills/parser.py`、`src/execution/skills/catalog.py`、`src/execution/hooks/*`。
 - MCP：`src/integrations/mcp/config.py`、`tests/mcp_test/*`。
 
-以上是物理源码位置；Python 导入使用 `agentloom.application`、`agentloom.runtime`
+以上是物理源码位置；Python 导入使用 `agentloom.application`、`agentloom.execution`
 等 canonical 名称。标准安装将直接位于 `src/` 的职责模块映射为 `agentloom`，
 不支持旧 `src.*` 导入。
 

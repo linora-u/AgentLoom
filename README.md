@@ -315,8 +315,8 @@ result = execute_app("applications/release_review/workflows/release_review_agent
 print(result.output, result.run.run_id)
 ```
 
-Framework source lives directly in `src/application/`, `src/runtime/`,
-`src/adapters/`, and the other responsibility modules. Installation maps `src/`
+Framework source lives directly in `src/application/`, `src/execution/`,
+`src/integrations/`, and the other responsibility modules. Installation maps `src/`
 to the Python package name `agentloom`: the import above loads
 `src/application/runner.py`. There is no extra `agentloom` source directory.
 Use `uv sync --python 3.12 --locked --all-groups --extra smol --extra code` to install the checkout before

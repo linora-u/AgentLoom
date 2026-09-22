@@ -804,7 +804,7 @@ tools = YamlAgentFactory.create_agent_as_tool(
 from __future__ import annotations
 from pathlib import Path
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 from agentloom.application.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
@@ -862,7 +862,7 @@ import json
 import traceback
 from pathlib import Path
 
-from agentloom.runtime.logging import get_logger
+from agentloom.execution.logging import get_logger
 from agentloom.application.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"

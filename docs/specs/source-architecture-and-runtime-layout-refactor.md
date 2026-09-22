@@ -25,7 +25,7 @@ Pi SDK 安装目前直接写入 Python package 或源码目录中的 bridge 目�
 | --- | --- |
 | Application | Application 定义、装配、运行入口、工具加载与业务路径解释 |
 | Configuration | 项目配置、模型配置与配置诊断 |
-| Runtime | 所有 Agent runtime 必须遵守的中立合同，以及平台共享的运行服务 |
+| Execution | 所有 Agent runtime 必须遵守的中立合同，以及平台共享的执行行为 |
 | Runtimes / Pi | Pi 的完整执行循环、桥接、状态、恢复和原生工具接入 |
 | Runtimes / smolagents | smolagents 的完整执行循环、私有状态、恢复和私有执行工具 |
 | Integrations / LiteLLM | LiteLLM 协议与模型集成 |
@@ -37,7 +37,7 @@ Pi SDK 安装目前直接写入 Python package 或源码目录中的 bridge 目�
 
 删除职责已经被上述 module 吸收的 `adapters`、`encoding`、`ui`、`tui_bridge`、顶层 `utils` 和根部 scaffold module。保持源码目录直接映射为 `agentloom` Python package，不增加嵌套的 `src/agentloom` 目录，也不新增顶层 `studio_bridge`。
 
-`runtime` 只定义中立合同与共享服务。Pi 和 smolagents 分别实现这些合同。Application 拥有唯一的 composition root，根据 YAML 的 `agent_runtime` 从显式 registry 中选择实现。内置 runtime 不使用插件发现、自注册或为打破循环而设置的条件导入。
+`execution` 只定义中立合同与共享执行行为。Pi 和 smolagents 分别实现这些合同。Application 拥有唯一的 composition root，根据 YAML 的 `agent_runtime` 从显式 registry 中选择实现。内置 runtime 不使用插件发现、自注册或为打破循环而设置的条件导入。
 
 顶层 `tools` 只保留框架平台拥有的工具目录和 registry。Pi 使用官方 native tools；smolagents 的基础执行工具保留在 smolagents runtime 内。旧镜像、深层导入别名和无生产调用的工具被删除。真正重复的函数放到最近的共同业务所有者中，不创建新的顶层 `utils`、`common`、`shared` 或 `kernel`。
 
@@ -59,7 +59,7 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 
 1. As an AgentLoom maintainer, I want each top-level module to express one clear owner, so that I can locate behavior without tracing forwarding imports.
 2. As an AgentLoom maintainer, I want complete Agent engines separated from protocol integrations, so that runtime behavior is not mistaken for a thin adapter.
-3. As an AgentLoom maintainer, I want `runtime` to expose neutral contracts, so that Pi and smolagents can implement the same Application-facing seam.
+3. As an AgentLoom maintainer, I want `execution` to expose neutral contracts, so that Pi and smolagents can implement the same Application-facing seam.
 4. As an AgentLoom maintainer, I want runtime selection assembled explicitly, so that startup dependencies are visible and testable.
 5. As an AgentLoom maintainer, I want built-in runtimes registered in one composition root, so that conditional imports and self-registration do not create cycles.
 6. As an AgentLoom maintainer, I want external protocols grouped as integrations, so that LiteLLM, MCP and LSP ownership is clear.
@@ -125,10 +125,10 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 
 ### Architecture and dependency direction
 
-1. The final top-level Python package set is Application, Configuration, Runtime, Runtimes, Integrations, Tools, Schedules and Self-learning. The existing `agentloom = "src"` package mapping remains; no nested package directory or top-level Studio bridge package is introduced.
-2. Runtime contains only contracts and services that are genuinely shared by multiple runtime implementations or owned by the platform. A concrete Agent loop, provider-specific state, recovery mechanism or native execution tool belongs to its concrete runtime.
+1. The final top-level Python package set is Application, Configuration, Execution, Runtimes, Integrations, Tools, Schedules and Self-learning. The existing `agentloom = "src"` package mapping remains; no nested package directory or top-level Studio bridge package is introduced.
+2. Execution contains only contracts and behavior that are genuinely shared by multiple runtime adapters or owned by the platform. A concrete Agent loop, provider-specific state, recovery mechanism or native execution tool belongs to its concrete runtime.
 3. Pi and smolagents each own a complete runtime implementation. Neither runtime imports the other, and the platform does not normalize them into a shared internal tool implementation.
-4. Application owns a single explicit composition root. It maps the configured `agent_runtime` value to a built-in implementation. Runtime implementations depend on Runtime contracts; Application depends on contracts and performs final assembly.
+4. Application owns a single explicit composition root. It maps the configured `agent_runtime` value to a built-in implementation. Runtime adapters depend on Execution contracts; Application depends on those contracts and performs final assembly.
 5. Built-in runtime discovery does not use Python entry points, import-time registration or conditional imports. A future plugin system requires a separate specification.
 6. LiteLLM, MCP and LSP are integrations because they adapt external protocols or services. They do not own Agent execution loops.
 7. Schedules and Self-learning remain independent bounded contexts because each has its own model, lifecycle and persistence rules.
@@ -152,11 +152,11 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 19. Top-level Tools contains the registry and selection control plane, AgentLoom platform tools, and professional tools. It does not mirror a concrete runtime's basic execution tools.
 20. Pi uses the official Pi native read, edit, write and bash implementations, with AgentLoom authorization and journaling applied through the platform host contracts.
 21. smolagents basic file, search, Shell, background and Todo execution remains private to the smolagents runtime where its execution model is implemented.
-22. Smolagents mirror aliases in top-level Tools and Runtime are deleted after all production and behavior-test consumers use canonical modules.
+22. Smolagents mirror aliases in top-level Tools and Execution are deleted after all production and behavior-test consumers use canonical modules.
 23. The local near-copy of the upstream smolagents tool decorator is removed. Its remaining production caller becomes an ordinary callable or uses the pinned upstream decorator when its contract matches.
 24. Unused path-existence and quick-directory-list helpers are removed after confirming no production registry, YAML name or dynamic loader references them.
 25. No top-level `utils`, `common`, `shared` or `kernel` module is created. Reuse is extracted on the second true semantic caller and placed in the nearest common owner under a domain-specific name.
-26. Permission rule parsing belongs to Runtime permissions. Shell configuration and security checks belong to Runtime Shell governance. Tree-sitter support belongs to code navigation. Model diagnostics belong to Configuration. Application YAML path resolution and dynamic tool loading belong to Application. Rich prefix rendering belongs to Runtime logging. Sandbox behavior belongs to Runtime Shell governance. Scaffold generation belongs to Application.
+26. Permission rule parsing belongs to Execution permissions. Shell configuration and security checks belong to Execution Shell governance. Tree-sitter support belongs to code navigation. Model diagnostics belong to Configuration. Application YAML path resolution and dynamic tool loading belong to Application. Rich prefix rendering belongs to Execution logging. Sandbox behavior belongs to Execution Shell governance. Scaffold generation belongs to Application.
 
 ### Encoding and process boundaries
 
@@ -200,7 +200,7 @@ CLI 统一提供 `loom runtime install pi`、`loom runtime status pi` 和 `loom 
 10. Tool catalog tests verify that top-level Tools exposes only registry, platform and professional capabilities; Pi native tools and smolagents private tools remain owned by their runtimes. Existing YAML-visible tool names continue to resolve.
 11. Studio adapter tests continue at the NDJSON request/response seam and live with the existing TUI project. Python business behavior is tested through Application, Application Run query and Schedules services; adapter tests cover framing, dispatch, concurrency, cancellation and error projection.
 12. Dashboard tests and tests that only assert deleted compatibility imports are removed. Their removal is verified by the absence of the command, module and unused dependency rather than replacement tests for deleted code.
-13. Runtime, schedule, self-learning and Application persistence tests verify that project `.agentloom` data remains in place and is not mixed with Pi SDK assets.
+13. Execution, schedule, self-learning and Application persistence tests verify that project `.agentloom` data remains in place and is not mixed with Pi SDK assets.
 14. The final validation runs the relevant unit and integration suites after all moves, followed by controlled real Application executions for both built-in runtimes. Existing acceptance evidence conventions are reused; model self-report is not treated as proof of tool behavior.
 15. Formal wheel installation and clean-install profile tests are not acceptance gates for the Pi asset-location decision in this specification. Tests may still be updated for canonical imports when needed by the source migration, but no formal-install path is added.
 16. Testing stops once the canonical imports, dependency direction, two runtime paths, retained platform behavior and Pi lifecycle are sufficiently verified. Deleted compatibility surfaces are not recreated solely to satisfy historical tests.
