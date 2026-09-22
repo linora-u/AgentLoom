@@ -85,12 +85,7 @@ def test_print_function_schema_generation_from_worker_yaml():
     assert schema.parameters["properties"]["query"]["type"] == "string"
     assert "query" in schema.parameters["required"]
     result = tool_fn("pwd")
-    assert result.startswith("RUN::Task specification (what you must follow in this task):")
-    assert "<task_spec>" in result
-    assert "<inputs>" in result
-    assert "<workflow>" not in result
-    assert result.index("<task_spec>") < result.index("<inputs>")
-    assert "\npwd\n" in result
+    assert result == "RUN::pwd"
 
 
 def test_generated_tool_includes_optional_inputs_in_payload_block():
@@ -121,8 +116,4 @@ def test_generated_tool_includes_optional_inputs_in_payload_block():
     print("\n=== Invocation Output ===")
     print(result)
 
-    assert "<inputs>" in result
-    assert "<task_spec>" in result
-    assert "<workflow>" not in result
-    assert result.index("<task_spec>") < result.index("<inputs>")
-    assert '{"query":"run command","retry":2,"tag":"nightly"}' in result
+    assert result == 'RUN::{"query":"run command","retry":2,"tag":"nightly"}'

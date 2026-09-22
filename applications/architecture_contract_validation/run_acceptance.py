@@ -217,7 +217,7 @@ def _rejection_child(attempt: Path, request: dict) -> int:
         elif variant == "invalid-worker":
             worker = app / "workflows/worker_agents/repository_investigator.yaml"
             invalid = yaml.safe_load(worker.read_text())
-            invalid["agent_function_schema"]["inputs"]["query"]["required"] = "yes"
+            invalid["input_schema"]["required"] = "query"
             worker.write_text(yaml.safe_dump(invalid, sort_keys=False))
         else:
             invalid = yaml.safe_load(original)

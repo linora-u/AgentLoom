@@ -74,6 +74,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             return query
 
         def run(self, formatted_query, additional_args=None):
+            self.task = formatted_query
             self.additional_args = additional_args
             return f"result_from_{self._id}"
 
@@ -122,15 +123,16 @@ class TestFactoryMode:
         call_agents = instances[1:]
         assert call_agents[0]._model_binding is call_agents[1]._model_binding
 
-    def test_tool_inputs_are_passed_as_additional_args(self):
-        """Schema inputs should become executor state, not just prompt text."""
+    def test_tool_inputs_are_passed_once_as_the_worker_user_task(self):
+        """A single string argument becomes the Worker user message."""
         instances = []
         tool, _, _ = _create_tool_with_mock_agent(agent_instances=instances)
 
         tool(query="payload")
 
         call_agent = instances[1]
-        assert call_agent.additional_args == {"query": "payload"}
+        assert call_agent.task == "payload"
+        assert call_agent.additional_args is None
 
     def test_concurrent_calls_no_memory_crosstalk(self):
         """Concurrent calls should each get their own Agent (no shared state)."""

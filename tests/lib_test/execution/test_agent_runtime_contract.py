@@ -175,6 +175,12 @@ def test_runtime_definition_carries_an_immutable_output_contract() -> None:
     assert definition.output_contract.schema["properties"]["answer"]["type"] == "string"
 
 
+def test_runtime_request_allows_an_absent_user_task() -> None:
+    request = AgentRuntimeRequest(task=None)
+
+    assert request.task is None
+
+
 @dataclass
 class _RecordingRuntime:
     runtime_id: str

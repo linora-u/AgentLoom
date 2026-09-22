@@ -5,10 +5,32 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from agentloom.execution.agent_runtime import (
+    AgentRuntimeError,
+    AgentRuntimeRequest,
+    RuntimeCapabilities,
+    RuntimeCheckpointEnvelope,
+    RuntimeEvent,
+    RuntimeRequirements,
+)
+from agentloom.execution.goal import GoalCompleteError, GoalState
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
+    FunctionCallItem,
+    FunctionCallOutputItem,
+    MessageItem,
+    ModelTurnRequest,
+    ModelTurnResult,
+    ModelUsage,
+    ReasoningItem,
+    ToolDefinition,
+)
+from agentloom.execution.tool_protocol import ToolCallRecord
 from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
 from agentloom.runtimes.smolagents.checkpoint_codec import (
     SmolagentsCheckpointCodec,
 )
+from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.runtimes.smolagents.model_turn_bridge import (
     MODEL_ITEMS_RAW_KEY,
     MODEL_RESPONSE_ID_RAW_KEY,
@@ -24,28 +46,6 @@ from agentloom.runtimes.smolagents.runtime_adapter import (
 from agentloom.runtimes.smolagents.tool_protocol import (
     action_step_to_protocol_messages,
 )
-from agentloom.execution.agent_runtime import (
-    AgentRuntimeError,
-    AgentRuntimeRequest,
-    RuntimeCapabilities,
-    RuntimeCheckpointEnvelope,
-    RuntimeEvent,
-    RuntimeRequirements,
-)
-from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
-from agentloom.execution.goal import GoalCompleteError, GoalState
-from agentloom.execution.model_binding import ModelTurnBinding
-from agentloom.execution.model_protocol import (
-    FunctionCallItem,
-    FunctionCallOutputItem,
-    MessageItem,
-    ModelTurnRequest,
-    ModelTurnResult,
-    ModelUsage,
-    ReasoningItem,
-    ToolDefinition,
-)
-from agentloom.execution.tool_protocol import ToolCallRecord
 from smolagents.agents import (
     AgentError,
     AgentExecutionError,
@@ -444,6 +444,22 @@ def test_adapter_omits_empty_additional_args_and_resets_new_session() -> None:
             "task": "inspect",
             "return_full_result": True,
             "reset": True,
+        }
+    ]
+
+
+def test_adapter_starts_instruction_only_run_without_a_task_step() -> None:
+    native = _NativeRuntime(_NativeResult(output="done"))
+    runtime = _runtime(native)
+
+    runtime.run(AgentRuntimeRequest(task=None))
+
+    assert native.calls == [
+        {
+            "task": "",
+            "return_full_result": True,
+            "reset": True,
+            "_skip_task_step": True,
         }
     ]
 

@@ -988,9 +988,17 @@
           "type": "string"
         },
         "task": {
-          "minLength": 1,
-          "title": "Task",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
         },
         "cwd": {
           "minLength": 1,
@@ -1064,7 +1072,6 @@
         "method",
         "application_id",
         "task_id",
-        "task",
         "cwd",
         "instructions",
         "model",
