@@ -418,7 +418,6 @@ class CheckpointManager:
 
         self._tree_lock = threading.Lock()
         self._goal_lock = threading.RLock()
-        self._todos: Any = None
         self._task_storages: dict[Path, SecureDirectory] = {}
         if self._checkpoint_dir is not None and self._checkpoint_dir.is_dir():
             self._task_storages[self._checkpoint_dir] = SecureDirectory(
@@ -476,9 +475,6 @@ class CheckpointManager:
 
     def _heartbeat_path(self, task_id: str) -> Path:
         return self._task_dir(task_id) / "heartbeat.json"
-
-    def _todos_path(self, task_id: str) -> Path:
-        return self._task_dir(task_id) / "todos.json"
 
     def _goal_path(self, task_id: str) -> Path:
         return self._task_dir(task_id) / "goal.json"
@@ -571,23 +567,6 @@ class CheckpointManager:
             RuntimeError,
         ):
             return None
-
-    def _todo_store(self):
-        """Return the lazily initialized smolagents Todo store."""
-        with self._tree_lock:
-            if self._todos is None:
-                from agentloom.runtimes.smolagents.todo.store import TodoStore
-
-                self._todos = TodoStore(self.task_storage)
-            return self._todos
-
-    def load_todos(self, task_id: str, agent_path: str) -> dict[str, Any]:
-        """Load smolagents Todo state through the canonical checkpoint store."""
-        return self._todo_store().load_todos(task_id, agent_path)
-
-    def replace_todos(self, task_id: str, agent_path: str, items: Any) -> dict[str, Any]:
-        """Replace smolagents Todo state in the canonical checkpoint store."""
-        return self._todo_store().replace_todos(task_id, agent_path, items)
 
     def load_goal(self, task_id: str) -> dict[str, Any] | None:
         """Load strict Goal state; corruption is terminal rather than fail-open."""
