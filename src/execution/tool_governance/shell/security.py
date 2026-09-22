@@ -114,8 +114,8 @@ SAFE_ENV_VARS = frozenset({
 
 # Destructive command patterns
 _DESTRUCTIVE_PATTERNS = [
-    (re.compile(r'\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*/\s*$'), "rm -rf /"),
-    (re.compile(r'\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*~'), "rm -rf ~"),
+    (re.compile(r'\brm\s+(-[a-eg-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*/\s*$'), "rm -rf /"),
+    (re.compile(r'\brm\s+(-[a-eg-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*~'), "rm -rf ~"),
     (re.compile(r'\bgit\s+reset\s+--hard'), "git reset --hard"),
     (re.compile(r'\bgit\s+clean\s+-[a-zA-Z]*f'), "git clean -f"),
     (re.compile(r'\bgit\s+push\s+.*--force'), "git push --force"),
