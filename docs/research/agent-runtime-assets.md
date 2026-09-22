@@ -92,9 +92,9 @@ Aider 自己的 model metadata、help index 等可再生内容放在 `~/.aider/c
             └── sdk-0.79.4/
                 └── <bridge-fingerprint>/
                     └── <os>-<arch>-nodeabi-<abi>/
-                        ├── package.json
-                        ├── package-lock.json
                         ├── bridge/
+                        │   ├── package.json
+                        │   ├── package-lock.json
                         │   ├── dist/
                         │   └── node_modules/
                         └── ready.json
