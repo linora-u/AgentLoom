@@ -72,7 +72,7 @@ def test_unit_test_studio_uses_structured_tool_runtime_contract():
         assert "planning_interval" not in cfg
 
 
-def test_unit_test_studio_workers_register_as_tools_when_schema_present():
+def test_unit_test_studio_workers_register_as_tools():
     repo_root = Path(__file__).resolve().parents[3]
     app_root = repo_root / "applications" / "unit_test_studio"
     worker_dir = app_root / "workflows" / "worker_agents"
@@ -87,11 +87,8 @@ def test_unit_test_studio_workers_register_as_tools_when_schema_present():
             cfg,
             model_binding=make_test_model_binding(),
         )
-        if cfg.get("agent_function_schema") is None:
-            assert tool is None
-        else:
-            assert tool is not None, f"worker should register as tool: {worker_yaml}"
-            assert tool.__name__ == cfg["name"]
-            tool_count += 1
+        assert tool is not None, f"worker should register as tool: {worker_yaml}"
+        assert tool.__name__ == cfg["name"]
+        tool_count += 1
 
-    assert tool_count >= 1
+    assert tool_count == len(worker_files)

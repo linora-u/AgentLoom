@@ -98,21 +98,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Evaluates error handling robustness including uncaught exceptions, resource leaks,
-    missing null checks, and error propagation patterns.
-
-    Core capabilities:
-    1. Audit exception and error handling completeness
-    2. Detect resource leaks and missing cleanup
-    3. Trace error propagation paths through call chains
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with target module/files and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_ErrorHandling.md containing all error handling findings
+      type: string
+      description: 'Analysis task description with target module/files and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

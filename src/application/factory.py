@@ -8,21 +8,22 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
+from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.application.definition import extract_markdown_definition, load_agent_definition
+from agentloom.application.imports.dynamic_import import load_function
 from agentloom.application.validation import AgentConfigNormalizer, NormalizedAgentConfig
 from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from agentloom.configuration import C
 from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.execution.goal import normalize_goal_config, normalize_workflow_for_goal
 from agentloom.execution.logging import (
     get_logger,
 )
+from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.tool_gateway import ToolBinding, bind_tool
-from agentloom.tools.selection import resolve_runtime_toolsets
 from agentloom.tools.loader import resolve_tool_function
-from agentloom.application.imports.dynamic_import import load_function
+from agentloom.tools.selection import resolve_runtime_toolsets
 
 # Prompt protocol constants are externalized in prompts/ YAML to keep wording/template
 # configuration centralized and editable without changing implementation logic.
@@ -103,7 +104,7 @@ def _bind_fixed_tool_args(tool_func: Callable, tool_name: str, fixed_args: dict[
     fixed_args_tool.__name__ = tool_name
     fixed_args_tool.__qualname__ = tool_name
     fixed_args_tool.__annotations__ = annotations
-    fixed_args_tool.__signature__ = visible_signature
+    fixed_args_tool.__signature__ = visible_signature  # type: ignore[attr-defined]
     fixed_args_tool._agentloom_fixed_args = tuple(sorted(fixed_args))  # type: ignore[attr-defined]
     fixed_args_tool._agentloom_fixed_values = copy.deepcopy(fixed_args)  # type: ignore[attr-defined]
     return fixed_args_tool
@@ -451,15 +452,19 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         and uses ``ParallelAgentExecutor`` under the hood.
         """
         normalized = self._ensure_normalized()
-        schema = normalized.agent_function_schema
-        if schema is None:
-            return None
-
-        # Tool metadata is defined by worker top-level fields and schema.
         function_name = self.name
-        inputs_schema: dict[str, dict[str, Any]] = schema["inputs"]
-        required_names = [name for name, spec in inputs_schema.items() if spec.get("required", True)]
-        optional_names = [name for name, spec in inputs_schema.items() if not spec.get("required", True)]
+        input_schema = normalized.input_schema
+        if not isinstance(input_schema, dict):
+            raise ValueError(f"Worker Agent '{function_name}' has no input schema")
+        properties = input_schema.get("properties")
+        if not isinstance(properties, dict):
+            raise ValueError(
+                f"Worker Agent '{function_name}' input_schema requires object properties"
+            )
+        required_names = [
+            name for name in input_schema.get("required", []) if isinstance(name, str)
+        ]
+        optional_names = [name for name in properties if name not in required_names]
         ordered_input_names = required_names + optional_names
 
         # ── Factory mode: capture shared immutable state ──
@@ -480,35 +485,25 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 logger=_shared_logger,
             )
 
-        def _build_formatted_query(input_payload):
-            """Build the formatted query string from input payload."""
-            prompt_inputs = {k: v for k, v in input_payload.items() if v is not None}
-            input_lines = [INPUTS_LIST_INTRO_LINE]
-            item_index = 1
-            for name in ordered_input_names:
-                if name not in prompt_inputs:
-                    continue
-                description = inputs_schema[name]["description"]
-                value = prompt_inputs[name]
-                if isinstance(value, (dict, list)):
-                    value_text = json.dumps(value, ensure_ascii=False, default=str)
-                else:
-                    value_text = str(value)
-                input_lines.append(f"{item_index}. {description}: {value_text}")
-                item_index += 1
-            if item_index == 1:
-                input_lines.append(INPUTS_EMPTY_LINE)
-            inputs_block = INPUTS_BLOCK_TEMPLATE.format(content="\n".join(input_lines))
-            # Use a fresh agent's process_tool_query (stateless method)
-            query = inputs_block
-            output_lines = [
-                schema["output"]["description"],
-                "",
-                OUTPUT_RULE_HEADER,
-                *OUTPUT_RULE_LINES,
-            ]
-            output_block = OUTPUT_BLOCK_TEMPLATE.format(content="\n".join(output_lines))
+        def _build_user_input(input_payload: dict[str, Any]) -> str:
+            """Project validated Tool arguments into one Worker user message."""
+            if len(properties) == 1 and len(input_payload) == 1:
+                only_name = next(iter(properties))
+                only_value = input_payload.get(only_name)
+                if isinstance(only_value, str):
+                    return only_value
+            return json.dumps(
+                input_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
 
+        def _build_formatted_query(input_payload: dict[str, Any]) -> str:
+            """Build the legacy task wrapper until Prompt Protocol is removed."""
+            query = INPUTS_BLOCK_TEMPLATE.format(
+                content=_build_user_input(input_payload)
+            )
             workflow = _workflow_to_task_spec_source(_frozen_config['workflow'])
             task_spec_block, has_workflow = _build_task_spec_block(workflow, logger=_shared_logger)
             task_spec_guidance = _build_task_spec_guidance(has_workflow)
@@ -519,15 +514,12 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 f"{INPUTS_SECTION_HEADER}\n"
                 f"{INPUTS_SECTION_GUIDANCE}\n"
                 f"{query}\n\n"
-                f"{OUTPUT_SECTION_HEADER}\n"
-                f"{OUTPUT_SECTION_GUIDANCE}\n"
-                f"{output_block}\n\n"
                 f"{FINAL_BRIDGE_INSTRUCTION}"
             )
             return formatted_query
 
         # Dynamically create the tool function (factory mode)
-        def dynamic_agent_tool(*args, **kwargs) -> str:
+        def dynamic_agent_tool(*args, **kwargs):
             if len(args) > len(ordered_input_names):
                 raise TypeError(
                     f"{function_name}() takes {len(ordered_input_names)} positional arguments but {len(args)} were given"
@@ -538,7 +530,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 input_payload[ordered_input_names[idx]] = value
 
             for key, value in kwargs.items():
-                if key not in inputs_schema:
+                if key not in properties:
                     raise TypeError(f"{function_name}() got an unexpected keyword argument '{key}'")
                 if key in input_payload:
                     raise TypeError(f"{function_name}() got multiple values for argument '{key}'")
@@ -551,40 +543,34 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                     + ", ".join(missing_required)
                 )
 
-            for name in optional_names:
-                input_payload.setdefault(name, None)
-
-            state_args = {k: v for k, v in input_payload.items() if v is not None}
+            assert normalized.input_validator is not None
+            normalized.input_validator(input_payload)
             formatted_query = _build_formatted_query(input_payload)
 
             # Factory mode: create a NEW agent for each call (thread-safe)
             agent = _create_fresh_agent()
-            result = agent.run(formatted_query, additional_args=state_args)
-
-            # Agent-as-Tool crosses a text boundary. Preserve structured final
-            # answers as real JSON instead of Python repr: downstream callers
-            # can parse it without guessing, and quotation marks inside string
-            # values remain escaped correctly.
-            result_str = (
-                ""
-                if result is None
-                else json.dumps(result, ensure_ascii=False, default=str)
-                if isinstance(result, (dict, list))
-                else str(result)
+            result = agent.run(
+                formatted_query,
+                additional_args=input_payload,
             )
-            from agentloom.execution.context_engine.runtime import get_active_context_engine
+            if not isinstance(result, str):
+                return result
+
+            from agentloom.execution.context_engine.runtime import (
+                get_active_context_engine,
+            )
 
             engine = get_active_context_engine()
-            if engine is not None:
-                return (
-                    engine.compress_tool_result(
-                        result_str,
-                        tool_name=function_name,
-                        source=f"worker_result:{function_name}",
-                    )
-                    or result_str
+            if engine is None:
+                return result
+            return (
+                engine.compress_tool_result(
+                    result,
+                    tool_name=function_name,
+                    source=f"worker_result:{function_name}",
                 )
-            return result_str
+                or result
+            )
 
         # ── Attach .batch() method for parallel execution ──
         def batch(tasks, concurrency=None, on_progress=None):
@@ -621,45 +607,51 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         dynamic_agent_tool._agent_loom_concurrency = _yaml_concurrency
         dynamic_agent_tool._agent_loom_model_type = _model_type
 
-        description_lines = [schema["description"], "", "Args:"]
+        description_lines = [self.description.strip(), "", "Args:"]
         for name in ordered_input_names:
-            spec = inputs_schema[name]
-            required_tag = "required" if spec.get("required", True) else "optional"
+            spec = properties[name]
+            required_tag = "required" if name in required_names else "optional"
             description_lines.append(
-                f"    {name} ({spec['type']}, {required_tag}): {spec['description']}"
+                f"    {name} ({spec.get('type', 'any')}, {required_tag}): "
+                f"{spec.get('description', '')}"
             )
-        description_lines.extend(
-            [
-                "",
-                "Returns:",
-                f"    str: {schema['output']['description']}",
-            ]
-        )
         generated_docstring = "\n".join(description_lines)
 
         # Set dynamic function name and docstring
         dynamic_agent_tool.__name__ = function_name
         dynamic_agent_tool.__doc__ = generated_docstring
 
-        annotations: dict[str, Any] = {"return": str}
+        annotations: dict[str, Any] = {"return": Any}
         signature_params = []
         for name in ordered_input_names:
-            param_spec = inputs_schema[name]
-            annotations[name] = str
-            default = inspect.Parameter.empty if param_spec.get("required", True) else None
+            annotations[name] = Any
+            default = (
+                inspect.Parameter.empty
+                if name in required_names
+                else None
+            )
             signature_params.append(
                 inspect.Parameter(
                     name=name,
                     kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
                     default=default,
-                    annotation=str,
+                    annotation=Any,
                 )
             )
 
         dynamic_agent_tool.__annotations__ = annotations
         dynamic_agent_tool.__signature__ = inspect.Signature(
             parameters=signature_params,
-            return_annotation=str,
+            return_annotation=Any,
+        )
+        dynamic_agent_tool._agentloom_tool_definition = ToolDefinition(  # type: ignore[attr-defined]
+            name=function_name,
+            description=self.description.strip(),
+            parameters=input_schema,
+            strict=True,
+        )
+        dynamic_agent_tool._agentloom_input_validator = (  # type: ignore[attr-defined]
+            normalized.input_validator
         )
         dynamic_agent_tool._agentloom_recovery_descriptor = lambda arguments: {  # type: ignore[attr-defined]
             "agent_name": function_name,
@@ -777,18 +769,6 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         if goal.enabled:
             merged_workflow = normalize_workflow_for_goal(workflow_content)
             return [self._transform_task(task, workflow_override=merged_workflow)]
-        if isinstance(workflow_content, list):
-            # List workflows are executed sequentially: each item becomes a
-            # separate runtime_agent.run() call with reset=False preserving
-            # memory from previous steps.  The original task data (e.g. sample
-            # row content) is injected into the first item via <inputs> block
-            # so it is visible to the agent in step 1; subsequent steps access
-            # it through preserved memory.steps.
-            items = list(AgentConfigNormalizer.normalize_workflow_items(workflow_content))
-            if task.strip():
-                inputs_block = INPUTS_BLOCK_TEMPLATE.format(content=task)
-                items[0] = f"{items[0]}\n\n{inputs_block}"
-            return items
         return [self._transform_task(task)]
 
     def _get_tools(self) -> list:
@@ -1252,7 +1232,7 @@ class YamlAgentFactory:
             List: List of all dynamically generated agent tool functions.
         """
         folder_path = Path(folder_path)
-        all_tools = []
+        all_tools: list[Callable] = []
         log = get_logger(logger, __name__)
 
         if not folder_path.exists() or not folder_path.is_dir():

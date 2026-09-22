@@ -112,21 +112,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Identifies performance issues including algorithmic complexity hotspots,
-    unnecessary copies, memory allocation patterns, and I/O bottlenecks.
-
-    Core capabilities:
-    1. Analyze algorithmic time/space complexity
-    2. Detect unnecessary copies, allocations, and redundant computation
-    3. Identify I/O bottlenecks and scalability concerns
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with target module/files and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_Performance.md containing all performance findings
+      type: string
+      description: 'Analysis task description with target module/files and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

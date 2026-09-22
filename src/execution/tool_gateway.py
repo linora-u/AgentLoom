@@ -440,6 +440,9 @@ def bind_tool(
         candidate = getattr(tool, "_agentloom_output_normalizer", None)
         if callable(candidate):
             selected_normalizer = candidate
+    input_validator = getattr(tool, "_agentloom_input_validator", None)
+    if not callable(input_validator):
+        input_validator = None
 
     return ToolBinding(
         definition=definition,
@@ -456,6 +459,7 @@ def bind_tool(
         clone_factory=clone_factory,
         output_normalizer=selected_normalizer,
         compression_source=compression_source,
+        input_validator=input_validator,
         manifest_entry=(
             ToolManifestEntry(
                 logical_name=catalog_spec.logical_name or catalog_spec.name,

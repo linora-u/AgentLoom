@@ -67,7 +67,10 @@ def validate_runtime_agent_config(
     AgentConfigNormalizer.validate_runtime_tool_references(config)
     AgentConfigNormalizer.validate_workflow_config(config)
     AgentConfigNormalizer.validate_skills_config(config)
-    AgentConfigNormalizer.validate_agent_function_schema(config)
+    AgentConfigNormalizer.validate_agent_schemas(
+        config,
+        include_input=False,
+    )
     AgentConfigNormalizer.validate_worker_agents_config(config.get("worker_agents", []))
     normalize_goal_config(config, source=str(yaml_path))
 
@@ -84,5 +87,7 @@ def validate_runtime_worker_config(
             "Goal mode is Supervisor-only"
         )
     validate_runtime_agent_config(config, yaml_path, agent_root=agent_root)
-    if AgentConfigNormalizer.validate_agent_function_schema(config) is None:
-        raise ValueError(f"Worker Agent configuration {yaml_path} agent_function_schema is required")
+    AgentConfigNormalizer.validate_agent_schemas(
+        config,
+        include_input=True,
+    )

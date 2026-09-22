@@ -17,18 +17,19 @@ workflow: |
   Do not call any other tool or request more evidence. Your second model response
   must be the final verdict. Do not call tools; your first response is final.
 
-agent_function_schema:
-  description: "Audit one Goal documentation slice against current code truth."
-  inputs:
+input_schema:
+  type: object
+  properties:
     task_id:
-      description: "Stable audit case identifier used by the batch ledger."
-      required: true
+      type: string
+      description: Stable audit case identifier used by the batch ledger.
     query:
-      description: "Documentation topic, expected claims, and repository paths."
-      required: true
-  output:
-    description: "Documentation consistency verdict and exact drift list."
-
+      type: string
+      description: Documentation topic, expected claims, and repository paths.
+  required:
+  - task_id
+  - query
+  additionalProperties: false
 tools: []
 
 worker_agents: []

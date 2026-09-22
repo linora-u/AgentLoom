@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import pytest
-
-from agentloom.application.validation import AgentConfigNormalizer
 from agentloom.application.definition import load_agent_definition, validate_agent_definition
+from agentloom.application.validation import AgentConfigNormalizer
 
 
 def write(path: Path, content: str) -> Path:
@@ -13,14 +12,14 @@ def write(path: Path, content: str) -> Path:
 
 
 BASE = "name: demo\nagent_runtime: smolagents\ndescription: Demo\nworkflow: Run the task.\n"
-SCHEMA = """agent_function_schema:
-  description: Work on one task.
-  inputs:
+SCHEMA = """input_schema:
+  type: object
+  properties:
     task:
+      type: string
       description: The task.
-      required: true
-  output:
-    description: The evidence.
+  required: [task]
+  additionalProperties: false
 """
 
 
@@ -107,8 +106,8 @@ def project_config(root):
 
 
 def test_effective_values_sources_and_secret_projection_are_independent(tmp_path):
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
     from agentloom.application.studio.application_studio import application_detail
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/group/demo"
@@ -271,12 +270,15 @@ def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypa
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
-    write(path.parent / "worker_agents/child.yaml", BASE)
+    write(
+        path.parent / "worker_agents/child.yaml",
+        BASE + "input_schema: {type: array, items: {type: string}}\n",
+    )
     monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
     monkeypatch.setattr(runner, "get_config", lambda: base)
     monkeypatch.setattr(runner, "generate_runtime_id", lambda *args: pytest.fail("allocated a Run for invalid Worker"))
     events = []
-    with pytest.raises(ValueError, match="agent_function_schema is required"):
+    with pytest.raises(ValueError, match="input_schema root type must be object"):
         runner.execute_app(path, event_sink=events.append)
     assert not (tmp_path / ".agentloom").exists()
     assert len(events) == 1 and events[0].event == "run.rejected"
@@ -392,8 +394,8 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
 def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(tmp_path, monkeypatch):
     import json
 
-    from agentloom.execution.skills.catalog import SkillCatalog
     from agentloom.application.studio.application_studio import application_detail
+    from agentloom.execution.skills.catalog import SkillCatalog
 
     project_config(tmp_path)
     app = tmp_path / "applications/demo"
@@ -602,8 +604,8 @@ def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeyp
 def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    import agentloom.configuration.config as config_module
     import agentloom.application.runner as runner
+    import agentloom.configuration.config as config_module
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE)
@@ -671,8 +673,9 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
 
 def test_public_connection_urls_never_expose_authentication(tmp_path):
     import json
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
+
     from agentloom.application.studio.application_studio import application_detail
+    from agentloom.configuration.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     url = "https://synthetic-user:synthetic-password@example.invalid/mcp?access_token=synthetic-token"
@@ -697,13 +700,12 @@ def test_public_connection_urls_never_expose_authentication(tmp_path):
 @pytest.mark.parametrize("target", ["supervisor", "worker"])
 @pytest.mark.parametrize("suffix", [".yaml", ".md"])
 def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monkeypatch, target, suffix):
-    import json
     from types import SimpleNamespace
 
     import agentloom.application.runner as runner
     from agentloom.application.definition import prepare_application_definition
-    from agentloom.application.readiness import validate_runtime_agent_config, validate_runtime_worker_config
     from agentloom.application.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+    from agentloom.application.readiness import validate_runtime_agent_config, validate_runtime_worker_config
     from agentloom.application.studio.domain_actions import execute_domain_action
     from agentloom.application.studio.query_service import StudioQueryService
 

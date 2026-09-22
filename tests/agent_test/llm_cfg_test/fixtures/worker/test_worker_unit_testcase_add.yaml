@@ -134,24 +134,20 @@ tools:
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"
     function: "collect_generation_report"
 
-agent_function_schema:
-  description: |
-    基于 Unit Test Studio 的函数级测试补充智能体。
-
-    核心能力：
-    - 解析函数目标并规范化输入
-    - 生成可执行场景并产出参数化 pytest
-    - 以 append/upsert 方式写入测试文件
-    - 对生成结果进行轻量校验与修正
-    - 输出最终交付报告
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        JSON 字符串，包含：
+      type: string
+      description: 'JSON 字符串，包含：
+
         - target_root: 目标项目根目录
+
         - targets: 逗号分隔 module.py:function_name 列表
+
         - output_dir: 可选，输出目录（默认 test/generated）
-      required: true
-  output:
-    description: |
-      str: JSON 字符串，包含 target_root、output_dir、generated_files、refinement 与 report。
+
+        '
+  required:
+  - query
+  additionalProperties: false

@@ -16,18 +16,19 @@ workflow: |
   Do not call tools or request more evidence. The specification alone is not
   implementation evidence. Your first model response must be the final verdict.
 
-agent_function_schema:
-  description: "Audit one Goal Mode configuration or persisted-state contract slice."
-  inputs:
+input_schema:
+  type: object
+  properties:
     task_id:
-      description: "Stable audit case identifier used by the batch ledger."
-      required: true
+      type: string
+      description: Stable audit case identifier used by the batch ledger.
     query:
-      description: "Audit lens, acceptance criteria, and exact repository paths."
-      required: true
-  output:
-    description: "Evidence-backed contract verdict with cited code and tests."
-
+      type: string
+      description: Audit lens, acceptance criteria, and exact repository paths.
+  required:
+  - task_id
+  - query
+  additionalProperties: false
 tools: []
 
 worker_agents: []

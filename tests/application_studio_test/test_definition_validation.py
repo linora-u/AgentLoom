@@ -13,7 +13,7 @@ def test_catalog_uses_runner_required_fields_for_agent_validation(tmp_path: Path
     valid = tmp_path / "applications/valid/workflows/valid.yaml"
     valid.parent.mkdir(parents=True)
     valid.write_text(
-        "name: valid\nagent_runtime: smolagents\ndescription: valid agent\nworkflow:\n  - first\n  - second\n",
+        "name: valid\nagent_runtime: smolagents\ndescription: valid agent\nworkflow: |\n  first\n  second\n",
         encoding="utf-8",
     )
     invalid = tmp_path / "applications/invalid/workflows/invalid.yaml"
@@ -109,14 +109,14 @@ workflow: delegate the task
 name: markdown_worker
 agent_runtime: smolagents
 description: worker stored as Markdown
-agent_function_schema:
-  description: Handle one task.
-  inputs:
+input_schema:
+  type: object
+  properties:
     task:
+      type: string
       description: Task to handle.
-      required: true
-  output:
-    description: Worker result.
+  required: [task]
+  additionalProperties: false
 ```
 
 Handle the supplied task.
@@ -167,11 +167,10 @@ workflow: delegate the task
 name: markdown_worker
 agent_runtime: smolagents
 description: invalid worker schema
-agent_function_schema:
-  description: Handle one task.
-  inputs: []
-  output:
-    description: Worker result.
+input_schema:
+  type: array
+  items:
+    type: string
 ```
 
 Handle the supplied task.
@@ -184,10 +183,10 @@ Handle the supplied task.
     errors = "\n".join(system["validation"]["errors"])
     assert system["validation"]["valid"] is False
     assert "worker.md" in errors
-    assert "agent_function_schema.inputs" in errors
+    assert "input_schema root type must be object" in errors
 
 
-def test_catalog_rejects_referenced_worker_without_function_schema(tmp_path: Path) -> None:
+def test_catalog_accepts_referenced_worker_without_explicit_input_schema(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.mkdir()
     (config / "llm.yaml").write_text(
@@ -216,10 +215,7 @@ workflow: delegate the task
 
     [system] = StudioQueryService(tmp_path).bootstrap()["systems"]
 
-    errors = "\n".join(system["validation"]["errors"])
-    assert system["validation"]["valid"] is False
-    assert "worker.yaml" in errors
-    assert "agent_function_schema is required" in errors
+    assert system["validation"] == {"valid": True, "errors": []}
 
 
 def test_catalog_rejects_existing_worker_with_unconfigured_model(tmp_path: Path) -> None:
@@ -251,13 +247,14 @@ agent_runtime: smolagents
 description: worker with missing model
 model_type: definitely_missing
 workflow: do the task
-agent_function_schema:
-  description: Handle one task.
-  inputs:
+input_schema:
+  type: object
+  properties:
     task:
+      type: string
       description: Task to handle.
-  output:
-    description: Worker result.
+  required: [task]
+  additionalProperties: false
 """,
         encoding="utf-8",
     )
