@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-TUI_ROOT="$REPO_ROOT/agentloom-tui"
+STUDIO_ROOT="$REPO_ROOT/studio"
 INSTALL_ROOT=${AGENTLOOM_INSTALL_DIR:-"$HOME/.agentloom"}
 mkdir -p "$INSTALL_ROOT"
 INSTALL_ROOT=$(cd -- "$INSTALL_ROOT" && pwd -P)
@@ -146,17 +146,17 @@ cleanup() {
   rm -rf "$BUILD_DIR"
 }
 trap cleanup EXIT
-BUILD_BINARY="$BUILD_DIR/agentloom-tui"
+BUILD_BINARY="$BUILD_DIR/agentloom-studio"
 
-printf '%b\n' "${MUTED}Building the native AgentLoom TUI...${NC}"
+printf '%b\n' "${MUTED}Building the native AgentLoom Studio...${NC}"
 (
-  cd -- "$TUI_ROOT"
+  cd -- "$STUDIO_ROOT"
   "$BUN_BIN" install --frozen-lockfile
   "$BUN_BIN" run build -- --outfile "$BUILD_BINARY"
 )
 "$BUILD_BINARY" --version >/dev/null
 
-OPENCODE_SOURCE=${AGENTLOOM_OPENCODE_SOURCE:-"$TUI_ROOT/node_modules/.bin/opencode"}
+OPENCODE_SOURCE=${AGENTLOOM_OPENCODE_SOURCE:-"$STUDIO_ROOT/node_modules/.bin/opencode"}
 if [[ ! -x "$OPENCODE_SOURCE" ]]; then
   printf '%b\n' "${RED}Error: bundled OpenCode Runtime was not installed at $OPENCODE_SOURCE.${NC}" >&2
   exit 1
@@ -167,8 +167,9 @@ if [[ "$OPENCODE_VERSION" != "$EXPECTED_OPENCODE_VERSION" ]]; then
   exit 1
 fi
 
-install -m 755 "$BUILD_BINARY" "$BIN_DIR/.agentloom-tui.$$.tmp"
-mv -f "$BIN_DIR/.agentloom-tui.$$.tmp" "$BIN_DIR/agentloom-tui"
+install -m 755 "$BUILD_BINARY" "$BIN_DIR/.agentloom-studio.$$.tmp"
+mv -f "$BIN_DIR/.agentloom-studio.$$.tmp" "$BIN_DIR/agentloom-studio"
+rm -f "$BIN_DIR/agentloom-tui"
 install -m 755 "$OPENCODE_SOURCE" "$BIN_DIR/.agentloom-opencode.$$.tmp"
 mv -f "$BIN_DIR/.agentloom-opencode.$$.tmp" "$BIN_DIR/agentloom-opencode"
 printf '%s\n' "$REPO_ROOT" > "$INSTALL_ROOT/.source-root.$$.tmp"
@@ -215,7 +216,7 @@ if [ "${1:-}" = "schedules" ]; then
   shift
   exec "$AGENTLOOM_PYTHON" -I -m agentloom schedules "$@"
 fi
-exec "$install_root/bin/agentloom-tui" "$@"
+exec "$install_root/bin/agentloom-studio" "$@"
 EOF
 chmod 755 "$WRAPPER_TMP"
 mv -f "$WRAPPER_TMP" "$BIN_DIR/agentloom"

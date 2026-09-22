@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agentloom.application.studio.bridge import TuiBridge
+from agentloom.application.studio.query_service import StudioQueryService
 
 
 def test_run_detail_uses_durable_events_after_success_checkpoint_cleanup(tmp_path: Path) -> None:
@@ -53,14 +53,7 @@ def test_run_detail_uses_durable_events_after_success_checkpoint_cleanup(tmp_pat
         encoding="utf-8",
     )
 
-    result = TuiBridge(tmp_path).dispatch(
-        "run.detail",
-        {
-            "run_id": "run-1",
-            "application_id": "reports",
-            "system_id": "applications/reports/workflows/report.yaml",
-        },
-    )
+    result = StudioQueryService(tmp_path).run_detail("run-1", application_id="reports", system_id="applications/reports/workflows/report.yaml")
 
     assert result["result_state"] == "available"
     assert result["result"] == "final report"

@@ -14,7 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 def run_fresh(source: str) -> None:
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(source)],
-        cwd=ROOT, text=True, capture_output=True, timeout=60,
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -53,26 +56,44 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         assert not any(type(finder).__name__ == '_LegacyFinder' for finder in sys.meta_path)
         assert not any(name == 'src' or name.startswith('src.') for name in sys.modules)
     """)
-    assert not (ROOT / 'agentloom').exists()
-    for package in ('application', 'configuration', 'execution', 'runtimes', 'integrations', 'tools'):
-        assert (ROOT / 'src' / package).is_dir()
-    assert not (ROOT / 'src' / 'runtime').exists()
-    for removed in ('adapters', 'encoding', 'ui', 'utils', 'tui_bridge'):
-        assert not (ROOT / 'src' / removed).exists()
-    for removed in ("agent.py", "factory.py", "invocation.py"):
-        assert not (ROOT / "src" / "runtime" / removed).exists()
+    assert not (ROOT / "agentloom").exists()
+    for package in ("application", "configuration", "execution", "runtimes", "integrations", "tools"):
+        assert (ROOT / "src" / package).is_dir()
+    assert not (ROOT / "src" / "runtime").exists()
+    for removed in ("adapters", "encoding", "ui", "utils", "tui_bridge"):
+        assert not (ROOT / "src" / removed).exists()
     assert not (ROOT / "src" / "scaffold.py").exists()
+    assert not (ROOT / "src" / "execution" / "agent.py").exists()
+    assert not (ROOT / "src" / "execution" / "factory.py").exists()
+    assert not (ROOT / "src" / "execution" / "invocation.py").exists()
+    assert not (ROOT / "src" / "application" / "studio" / "bridge.py").exists()
+    assert not (ROOT / "src" / "application" / "studio" / "domain_cli.py").exists()
+    assert not (ROOT / "agentloom-tui").exists()
+    assert (ROOT / "studio").is_dir()
     run_fresh("""
         import importlib.util
+        assert importlib.util.find_spec("agentloom.scaffold") is None
         assert importlib.util.find_spec("agentloom.execution.agent") is None
         assert importlib.util.find_spec("agentloom.execution.factory") is None
         assert importlib.util.find_spec("agentloom.execution.invocation") is None
-        assert importlib.util.find_spec("agentloom.scaffold") is None
-        assert importlib.util.find_spec("agentloom.application.scaffold") is not None
-        assert importlib.util.find_spec("agentloom.application.agent") is not None
-        assert importlib.util.find_spec("agentloom.application.factory") is not None
-        assert importlib.util.find_spec("agentloom.application.invocation") is not None
+        assert importlib.util.find_spec("agentloom.application.studio.bridge") is None
+        assert importlib.util.find_spec("agentloom.application.studio.domain_cli") is None
+        assert importlib.util.find_spec("agentloom_tui_bridge") is None
+        assert importlib.util.find_spec("agentloom_studio_adapter") is not None
     """)
+
+
+def test_root_cli_is_only_a_command_composition_root() -> None:
+    source_path = ROOT / "src" / "__main__.py"
+    source = source_path.read_text(encoding="utf-8")
+    module = ast.parse(source)
+
+    function_names = {node.name for node in module.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    class_names = {node.name for node in module.body if isinstance(node, ast.ClassDef)}
+
+    assert function_names == {"main"}
+    assert class_names == set()
+    assert len(source.splitlines()) < 100
 
 
 def test_runtime_contract_does_not_export_smolagents_capabilities() -> None:
@@ -97,6 +118,7 @@ def test_configuration_does_not_load_runtime_implementations() -> None:
         )
     """)
 
+
 def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
     offenders: list[str] = []
     for source_path in (ROOT / "src").rglob("*.py"):
@@ -109,33 +131,17 @@ def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
             else:
                 continue
             for module, name in imports:
-                if (
-                    "configuration" in source_path.relative_to(ROOT / "src").parts
-                    and (
-                        module == "agentloom.execution"
-                        or module.startswith("agentloom.execution.")
-                    )
+                if "configuration" in source_path.relative_to(ROOT / "src").parts and (
+                    module == "agentloom.execution"
+                    or module.startswith("agentloom.execution.")
                 ):
-                    offenders.append(
-                        f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}"
-                    )
-                if (
-                    module == "agentloom.execution.model_protocol"
-                    and name in {"AdapterKind", "MODEL_ADAPTERS"}
-                ):
-                    offenders.append(
-                        f"{source_path.relative_to(ROOT)}:{node.lineno}:"
-                        f"{module}.{name}"
-                    )
-                if (
-                    module == "agentloom.application.runtime_options"
-                    and name == "runtime_config_layers"
-                ):
-                    offenders.append(
-                        f"{source_path.relative_to(ROOT)}:{node.lineno}:"
-                        f"{module}.{name}"
-                    )
+                    offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}")
+                if module == "agentloom.execution.model_protocol" and name in {"AdapterKind", "MODEL_ADAPTERS"}:
+                    offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}.{name}")
+                if module == "agentloom.application.runtime_options" and name == "runtime_config_layers":
+                    offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}.{name}")
     assert offenders == []
+
 
 def test_model_protocol_does_not_reexport_configuration_vocabulary() -> None:
     run_fresh("""
@@ -145,6 +151,7 @@ def test_model_protocol_does_not_reexport_configuration_vocabulary() -> None:
         assert not hasattr(model_protocol, "AdapterKind")
         assert not hasattr(model_protocol, "MODEL_ADAPTERS")
     """)
+
 
 def test_tool_gateway_does_not_export_smolagents_final_answer_binding() -> None:
     run_fresh("""
@@ -173,43 +180,31 @@ def test_schedules_do_not_depend_on_application_implementations() -> None:
             else:
                 continue
             for name in names:
-                if name == "agentloom.application" or name.startswith(
-                    "agentloom.application."
-                ):
-                    offenders.append(
-                        f"{source_path.relative_to(ROOT)}:{node.lineno}:{name}"
-                    )
+                if name == "agentloom.application" or name.startswith("agentloom.application."):
+                    offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{name}")
     assert offenders == []
 
 
-def test_studio_bridge_does_not_assemble_schedule_business_dependencies() -> None:
-    source_path = ROOT / "src/application/studio/bridge.py"
+def test_studio_adapter_does_not_assemble_schedule_business_dependencies() -> None:
+    source_path = ROOT / "studio/python/agentloom_studio_adapter/dispatcher.py"
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     forbidden_imports: list[str] = []
     forbidden_calls: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module is not None:
-            forbidden_imports.extend(
-                f"{node.module}.{alias.name}"
-                for alias in node.names
-                if (
-                    node.module == "agentloom.application.definition"
-                    and alias.name == "resolve_valid_supervisor_definition"
-                )
-                or (
-                    node.module == "agentloom.schedules.mutations"
-                    and alias.name == "ScheduleMutationService"
-                )
-            )
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "ScheduleMutationService"
-        ):
-            forbidden_calls.append(
-                f"{source_path.relative_to(ROOT)}:{node.lineno}"
-            )
+        if isinstance(node, ast.Import):
+            imports = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imports = [node.module]
+        else:
+            imports = []
+        forbidden_imports.extend(
+            name
+            for name in imports
+            if name == "agentloom.application.definition" or name == "agentloom.schedules.mutations"
+        )
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "ScheduleMutationService":
+            forbidden_calls.append(f"{source_path.relative_to(ROOT)}:{node.lineno}")
 
     assert forbidden_imports == []
     assert forbidden_calls == []

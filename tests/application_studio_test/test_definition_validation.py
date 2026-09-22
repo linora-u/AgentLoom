@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agentloom.application.studio.bridge import TuiBridge
+from agentloom.application.studio.query_service import StudioQueryService
 
 
 def test_catalog_uses_runner_required_fields_for_agent_validation(tmp_path: Path) -> None:
@@ -23,7 +23,7 @@ def test_catalog_uses_runner_required_fields_for_agent_validation(tmp_path: Path
         encoding="utf-8",
     )
 
-    systems = {item["application_id"]: item for item in TuiBridge(tmp_path).bootstrap()["systems"]}
+    systems = {item["application_id"]: item for item in StudioQueryService(tmp_path).bootstrap()["systems"]}
 
     assert systems["valid"]["validation"] == {"valid": True, "errors": []}
     assert systems["invalid"]["validation"]["valid"] is False
@@ -69,7 +69,7 @@ workflow: do the task
         encoding="utf-8",
     )
 
-    systems = {system["application_id"]: system for system in TuiBridge(tmp_path).bootstrap()["systems"]}
+    systems = {system["application_id"]: system for system in StudioQueryService(tmp_path).bootstrap()["systems"]}
 
     errors = "\n".join(systems["invalid"]["validation"]["errors"])
     assert systems["invalid"]["validation"]["valid"] is False
@@ -124,7 +124,7 @@ Handle the supplied task.
         encoding="utf-8",
     )
 
-    bridge = TuiBridge(tmp_path)
+    bridge = StudioQueryService(tmp_path)
     [system] = bridge.bootstrap()["systems"]
     detail = bridge.system_detail(system["id"])
 
@@ -179,7 +179,7 @@ Handle the supplied task.
         encoding="utf-8",
     )
 
-    [system] = TuiBridge(tmp_path).bootstrap()["systems"]
+    [system] = StudioQueryService(tmp_path).bootstrap()["systems"]
 
     errors = "\n".join(system["validation"]["errors"])
     assert system["validation"]["valid"] is False
@@ -214,7 +214,7 @@ workflow: delegate the task
         encoding="utf-8",
     )
 
-    [system] = TuiBridge(tmp_path).bootstrap()["systems"]
+    [system] = StudioQueryService(tmp_path).bootstrap()["systems"]
 
     errors = "\n".join(system["validation"]["errors"])
     assert system["validation"]["valid"] is False
@@ -262,7 +262,7 @@ agent_function_schema:
         encoding="utf-8",
     )
 
-    [system] = TuiBridge(tmp_path).bootstrap()["systems"]
+    [system] = StudioQueryService(tmp_path).bootstrap()["systems"]
 
     errors = "\n".join(system["validation"]["errors"])
     assert system["validation"]["valid"] is False

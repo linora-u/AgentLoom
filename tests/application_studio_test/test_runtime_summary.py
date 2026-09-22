@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import agentloom.application.studio.bridge as bridge_module
+import agentloom.application.studio.query_service as bridge_module
 import pytest
 import yaml
-from agentloom.application.studio.bridge import BridgeError, TuiBridge
+from agentloom.application.studio.errors import StudioServiceError
+from agentloom.application.studio.query_service import StudioQueryService
 from agentloom.execution.context import RuntimeRunLease
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
@@ -18,7 +19,7 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
-def _project(tmp_path: Path) -> TuiBridge:
+def _project(tmp_path: Path) -> StudioQueryService:
     _write(
         tmp_path / "config/system.yaml",
         "runtime:\n  root_dir: .runtime-live\n",
@@ -42,7 +43,7 @@ workflow: Run the task.
         tmp_path / "applications/demo/skills/reader/SKILL.md",
         "---\nname: reader\ndescription: Reads evidence\n---\n",
     )
-    return TuiBridge(tmp_path)
+    return StudioQueryService(tmp_path)
 
 
 def _completed_run(tmp_path: Path) -> None:
@@ -105,10 +106,7 @@ def test_goal_status_and_evidence_are_visible_in_runtime_summary_and_detail(
     _write(manifest_path, json.dumps(manifest))
 
     bootstrap = bridge.bootstrap()
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": "run-live"},
-    )
+    detail = bridge.run_detail("run-live", application_id="demo", system_id=None)
 
     assert bootstrap["runs"][0]["status"] == "interrupted"
     assert bootstrap["runs"][0]["goal"]["status"] == "active"
@@ -133,10 +131,7 @@ def test_running_goal_is_loaded_from_checkpoint_for_tui_detail(tmp_path: Path) -
         json.dumps(goal),
     )
 
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": "run-live"},
-    )
+    detail = bridge.run_detail("run-live", application_id="demo", system_id=None)
 
     assert detail["summary"]["goal"] == goal
 
@@ -259,18 +254,13 @@ def _terminal_run_with_stale_worker(
     )
 
 
-def test_runtime_summary_requires_bootstrap_and_strict_empty_params(tmp_path: Path) -> None:
+def test_runtime_summary_requires_bootstrap(tmp_path: Path) -> None:
     bridge = _project(tmp_path)
 
-    with pytest.raises(BridgeError) as before_bootstrap:
-        bridge.dispatch("runtime.summary", {})
+    with pytest.raises(StudioServiceError) as before_bootstrap:
+        bridge.runtime_summary()
     assert before_bootstrap.value.code == "not_ready"
     assert str(before_bootstrap.value) == "runtime.summary requires a successful bootstrap"
-
-    with pytest.raises(BridgeError) as invalid:
-        bridge.dispatch("runtime.summary", {"refresh": True})
-    assert invalid.value.code == "invalid_params"
-    assert str(invalid.value) == "runtime.summary params are invalid (unexpected refresh)"
 
 
 @pytest.mark.parametrize(
@@ -298,7 +288,7 @@ def test_terminal_parent_run_reconciles_stale_active_worker_status_in_live_proje
     )
 
     bootstrap = bridge.bootstrap()
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     assert bootstrap["runs"][0]["status"] == expected_status
     assert bootstrap["worker_invocations"][0]["status"] == expected_status
@@ -350,7 +340,7 @@ def test_active_worker_beats_a_newer_terminal_invocation_from_another_run(
     lease.acquire()
     try:
         bootstrap = bridge.bootstrap()
-        live = bridge.dispatch("runtime.summary", {})
+        live = bridge.runtime_summary()
     finally:
         lease.release()
 
@@ -488,7 +478,7 @@ def test_worker_history_cannot_hide_a_later_active_worker_inside_task_budget(
     lease.acquire()
     try:
         bootstrap = bridge.bootstrap()
-        live = bridge.dispatch("runtime.summary", {})
+        live = bridge.runtime_summary()
     finally:
         lease.release()
 
@@ -541,10 +531,7 @@ def test_run_detail_keeps_each_worker_entity_before_filling_call_budget(
     )
 
     bootstrap = bridge.bootstrap()
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": "run-detail-budget"},
-    )
+    detail = bridge.run_detail("run-detail-budget", application_id="demo", system_id=None)
 
     assert {(worker["agent_name"], worker["call_index"]) for worker in detail["workers"]} == {
         ("current", 0),
@@ -590,7 +577,7 @@ def test_worker_entity_overflow_is_explicitly_incomplete(tmp_path: Path) -> None
     )
 
     bootstrap = bridge.bootstrap()
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     for projection in (bootstrap, live):
         assert len(projection["worker_invocations"]) == 256
@@ -637,11 +624,8 @@ def test_oversized_task_tree_is_explicitly_incomplete_everywhere(
     assert tree_path.stat().st_size > bridge_module.RUNTIME_TASK_PROJECTION_MAX_BYTES
 
     bootstrap = bridge.bootstrap()
-    live = bridge.dispatch("runtime.summary", {})
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": "run-oversized-tree"},
-    )
+    live = bridge.runtime_summary()
+    detail = bridge.run_detail("run-oversized-tree", application_id="demo", system_id=None)
 
     for projection in (bootstrap, live):
         assert projection["worker_invocations"] == []
@@ -684,10 +668,7 @@ def test_oversized_archived_task_tree_is_explicitly_incomplete(
     (tmp_path / ".runtime-live/checkpoints/demo/task-oversized-archive/task_tree.json").unlink()
 
     bootstrap = bridge.bootstrap()
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": "run-oversized-archive"},
-    )
+    detail = bridge.run_detail("run-oversized-archive", application_id="demo", system_id=None)
 
     assert bootstrap["worker_invocations"] == []
     assert bootstrap["worker_invocations_incomplete"] is True
@@ -719,11 +700,8 @@ def test_disabled_task_tree_observation_never_claims_worker_never_ran(
     (tmp_path / ".runtime-live/checkpoints/demo/task-observation-disabled/task_tree.json").unlink()
 
     bootstrap = bridge.bootstrap()
-    live = bridge.dispatch("runtime.summary", {})
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": "run-observation-disabled"},
-    )
+    live = bridge.runtime_summary()
+    detail = bridge.run_detail("run-observation-disabled", application_id="demo", system_id=None)
 
     for projection in (bootstrap, live):
         assert projection["worker_invocations"] == []
@@ -764,11 +742,8 @@ def test_archived_task_tree_preserves_worker_status_after_checkpoint_cleanup(
     checkpoint_tree.unlink()
 
     bootstrap = bridge.bootstrap()
-    live = bridge.dispatch("runtime.summary", {})
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": "run-archived-tree"},
-    )
+    live = bridge.runtime_summary()
+    detail = bridge.run_detail("run-archived-tree", application_id="demo", system_id=None)
 
     for projection in (bootstrap, live):
         [worker] = projection["worker_invocations"]
@@ -842,9 +817,10 @@ def test_declared_task_tree_artifact_cannot_escape_its_run(
     checkpoint_tree.unlink()
 
     bootstrap = bridge.bootstrap()
-    detail = bridge.dispatch(
-        "run.detail",
-        {"application_id": "demo", "run_id": run_id},
+    detail = bridge.run_detail(
+        run_id,
+        application_id="demo",
+        system_id=None,
     )
 
     assert bootstrap["worker_invocations"] == []
@@ -912,7 +888,7 @@ def test_active_attempt_merges_workers_from_an_archived_attempt(
     lease.acquire()
     try:
         bootstrap = bridge.bootstrap()
-        live = bridge.dispatch("runtime.summary", {})
+        live = bridge.runtime_summary()
     finally:
         lease.release()
 
@@ -975,7 +951,7 @@ def test_live_transition_uses_archive_after_success_cleanup(
     _write(manifest_path, json.dumps(manifest))
     checkpoint_tree.unlink()
 
-    live = bridge.dispatch("runtime.summary", {})
+    live = bridge.runtime_summary()
 
     [completed_worker] = live["worker_invocations"]
     assert completed_worker["run_id"] == run_id
@@ -1022,7 +998,7 @@ def test_resumed_task_preserves_latest_worker_from_an_older_attempt(
     lease.acquire()
     try:
         bootstrap = bridge.bootstrap()
-        live = bridge.dispatch("runtime.summary", {})
+        live = bridge.runtime_summary()
     finally:
         lease.release()
 
@@ -1059,7 +1035,7 @@ def test_worker_scoped_to_a_pruned_run_is_not_reassigned_to_current_run(
     lease.acquire()
     try:
         bootstrap = bridge.bootstrap()
-        live = bridge.dispatch("runtime.summary", {})
+        live = bridge.runtime_summary()
     finally:
         lease.release()
 
@@ -1093,7 +1069,7 @@ def test_runtime_summary_reuses_bootstrap_identity_without_parsing_configuration
     monkeypatch.setattr(bridge, "_read_yaml", forbidden)
     monkeypatch.setattr(yaml, "safe_load", forbidden)
 
-    result = bridge.dispatch("runtime.summary", {})
+    result = bridge.runtime_summary()
 
     assert set(result) == {
         "systems",
@@ -1188,13 +1164,11 @@ def test_bootstrap_projects_invalid_system_config_as_schedule_error(
     _write(tmp_path / "config/system.yaml", "{invalid")
 
     result = bridge.bootstrap()
-    refreshed = bridge.dispatch("runtime.summary", {})
+    refreshed = bridge.runtime_summary()
 
     assert result["schedules"]["items"] == []
     assert result["schedules"]["service"]["state"] == "error"
-    assert result["schedules"]["service"]["last_error"] == (
-        "Schedule storage is unreadable."
-    )
+    assert result["schedules"]["service"]["last_error"] == ("Schedule storage is unreadable.")
     assert refreshed["schedules"] == result["schedules"]
 
 
@@ -1202,11 +1176,11 @@ def test_runtime_summary_returns_fresh_independent_system_objects(tmp_path: Path
     bridge = _project(tmp_path)
     bridge.bootstrap()
 
-    first = bridge.dispatch("runtime.summary", {})
+    first = bridge.runtime_summary()
     first["systems"][0]["name"] = "mutated by caller"
     first["systems"][0]["validation"]["errors"].append("mutated")
 
-    second = bridge.dispatch("runtime.summary", {})
+    second = bridge.runtime_summary()
 
     assert second["systems"][0]["name"] == "demo"
     assert second["systems"][0]["validation"] == {"valid": True, "errors": []}
@@ -1220,9 +1194,15 @@ def test_legacy_goal_budget_is_silently_ignored_in_tui(tmp_path: Path, source: s
     manifest = json.loads(manifest_path.read_text())
     manifest["status"] = "budget_limited"
     legacy = {
-        "goal_id": "goal-legacy", "status": "budget_limited", "goal_started": True,
-        "objective": "Finish report", "token_budget": 1, "used_tokens": 100,
-        "remaining_tokens": 0, "prompt_tokens": 90, "completion_tokens": 10,
+        "goal_id": "goal-legacy",
+        "status": "budget_limited",
+        "goal_started": True,
+        "objective": "Finish report",
+        "token_budget": 1,
+        "used_tokens": 100,
+        "remaining_tokens": 0,
+        "prompt_tokens": 90,
+        "completion_tokens": 10,
     }
     if source == "manifest":
         manifest["goal"] = legacy
@@ -1230,10 +1210,16 @@ def test_legacy_goal_budget_is_silently_ignored_in_tui(tmp_path: Path, source: s
         manifest.pop("goal", None)
         _write(tmp_path / ".runtime-live/checkpoints/demo/task-live/goal.json", json.dumps(legacy))
     _write(manifest_path, json.dumps(manifest))
-    summary = bridge.dispatch("run.detail", {"application_id": "demo", "run_id": "run-live"})["summary"]
+    summary = bridge.run_detail(
+        "run-live",
+        application_id="demo",
+        system_id=None,
+    )["summary"]
     assert summary["status"] == "interrupted"
     assert summary["goal"] == {
-        "goal_id": "goal-legacy", "status": "active", "goal_started": True,
+        "goal_id": "goal-legacy",
+        "status": "active",
+        "goal_started": True,
         "objective": "Finish report",
     }
     assert json.loads(manifest_path.read_text())["status"] == "budget_limited"
