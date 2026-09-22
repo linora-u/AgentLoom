@@ -3,7 +3,8 @@
 Research baseline: `ca27966d`. The implementation uses the user-selected layout:
 responsibility modules live directly under `src/`, and standard setuptools
 `package-dir` configuration maps that directory to the installed `agentloom`
-package. There is no nested `src/agentloom/` or repository-root `agentloom/` tree.
+package and maps `studio/python/agentloom_studio_adapter/` to its private Studio
+adapter package. There is no nested `src/agentloom/` or repository-root `agentloom/` tree.
 Source paths and Python import names are distinct.
 
 The migration is intentionally breaking for old Python imports and module
