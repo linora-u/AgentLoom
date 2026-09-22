@@ -3,25 +3,57 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import click
 
-from .schedule import cron_schedule, interval_schedule, once_schedule
+from .mutations import ScheduleMutationService
 from .service import ScheduleServerAlreadyRunning, ScheduleService
 from .store import ScheduleStore, ScheduleStoreError
+
+SCHEDULE_CLI_DEPENDENCIES_KEY = "agentloom.schedule_cli_dependencies"
+
+
+@dataclass(frozen=True)
+class ScheduleCliDependencies:
+    """Application-owned functions injected by the root CLI."""
+
+    build_mutations: Callable[[Path], ScheduleMutationService]
+
+
+@dataclass
+class _ScheduleCommandContext:
+    project_root: Path
+    dependencies: ScheduleCliDependencies
+    service: ScheduleService | None = None
 
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
+def _schedule_context(context: click.Context) -> _ScheduleCommandContext:
+    command_context = context.find_object(_ScheduleCommandContext)
+    if command_context is None:
+        raise click.ClickException("Schedule command context is unavailable")
+    return command_context
+
+
 def _context_service(context: click.Context) -> ScheduleService:
-    service = context.find_object(ScheduleService)
-    if service is None:
-        raise click.ClickException("Schedule service context is unavailable")
-    return service
+    command_context = _schedule_context(context)
+    if command_context.service is None:
+        store = ScheduleStore(command_context.project_root)
+        context.call_on_close(store.close)
+        command_context.service = ScheduleService(store)
+    return command_context.service
+
+
+def _context_mutations(context: click.Context) -> ScheduleMutationService:
+    command_context = _schedule_context(context)
+    return command_context.dependencies.build_mutations(command_context.project_root)
 
 
 def _emit_job(job: dict[str, Any], *, as_json: bool) -> None:
@@ -42,7 +74,13 @@ def _emit_job(job: dict[str, Any], *, as_json: bool) -> None:
 @click.pass_context
 def schedules(context: click.Context, project_root: Path | None) -> None:
     """Manage durable project-level Agent schedules."""
-    context.obj = ScheduleService(ScheduleStore(project_root or Path.cwd()))
+    dependencies = context.find_root().meta.get(SCHEDULE_CLI_DEPENDENCIES_KEY)
+    if not isinstance(dependencies, ScheduleCliDependencies):
+        raise click.ClickException("Schedule CLI dependencies are unavailable")
+    context.obj = _ScheduleCommandContext(
+        project_root=(project_root or Path.cwd()).expanduser().resolve(),
+        dependencies=dependencies,
+    )
 
 
 @schedules.command("list")
@@ -109,14 +147,19 @@ def schedules_add(
     choices = [run_at is not None, every is not None, cron_expression is not None]
     if sum(choices) != 1:
         raise click.UsageError("Choose exactly one of --at, --every, or --cron")
+    schedule: dict[str, str]
+    if run_at is not None:
+        schedule = {"kind": "once", "at": run_at, "timezone": timezone}
+    elif every is not None:
+        schedule = {"kind": "interval", "every": every, "timezone": timezone}
+    else:
+        schedule = {
+            "kind": "cron",
+            "expression": str(cron_expression),
+            "timezone": timezone,
+        }
     try:
-        if run_at is not None:
-            schedule = once_schedule(run_at, timezone=timezone)
-        elif every is not None:
-            schedule = interval_schedule(every, timezone=timezone)
-        else:
-            schedule = cron_schedule(str(cron_expression), timezone=timezone)
-        job = _context_service(context).store.add_job(
+        job = _context_mutations(context).add(
             name=name or yaml_path.stem,
             yaml_path=yaml_path,
             schedule=schedule,
@@ -140,8 +183,11 @@ def _job_mutation(command_name: str):
 def schedules_remove(context: click.Context, job_id: str, as_json: bool) -> None:
     """Remove a job while retaining its execution ledger."""
     try:
-        job = _context_service(context).store.remove(job_id)
-    except ScheduleStoreError as exc:
+        job = _context_mutations(context).mutate(
+            "remove",
+            job_id=job_id,
+        )
+    except (ValueError, ScheduleStoreError) as exc:
         raise click.ClickException(str(exc)) from exc
     if as_json:
         click.echo(_json(job))
@@ -153,8 +199,11 @@ def schedules_remove(context: click.Context, job_id: str, as_json: bool) -> None
 def schedules_pause(context: click.Context, job_id: str, as_json: bool) -> None:
     """Pause scheduled firing; manual run remains available."""
     try:
-        job = _context_service(context).store.pause(job_id)
-    except ScheduleStoreError as exc:
+        job = _context_mutations(context).mutate(
+            "pause",
+            job_id=job_id,
+        )
+    except (ValueError, ScheduleStoreError) as exc:
         raise click.ClickException(str(exc)) from exc
     _emit_job(job, as_json=as_json)
 
@@ -163,7 +212,10 @@ def schedules_pause(context: click.Context, job_id: str, as_json: bool) -> None:
 def schedules_resume(context: click.Context, job_id: str, as_json: bool) -> None:
     """Resume a paused job and compute its next future fire."""
     try:
-        job = _context_service(context).store.resume(job_id)
+        job = _context_mutations(context).mutate(
+            "resume",
+            job_id=job_id,
+        )
     except (ValueError, ScheduleStoreError) as exc:
         raise click.ClickException(str(exc)) from exc
     _emit_job(job, as_json=as_json)

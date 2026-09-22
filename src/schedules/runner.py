@@ -12,6 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from .schema import APPLICATION_SUPERVISOR_VALIDATION
 from .store import ScheduleStore
 
 CommandFactory = Callable[[dict[str, Any]], list[str]]
@@ -38,8 +39,16 @@ class ScheduleRunner:
 
     def command_for(self, job: dict[str, Any]) -> list[str]:
         if self._command_factory is not None:
+            if (
+                job.get("target_validation")
+                == APPLICATION_SUPERVISOR_VALIDATION
+            ):
+                raise RuntimeError(
+                    "custom Schedule commands cannot bypass Application "
+                    "Supervisor validation"
+                )
             return list(self._command_factory(job))
-        return [
+        command = [
             sys.executable,
             "-I",
             "-m",
@@ -49,6 +58,9 @@ class ScheduleRunner:
             "--output-format",
             "jsonl",
         ]
+        if job.get("target_validation") == APPLICATION_SUPERVISOR_VALIDATION:
+            command.append("--require-valid-supervisor-target")
+        return command
 
     @staticmethod
     def _process_group_exists(process_group_id: int) -> bool:
@@ -138,8 +150,8 @@ class ScheduleRunner:
     ) -> dict[str, Any]:
         job = claim["job"]
         execution_id = str(claim["execution"]["id"])
-        command = self.command_for(job)
         stdout_path, stderr_path = self.store.execution_log_paths(execution_id)
+        command: list[str] = []
         process: subprocess.Popen[bytes] | None = None
         exit_code: int | None = None
         error: str | None = None
@@ -147,6 +159,7 @@ class ScheduleRunner:
         last_heartbeat = time.monotonic()
 
         try:
+            command = self.command_for(job)
             with self.store.open_execution_logs(execution_id) as (stdout_handle, stderr_handle):
                 if should_stop is not None and should_stop():
                     raise _ExecutionInterrupted

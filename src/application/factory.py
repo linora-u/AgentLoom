@@ -12,6 +12,7 @@ from agentloom.application.definition import extract_markdown_definition, load_a
 from agentloom.application.validation import AgentConfigNormalizer, NormalizedAgentConfig
 from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from agentloom.configuration import C
+from agentloom.configuration.config import EffectiveAgentConfigSnapshot
 from agentloom.configuration.yaml_loader import load_unique_yaml
 from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.runtime.goal import normalize_goal_config, normalize_workflow_for_goal
@@ -699,7 +700,19 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         yaml_file_path = self._config.get('_yaml_file_path')
         self._yaml_file_path = Path(yaml_file_path) if yaml_file_path else None
 
-        # Infer category from file path
+        pinned_application_id = self._config.get("_application_id")
+        if (
+            isinstance(pinned_application_id, str)
+            and pinned_application_id
+            and isinstance(
+                self._config.get("_effective_agent_config_snapshot"),
+                EffectiveAgentConfigSnapshot,
+            )
+        ):
+            self._inferred_category = pinned_application_id
+            return
+
+        # Infer category from file path for ordinary, non-pinned definitions.
         if self._yaml_file_path:
             self._inferred_category = infer_category_from_yaml_path(self._yaml_file_path)
             return
@@ -801,11 +814,17 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
                                 if source_path else get_worker_agent_yaml_path(self.workflow_category))
 
         pinned_workers = self._config.get("_worker_definitions")
-        if isinstance(pinned_workers, dict):
+        pinned_worker_paths = self._config.get("_worker_definition_paths")
+        if isinstance(pinned_workers, dict) and isinstance(
+            pinned_worker_paths,
+            dict,
+        ):
             resolved_worker_agents = [
-                (item['path'], AgentConfigNormalizer.resolve_worker_agent_config_path(
-                    item['path'], worker_agents_folder, agent_root=C.agent_root,
-                )) for item in expected_agents
+                (
+                    item["path"],
+                    Path(pinned_worker_paths[item["path"]]),
+                )
+                for item in expected_agents
             ]
         else:
             resolved_worker_agents = AgentConfigNormalizer.precheck_worker_agent_paths(
@@ -824,7 +843,8 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
                 # Create agent tool
                 agent_tool = YamlAgentFactory.create_agent_as_tool(
                     agent_config,
-                    logger=worker_logger
+                    logger=worker_logger,
+                    _source_path_is_pinned=str(found_file) in pinned_workers,
                 )
                 if agent_tool is not None:
                     tools.append(agent_tool)
@@ -1031,7 +1051,12 @@ class YamlAgentFactory:
         return extract_markdown_definition(content)
 
     @staticmethod
-    def _prepare_agent_config(config: dict, *, source_path: str | Path | None = None) -> dict:
+    def _prepare_agent_config(
+        config: dict,
+        *,
+        source_path: str | Path | None = None,
+        source_path_is_pinned: bool = False,
+    ) -> dict:
         if not isinstance(config, dict):
             raise ValueError(f"Agent configuration must be a mapping, got {type(config).__name__}")
 
@@ -1042,7 +1067,11 @@ class YamlAgentFactory:
 
         raw_path = prepared.get("_yaml_file_path")
         if isinstance(raw_path, str) and raw_path.strip():
-            prepared["_yaml_file_path"] = str(Path(raw_path).expanduser().resolve())
+            prepared["_yaml_file_path"] = (
+                raw_path
+                if source_path_is_pinned
+                else str(Path(raw_path).expanduser().resolve())
+            )
         return prepared
 
     @staticmethod
@@ -1096,6 +1125,7 @@ class YamlAgentFactory:
                             agent_class=None,
                             model_binding=None,
                             logger: Any = None,
+                            _source_path_is_pinned: bool = False,
                             **kwargs
                             ) -> Callable | None:
         """
@@ -1125,7 +1155,10 @@ class YamlAgentFactory:
 
         # Use dict directly when provided; otherwise load from file
         if isinstance(config_path, dict):
-            config = YamlAgentFactory._prepare_agent_config(config_path)
+            config = YamlAgentFactory._prepare_agent_config(
+                config_path,
+                source_path_is_pinned=_source_path_is_pinned,
+            )
         else:
             config = YamlAgentFactory._load_config_from_file(config_path)
 

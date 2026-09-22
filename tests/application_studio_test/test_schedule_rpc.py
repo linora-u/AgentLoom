@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from agentloom.schedules.store import ScheduleStore
+from agentloom.application.composition import build_schedule_mutations
 from agentloom.application.studio.bridge import BridgeError, TuiBridge
+from agentloom.schedules.store import ScheduleStore
+
+
+def _bridge(project_root: Path) -> TuiBridge:
+    return TuiBridge(
+        project_root,
+        schedule_mutations=build_schedule_mutations(project_root),
+    )
 
 
 def _write_agent(project_root: Path, relative_path: str, *, name: str = "scheduled_agent") -> Path:
@@ -60,7 +67,7 @@ def test_schedule_add_parses_once_interval_and_cron_without_using_the_cli(tmp_pa
     _write_agent(tmp_path, once_path, name="once")
     _write_agent(tmp_path, interval_path, name="hourly")
     _write_agent(tmp_path, cron_path, name="morning")
-    bridge = TuiBridge(tmp_path)
+    bridge = _bridge(tmp_path)
 
     once = _add(
         bridge,
@@ -113,7 +120,7 @@ def test_schedule_add_parses_once_interval_and_cron_without_using_the_cli(tmp_pa
 def test_schedule_mutations_are_durable_and_bootstrap_projects_the_result(tmp_path: Path) -> None:
     yaml_path = "applications/durable/workflows/durable.yaml"
     _write_agent(tmp_path, yaml_path, name="durable")
-    bridge = TuiBridge(tmp_path)
+    bridge = _bridge(tmp_path)
     added = _add(
         bridge,
         yaml_path,
@@ -128,7 +135,7 @@ def test_schedule_mutations_are_durable_and_bootstrap_projects_the_result(tmp_pa
         "name": "Durable job",
         "state": "paused",
     }
-    paused_catalog = TuiBridge(tmp_path).bootstrap()["schedules"]["items"]
+    paused_catalog = _bridge(tmp_path).bootstrap()["schedules"]["items"]
     assert [(item["id"], item["state"], item["enabled"]) for item in paused_catalog] == [
         (
             job_id,
@@ -143,7 +150,7 @@ def test_schedule_mutations_are_durable_and_bootstrap_projects_the_result(tmp_pa
         "name": "Durable job",
         "state": "scheduled",
     }
-    resumed_catalog = TuiBridge(tmp_path).bootstrap()["schedules"]["items"]
+    resumed_catalog = _bridge(tmp_path).bootstrap()["schedules"]["items"]
     assert [(item["id"], item["state"], item["enabled"]) for item in resumed_catalog] == [
         (
             job_id,
@@ -158,14 +165,14 @@ def test_schedule_mutations_are_durable_and_bootstrap_projects_the_result(tmp_pa
         "name": "Durable job",
         "state": "scheduled",
     }
-    assert TuiBridge(tmp_path).bootstrap()["schedules"]["items"] == []
+    assert _bridge(tmp_path).bootstrap()["schedules"]["items"] == []
     assert ScheduleStore(tmp_path).list_jobs() == []
 
 
 @pytest.mark.parametrize("method", ["schedule.pause", "schedule.resume", "schedule.remove"])
 def test_schedule_mutations_preserve_unknown_job_errors(method: str, tmp_path: Path) -> None:
     with pytest.raises(BridgeError) as error:
-        TuiBridge(tmp_path).dispatch(method, {"job_id": "job_missing"})
+        _bridge(tmp_path).dispatch(method, {"job_id": "job_missing"})
 
     assert error.value.code == "not_found"
     assert str(error.value) == "Unknown schedule job: job_missing"
@@ -176,14 +183,14 @@ def test_schedule_mutations_preserve_live_claim_busy_errors(method: str, tmp_pat
     yaml_path = "applications/busy/workflows/busy.yaml"
     _write_agent(tmp_path, yaml_path, name="busy")
     added = _add(
-        TuiBridge(tmp_path),
+        _bridge(tmp_path),
         yaml_path,
         {"kind": "interval", "every": "1h", "timezone": "UTC"},
     )
     ScheduleStore(tmp_path).claim_now(str(added["job_id"]), owner="test-owner")
 
     with pytest.raises(BridgeError) as error:
-        TuiBridge(tmp_path).dispatch(method, {"job_id": added["job_id"]})
+        _bridge(tmp_path).dispatch(method, {"job_id": added["job_id"]})
 
     assert error.value.code == "busy"
     assert "running" in str(error.value)
@@ -192,7 +199,7 @@ def test_schedule_mutations_preserve_live_claim_busy_errors(method: str, tmp_pat
 @pytest.mark.parametrize("method", ["schedule.run", "schedule.runNow"])
 def test_schedule_rpc_does_not_expose_blocking_run_now(method: str, tmp_path: Path) -> None:
     with pytest.raises(BridgeError) as error:
-        TuiBridge(tmp_path).dispatch(method, {"job_id": "job_1"})
+        _bridge(tmp_path).dispatch(method, {"job_id": "job_1"})
 
     assert error.value.code == "method_not_found"
 
@@ -219,14 +226,14 @@ def test_schedule_add_rejects_non_supervisor_targets(tmp_path: Path, target_fact
 
     with pytest.raises(BridgeError) as error:
         _add(
-            TuiBridge(tmp_path),
+            _bridge(tmp_path),
             target,
             {"kind": "interval", "every": "1h", "timezone": "UTC"},
         )
 
     assert error.value.code == "invalid_params"
     assert "yaml_path" in str(error.value)
-    assert not (tmp_path / ".agentloom/schedules/jobs.json").exists()
+    assert not (tmp_path / ".agentloom").exists()
 
 
 @pytest.mark.parametrize("link_kind", ["file", "directory"])
@@ -245,14 +252,14 @@ def test_schedule_add_rejects_symlink_targets(tmp_path: Path, link_kind: str) ->
 
     with pytest.raises(BridgeError) as error:
         _add(
-            TuiBridge(tmp_path),
+            _bridge(tmp_path),
             target,
             {"kind": "interval", "every": "1h", "timezone": "UTC"},
         )
 
     assert error.value.code == "invalid_params"
     assert "yaml_path" in str(error.value)
-    assert not (tmp_path / ".agentloom/schedules/jobs.json").exists()
+    assert not (tmp_path / ".agentloom").exists()
 
 
 def test_schedule_add_rejects_invalid_supervisor_yaml(tmp_path: Path) -> None:
@@ -262,56 +269,69 @@ def test_schedule_add_rejects_invalid_supervisor_yaml(tmp_path: Path) -> None:
 
     with pytest.raises(BridgeError) as error:
         _add(
-            TuiBridge(tmp_path),
+            _bridge(tmp_path),
             yaml_path,
             {"kind": "interval", "every": "1h", "timezone": "UTC"},
         )
 
     assert error.value.code == "invalid_params"
     assert "valid supervisor" in str(error.value)
-    assert not (tmp_path / ".agentloom/schedules/jobs.json").exists()
+    assert not (tmp_path / ".agentloom").exists()
 
 
-def test_schedule_add_never_publishes_a_target_swapped_during_store_write(
+def test_schedule_add_rejects_invalid_name_before_storage_creation(
+    tmp_path: Path,
+) -> None:
+    yaml_path = "applications/invalid-name/workflows/root.yaml"
+    _write_agent(tmp_path, yaml_path)
+
+    with pytest.raises(BridgeError) as error:
+        _add(
+            _bridge(tmp_path),
+            yaml_path,
+            {"kind": "interval", "every": "1h", "timezone": "UTC"},
+            name="bad\nname",
+        )
+
+    assert error.value.code == "invalid_params"
+    assert "control characters" in str(error.value)
+    assert not (tmp_path / ".agentloom").exists()
+
+
+def test_schedule_add_marks_target_swapped_during_store_write_for_safe_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agentloom.schedules.runner import ScheduleRunner
+    from agentloom.schedules.schema import APPLICATION_SUPERVISOR_VALIDATION
+
     yaml_path = "applications/racy/workflows/racy.yaml"
     target = _write_agent(tmp_path, yaml_path)
     outside = _write_agent(tmp_path.parent, "racy-outside.yaml")
     original_stored_path = ScheduleStore._stored_yaml_path
-    original_add_job = ScheduleStore.add_job
-    due_claims: list[dict[str, object]] = []
 
     def swap_before_store_resolve(store: ScheduleStore, path: str | Path) -> str:
         target.unlink()
         target.symlink_to(outside)
         return original_stored_path(store, path)
 
-    def add_then_probe_ticker(store: ScheduleStore, **kwargs):
-        try:
-            return original_add_job(store, **kwargs)
-        finally:
-            due_claims.extend(
-                ScheduleStore(tmp_path).claim_due(
-                    now=datetime.now(UTC) + timedelta(days=1),
-                    owner="concurrent-ticker-probe",
-                )
-            )
+    monkeypatch.setattr(
+        ScheduleStore,
+        "_stored_yaml_path",
+        swap_before_store_resolve,
+    )
 
-    monkeypatch.setattr(ScheduleStore, "_stored_yaml_path", swap_before_store_resolve)
-    monkeypatch.setattr(ScheduleStore, "add_job", add_then_probe_ticker)
+    result = _add(
+        _bridge(tmp_path),
+        yaml_path,
+        {"kind": "interval", "every": "1h", "timezone": "UTC"},
+    )
 
-    with pytest.raises(BridgeError) as error:
-        _add(
-            TuiBridge(tmp_path),
-            yaml_path,
-            {"kind": "interval", "every": "1h", "timezone": "UTC"},
-        )
-
-    assert error.value.code == "invalid_params"
-    assert due_claims == []
-    assert ScheduleStore(tmp_path).list_jobs() == []
+    job = ScheduleStore(tmp_path).get_job(str(result["job_id"]))
+    assert job["target_validation"] == APPLICATION_SUPERVISOR_VALIDATION
+    assert ScheduleRunner(ScheduleStore(tmp_path)).command_for(job)[-1] == (
+        "--require-valid-supervisor-target"
+    )
 
 
 @pytest.mark.parametrize(
@@ -387,6 +407,6 @@ def test_schedule_rpc_strictly_validates_wire_params(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(BridgeError) as error:
-        TuiBridge(tmp_path).dispatch(method, params)
+        _bridge(tmp_path).dispatch(method, params)
 
     assert error.value.code == "invalid_params"

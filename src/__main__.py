@@ -22,7 +22,14 @@ from datetime import UTC, datetime
 from typing import Any, TextIO
 
 import click
-from agentloom.schedules.cli import schedules as _schedules_command
+from agentloom.application.composition import build_schedule_mutations
+from agentloom.schedules.cli import (
+    SCHEDULE_CLI_DEPENDENCIES_KEY,
+    ScheduleCliDependencies,
+)
+from agentloom.schedules.cli import (
+    schedules as _schedules_command,
+)
 
 _MAIN_EPILOG = """\
 \b
@@ -154,11 +161,16 @@ def _run_rejected_payload(
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]}, epilog=_MAIN_EPILOG)
-def main():
+@click.pass_context
+def main(context: click.Context):
     """AgentLoom – AI agent framework CLI."""
     import os
     from pathlib import Path as _Path
 
+    context.meta.setdefault(
+        SCHEDULE_CLI_DEPENDENCIES_KEY,
+        ScheduleCliDependencies(build_mutations=build_schedule_mutations),
+    )
     try:
         from agentloom.configuration import C
 
@@ -297,12 +309,18 @@ Examples:
     show_default=True,
     help="Choose human-readable output, one JSON event, or lifecycle JSON Lines.",
 )
+@click.option(
+    "--require-valid-supervisor-target",
+    is_flag=True,
+    hidden=True,
+)
 def run(
     yaml_path: str,
     no_file_log: bool,
     resume_task_id: str | None,
     task_override: str | None,
     output_format: str,
+    require_valid_supervisor_target: bool,
 ):
     """Run a supervisor agent from a YAML configuration."""
     emitted_events: set[str] = set()
@@ -344,6 +362,7 @@ def run(
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
                     task_override=task_override,
+                    require_valid_supervisor_target=require_valid_supervisor_target,
                     event_sink=emit_event,
                 )
             else:
@@ -354,6 +373,7 @@ def run(
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
                     task_override=task_override,
+                    require_valid_supervisor_target=require_valid_supervisor_target,
                 )
                 click.echo(completed.output)
                 completed_goal = getattr(completed, "goal", None)

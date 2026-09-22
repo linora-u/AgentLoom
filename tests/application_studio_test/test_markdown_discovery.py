@@ -7,10 +7,18 @@ from pathlib import Path
 
 import pytest
 import yaml
+from agentloom.application.composition import build_schedule_mutations
 from agentloom.application.definition import definition_error, load_agent_definition, validate_agent_definition
 from agentloom.application.studio.bridge import TuiBridge
 from agentloom.application.studio.catalog import project_catalog
 from agentloom.application.studio.domain_cli import main as domain_main
+
+
+def _bridge(project_root: Path) -> TuiBridge:
+    return TuiBridge(
+        project_root,
+        schedule_mutations=build_schedule_mutations(project_root),
+    )
 
 
 def _markdown(path: Path, config: dict, body: str = "Run the declared task.") -> None:
@@ -50,7 +58,7 @@ def _project(root: Path, app_id: str = "markdown", folder: str = "") -> tuple[Pa
 def test_markdown_supervisor_and_worker_are_discovered_through_all_read_only_surfaces(tmp_path, capsys, app_id, folder):
     supervisor, worker = _project(tmp_path, app_id, folder)
     relative = supervisor.relative_to(tmp_path).as_posix()
-    bridge = TuiBridge(tmp_path)
+    bridge = _bridge(tmp_path)
     bootstrap = bridge.bootstrap()
     assert len(bootstrap["systems"]) == 1
     system = bootstrap["systems"][0]
@@ -104,7 +112,7 @@ def test_markdown_discovery_preserves_shared_definition_diagnostics(tmp_path, ca
     else:
         canonical = validate_agent_definition(tmp_path, str(supervisor), definition)
     assert canonical
-    bridge = TuiBridge(tmp_path)
+    bridge = _bridge(tmp_path)
     system = bridge.bootstrap()["systems"][0]
     assert system["validation"]["valid"] is False
     detail = bridge.dispatch("application.detail", {"application_id": "group/markdown"})
@@ -126,7 +134,7 @@ def test_markdown_discovery_does_not_promote_workers_or_follow_symlinks(tmp_path
     })
     (supervisor.parent / "linked.md").symlink_to(supervisor)
     (supervisor.parent / "linked_dir").symlink_to(supervisor.parent, target_is_directory=True)
-    bridge = TuiBridge(tmp_path)
+    bridge = _bridge(tmp_path)
     assert [system["id"] for system in bridge.bootstrap()["systems"]] == [supervisor.relative_to(tmp_path).as_posix()]
     assert [app["id"] for app in project_catalog(tmp_path, [], [])["applications"]] == ["markdown"]
 
@@ -164,7 +172,7 @@ def test_schedule_accepts_markdown_supervisor_in_temporary_store(tmp_path):
 
     supervisor, _ = _project(tmp_path, "nested/markdown", "subgroup")
     relative = supervisor.relative_to(tmp_path).as_posix()
-    bridge = TuiBridge(tmp_path)
+    bridge = _bridge(tmp_path)
     result = bridge.dispatch("schedule.add", {
         "yaml_path": relative, "name": "Markdown schedule",
         "schedule": {"kind": "once", "at": "2099-01-02T03:04:05Z", "timezone": "UTC"},
@@ -199,7 +207,7 @@ def test_schedule_rejects_invalid_or_unsafe_markdown_targets_before_store_write(
         _markdown(outside, {"name": "outside", "description": "Outside definition"})
         candidate = "../" + outside.name
     with pytest.raises(BridgeError) as error:
-        TuiBridge(tmp_path).dispatch("schedule.add", {
+        _bridge(tmp_path).dispatch("schedule.add", {
             "yaml_path": candidate, "name": "Invalid Markdown schedule",
             "schedule": {"kind": "once", "at": "2099-01-02T03:04:05Z", "timezone": "UTC"},
         })
