@@ -3,13 +3,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from agentloom.integrations.litellm import OpenAIChatModelTurnAdapter
-from agentloom.integrations.litellm.tool_error_projection import (
-    patch_litellm_tool_error_projection,
-)
-from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
-from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.runtimes.smolagents.terminal import final_answer_binding
+from agentloom.execution.agent_runtime import AgentRuntimeError
 from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.tool_gateway import (
@@ -22,6 +16,13 @@ from agentloom.execution.trace import (
     bind_explicit_execution_context,
     capture_explicit_execution_context,
 )
+from agentloom.integrations.litellm import OpenAIChatModelTurnAdapter
+from agentloom.integrations.litellm.tool_error_projection import (
+    patch_litellm_tool_error_projection,
+)
+from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
+from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from smolagents import Tool
 from smolagents.memory import ActionStep
 from smolagents.models import (
@@ -282,6 +283,50 @@ def test_output_validation_failure_is_the_only_hook_terminal_record() -> None:
     assert len(traced) == 1
     assert traced[0].status == "error"
     assert traced[0].stage == "output_validation"
+
+
+def test_subagent_output_validation_failure_keeps_its_tool_category() -> None:
+    def invalid_subagent() -> str:
+        raise AgentRuntimeError(
+            "Subagent exhausted its output correction budget",
+            category="output_validation",
+            retryable=True,
+        )
+
+    run = HookRun(
+        HookPlan(),
+        local_run_id="local-subagent-output",
+        root_run_id="root-subagent-output",
+    )
+    execution = ExplicitExecutionContext(
+        task_id="task-subagent-output",
+        sub_task_id=None,
+        agent_id="agent-subagent-output",
+        agent_name="supervisor",
+        agent_config={},
+        skill_catalog=None,
+        hook_run=run,
+        runtime_agent_path="supervisor",
+        root_run_id="root-subagent-output",
+        local_run_id="local-subagent-output",
+    )
+
+    with bind_explicit_execution_context(execution):
+        settled = AgentLoomToolGateway.from_tools(
+            [invalid_subagent]
+        ).invoke(
+            call_id="invalid-subagent-output",
+            tool_name="invalid_subagent",
+            arguments={},
+        )
+
+    assert settled.status == "error"
+    assert settled.error == ToolErrorRecord(
+        kind="output_validation",
+        message="Subagent exhausted its output correction budget",
+        retryable=True,
+        stage="output_validation",
+    )
 
 
 def test_terminal_record_rejects_nonterminal_or_contradictory_state() -> None:

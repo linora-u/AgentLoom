@@ -62,6 +62,7 @@ type RuntimeErrorCategory = Literal[
     "unsupported_capability",
     "provider",
     "tool",
+    "output_validation",
     "interrupted",
     "internal",
 ]
@@ -70,6 +71,7 @@ RUNTIME_ERROR_CATEGORIES: tuple[RuntimeErrorCategory, ...] = (
     "unsupported_capability",
     "provider",
     "tool",
+    "output_validation",
     "interrupted",
     "internal",
 )
@@ -241,6 +243,9 @@ class AgentRuntimeError(RuntimeError):
         self.category = category
         self.cause = cause
         self.retryable = retryable
+        if category == "output_validation":
+            self.kind = "output_validation"
+            self.stage = "output_validation"
         if cause is not None:
             self.__cause__ = cause
 
