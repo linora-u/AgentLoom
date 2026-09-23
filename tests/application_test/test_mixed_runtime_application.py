@@ -149,7 +149,10 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         definition = yaml.safe_load(workflow.read_text())
         worker_path = workflow.parent / 'worker_agents/inspect.yaml'
         worker_definition = yaml.safe_load(worker_path.read_text())
-        worker_definition['tools'] = [{'name': 'get_file_outline'}]
+        worker_definition['tools'] = [
+            {'name': 'get_file_outline'},
+            {'name': 'loom_retrieve_context'},
+        ]
         write_yaml(worker_path, worker_definition)
         definition['tools'] = [{'name': 'loom_retrieve_context'}]
         write_yaml(workflow, definition)
