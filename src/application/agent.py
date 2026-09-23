@@ -27,6 +27,7 @@ from agentloom.execution.agent_runtime import (
     AgentRuntime,
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    JSONValue,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeDefinition,
@@ -749,7 +750,7 @@ class RoleDrivenAgent(BaseAgent):
         application_lifecycle: "ApplicationRunLifecycle | None" = None,
         resume: bool = False,
         additional_args: dict[str, Any] | None = None,
-    ) -> str:
+    ) -> JSONValue:
         """Run inside one explicit root-run binding.
 
         The first agent in the call tree owns the binding and the session
@@ -757,7 +758,7 @@ class RoleDrivenAgent(BaseAgent):
         propagation and therefore cannot emit duplicate SessionStart/End.
         """
 
-        def _run_once() -> str:
+        def _run_once() -> JSONValue:
             from agentloom.application.invocation import AgentInvocation
 
             # Every invocation gets a fresh local id. The outermost invocation

@@ -13,6 +13,7 @@ from agentloom.execution import get_current_run_context
 from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    JSONValue,
     RuntimeEvent,
     RuntimeEventSink,
     require_runtime_state,
@@ -70,7 +71,7 @@ class AgentInvocation:
     additional_args: dict[str, Any] | None = None
     owns_root_run: bool = False
 
-    def run(self) -> str:
+    def run(self) -> JSONValue:
         from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
         from agentloom.execution.goal import (
             GoalStateProvider,
@@ -155,7 +156,7 @@ class AgentInvocation:
                     CheckpointCoordinator.deactivate(coordinator)
                 raise
 
-        def execute() -> str:
+        def execute() -> JSONValue:
             from agentloom.execution.context_engine.runtime import ensure_task_context_engine
             with ensure_task_context_engine(owner._effective_agent_config or owner._config):
                 return self._execute_bound(
@@ -185,7 +186,7 @@ class AgentInvocation:
         coordinator: Any,
         lifecycle: ApplicationRunLifecycle | None,
         owns_lifecycle: bool,
-    ) -> str:
+    ) -> JSONValue:
         from agentloom.execution.goal import bind_goal_state_provider
 
         owner = self.owner
