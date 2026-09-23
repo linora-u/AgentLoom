@@ -167,6 +167,7 @@ class SmolagentsRuntimeFactory:
                 native_runtime,
                 model_binding=definition.model,
                 tool_gateway=gateway,
+                output_contract=definition.output_contract,
             )
         except BaseException:
             gateway.close()
