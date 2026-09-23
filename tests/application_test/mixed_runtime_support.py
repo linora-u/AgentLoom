@@ -1,18 +1,29 @@
 """HTTP model boundary for Applications running real smol and Pi runtimes."""
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
 from threading import Barrier, Lock, Thread
-from typing import Any, Callable
+from typing import Any, NamedTuple
 
 import yaml
 
 
+class ModelReply(NamedTuple):
+    content: str
+    finish_reason: str
+
+
 @contextmanager
-def model_service(program: Callable[[dict[str, Any]], str | list[tuple[str, str, dict]]]):
+def model_service(
+    program: Callable[
+        [dict[str, Any]],
+        str | ModelReply | list[tuple[str, str, dict]],
+    ],
+):
     requests: list[dict[str, Any]] = []
     errors: list[Exception] = []
     lock = Lock()
@@ -27,13 +38,16 @@ def model_service(program: Callable[[dict[str, Any]], str | list[tuple[str, str,
                 requests.append(request)
             try:
                 answer = program(request)
+                finish_override = None
+                if isinstance(answer, ModelReply):
+                    answer, finish_override = answer
                 message: dict[str, Any] = {'role': 'assistant', 'content': answer if isinstance(answer, str) else None}
                 if isinstance(answer, list):
                     message['tool_calls'] = [
                         {'id': call_id, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(arguments)}}
                         for call_id, name, arguments in answer
                     ]
-                finish = 'tool_calls' if isinstance(answer, list) else 'stop'
+                finish = finish_override or ('tool_calls' if isinstance(answer, list) else 'stop')
                 self.send_response(200)
                 if request.get('stream'):
                     self.send_header('Content-Type', 'text/event-stream')
