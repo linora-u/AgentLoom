@@ -40,6 +40,15 @@ type JSONValue = (
     | list[JSONValue]
     | dict[str, JSONValue]
 )
+type FrozenJSONValue = (
+    None
+    | bool
+    | int
+    | float
+    | str
+    | tuple[FrozenJSONValue, ...]
+    | Mapping[str, FrozenJSONValue]
+)
 type RuntimeEventKind = Literal[
     "run",
     "model",
@@ -122,6 +131,19 @@ def _frozen_json_mapping(
     return MappingProxyType(normalized)
 
 
+def _freeze_json_value(value: JSONValue) -> FrozenJSONValue:
+    """Return a recursively immutable view of an already-normalized JSON value."""
+
+    if isinstance(value, dict):
+        return MappingProxyType({
+            key: _freeze_json_value(child)
+            for key, child in value.items()
+        })
+    if isinstance(value, list):
+        return tuple(_freeze_json_value(child) for child in value)
+    return value
+
+
 def _optional_identity(value: str | None, *, field_name: str) -> str | None:
     if value is None:
         return None
@@ -153,7 +175,7 @@ class OutputContract:
     """One validated Draft 2020-12 contract for an Agent's final output."""
 
     name: str
-    schema: Mapping[str, JSONValue]
+    schema: Mapping[str, FrozenJSONValue]
     _validator: Any = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -181,11 +203,7 @@ class OutputContract:
 
         validator_schema = deepcopy(normalized_schema)
         object.__setattr__(self, "name", self.name.strip())
-        object.__setattr__(
-            self,
-            "schema",
-            MappingProxyType(deepcopy(normalized_schema)),
-        )
+        object.__setattr__(self, "schema", _freeze_json_value(normalized_schema))
         object.__setattr__(
             self,
             "_validator",

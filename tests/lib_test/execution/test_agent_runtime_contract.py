@@ -175,7 +175,7 @@ def test_output_contract_allows_reference_shaped_instance_data(schema, value) ->
 
 
 def test_runtime_definition_carries_an_immutable_output_contract() -> None:
-    source_schema = {
+    source_schema: dict[str, Any] = {
         "type": "object",
         "properties": {"answer": {"type": "string"}},
         "required": ["answer"],
@@ -186,6 +186,18 @@ def test_runtime_definition_carries_an_immutable_output_contract() -> None:
 
     assert definition.output_contract is contract
     assert definition.output_contract.schema["properties"]["answer"]["type"] == "string"
+
+    properties = definition.output_contract.schema["properties"]
+    assert isinstance(properties, Mapping)
+    answer = properties["answer"]
+    assert isinstance(answer, Mapping)
+    with pytest.raises(TypeError):
+        answer["type"] = "integer"  # type: ignore[index]
+
+    required = definition.output_contract.schema["required"]
+    assert isinstance(required, tuple)
+    with pytest.raises(AttributeError):
+        required.append("other")  # type: ignore[attr-defined]
 
 
 def test_runtime_request_allows_an_absent_user_task() -> None:
