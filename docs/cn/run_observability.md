@@ -5,7 +5,7 @@
 ## Python API
 
 ```python
-from agentloom.application.runner import execute_app
+from agentloom.app.runner import execute_app
 
 events = []
 result = execute_app(

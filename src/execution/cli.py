@@ -8,7 +8,7 @@ import click
 
 
 def _configured_runtime_home():
-    from agentloom.configuration import C
+    from agentloom.config import C
     from agentloom.execution import resolve_runtime_home
 
     return resolve_runtime_home(C.raw, agent_root=C.agent_root)
@@ -107,7 +107,7 @@ def clean_tasks(clean_all: bool, before_days: int | None) -> None:
 def clean_runtime_command() -> None:
     """Apply bounded retention to run directories and raw artifacts."""
 
-    from agentloom.configuration import C
+    from agentloom.config import C
     from agentloom.execution.retention import clean_runtime
 
     runtime_config = C.get("runtime", {})

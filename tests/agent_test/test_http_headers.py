@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from agentloom.configuration.http_headers import normalize_http_headers
+from agentloom.config.http_headers import normalize_http_headers
 
 
 def test_explicit_model_headers_do_not_add_identity_or_system_defaults() -> None:

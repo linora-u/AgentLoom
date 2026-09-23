@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agentloom.configuration.config import EffectiveAgentConfigSnapshot
-from agentloom.configuration.runtime_options import (
+from agentloom.config.config import EffectiveAgentConfigSnapshot
+from agentloom.config.runtime_options import (
     runtime_config_layers as _runtime_config_layers,
 )
 

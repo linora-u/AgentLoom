@@ -12,7 +12,7 @@ afterEach(async () => {
 
 describe("trusted source updates", () => {
   test.each([
-    "src/application/agent.py",
+    "src/app/agent.py",
     "studio/src/main.ts",
     "studio/python/agentloom_studio_adapter/dispatcher.py",
   ])(

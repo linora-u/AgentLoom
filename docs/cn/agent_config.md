@@ -598,7 +598,7 @@ tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
 # 构造任务列表
 tasks = [
     {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/application/imports", "index_content": "..."},
+    {"dir_path": "src/app/imports", "index_content": "..."},
     {"dir_path": "src/core", "index_content": "..."},
 ]
 
@@ -771,7 +771,7 @@ toolset 归属、implementation 加载规则和真实验收矩阵见
 #### 4.4.3 核心 API：`YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict — Worker YAML 路径（相对于 AGENT_ROOT）或配置字典
@@ -808,7 +808,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -866,7 +866,7 @@ import traceback
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -1266,7 +1266,7 @@ input_schema:
   properties:
     dir_path:
       type: string
-      description: "要分析的相对目录路径，如 src/application/imports"
+      description: "要分析的相对目录路径，如 src/app/imports"
     index_content:
       type: string
       description: "该目录 index.md 的完整文本内容"

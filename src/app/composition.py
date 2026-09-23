@@ -21,7 +21,7 @@ def build_schedule_mutations(
 ) -> ScheduleMutationService:
     """Build Schedule mutations with Application Supervisor validation."""
 
-    from agentloom.application.definition import (
+    from agentloom.app.definition import (
         inspect_supervisor_definition,
     )
     from agentloom.schedules.mutations import ScheduleMutationService

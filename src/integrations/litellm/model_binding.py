@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Any
 
-from agentloom.configuration import C
-from agentloom.configuration.http_headers import normalize_http_headers
-from agentloom.configuration.llm_config import LlmModelTypeSettings
+from agentloom.config import C
+from agentloom.config.http_headers import normalize_http_headers
+from agentloom.config.llm_config import LlmModelTypeSettings
 from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnAdapter

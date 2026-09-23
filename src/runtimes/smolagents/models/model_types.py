@@ -6,8 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from agentloom.configuration import C
-from agentloom.configuration.defaults import (
+from agentloom.config import C
+from agentloom.config.defaults import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_CONTEXT_CACHE,
@@ -18,7 +18,7 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
-from agentloom.configuration.model_adapters import AdapterKind
+from agentloom.config.model_adapters import AdapterKind
 from agentloom.execution.logging import get_logger
 
 logger = get_logger(__name__)

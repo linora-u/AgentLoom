@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
-from agentloom.configuration.model_adapters import AdapterKind as _AdapterKind
+from agentloom.config.model_adapters import AdapterKind as _AdapterKind
 
 type MessageRole = Literal["system", "developer", "user", "assistant"]
 

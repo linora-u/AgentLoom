@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.config.yaml_loader import load_unique_yaml
 from agentloom.execution.context import RuntimeHome, resolve_runtime_home
 from agentloom.execution.storage import SecureDirectory
 from agentloom.schedules.schedule import validate_schedule

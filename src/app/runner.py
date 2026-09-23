@@ -6,7 +6,7 @@ Provides ``run_app`` – a single-call entry point that boots a
 
 Usage (Python API)::
 
-    from agentloom.application.runner import run_app
+    from agentloom.app.runner import run_app
 
     result = run_app("applications/<app>/workflows/<agent>.yaml")
 
@@ -21,27 +21,27 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentloom.application.definition import (
+from agentloom.app.definition import (
     inspect_supervisor_definition,
     prepare_application_definition,
 )
-from agentloom.application.factory import (
+from agentloom.app.factory import (
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )
-from agentloom.application.lifecycle import (
+from agentloom.app.lifecycle import (
     ApplicationRunFinalization,
     ApplicationRunLifecycle,
     ApplicationRunResources,
     _run_event_chunks,  # noqa: F401 - public compatibility re-export
     _task_events_size,
 )
-from agentloom.application.readiness import (
+from agentloom.app.readiness import (
     validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
     validate_runtime_agent_config,  # noqa: F401 - public compatibility re-export
 )
-from agentloom.application.revision import application_revision
-from agentloom.application.run import (
+from agentloom.app.revision import application_revision
+from agentloom.app.run import (
     ApplicationRunError,
     ApplicationRunInterrupted,
     ApplicationRunResult,
@@ -52,8 +52,8 @@ from agentloom.application.run import (
     RunRejectedEvent,
     RunRejection,
 )
-from agentloom.configuration import C, build_effective_agent_config, get_config
-from agentloom.configuration.config import bind_config, fresh_invocation_config
+from agentloom.config import C, build_effective_agent_config, get_config
+from agentloom.config.config import bind_config, fresh_invocation_config
 from agentloom.execution import (
     bind_run_context,
     generate_runtime_id,

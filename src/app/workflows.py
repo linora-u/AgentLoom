@@ -20,7 +20,7 @@ class WorkflowManager:
     def get_supervisor_agent_yaml_path(self, category: str) -> Path:
         """Get the supervisor-agent configuration directory path."""
             
-        from agentloom.configuration import C
+        from agentloom.config import C
         root_dir = Path(C.agent_root)
         app_path = root_dir / 'applications' / category / 'workflows'
         if app_path.exists():

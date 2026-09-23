@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from agentloom.application.composition import build_schedule_mutations
+from agentloom.app.composition import build_schedule_mutations
 from agentloom.schedules.mutations import ScheduleMutationService
 from agentloom.schedules.schema import (
     APPLICATION_SUPERVISOR_VALIDATION,

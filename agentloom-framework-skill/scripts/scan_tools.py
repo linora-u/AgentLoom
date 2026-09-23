@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agentloom.application.definition import (
+from agentloom.app.definition import (
     definition_error,
     discover_application_definition_files,
     load_agent_definition,

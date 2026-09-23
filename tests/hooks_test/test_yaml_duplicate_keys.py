@@ -17,7 +17,7 @@ hooks:
 
 
 def test_system_config_rejects_duplicate_hook_event_keys(tmp_path: Path) -> None:
-    from agentloom.configuration.config import _load_yaml
+    from agentloom.config.config import _load_yaml
 
     path = tmp_path / "system.yaml"
     path.write_text(_DUPLICATE_HOOKS, encoding="utf-8")
@@ -27,7 +27,7 @@ def test_system_config_rejects_duplicate_hook_event_keys(tmp_path: Path) -> None
 
 
 def test_agent_yaml_rejects_duplicate_hook_event_keys(tmp_path: Path) -> None:
-    from agentloom.application.factory import YamlAgentFactory
+    from agentloom.app.factory import YamlAgentFactory
 
     path = tmp_path / "agent.yaml"
     path.write_text(_DUPLICATE_HOOKS, encoding="utf-8")
@@ -37,7 +37,7 @@ def test_agent_yaml_rejects_duplicate_hook_event_keys(tmp_path: Path) -> None:
 
 
 def test_yaml_merge_defaults_allow_explicit_overrides() -> None:
-    from agentloom.configuration.yaml_loader import load_unique_yaml
+    from agentloom.config.yaml_loader import load_unique_yaml
 
     loaded = load_unique_yaml(
         """\

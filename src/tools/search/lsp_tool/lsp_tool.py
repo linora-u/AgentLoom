@@ -50,7 +50,7 @@ def _find_project_root(file_path: str) -> str:
     """
     resolved = Path(file_path).resolve()
     try:
-        from agentloom.configuration import C
+        from agentloom.config import C
         agent_root = Path(C.agent_root).resolve()
         # Only use agent_root when the file is within the project tree
         if resolved == agent_root or agent_root in resolved.parents:
@@ -160,7 +160,7 @@ def lsp_find_references(
     falls back to ripgrep word-boundary search.
 
     Examples:
-        lsp_find_references("src/application/imports.py", line=10, character=5)
+        lsp_find_references("src/app/imports.py", line=10, character=5)
 
     Args:
         file_path: Path to the file containing the symbol.

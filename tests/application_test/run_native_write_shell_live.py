@@ -16,8 +16,8 @@ from pathlib import Path
 
 import yaml
 from agentloom.integrations.litellm.model_binding import ModelProfileOverlay, resolve_litellm_model_turn_binding
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 
 from tests.application_test.native_write_shell_support import (
     SCENARIOS,
