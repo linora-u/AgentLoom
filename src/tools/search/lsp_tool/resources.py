@@ -23,7 +23,7 @@ def get_lsp_manager() -> LSPServerManager:
     """
     from agentloom.integrations.lsp import LSPServerManager
     from agentloom.integrations.lsp.config import LSPConfig
-    from agentloom.configuration import C
+    from agentloom.config import C
     from agentloom.execution import get_current_run_context
     from agentloom.execution.resources import register_resource
     from agentloom.execution.trace import capture_explicit_execution_context

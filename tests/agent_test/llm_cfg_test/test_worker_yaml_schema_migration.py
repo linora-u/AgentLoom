@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import yaml
-from agentloom.application.factory import YamlConfiguredAgent
+from agentloom.app.factory import YamlConfiguredAgent
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
 FIXTURE_WORKER_ROOT = FIXTURE_ROOT / "worker"

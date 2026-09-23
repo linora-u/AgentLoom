@@ -531,7 +531,7 @@ LiteLLM 与目标 provider 决定。AgentLoom 不读取前缀来选择 adapter�
 
 ## 8. 默认值常量对照表
 
-以下常量定义在 `src/configuration/defaults.py` 中，是所有模型参数的最终兜底值：
+以下常量定义在 `src/config/defaults.py` 中，是所有模型参数的最终兜底值：
 
 | 常量名 | 值 | 对应参数 |
 |--------|-----|---------|
@@ -595,7 +595,7 @@ class LLMConfig(BaseModel):
 **运行时访问方式**：
 
 ```python
-from agentloom.configuration.config import C
+from agentloom.config.config import C
 
 # 获取 LLMConfig 对象
 llm = C.llm

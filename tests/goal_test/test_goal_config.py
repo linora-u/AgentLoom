@@ -2,7 +2,7 @@ from pathlib import Path
 
 import agentloom.execution.goal as goal_contract
 import pytest
-from agentloom.application.readiness import (
+from agentloom.app.readiness import (
     validate_runtime_agent_config,
     validate_runtime_worker_config,
 )

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
+from agentloom.config.llm_config import LLMConfig, LlmModelTypeSettings
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import (
     MessageItem,

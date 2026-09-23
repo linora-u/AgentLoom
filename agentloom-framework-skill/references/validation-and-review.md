@@ -19,7 +19,7 @@ git check-ignore -v config/llm.yaml || true
 
 通过标准：`summary.valid == true` 且 `error_count == 0`。
 
-此脚本是 `agentloom.application.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML/Markdown 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
+此脚本是 `agentloom.app.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML/Markdown 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
 
 输出保留 `summary` 与 `errors` envelope；共享诊断使用 `field: definition`、`rule: shared_definition`，`message` 保留 canonical 原因。目录缺失、没有定义等 authoring 结构错误使用独立规则，不保证旧脚本的字段级 rule 名称。
 
@@ -203,10 +203,10 @@ Supervisor 中断必须等到初始化副作用 ledger 与预期文件均落盘�
 最小检查：
 
 ```bash
-rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/configuration/config.py
-rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/configuration src/runtimes/smolagents/models docs/en docs/cn agentloom-framework-skill
-rg -n "agent_runtime|ModelTurnAdapter|schema-bound|openai_responses|anthropic_messages" src/runtimes/smolagents src/configuration tests docs/en docs/cn agentloom-framework-skill
-rg -n "skills.paths|Duplicate skill name|hooks:" src/execution/skills src/execution/hooks src/application/definition.py docs/en agentloom-framework-skill
+rg -n "_WORKFLOW_OVERLAY_KEYS|_LLM_ONLY_TOP_LEVEL_KEYS|extract_workflow_overlay" src/config/config.py
+rg -n "class RootSettings|class ToolAccessControlSettings|class LlmModelTypeSettings|extra_completion_params|supports_structured_output|supports_native_tool_calls|tool_choice" src/config src/runtimes/smolagents/models docs/en docs/cn agentloom-framework-skill
+rg -n "agent_runtime|ModelTurnAdapter|schema-bound|openai_responses|anthropic_messages" src/runtimes/smolagents src/config tests docs/en docs/cn agentloom-framework-skill
+rg -n "skills.paths|Duplicate skill name|hooks:" src/execution/skills src/execution/hooks src/app/definition.py docs/en agentloom-framework-skill
 rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-framework-skill
 ```
 

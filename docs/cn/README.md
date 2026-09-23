@@ -303,15 +303,15 @@ uv run loom run <workflow> --output-format jsonl
 `RunInfo` receipt 的 `ApplicationRunResult`：
 
 ```python
-from agentloom.application.runner import execute_app
+from agentloom.app.runner import execute_app
 
 result = execute_app("applications/release_review/workflows/release_review_agent.yaml")
 print(result.output, result.run.run_id)
 ```
 
-框架源码直接放在 `src/application/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等职责模块中。
+框架源码直接放在 `src/app/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等职责模块中。
 安装配置将 `src/` 映射为 Python 包名 `agentloom`，所以上面的导入实际加载
-`src/application/runner.py`，磁盘上不需要再套一层 `agentloom` 目录。
+`src/app/runner.py`，磁盘上不需要再套一层 `agentloom` 目录。
 先运行 `uv sync --python 3.12 --locked --all-groups` 安装项目，再调用 Python API。
 旧的 `src.*` 导入和模块命令已移除；命令入口为 `loom` 和 `python -m agentloom`。
 各模块职责与迁移方式见[架构与迁移地图](../specs/architecture-migration-inventory.md)。

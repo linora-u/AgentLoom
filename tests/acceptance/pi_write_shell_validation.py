@@ -164,9 +164,9 @@ def child(case, workspace, profile):
     (config / 'system.yaml').write_text(yaml.safe_dump(system))
     app = workspace / 'applications/validation/workflows/root.yaml'; app.parent.mkdir(parents=True)
     app.write_text(yaml.safe_dump(definition))
-    from agentloom.application.runner import execute_app
-    from agentloom.application.run import ApplicationRunError
-    from agentloom.configuration.config import bind_config, load_project_config
+    from agentloom.app.runner import execute_app
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.config.config import bind_config, load_project_config
     failed = False
     result = None
     with bind_config(load_project_config(workspace)):

@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from agentloom.application.studio.domain_actions import execute_domain_action
-from agentloom.application.studio.errors import StudioServiceError
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.domain_actions import execute_domain_action
+from agentloom.app.studio.errors import StudioServiceError
+from agentloom.app.studio.query_service import StudioQueryService
 
 
 class StudioAdapterError(RuntimeError):
@@ -47,7 +47,7 @@ class StudioDispatcher:
 
     def _builder_service(self) -> Any:
         if self._builder is None:
-            from agentloom.application.studio.builder import BuilderService
+            from agentloom.app.studio.builder import BuilderService
 
             self._builder = BuilderService(self.project_root)
         return self._builder
@@ -238,7 +238,7 @@ class StudioDispatcher:
                 send_params["on_event"] = event_sink
             return self._builder_service().send(**send_params)
         except Exception as error:
-            from agentloom.application.studio.chat_agent import ChatAgentError
+            from agentloom.app.studio.chat_agent import ChatAgentError
 
             if isinstance(error, ChatAgentError):
                 raise StudioAdapterError(error.code, str(error)) from error
@@ -250,7 +250,7 @@ class StudioDispatcher:
             ) from error
 
     def _draft_apply(self, params: dict[str, Any]) -> dict[str, Any]:
-        from agentloom.application.studio.builder import DraftConflictError
+        from agentloom.app.studio.builder import DraftConflictError
 
         self._exact_params(
             params,

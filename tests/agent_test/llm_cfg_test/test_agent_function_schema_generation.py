@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from agentloom.application.factory import YamlAgentFactory, YamlConfiguredAgent
+from agentloom.app.factory import YamlAgentFactory, YamlConfiguredAgent
 from agentloom.execution.tool_gateway import bind_tool
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"

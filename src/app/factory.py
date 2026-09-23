@@ -8,17 +8,17 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-from agentloom.application.definition import extract_markdown_definition, load_agent_definition
-from agentloom.application.imports.dynamic_import import load_function
-from agentloom.application.validation import (
+from agentloom.app.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+from agentloom.app.definition import extract_markdown_definition, load_agent_definition
+from agentloom.app.imports.dynamic_import import load_function
+from agentloom.app.validation import (
     AgentConfigNormalizer,
     NormalizedAgentConfig,
     resolve_input_schema_object,
 )
-from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
-from agentloom.configuration import C
-from agentloom.configuration.config import EffectiveAgentConfigSnapshot
+from agentloom.app.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
+from agentloom.config import C
+from agentloom.config.config import EffectiveAgentConfigSnapshot
 from agentloom.execution.logging import (
     get_logger,
 )

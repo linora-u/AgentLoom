@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentloom.configuration.config import EffectiveAgentConfigSnapshot
+from agentloom.config.config import EffectiveAgentConfigSnapshot
 
 
 def runtime_config_layers(

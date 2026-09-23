@@ -6,9 +6,9 @@ import stat
 from pathlib import Path
 from types import SimpleNamespace
 
-import agentloom.application.studio.builder as builder_module
+import agentloom.app.studio.builder as builder_module
 import pytest
-from agentloom.application.studio.builder import BuilderService, DraftConflictError
+from agentloom.app.studio.builder import BuilderService, DraftConflictError
 
 VALID_AGENT_YAML = """\
 name: report_agent

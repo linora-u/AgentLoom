@@ -183,7 +183,7 @@ def select_cases(
 
 
 def _load_config() -> object:
-    from agentloom.configuration.llm_config import LLMConfig
+    from agentloom.config.llm_config import LLMConfig
 
     if not LLM_CONFIG_PATH.is_file():
         raise FileNotFoundError("ignored config/llm.yaml is absent")
@@ -368,8 +368,8 @@ def run_case(case: MatrixCase, workspace: Path) -> dict[str, object]:
             "status": "NOT-RUN",
             "reason": case.reason,
         }
-    from agentloom.application.runner import execute_app
-    from agentloom.configuration import C
+    from agentloom.app.runner import execute_app
+    from agentloom.config import C
 
     workspace.mkdir(parents=True, exist_ok=True)
     workflow = application_workflow_path(workspace, case.adapter)

@@ -7,7 +7,7 @@ include_paths + exclude_paths conflict, and symlink + include_paths combination.
 import os
 from pathlib import Path
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 from agentloom.execution.hooks.path_validators import validate_workspace_path
 from agentloom.execution.hooks.types import HookContext
 

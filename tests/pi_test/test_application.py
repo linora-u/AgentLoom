@@ -10,8 +10,8 @@ from threading import Lock, Thread
 
 import pytest
 import yaml
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 
 
 @contextmanager
@@ -264,7 +264,7 @@ def test_invalid_structured_output_is_corrected_in_same_session_without_tools(
 def test_provider_failure_during_structured_correction_stays_provider_error(
     tmp_path,
 ):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
 
     with model_service(
         outputs=["not-json"],
@@ -298,7 +298,7 @@ def test_provider_failure_during_structured_correction_stays_provider_error(
 def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
     tmp_path,
 ):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
 
     with model_service(outputs=["not-json"], finish="length") as (url, requests):
         app = project(tmp_path, url)
@@ -331,7 +331,7 @@ def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
 def test_invalid_structured_output_consumes_the_existing_delivery_budget(
     tmp_path,
 ):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
 
     with model_service(
         outputs=["not-json", "still-not-json", "not-json-again"],
@@ -366,7 +366,7 @@ def test_invalid_structured_output_consumes_the_existing_delivery_budget(
 def test_structured_correction_and_stop_gate_share_one_delivery_budget(
     tmp_path,
 ):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
 
     valid_output = json.dumps({"findings": []})
     with model_service(outputs=["not-json", valid_output, valid_output]) as (
@@ -415,7 +415,7 @@ def test_structured_correction_and_stop_gate_share_one_delivery_budget(
 
 @pytest.mark.parametrize("status,retries,expected", [(500, 2, 2), (429, 1, 2), (401, 3, 1), (400, 3, 1), (500, 0, 1)])
 def test_profile_retry_count_and_private_error_redaction(tmp_path, status, retries, expected):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     with model_service(fail_count=1, error_status=status) as (url, requests):
         app = project(tmp_path, url)
         change_model(tmp_path, num_retries=retries, retry_delay=0.01, max_retry_delay=0.01)
@@ -461,7 +461,7 @@ def test_unsupported_model_settings_fail_without_http_call(tmp_path, changes, ma
 
 @pytest.mark.parametrize("allow_second", [True, False])
 def test_stop_hook_can_continue_same_native_session_or_reject(tmp_path, allow_second):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     with model_service() as (url, requests):
         app = project(tmp_path, url)
         marker = tmp_path / "stop-count"
@@ -500,7 +500,7 @@ def test_project_pi_extensions_skills_and_context_files_are_not_discovered(tmp_p
 
 @pytest.mark.parametrize("finish,match", [("length", "max_steps_error"), ("tool_calls", "unavailable tool")])
 def test_incomplete_or_unselected_tool_turn_does_not_report_success(tmp_path, finish, match):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     with model_service(finish=finish) as (url, requests):
         app = project(tmp_path, url)
         with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match=match):
@@ -512,7 +512,7 @@ def test_incomplete_or_unselected_tool_turn_does_not_report_success(tmp_path, fi
 def test_profile_timeout_bounds_an_open_sse_stream(tmp_path):
     from threading import Event
 
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     release = Event()
     request_times = []
     with model_service(

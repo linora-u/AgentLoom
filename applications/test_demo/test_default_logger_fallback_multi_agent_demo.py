@@ -12,7 +12,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from agentloom.execution.logging import get_global_logger, resolve_logger
-from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 
 
 DEFAULT_YAML_PATH = Path(__file__).parent / "workflows" / "test_default_logger_fallback_multi_supervisor.yaml"

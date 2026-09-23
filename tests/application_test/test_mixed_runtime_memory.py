@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
 from agentloom.self_learning.persistence.memory_store import MemoryStore
 from agentloom.self_learning.persistence.ledger import SelfLearningLedger

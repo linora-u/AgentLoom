@@ -430,7 +430,7 @@ def _resolve_application_review_config(application_id: str) -> dict[str, Any]:
     worker YAML. Project policy remains protected by the normal config builder.
     """
 
-    from agentloom.configuration import C, build_effective_agent_config
+    from agentloom.config import C, build_effective_agent_config
 
     canonical = safe_application_id(application_id)
     app_root = Path(C.agent_root) / "applications" / Path(*canonical.split("/"))

@@ -256,7 +256,7 @@ def run(
     with output_context as active_event_stream:
         event_stream = active_event_stream
         try:
-            from agentloom.application.runner import execute_app
+            from agentloom.app.runner import execute_app
 
             if machine_output:
 
@@ -294,7 +294,7 @@ def run(
         except KeyboardInterrupt as exc:
             if not emitted_events:
                 emit_rejected(exc, message="interrupted before run started")
-            from agentloom.application.run import ApplicationRunInterrupted
+            from agentloom.app.run import ApplicationRunInterrupted
 
             if isinstance(exc, ApplicationRunInterrupted) and exc.resumable:
                 click.echo("\nInterrupted. Use --resume to continue.", err=True)
@@ -335,7 +335,7 @@ Examples:
 def create(yaml_path: str, output: str | None) -> None:
     """Generate a minimal demo script for a supervisor YAML config."""
 
-    from agentloom.application.scaffold import create_demo_script
+    from agentloom.app.scaffold import create_demo_script
 
     try:
         generated = create_demo_script(

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from subprocess import Popen
     from agentloom.runtimes.smolagents.tools.shell.stall_watchdog import StallWatchdog
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.logging import get_logger
 from agentloom.execution import copy_runtime_context, get_current_run_context
 from agentloom.runtimes.smolagents.tools.shell.output_reader import AnchoredOutputReader

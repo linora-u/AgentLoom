@@ -16,7 +16,7 @@ if project_root not in sys.path:
 
 from smolagents.tools import get_json_schema
 
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 
 def _default_yaml_path() -> Path:

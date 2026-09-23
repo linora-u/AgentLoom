@@ -17,19 +17,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
-from agentloom.application.readiness import (
+from agentloom.app.readiness import (
     validate_runtime_agent_config,
     validate_runtime_worker_config,
 )
-from agentloom.application.validation import AgentConfigNormalizer
-from agentloom.configuration.config import (
+from agentloom.app.validation import AgentConfigNormalizer
+from agentloom.config.config import (
     EffectiveAgentConfigSnapshot,
     UnifiedConfig,
     build_effective_agent_config_snapshot,
     load_project_config,
 )
-from agentloom.configuration.llm_config import LLMConfig
-from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.config.llm_config import LLMConfig
+from agentloom.config.yaml_loader import load_unique_yaml
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
@@ -623,7 +623,7 @@ def _walk_definitions(
     root_path_is_pinned: bool = False,
     snapshot_session: _DefinitionSnapshotSession | None = None,
 ) -> ApplicationDefinitionInspection:
-    from agentloom.application.paths import worker_reference_candidate
+    from agentloom.app.paths import worker_reference_candidate
 
     nodes: dict[Path, dict[str, object]] = {}
     snapshots: dict[Path, EffectiveAgentConfigSnapshot] = {}
@@ -683,7 +683,7 @@ def _walk_definitions(
                         config,
                         effective_config=snapshots[path].values,
                     )
-                    from agentloom.application.runtime_options import normalize_runtime_options
+                    from agentloom.app.runtime_options import normalize_runtime_options
 
                     runtime_options, _ = normalize_runtime_options(
                         config, snapshot=snapshots[path], agent_root=project_root
@@ -917,7 +917,7 @@ def _prepare_inspected_definition(
         workers: dict[str, dict[str, object]] = {}
         worker_paths: dict[str, str] = {}
         for item in config.get("worker_agents", []):
-            from agentloom.application.paths import worker_reference_candidate
+            from agentloom.app.paths import worker_reference_candidate
 
             candidate = worker_reference_candidate(
                 item["path"],
