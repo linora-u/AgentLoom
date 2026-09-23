@@ -839,13 +839,6 @@ agent_runtime: smolagents
 description: invalid worker
 workflow: do the task
 runtime_options: {max_steps: true}
-agent_function_schema:
-  description: Handle one task.
-  inputs:
-    task:
-      description: Task to handle.
-  output:
-    description: Worker result.
 """,
         encoding="utf-8",
     )
@@ -875,16 +868,16 @@ worker_agents:
 @pytest.mark.parametrize(
     ("worker_schema", "expected_error"),
     [
-        ("", "agent_function_schema is required"),
+        (
+            "input_schema: []\n",
+            "input_schema must be a JSON Schema mapping",
+        ),
         (
             """\
-agent_function_schema:
-  description: Handle one task.
-  inputs: []
-  output:
-    description: Worker result.
+input_schema:
+  type: array
 """,
-            "agent_function_schema.inputs",
+            "input_schema root type must be object",
         ),
     ],
 )
