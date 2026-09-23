@@ -114,10 +114,40 @@ def test_tool_gateway_requires_an_active_hook_run() -> None:
         )
 
 
-def test_empty_tool_result_is_visible_to_the_model() -> None:
+def test_empty_tool_result_preserves_canonical_value_for_the_model() -> None:
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    gateway = AgentLoomToolGateway.from_tools([_tool("empty_tool", "")])
 
-    assert _invoke(_tool("empty_tool", ""), run) == "(empty_tool completed with no output)"
+    with _bind(run):
+        record = gateway.invoke(
+            call_id="empty-call",
+            tool_name="empty_tool",
+            arguments={},
+        )
+
+    assert record.output == ""
+    assert record.direct_result() == ""
+    assert record.model_content() == (
+        '{"ok":true,"status":"completed","output":""}'
+    )
+
+
+def test_null_tool_result_preserves_json_null() -> None:
+    run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    gateway = AgentLoomToolGateway.from_tools([_tool("null_tool", None)])
+
+    with _bind(run):
+        record = gateway.invoke(
+            call_id="null-call",
+            tool_name="null_tool",
+            arguments={},
+        )
+
+    assert record.output is None
+    assert record.direct_result() is None
+    assert record.model_content() == (
+        '{"ok":true,"status":"completed","output":null}'
+    )
 
 
 def test_gateway_without_retrieval_tool_keeps_large_result_in_full() -> None:
