@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 
 
 def _write_pyproject(directory: Path, name: str = "AgentLoom") -> None:

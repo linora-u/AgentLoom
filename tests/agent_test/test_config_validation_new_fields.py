@@ -1,11 +1,11 @@
 """Tests for RootSettings config validation with new runtime fields."""
 
 import pytest
-from agentloom.configuration.config import (
+from agentloom.config.config import (
     _reject_application_global_only_keys,
     extract_workflow_overlay,
 )
-from agentloom.configuration.config_validation import (
+from agentloom.config.config_validation import (
     LoggingSettings,
     RootSettings,
     RuntimeSettings,

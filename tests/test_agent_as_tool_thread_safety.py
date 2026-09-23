@@ -63,7 +63,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             agent_instances.append(self)
 
         def _ensure_normalized(self):
-            from agentloom.application.validation import AgentConfigNormalizer
+            from agentloom.app.validation import AgentConfigNormalizer
             return AgentConfigNormalizer.build_worker_normalized_config(
                 self._config, agent_root=".", source_name="test",
             )
@@ -77,7 +77,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             return f"result_from_{self._id}"
 
         def agent_as_tool(self):
-            from agentloom.application.factory import YamlConfiguredAgent
+            from agentloom.app.factory import YamlConfiguredAgent
             # Delegate to the real agent_as_tool logic but with our class
             real = YamlConfiguredAgent.__dict__['agent_as_tool']
             return real(self)
@@ -178,7 +178,7 @@ class TestFactoryMode:
                 self.description = config.get("description", "")
 
             def _ensure_normalized(self):
-                from agentloom.application.validation import AgentConfigNormalizer
+                from agentloom.app.validation import AgentConfigNormalizer
                 return AgentConfigNormalizer.build_worker_normalized_config(
                     self._config, agent_root=".", source_name="test",
                 )
@@ -195,7 +195,7 @@ class TestFactoryMode:
                 return f"ok_{n}"
 
             def agent_as_tool(self):
-                from agentloom.application.factory import YamlConfiguredAgent
+                from agentloom.app.factory import YamlConfiguredAgent
                 return YamlConfiguredAgent.__dict__['agent_as_tool'](self)
 
         agent = FailOnSecond(config)
@@ -222,7 +222,7 @@ class TestFactoryMode:
         assert len(results) == 3
 
     def test_large_worker_result_stays_canonical(self, tmp_path):
-        from agentloom.application.factory import YamlConfiguredAgent
+        from agentloom.app.factory import YamlConfiguredAgent
         from agentloom.execution.context_engine import ContextEngine, ContextEngineConfig
         from agentloom.execution.context_engine.runtime import clear_current_context_engine, set_current_context_engine
 
@@ -241,7 +241,7 @@ class TestFactoryMode:
                 self.description = config.get("description", "")
 
             def _ensure_normalized(self):
-                from agentloom.application.validation import AgentConfigNormalizer
+                from agentloom.app.validation import AgentConfigNormalizer
 
                 return AgentConfigNormalizer.build_worker_normalized_config(
                     self._config, agent_root=".", source_name="test",

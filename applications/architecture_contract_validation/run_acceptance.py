@@ -92,7 +92,7 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
     (isolated / "config").mkdir(parents=True)
     (isolated / "pyproject.toml").write_text('[project]\nname = "AgentLoom"\nversion = "0.0.0"\n')
     system = yaml.safe_load((project / "config/system.yaml").read_text())
-    system.update({"lsp_servers": {"enabled": False}, "mcp_servers": None,
+    system.update({"mcp_servers": None,
                    "checkpoint": {**system.get("checkpoint", {}), "enabled": True, "cleanup_on_success": False},
                    "runtime": {**system.get("runtime", {}), "root_dir": str(attempt / "runtime")},
                    "self_learning": {"enabled": False}, "todo": {"mode": "off"}})
@@ -125,7 +125,7 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
         "definition": str(definition), "mode": mode, "started_at": datetime.now(UTC).isoformat(),
         "baseline_project_relative_adaptation": baseline_project_relative,
         "namespace_adaptations": namespace_adaptations,
-        "configuration": {"lsp_servers": False, "mcp_servers": None, "checkpoint_cleanup_on_success": False,
+        "configuration": {"mcp_servers": None, "checkpoint_cleanup_on_success": False,
                           "model_profile": "powerful", "runtime_root": str(attempt / "runtime")},
     }
     if case == "policy":
@@ -141,8 +141,8 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
 
 
 def _run_child(attempt: Path, request: dict) -> int:
-    from agentloom.application.runner import execute_app
-    from agentloom.configuration import C
+    from agentloom.app.runner import execute_app
+    from agentloom.config import C
 
     receipt = {**request, "status": "failed"}
     events = []
@@ -199,8 +199,8 @@ def _policy_definition(attempt: Path, request: dict) -> Path:
 
 def _rejection_child(attempt: Path, request: dict) -> int:
     """Negative case: audit network attempts and require run-less preflight rejection."""
-    from agentloom.application.runner import execute_app
-    from agentloom.application.studio.domain_actions import execute_domain_action
+    from agentloom.app.runner import execute_app
+    from agentloom.app.studio.domain_actions import execute_domain_action
 
     project = Path(request["project"])
     base = Path(request["definition"])

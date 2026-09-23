@@ -62,12 +62,11 @@ def _run_code(resume_task_id: str | None = None) -> str:
     resume_arg = f", resume_task_id={resume_task_id!r}" if resume_task_id else ""
     return dedent(
         f"""
-        from agentloom.configuration import C
+        from agentloom.config import C
         C.raw.setdefault("runtime", {{}})["root_dir"] = {str(RUNTIME_ROOT)!r}
         C.raw.setdefault("checkpoint", {{}})["cleanup_on_success"] = False
-        C.raw.setdefault("lsp_servers", {{}})["enabled"] = False
         C.raw["skills"] = {{"paths": []}}
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
         result = execute_app({YAML_PATH!r}{resume_arg}, file_logging=True)
         print("RESULT_PREFIX=" + result.output[:200].replace("\\n", " "))
         """
@@ -203,7 +202,7 @@ def _current_runtime_contract() -> dict[str, object]:
     from agentloom.runtimes.smolagents.runtime_adapter import (
         SmolagentsRuntimeAdapter,
     )
-    from agentloom.configuration import C
+    from agentloom.config import C
 
     adapter_id = C.get_model_config("powerful", "adapter")
     if not isinstance(adapter_id, str) or not adapter_id:
@@ -653,7 +652,7 @@ def _wait_for_worker_interrupt_point(proc: subprocess.Popen, timeout: float = 24
 
 def prepare(scenario: str) -> dict:
     """Retain an interrupted run for same-version resume."""
-    from agentloom.configuration import C
+    from agentloom.config import C
     log_dir = SESSION_ROOT / "logs"
     started_at = datetime.now(UTC).isoformat()
     proc = _start_run(log_dir / "initial.log")

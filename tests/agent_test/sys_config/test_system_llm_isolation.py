@@ -5,12 +5,12 @@
 """
 
 import pytest
-from agentloom.configuration.config import (
+from agentloom.config.config import (
     _WORKFLOW_OVERLAY_KEYS,
     _filter_llm_only_top_level_keys,
     load_project_config,
 )
-from agentloom.configuration.system_loader import _LLM_ONLY_TOP_LEVEL_KEYS
+from agentloom.config.system_loader import _LLM_ONLY_TOP_LEVEL_KEYS
 
 # ─── 测试：_filter_llm_only_top_level_keys 边界条件 ───
 

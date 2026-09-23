@@ -8,8 +8,6 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-  - "markdown_report"
-  - "code_nav"
 runtime_options:
   planning_interval: 3
   smart_summary: false
@@ -83,7 +81,7 @@ workflow: |
 
   Write analysis results as Markdown to `temp/QA_ProjectStructure.md`, ensuring all sections above are included.
 
-  **Important: When writing Markdown files, use the `write_markdown_file` tool with the `sections` parameter (a list of structured sections, each with heading, level, body). Avoid concatenating long strings directly in code. For large content, use `append_markdown_sections` to add sections incrementally.**
+  **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
 
 tools:
   - name: "get_module_context"

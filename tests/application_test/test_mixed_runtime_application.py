@@ -5,8 +5,8 @@ from threading import Barrier
 
 import pytest
 import yaml
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 
 from tests.application_test import mixed_runtime_support as support
 from tests.application_test.mixed_runtime_support import (
@@ -130,7 +130,7 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         messages = tool_messages(request)
         if request['model'] == 'worker':
             if not messages:
-                return [('large-outline', 'get_file_outline', {'file_path': str(source), 'max_items_per_section': 250})]
+                return [('large-read', 'read_context_fixture', {'file_path': str(source)})]
             match = re.search(r'ctx_[0-9a-f]{16}', messages[-1]['content'])
             assert match is not None
             ref = match.group()
@@ -154,7 +154,11 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         worker_path = workflow.parent / 'worker_agents/inspect.yaml'
         worker_definition = yaml.safe_load(worker_path.read_text())
         worker_definition['tools'] = [
-            {'name': 'get_file_outline'},
+            {
+                'name': 'read_context_fixture',
+                'module': 'tests.application_test.mixed_runtime_support',
+                'function': 'read_context_fixture',
+            },
             {'name': 'loom_retrieve_context'},
         ]
         write_yaml(worker_path, worker_definition)
@@ -170,7 +174,7 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
     assert len(refs) == 1
     entries = [json.loads(p.read_text()) for p in (tmp_path / 'runtime').rglob(f'{refs[0]}.json')]
     assert len(entries) == 1
-    assert entries[0]['tool_name'] == 'get_file_outline'
+    assert entries[0]['tool_name'] == 'read_context_fixture'
     assert 'TARGET_RECORD_CORIANDER_5287' in entries[0]['original']
     assert all(f'release_item_{i}' in entries[0]['original'] for i in range(180))
     assert 'WRONG-NEW-CONTENT' not in entries[0]['original']

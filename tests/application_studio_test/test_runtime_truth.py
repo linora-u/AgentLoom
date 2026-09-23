@@ -11,10 +11,10 @@ from typing import Any
 import pytest
 
 import agentloom.execution.context as runtime_context_module
-import agentloom.application.studio.query_service as bridge_module
+import agentloom.app.studio.query_service as bridge_module
 from agentloom.execution.context import RuntimeRunLease
-from agentloom.application.studio.errors import StudioServiceError
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.errors import StudioServiceError
+from agentloom.app.studio.query_service import StudioQueryService
 
 
 def _write(path: Path, content: str) -> Path:

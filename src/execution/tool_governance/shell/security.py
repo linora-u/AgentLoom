@@ -24,7 +24,7 @@ import shlex
 from dataclasses import dataclass
 from typing import List, Optional
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.logging import get_logger
 from agentloom.execution.tool_governance.shell.shell_command_ast import analyze_shell_command
 

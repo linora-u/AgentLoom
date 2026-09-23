@@ -83,7 +83,7 @@ def test_parallel_probe_reuses_report_for_same_goal(tmp_path, monkeypatch):
 
 
 def test_goal_audit_batch_injects_evidence_into_tool_free_worker_query(monkeypatch):
-    from agentloom.application.factory import YamlAgentFactory
+    from agentloom.app.factory import YamlAgentFactory
 
     captured = {}
 

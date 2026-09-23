@@ -110,7 +110,7 @@ protocol from its prefix nor falls back to another adapter.
 Regardless of how configurations are merged, both developers and the framework's underlying layers access configuration through a unique `C` singleton object. `C` encapsulates complex merging logic and provides a very simple API.
 
 ```python
-from agentloom.configuration import C
+from agentloom.config import C
 
 # 1. Access system configuration
 tools_list = C.get_nested("tools", "default", default=[])

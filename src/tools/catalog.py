@@ -28,10 +28,9 @@ def _build_catalog() -> dict[str, ToolSpec]:
     from agentloom.runtimes.smolagents.tool_catalog import tool_specs as smol_specs
     from agentloom.runtimes.pi.tool_catalog import tool_specs as pi_specs
     from .platform_catalog import tool_specs as platform_specs
-    from .optional_catalog import tool_specs as optional_specs
 
     catalog: dict[str, ToolSpec] = {}
-    for spec in (*smol_specs(), *pi_specs(), *platform_specs(), *optional_specs()):
+    for spec in (*smol_specs(), *pi_specs(), *platform_specs()):
         if spec.name in catalog:
             raise ValueError(f"Duplicate tool name: {spec.name}")
         catalog[spec.name] = spec

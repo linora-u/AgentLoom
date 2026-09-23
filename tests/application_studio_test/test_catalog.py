@@ -6,8 +6,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agentloom.application.studio.catalog import project_catalog
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.catalog import project_catalog
+from agentloom.app.studio.query_service import StudioQueryService
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -147,7 +147,7 @@ workflow: do shared work
         _write(tmp_path / relative, payload)
 
     parse_counts: Counter[str] = Counter()
-    from agentloom.application import definition as definition_module
+    from agentloom.app import definition as definition_module
     original_safe_load = definition_module.load_unique_yaml
 
     def count_definition_parse(stream):
@@ -326,7 +326,7 @@ def test_empty_catalog_is_read_only_and_does_not_create_schedule_storage(tmp_pat
 
 
 def test_catalog_does_not_reexport_schedule_projection() -> None:
-    from agentloom.application.studio import catalog
+    from agentloom.app.studio import catalog
 
     assert not hasattr(catalog, "schedule_catalog")
 
@@ -338,10 +338,10 @@ def test_catalog_import_does_not_load_agent_or_model_runtime() -> None:
             "-c",
             (
                 "import sys; "
-                "from agentloom.application.studio.catalog import project_catalog; "
+                "from agentloom.app.studio.catalog import project_catalog; "
                 "assert project_catalog; "
-                "assert 'agentloom.application.agent' not in sys.modules; "
-                "assert 'agentloom.application.runner' not in sys.modules; "
+                "assert 'agentloom.app.agent' not in sys.modules; "
+                "assert 'agentloom.app.runner' not in sys.modules; "
                 "assert 'agentloom.schedules.runner' not in sys.modules; "
                 "assert 'agentloom.schedules.service' not in sys.modules; "
                 "assert 'agentloom.schedules.store' not in sys.modules; "

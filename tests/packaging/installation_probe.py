@@ -89,7 +89,7 @@ runpy.run_path(sys.argv[1], run_name='__main__')
 assert adapter.calls == 2, adapter.calls
 assert len(adapter.requests) == 2
 assert Path(sys.argv[2]).read_text() == 'external-tool-ok:helper'
-from agentloom.configuration import C
+from agentloom.config import C
 assert Path(C.agent_root) == Path(sys.argv[3])
 print('GENERATED_APPLICATION_PASS')
 '''
@@ -113,8 +113,6 @@ def probe(workspace: Path) -> dict:
           enabled: false
         self_learning:
           enabled: false
-        lsp_servers:
-          enabled: false
         default_toolsets: []
     """))
     (config / "llm.yaml").write_text(
@@ -133,7 +131,7 @@ def probe(workspace: Path) -> dict:
     (app / "helper.py").write_text("SUFFIX = ':helper'\n")
     (app / "tools.py").write_text(textwrap.dedent('''\
         from pathlib import Path
-        from agentloom.configuration import C
+        from agentloom.config import C
         from .helper import SUFFIX
 
         def write_probe(value: str) -> str:
@@ -178,26 +176,17 @@ def probe(workspace: Path) -> dict:
         import importlib.util, json, sys
         import agentloom
         from importlib.resources import files
-        from agentloom.configuration import C
+        from agentloom.config import C
         from agentloom.tools.loader import resolve_tool_function
-        from agentloom.application.imports.dynamic_import import load_function
+        from agentloom.app.imports.dynamic_import import load_function
         assert importlib.util.find_spec('src') is None
         assert importlib.util.find_spec('agentloom._compat') is None
         assert not any(type(f).__name__ == '_LegacyFinder' for f in sys.meta_path)
         assert load_function('agentloom.runtimes.smolagents.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
         root = files('agentloom')
         assert root.joinpath('runtimes/smolagents/prompts/toolcalling_agent.example.yaml').read_text()
-        query_root = root.joinpath('tools/queries')
-        queries = list(query_root.rglob('*.scm'))
-        assert len(queries) == 56, len(queries)
-        assert not query_root.joinpath('queries').exists()
-        from agentloom.tools.file_ops.file_outliner import _get_scm_path as outline_query
-        from agentloom.tools.search.lsp_tool.treesitter_fallback import _get_scm_path as lsp_query
-        for language in ('python', 'typescript'):
-            outline_path = outline_query(language)
-            assert outline_path == lsp_query(language)
-            assert outline_path is not None and outline_path.read_text()
-        print(json.dumps({'package_origin': agentloom.__file__, 'project_root': str(C.agent_root), 'queries': len(queries)}))
+        assert not root.joinpath('tools/queries').exists()
+        print(json.dumps({'package_origin': agentloom.__file__, 'project_root': str(C.agent_root)}))
     ''')]))
     assert identity["project_root"] == str(project)
     checks += ["canonical-only imports", "explicit project context", "dynamic builtin identity", "bundled resources"]

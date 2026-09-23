@@ -10,8 +10,6 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-  - "markdown_report"
-  - "code_nav"
 workflow: |
   You are a **senior software engineer and concurrency analysis expert**. In this phase you act as the **"Concurrency Safety"** worker agent, responsible for a comprehensive audit of shared state, access patterns, synchronization mechanisms, and concurrency hazards.
 
@@ -115,7 +113,7 @@ workflow: |
 
   Write analysis results as Markdown to `temp/QA_ConcurrencySafety.md`.
 
-  **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
+  **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
 
 input_schema:
   type: object

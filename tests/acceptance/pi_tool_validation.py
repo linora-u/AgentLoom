@@ -20,8 +20,7 @@ sys.path.insert(0, str(ROOT))
 from tests.acceptance.platform_tool_validation import configure_case, verify_case, dump
 
 CASES = ('native_read', 'mcp', 'mcp_nested', 'mcp_error', 'goal', 'skill', 'skill_proposal',
-         'memory', 'context', 'outline_python', 'outline_json', 'ast', 'lsp_symbols',
-         'lsp_definition', 'lsp_references', 'lsp_workspace', 'lsp_hover', 'worker', 'parallel_workers', 'goal_worker')
+         'memory', 'context', 'worker', 'parallel_workers', 'goal_worker')
 
 
 def tool_records(run_dir: Path):
@@ -48,7 +47,7 @@ def child(case: str, workspace: Path, profile: str):
     (config / 'llm.yaml').chmod(0o600)
     system = {'runtime': {'root_dir': str(workspace / 'runtime')}, 'checkpoint': {'enabled': False},
               'logging': {'console_enabled': False}, 'self_learning': {'enabled': False},
-              'default_toolsets': [], 'lsp_servers': {'enabled': False}}
+              'default_toolsets': []}
     workflow = workspace / 'applications' / case / 'workflows/root.yaml'
     workflow.parent.mkdir(parents=True)
     definition = {'name': f'validate_{case}', 'agent_runtime': 'pi', 'model_type': profile,
@@ -74,8 +73,8 @@ def child(case: str, workspace: Path, profile: str):
             worker.write_text(yaml.safe_dump(worker_config))
     (config / 'system.yaml').write_text(yaml.safe_dump(system))
     workflow.write_text(yaml.safe_dump(definition))
-    from agentloom.application.runner import execute_app
-    from agentloom.configuration.config import bind_config, load_project_config
+    from agentloom.app.runner import execute_app
+    from agentloom.config.config import bind_config, load_project_config
     with bind_config(load_project_config(workspace)):
         result = execute_app(workflow, file_logging=True)
     records = tool_records(result.run.run_dir)

@@ -4,7 +4,7 @@ import importlib
 
 import pytest
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.tools.catalog import (
     DEFAULT_TOOLSETS,
     get_tool_spec,
@@ -58,18 +58,14 @@ class TestToolsets:
     def test_known_toolsets(self):
         toolsets = list_toolsets()
         assert set(DEFAULT_TOOLSETS).issubset(toolsets)
-        assert toolsets["markdown_report"] == (
-            "write_markdown_file",
-            "write_markdown_file_raw",
-            "append_markdown_sections",
-        )
         assert toolsets["self_learning"] == (
             "session_search",
             "session_scroll",
             "memory",
             "skill_manage",
         )
-        assert "get_file_outline" in toolsets["code_nav"]
+        assert "markdown_report" not in toolsets
+        assert "code_nav" not in toolsets
 
     def test_empty_toolsets_means_no_builtins(self):
         assert resolve_toolsets([]) == []
@@ -94,26 +90,6 @@ class TestDynamicModuleLoading:
         assert resolve_tool_function("grep_search") is direct
 
 
-class TestAdditionalToolsetsResolve:
-    @pytest.mark.parametrize(
-        "tool_name",
-        [
-            "write_markdown_file",
-            "write_markdown_file_raw",
-            "append_markdown_sections",
-            "get_file_outline",
-            "ast_grep_search_file",
-            "lsp_find_definition",
-            "lsp_find_references",
-            "lsp_get_document_symbols",
-            "lsp_hover",
-            "lsp_get_workspace_symbols",
-        ],
-    )
-    def test_optional_catalog_tool_resolves(self, tool_name):
-        assert callable(resolve_tool_function(tool_name))
-
-
 class TestRemovedToolsRaise:
     @pytest.mark.parametrize(
         "tool_name",
@@ -135,6 +111,16 @@ class TestRemovedToolsRaise:
             "git_commit_files",
             "git_auto_commit",
             "git_check_dirty",
+            "write_markdown_file",
+            "write_markdown_file_raw",
+            "append_markdown_sections",
+            "get_file_outline",
+            "ast_grep_search_file",
+            "lsp_find_definition",
+            "lsp_find_references",
+            "lsp_get_document_symbols",
+            "lsp_hover",
+            "lsp_get_workspace_symbols",
         ],
     )
     def test_removed_tool_names_do_not_resolve(self, tool_name):
@@ -156,7 +142,7 @@ class TestCatalogInvariants:
                 assert spec.provider in providers
                 assert spec.implementation.module.startswith(providers[spec.provider])
             else:
-                assert spec.owner in {"platform", "optional"}
+                assert spec.owner == "platform"
                 assert spec.implementation.module.startswith("agentloom.tools.")
             assert spec.implementation.attribute == spec.name
 

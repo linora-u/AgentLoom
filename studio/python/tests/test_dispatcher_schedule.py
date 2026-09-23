@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from agentloom.application.composition import build_schedule_mutations
+from agentloom.app.composition import build_schedule_mutations
 from agentloom.schedules.store import ScheduleStore
 from agentloom_studio_adapter.dispatcher import (
     StudioAdapterError,

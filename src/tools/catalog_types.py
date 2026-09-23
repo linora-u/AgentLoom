@@ -30,7 +30,7 @@ class ToolSpec:
     accepts_extra_fixed_args: bool = False
     path_params: tuple[str, ...] = ()
     output_kind: str = "text"
-    owner: Literal["runtime", "platform", "optional"] = "platform"
+    owner: Literal["runtime", "platform"] = "platform"
     provider: str = "agentloom"
     capability: str = ""
     operation: Literal["read", "write", "shell", "platform", "control"] = "control"
@@ -53,7 +53,7 @@ def _spec(
     max_result_chars: int | None = 20000,
     path_params: Iterable[str] = (),
     output_kind: str = "text",
-    owner: Literal["runtime", "platform", "optional"],
+    owner: Literal["runtime", "platform"],
     provider: str,
     capability: str,
     operation: Literal["read", "write", "shell", "platform", "control"],

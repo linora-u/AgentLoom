@@ -1,7 +1,7 @@
 """Query exclusion policy at real smol executor entry points."""
 from importlib import import_module
 import pytest
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.trace.task_context import set_current_agent_config, clear_current_agent_config
 
 @pytest.mark.parametrize("backend", ["rg", "python"])

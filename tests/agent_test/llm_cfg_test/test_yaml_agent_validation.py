@@ -1,9 +1,9 @@
 from pathlib import Path
 
-import agentloom.application.factory as yaml_factory_module
+import agentloom.app.factory as yaml_factory_module
 import pytest
-from agentloom.application.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
-from agentloom.application.validation import (
+from agentloom.app.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+from agentloom.app.validation import (
     AgentConfigNormalizer,
     NormalizedAgentConfig,
 )
@@ -12,7 +12,7 @@ from agentloom.runtimes.smolagents.options import normalize_runtime_options
 
 @pytest.fixture(autouse=True)
 def isolated_project_config(tmp_path):
-    from agentloom.configuration.config import LLMConfig, UnifiedConfig, bind_config
+    from agentloom.config.config import LLMConfig, UnifiedConfig, bind_config
 
     with bind_config(UnifiedConfig({}, agent_root=tmp_path, llm_config=LLMConfig())):
         yield
@@ -399,7 +399,7 @@ def test_validate_config_accepts_missing_tools_field(maker, config_builder):
 ])
 def test_get_tools_from_config_returns_list_when_tools_missing(config_builder):
     """When ``tools`` key is absent, ``get_tools_from_config`` should return a (list, manager) tuple."""
-    from agentloom.application.factory import YamlAgentFactory
+    from agentloom.app.factory import YamlAgentFactory
 
     result = YamlAgentFactory.get_tools_from_config(config_builder())
     assert isinstance(result, tuple)
@@ -409,7 +409,7 @@ def test_get_tools_from_config_returns_list_when_tools_missing(config_builder):
 
 
 def _config_at(root):
-    from agentloom.configuration import C
+    from agentloom.config import C
 
     class ProjectConfig:
         agent_root = root

@@ -115,7 +115,7 @@ def assert_workers(runtime: Path, required: set[str], count: int | None = None) 
 
 def metadata(workflow: Path) -> dict:
     import yaml
-    from agentloom.configuration import C
+    from agentloom.config import C
     cfg = yaml.safe_load(workflow.read_text())
     model_type = cfg.get("model_type", C.default_model_type)
     return {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
@@ -129,7 +129,7 @@ def metadata(workflow: Path) -> dict:
 
 
 def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume: str | None = None, attempt="run") -> dict:
-    from agentloom.application.runner import execute_app
+    from agentloom.app.runner import execute_app
     lifecycle = []
     meta = metadata(workflow)
     meta["started_at"] = datetime.now(UTC).isoformat()
@@ -319,10 +319,9 @@ def validate_goal(workspace: Path, receipt: dict, *, contract_case: bool) -> dic
 
 
 def child(case: str, workspace: Path) -> dict:
-    from agentloom.configuration import C
+    from agentloom.config import C
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
-    C.raw.setdefault("lsp_servers", {})["enabled"] = False
     os.environ["AGENTLOOM_GOAL_VALIDATION_OUTPUT_ROOT"] = str(workspace / "goal_reports")
     if case == "unit":
         target = workspace / "fixture"
@@ -338,8 +337,12 @@ def child(case: str, workspace: Path) -> dict:
         return verify_context(kind, workspace)
     if case in {"core", "markdown"}:
         name = f"tool_registry_{case}_validation"
-        workflow = copied_workflow(name, "core_tools_agent.yaml" if case == "core" else "markdown_report_agent.yaml", workspace,
-                                   {f"/tmp/agentloom_{name}": str(workspace / "artifacts")})
+        workflow = copied_workflow(
+            name,
+            "core_tools_agent.yaml" if case == "core" else "markdown_report_agent.yaml",
+            workspace,
+            {f"/tmp/agentloom_{name}": str(workspace / "artifacts")},
+        )
         execute(workflow, workspace)
         if case == "core":
             content = (workspace / "artifacts/result.txt").read_text()
@@ -348,9 +351,14 @@ def child(case: str, workspace: Path) -> dict:
             expected = {"shell_tool", "write_file", "edit_file", "read_file", "glob_search", "grep_search", "list_directory"}
         else:
             content = (workspace / "artifacts/report.md").read_text()
-            if not all(item in content for item in ("# Built-in Tool Catalog Markdown Validation", "## Summary", "## Result", "markdown_report toolset is explicitly enabled.")):
+            if not all(item in content for item in (
+                "# Core File Markdown Validation",
+                "## Summary",
+                "## Result",
+                "MARKDOWN_WRITE_MIGRATION_VALIDATION: PASS",
+            )):
                 raise AssertionError("Markdown content oracle failed")
-            expected = {"write_markdown_file", "read_file"}
+            expected = {"write_file", "read_file"}
         return {"tools": sorted(expected), "tool_records": len(assert_tools(workspace / "runtime", expected)), "artifact_oracle": True}
     if case == "repo":
         from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map

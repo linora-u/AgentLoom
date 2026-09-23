@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.config.yaml_loader import load_unique_yaml
 from agentloom.execution import SecureDirectory, resolve_runtime_home
 
 from .schedule import next_run, parse_datetime, validate_schedule

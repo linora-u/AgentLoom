@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_tools_application import select
 from tests.pi_test.test_process_lifecycle import node_launcher, start_cli, until, assert_gone
@@ -17,6 +17,11 @@ from tests.pi_test.test_process_lifecycle import node_launcher, start_cli, until
 def ordered_probe(label: str) -> str:
     """Return the label for mixed serial scheduling verification."""
     return label
+
+
+def file_probe(file_path: str) -> str:
+    """Read one fixture file for platform callback tests."""
+    return Path(file_path).read_text()
 
 
 def test_tool_hook_context_enters_exactly_the_next_internal_model_request(tmp_path):
@@ -44,11 +49,13 @@ def test_unsafe_tool_metadata_serializes_actual_platform_callbacks(tmp_path):
     hook.write_text('import json,sys,time\nfrom pathlib import Path\np=json.load(sys.stdin)\n'
                     f'with Path({str(trace)!r}).open("a") as f:f.write(sys.argv[1]+"\\n")\n'
                     'time.sleep(0.15 if sys.argv[1]=="begin" else 0)\nprint("{}")\n')
-    with model_service(turns=[[('one', 'get_file_outline', {'file_path': str(source)}),
-                               ('two', 'get_file_outline', {'file_path': str(source)})]]) as (url, requests):
+    with model_service(turns=[[('one', 'file_probe', {'file_path': str(source)}),
+                               ('two', 'file_probe', {'file_path': str(source)})]]) as (url, requests):
         app = project(tmp_path, url)
-        select(app, tools=[{'name': 'get_file_outline'}], tool_metadata={'get_file_outline': {'is_concurrency_safe': False}},
-            hooks={event: [{'id': event, 'matcher': 'get_file_outline', 'command': f'{sys.executable} {hook} {label}'}]
+        select(app, tools=[{'name': 'file_probe', 'module': 'tests.pi_test.test_hook_execution_application',
+                           'function': 'file_probe'}],
+            tool_metadata={'file_probe': {'is_concurrency_safe': False}},
+            hooks={event: [{'id': event, 'matcher': 'file_probe', 'command': f'{sys.executable} {hook} {label}'}]
                    for event, label in [('PreToolUse', 'begin'), ('PostToolUse', 'end')]})
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
@@ -70,22 +77,23 @@ def test_unsafe_tool_serializes_the_entire_mixed_platform_batch(tmp_path):
         f'with Path({str(trace)!r}).open("a") as f:f.write(sys.argv[1]+"\\n")\n'
         'time.sleep(0.1 if sys.argv[1].endswith("begin") else 0)\nprint("{}")\n'
     )
-    with model_service(turns=[[('unsafe', 'get_file_outline', {'file_path': str(source)}),
+    with model_service(turns=[[('unsafe', 'file_probe', {'file_path': str(source)}),
                                ('safe', 'ordered_probe', {'label': 'safe'})]]) as (url, requests):
         app = project(tmp_path, url)
         select(
             app,
             tools=[
-                {'name': 'get_file_outline'},
+                {'name': 'file_probe', 'module': 'tests.pi_test.test_hook_execution_application',
+                 'function': 'file_probe'},
                 {'name': 'ordered_probe', 'module': __name__, 'function': 'ordered_probe'},
             ],
             tool_metadata={
-                'get_file_outline': {'is_concurrency_safe': False},
+                'file_probe': {'is_concurrency_safe': False},
                 'ordered_probe': {'is_concurrency_safe': True},
             },
             hooks={
                 event: [
-                    {'id': f'{event}-outline', 'matcher': 'get_file_outline',
+                    {'id': f'{event}-probe-file', 'matcher': 'file_probe',
                      'command': f'{sys.executable} {hook} outline-{label}'},
                     {'id': f'{event}-probe', 'matcher': 'ordered_probe',
                      'command': f'{sys.executable} {hook} probe-{label}'},
@@ -144,12 +152,16 @@ def test_cancelling_a_batch_larger_than_callback_pool_does_not_start_queued_hook
                     'time.sleep(60)\nprint("{}")\n')
     source = tmp_path / 'source.py'
     source.write_text('def untouched_outline():\n    pass\n')
-    turns = [[(f'call-{n}', 'get_file_outline', {'file_path': str(source)}) for n in range(12)]]
+    turns = [[(f'call-{n}', 'file_probe', {'file_path': str(source)}) for n in range(12)]]
     with model_service(turns=turns) as (url, requests):
         app = project(tmp_path, url)
-        select(app, tools=[{'name': 'get_file_outline'}], hooks={'PreToolUse': [
-            {'id': 'batch-wait', 'matcher': 'get_file_outline', 'command': f'{sys.executable} {hook}', 'timeout': 120}]})
+        select(app, tools=[{'name': 'file_probe', 'module': 'tests.pi_test.test_hook_execution_application',
+                           'function': 'file_probe'}],
+            hooks={'PreToolUse': [
+                {'id': 'batch-wait', 'matcher': 'file_probe',
+                 'command': f'{sys.executable} {hook}', 'timeout': 120}]})
         env, bridge_marker = node_launcher(tmp_path)
+        env['PYTHONPATH'] = str(Path(__file__).parents[2])
         child = start_cli(tmp_path, app, env)
         try:
             until(lambda: markers.exists() and len(markers.read_text().splitlines()) == 8)

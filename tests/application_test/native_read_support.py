@@ -14,7 +14,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import yaml
-from agentloom.application.composition import build_builtin_runtime_registry
+from agentloom.app.composition import build_builtin_runtime_registry
 from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities
 from agentloom.execution.model_protocol import FunctionCallItem, FunctionCallOutputItem, MessageItem, ToolDefinition
 from agentloom.execution.native_tool_host import NativeReadToolHost
@@ -139,8 +139,8 @@ def external_read_runtime(model_factory, observations):
         "native-read-acceptance", capabilities=ExternalReadRuntime.capabilities, factory=ExternalReadRuntime
     )
     with (
-        patch("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry),
-        patch("agentloom.application.agent.build_builtin_runtime_registry", lambda: registry),
+        patch("agentloom.app.validation.build_builtin_runtime_registry", lambda: registry),
+        patch("agentloom.app.agent.build_builtin_runtime_registry", lambda: registry),
     ):
         yield
 

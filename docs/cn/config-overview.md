@@ -99,7 +99,7 @@ LiteLLM 的不透明名字；框架不从模型名前缀推断协议，也不在
 无论配置如何合并，开发者和框架底层都通过唯一的 `C` 单例对象来访问配置。`C` 封装了复杂的合并逻辑，提供了极其简洁的 API。
 
 ```python
-from agentloom.configuration import C
+from agentloom.config import C
 
 # 1. 访问系统配置
 tools_list = C.get_nested("tools", "default", default=[])

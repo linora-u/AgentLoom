@@ -1,5 +1,3 @@
-lsp_servers:
-  enabled: false
 mcp_servers: null
 checkpoint:
   enabled: true

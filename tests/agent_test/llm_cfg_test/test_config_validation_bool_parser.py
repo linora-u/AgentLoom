@@ -1,7 +1,7 @@
 import logging
 
 import pytest
-from agentloom.configuration.config_validation import (
+from agentloom.config.config_validation import (
     BoolParser,
     EnumParser,
     FloatParser,
@@ -47,7 +47,7 @@ def test_parser_warns_through_the_supplied_standard_logger(
     value,
     default,
 ):
-    logger = logging.getLogger("agentloom.configuration.parser-test")
+    logger = logging.getLogger("agentloom.config.parser-test")
 
     with caplog.at_level(logging.WARNING, logger=logger.name):
         assert parser.parse(value, default=default, logger=logger) == default
@@ -58,7 +58,7 @@ def test_parser_warns_through_the_supplied_standard_logger(
 
 
 def test_enum_parser_warns_through_the_supplied_standard_logger(caplog):
-    logger = logging.getLogger("agentloom.configuration.enum-parser-test")
+    logger = logging.getLogger("agentloom.config.enum-parser-test")
 
     with caplog.at_level(logging.WARNING, logger=logger.name):
         assert (

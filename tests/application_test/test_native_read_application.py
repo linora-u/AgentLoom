@@ -4,8 +4,8 @@ import json
 
 import pytest
 import yaml
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.model_protocol import FunctionCallItem, MessageItem, ModelTurnResult
 
 from tests.application_test.native_read_support import (
@@ -26,7 +26,6 @@ def test_application_native_read_runs_production_hooks_and_durable_host(tmp_path
                 "runtime": {"root_dir": str(tmp_path / "runtime")},
                 "checkpoint": {"enabled": False},
                 "self_learning": {"enabled": False},
-                "lsp_servers": {"enabled": False},
                 "default_toolsets": [],
             }
         )

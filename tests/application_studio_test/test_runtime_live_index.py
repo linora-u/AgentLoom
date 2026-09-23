@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agentloom.execution.context import RuntimeRunLease
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.query_service import StudioQueryService
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"
 

@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 import agentloom.execution.workspace as workspace_module
 
 

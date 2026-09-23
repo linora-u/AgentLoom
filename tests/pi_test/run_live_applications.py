@@ -29,8 +29,8 @@ TASKS = [
 
 
 def child(root: Path, output: Path):
-    from agentloom.application.runner import execute_app
-    from agentloom.configuration.config import bind_config, load_project_config
+    from agentloom.app.runner import execute_app
+    from agentloom.config.config import bind_config, load_project_config
     with bind_config(load_project_config(root)):
         result = execute_app(root / "applications/live/workflows/root.yaml", file_logging=False)
     output.write_text(json.dumps({"output": result.output, "application_id": result.run.application_id,
@@ -51,7 +51,7 @@ def campaign(destination: Path, source: Path, limit: int):
         (root / "config").mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, root / "config/llm.yaml")
         (root / "config/llm.yaml").chmod(0o600)
-        (root / "config/system.yaml").write_text("lsp_servers: {enabled: false}\ncheckpoint: {enabled: false}\nself_learning: {enabled: false}\ndefault_toolsets: []\n")
+        (root / "config/system.yaml").write_text("checkpoint: {enabled: false}\nself_learning: {enabled: false}\ndefault_toolsets: []\n")
         app = root / "applications/live/workflows/root.yaml"
         app.parent.mkdir(parents=True, exist_ok=True)
         app.write_text(yaml.safe_dump({"name": case, "agent_runtime": "pi", "model_type": profile,
