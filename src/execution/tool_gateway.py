@@ -27,7 +27,7 @@ from typing import (
 from agentloom.execution.logging import get_logger
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.native_tools import ToolManifestEntry
-from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord
 
 logger = get_logger(__name__)
 
@@ -1132,6 +1132,7 @@ class AgentLoomToolGateway:
         self._definitions = tuple(
             binding.definition for binding in by_name.values()
         )
+        self._can_retrieve_context = "loom_retrieve_context" in by_name
         self._resource_closers = closers
         self._close_lock = RLock()
         self._closed = False
@@ -1392,9 +1393,10 @@ class AgentLoomToolGateway:
                 return failed
 
         result = _canonical_tool_output(tool_name, raw_result)
-        if isinstance(result, str):
+        metadata: dict[str, Any] = {}
+        if self._can_retrieve_context and isinstance(result, str):
             try:
-                result = _compress_tool_result(
+                model_output = _compress_tool_result(
                     tool_name=tool_name,
                     source=(
                         binding.compression_source
@@ -1402,6 +1404,8 @@ class AgentLoomToolGateway:
                     ),
                     result=result,
                 )
+                if model_output != result:
+                    metadata[MODEL_OUTPUT_METADATA_KEY] = model_output
             except Exception as processing_error:
                 logger.warning(
                     "Context compression failed open for tool %s; "
@@ -1425,6 +1429,7 @@ class AgentLoomToolGateway:
             tool_name=tool_name,
             input=effective_input,
             output=result,
+            metadata=metadata,
             started_at=started_at,
             ended_at=time.time(),
         )

@@ -6,7 +6,6 @@ from threading import Barrier, Lock
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.execution.hooks.types import Blocked
 from agentloom.execution.tool_gateway import AgentLoomToolGateway
@@ -18,6 +17,7 @@ from agentloom.execution.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
     TrustedMemoryEvidenceEnvelope,
 )
+from agentloom.runtimes.smolagents.tools.tools import tool
 from smolagents import Tool
 
 
@@ -120,18 +120,50 @@ def test_empty_tool_result_is_visible_to_the_model() -> None:
     assert _invoke(_tool("empty_tool", ""), run) == "(empty_tool completed with no output)"
 
 
-def test_context_engine_remains_the_only_large_result_compression_boundary() -> None:
+def test_gateway_without_retrieval_tool_keeps_large_result_in_full() -> None:
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
     engine = MagicMock()
     engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
+    raw = "x" * 60_000
 
     with patch(
         "agentloom.execution.context_engine.runtime.get_active_context_engine",
         return_value=engine,
     ):
-        result = _invoke(_tool("large_tool", "x" * 60_000), run)
+        result = _invoke(_tool("large_tool", raw), run)
 
-    assert result == "[ContextRef ctx_123] preview"
+    assert result == raw
+    engine.compress_tool_result.assert_not_called()
+
+
+def test_gateway_compresses_only_model_projection_for_retriever() -> None:
+    run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    engine = MagicMock()
+    engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
+    raw = "x" * 60_000
+    gateway = AgentLoomToolGateway.from_tools(
+        [
+            _tool("large_tool", raw),
+            _tool("loom_retrieve_context", "retrieved"),
+        ]
+    )
+
+    with (
+        patch(
+            "agentloom.execution.context_engine.runtime.get_active_context_engine",
+            return_value=engine,
+        ),
+        _bind(run),
+    ):
+        record = gateway.invoke(
+            call_id="large-call",
+            tool_name="large_tool",
+            arguments={},
+        )
+
+    assert record.output == raw
+    assert record.direct_result() == raw
+    assert '"output":"[ContextRef ctx_123] preview"' in record.model_content()
     engine.compress_tool_result.assert_called_once()
 
 
@@ -168,11 +200,12 @@ def test_trusted_evidence_is_captured_before_result_compression() -> None:
         "agentloom.execution.context_engine.runtime.get_active_context_engine",
         return_value=engine,
     ):
-        assert _invoke(tool, run) == "[ContextRef ctx_123] preview"
+        assert _invoke(tool, run) == fact + ("x" * 60_000)
 
     envelope = seen_response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY]
     assert isinstance(envelope, TrustedMemoryEvidenceEnvelope)
     assert envelope[0]["text"] == fact
+    engine.compress_tool_result.assert_not_called()
 
 
 def test_transformed_unknown_field_is_blocked_before_side_effect() -> None:
