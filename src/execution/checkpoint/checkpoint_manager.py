@@ -51,7 +51,16 @@ class WorkerCallPreparation:
 
     call_index: int
     should_execute: bool
-    cached_result: Any = None
+    cached_result: JSONValue = None
+
+
+class _ResultNotProvided:
+    """Distinguish an omitted result from an explicit JSON null."""
+
+    __slots__ = ()
+
+
+_RESULT_NOT_PROVIDED = _ResultNotProvided()
 
 
 def _require_safe_path_component(value: Any, *, field: str) -> str:
@@ -340,7 +349,7 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
                 call["input_hash"] = event.get("input_hash")
             if event.get("task_input") is not None:
                 call["task_input"] = event.get("task_input")
-            if event.get("result") is not None:
+            if "result" in event:
                 call["result"] = event.get("result")
             if event.get("error") is not None:
                 call["error"] = event.get("error")
@@ -1010,7 +1019,7 @@ class CheckpointManager:
         status: str,
         input_hash: str = "",
         task_input: str = "",
-        result: str | None = None,
+        result: JSONValue | _ResultNotProvided = _RESULT_NOT_PROVIDED,
         error: str | None = None,
     ) -> dict:
         """Record terminal state for one worker call."""
@@ -1027,8 +1036,11 @@ class CheckpointManager:
             event["input_hash"] = input_hash
         if task_input:
             event["task_input"] = str(task_input)
-        if result is not None:
-            event["result"] = result
+        if not isinstance(result, _ResultNotProvided):
+            event["result"] = copy_json_value(
+                result,
+                field_name="worker checkpoint result",
+            )
         if error is not None:
             event["error"] = error
         with self._tree_lock:
@@ -1095,7 +1107,7 @@ class CheckpointManager:
         runtime_checkpoint: dict[str, Any] | None = None,
         task_input: str = "",
         status: str = "completed",
-        result: Any = None,
+        result: JSONValue = None,
         error: str | None = None,
     ) -> Path:
         data: dict[str, Any] = {
@@ -1116,7 +1128,10 @@ class CheckpointManager:
             if isinstance(progress, int) and not isinstance(progress, bool):
                 data["step_count"] = progress
         if status == "completed" or result is not None:
-            data["result"] = result
+            data["result"] = copy_json_value(
+                result,
+                field_name="worker runtime checkpoint result",
+            )
         if error is not None:
             data["error"] = error
         p = self._worker_call_ckpt(task_id, worker_name, call_index)
