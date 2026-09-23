@@ -10,7 +10,11 @@ from typing import Any
 from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
 from agentloom.application.definition import extract_markdown_definition, load_agent_definition
 from agentloom.application.imports.dynamic_import import load_function
-from agentloom.application.validation import AgentConfigNormalizer, NormalizedAgentConfig
+from agentloom.application.validation import (
+    AgentConfigNormalizer,
+    NormalizedAgentConfig,
+    resolve_input_schema_object,
+)
 from agentloom.application.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from agentloom.configuration import C
 from agentloom.configuration.config import EffectiveAgentConfigSnapshot
@@ -134,16 +138,28 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         input_schema = normalized.input_schema
         if not isinstance(input_schema, dict):
             raise ValueError(f"Worker Agent '{function_name}' has no input schema")
-        properties = input_schema.get("properties")
-        if not isinstance(properties, dict):
-            raise ValueError(
-                f"Worker Agent '{function_name}' input_schema requires object properties"
-            )
+        object_schema = resolve_input_schema_object(input_schema)
+        properties = {
+            **dict(object_schema.get("properties") or {}),
+            **dict(input_schema.get("properties") or {}),
+        }
         required_names = [
-            name for name in input_schema.get("required", []) if isinstance(name, str)
+            name
+            for name in dict.fromkeys(
+                [
+                    *object_schema.get("required", []),
+                    *input_schema.get("required", []),
+                ]
+            )
+            if isinstance(name, str)
         ]
         optional_names = [name for name in properties if name not in required_names]
         ordered_input_names = required_names + optional_names
+        additional_properties = input_schema.get(
+            "additionalProperties",
+            object_schema.get("additionalProperties", True),
+        )
+        accepts_additional_properties = additional_properties is not False
 
         # ── Factory mode: capture shared immutable state ──
         # Agent instances are stateful (memory.steps, state, step_number),
@@ -189,7 +205,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 input_payload[ordered_input_names[idx]] = value
 
             for key, value in kwargs.items():
-                if key not in properties:
+                if key not in properties and not accepts_additional_properties:
                     raise TypeError(f"{function_name}() got an unexpected keyword argument '{key}'")
                 if key in input_payload:
                     raise TypeError(f"{function_name}() got multiple values for argument '{key}'")
@@ -276,6 +292,18 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                     annotation=Any,
                 )
             )
+        if accepts_additional_properties:
+            extra_name = "additional_properties"
+            while extra_name in properties:
+                extra_name = f"_{extra_name}"
+            annotations[extra_name] = Any
+            signature_params.append(
+                inspect.Parameter(
+                    name=extra_name,
+                    kind=inspect.Parameter.VAR_KEYWORD,
+                    annotation=Any,
+                )
+            )
 
         dynamic_agent_tool.__annotations__ = annotations
         dynamic_agent_tool.__signature__ = inspect.Signature(
@@ -290,6 +318,9 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         )
         dynamic_agent_tool._agentloom_input_validator = (  # type: ignore[attr-defined]
             normalized.input_validator
+        )
+        dynamic_agent_tool._agentloom_input_object_schema = (  # type: ignore[attr-defined]
+            object_schema
         )
         dynamic_agent_tool._agentloom_recovery_descriptor = lambda arguments: {  # type: ignore[attr-defined]
             "agent_name": function_name,

@@ -16,7 +16,8 @@ from agentloom.execution.agent_runtime import (
 from agentloom.execution.goal import GoalConfig, normalize_goal_config
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
-from referencing import Registry
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 
 
 @dataclass
@@ -65,6 +66,36 @@ def _reject_remote_schema_refs(value: object, *, field_name: str, path: str = "$
             )
 
 
+def resolve_input_schema_object(schema: dict[str, Any]) -> dict[str, Any]:
+    """Resolve a root local reference to its object-shaped schema."""
+
+    candidate: object = schema
+    resolver = Registry().with_resource(
+        "urn:agentloom:input-schema",
+        Resource.from_contents(
+            schema,
+            default_specification=DRAFT202012,
+        ),
+    ).resolver("urn:agentloom:input-schema")
+    visited: set[str] = set()
+    while isinstance(candidate, dict) and "$ref" in candidate:
+        reference = candidate["$ref"]
+        if not isinstance(reference, str) or reference in visited:
+            raise ValueError("input_schema root reference must resolve to an object")
+        visited.add(reference)
+        try:
+            resolved = resolver.lookup(reference)
+        except Exception as exc:
+            raise ValueError(
+                "input_schema root reference must resolve to an object"
+            ) from exc
+        candidate = resolved.contents
+        resolver = resolved.resolver
+    if not isinstance(candidate, dict) or candidate.get("type") != "object":
+        raise ValueError("input_schema root type must be object")
+    return deepcopy(candidate)
+
+
 def _compile_input_schema(
     raw_schema: object,
 ) -> tuple[dict[str, Any], Callable[[object], None]]:
@@ -78,8 +109,7 @@ def _compile_input_schema(
         raise ValueError(
             f"input_schema must be valid Draft 2020-12: {exc.message}"
         ) from exc
-    if schema.get("type") != "object":
-        raise ValueError("input_schema root type must be object")
+    resolve_input_schema_object(schema)
     validator = Draft202012Validator(schema, registry=Registry())
     return schema, validator.validate
 
