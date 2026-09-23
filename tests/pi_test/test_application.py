@@ -138,11 +138,7 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
         message["role"] == "system" and "Say Pi answer." in message["content"]
         for message in messages
     )
-    assert not any(
-        message["role"] == "user"
-        and "Answer directly." in str(message.get("content"))
-        for message in messages
-    )
+    assert not any(message["role"] == "user" for message in messages)
     assert headers["X-Fixture"] == "selected-profile"
     assert "todo_write" not in json.dumps(payload)
     assert "final_answer" not in json.dumps(payload)
