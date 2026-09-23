@@ -1,7 +1,0 @@
-{
-  "originalDirectory": "experiments/pi-sdk-compatibility",
-  "currentDirectory": "tests/pi_sdk_compatibility",
-  "authoringResultSha256": "b90e39a811eaeaac9caba7ba5a5f154cb73795eab3420f4c29d69edf23a02abc",
-  "preservedReplay": "tests/pi_sdk_compatibility/evidence/ticket01-replay.json",
-  "replayRecord": "tests/pi_sdk_compatibility/evidence/result.json"
-}

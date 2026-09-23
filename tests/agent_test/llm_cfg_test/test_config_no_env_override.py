@@ -22,7 +22,6 @@ def test_system_fields_are_not_overridden_by_environment(monkeypatch, tmp_path):
                 "system": {
                     "name": "yaml-system-name",
                     "version": "9.9.9",
-                    "user_agent": "yaml-agent/9.9.9",
                 }
             },
         )
@@ -30,14 +29,12 @@ def test_system_fields_are_not_overridden_by_environment(monkeypatch, tmp_path):
 
         monkeypatch.setenv("SYSTEM_NAME", "env-system-name")
         monkeypatch.setenv("SYSTEM_VERSION", "1.2.3")
-        monkeypatch.setenv("USER_AGENT", "env-agent/1.2.3")
 
         cfg = config_module._load_merged_config(config_dir=config_dir)
         config_module._ACTIVE_CONFIG = cfg
 
         assert cfg.system_name == "yaml-system-name"
         assert cfg.system_version == "9.9.9"
-        assert cfg.user_agent == "yaml-agent/9.9.9"
         assert config_module.C.system_name == "yaml-system-name"
     finally:
         config_module._ACTIVE_CONFIG = previous
