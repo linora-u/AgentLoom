@@ -203,14 +203,25 @@ def test_final_answer_uses_and_validates_structured_output_contract() -> None:
                 "finding": {
                     "type": "string",
                 },
+                "scoped": {
+                    "$id": "urn:agentloom:scoped-output",
+                    "$defs": {"value": {"type": "string"}},
+                    "type": "object",
+                    "properties": {
+                        "value": {"$ref": "#/$defs/value"},
+                    },
+                },
             },
             "properties": {
                 "findings": {
                     "type": "array",
                     "items": {"$ref": "#/$defs/finding"},
                 },
+                "metadata": {
+                    "const": {"$ref": "#/literal"},
+                },
             },
-            "required": ["findings"],
+            "required": ["findings", "metadata"],
             "additionalProperties": False,
         },
     )
@@ -222,11 +233,31 @@ def test_final_answer_uses_and_validates_structured_output_contract() -> None:
     assert answer_schema["properties"]["findings"]["items"]["$ref"] == (
         "#/properties/answer/$defs/finding"
     )
+    assert answer_schema["properties"]["metadata"]["const"] == {
+        "$ref": "#/literal"
+    }
+    assert answer_schema["$defs"]["scoped"]["properties"]["value"]["$ref"] == (
+        "#/$defs/value"
+    )
     assert definition.strict is True
     assert binding.input_validator is not None
-    binding.input_validator({"answer": {"findings": ["missing guard"]}})
+    binding.input_validator(
+        {
+            "answer": {
+                "findings": ["missing guard"],
+                "metadata": {"$ref": "#/literal"},
+            }
+        }
+    )
     with pytest.raises(ValueError, match="output does not satisfy"):
-        binding.input_validator({"answer": {"findings": [3]}})
+        binding.input_validator(
+            {
+                "answer": {
+                    "findings": [3],
+                    "metadata": {"$ref": "#/literal"},
+                }
+            }
+        )
 
 
 def test_invalid_structured_final_answer_does_not_end_react_loop() -> None:
