@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import math
 import os
 import re
@@ -761,6 +762,22 @@ def _compress_tool_result(
     )
 
 
+def _model_projection_text(result: Any) -> str | None:
+    """Serialize JSON-compatible Tool results for model-only compression."""
+
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(
+            result,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 def _canonical_tool_output(tool_name: str, result: Any) -> Any:
     """Apply the stable empty-result projection shared by execution and recovery."""
     if result is None or (isinstance(result, str) and not result.strip()):
@@ -1394,7 +1411,12 @@ class AgentLoomToolGateway:
 
         result = _canonical_tool_output(tool_name, raw_result)
         metadata: dict[str, Any] = {}
-        if self._can_retrieve_context and isinstance(result, str):
+        projection_text = (
+            _model_projection_text(result)
+            if self._can_retrieve_context
+            else None
+        )
+        if projection_text is not None:
             try:
                 model_output = _compress_tool_result(
                     tool_name=tool_name,
@@ -1402,9 +1424,9 @@ class AgentLoomToolGateway:
                         binding.compression_source
                         or f"tool_result:{tool_name}"
                     ),
-                    result=result,
+                    result=projection_text,
                 )
-                if model_output != result:
+                if model_output != projection_text:
                     metadata[MODEL_OUTPUT_METADATA_KEY] = model_output
             except Exception as processing_error:
                 logger.warning(
