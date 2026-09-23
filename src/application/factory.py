@@ -263,11 +263,13 @@ class YamlConfiguredAgent(RoleDrivenAgent):
 
         description_lines = [self.description.strip(), "", "Args:"]
         for name in ordered_input_names:
-            spec = properties[name]
+            spec = properties.get(name, additional_properties)
             required_tag = "required" if name in required_names else "optional"
+            input_type = spec.get("type", "any") if isinstance(spec, dict) else "any"
+            input_description = spec.get("description", "") if isinstance(spec, dict) else ""
             description_lines.append(
-                f"    {name} ({spec.get('type', 'any')}, {required_tag}): "
-                f"{spec.get('description', '')}"
+                f"    {name} ({input_type}, {required_tag}): "
+                f"{input_description}"
             )
         generated_docstring = "\n".join(description_lines)
 
