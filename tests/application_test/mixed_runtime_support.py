@@ -97,9 +97,12 @@ def project(root: Path, url: str, *, supervisor: str, worker: str) -> Path:
         'name': 'inspect_note', 'agent_runtime': worker, 'model_type': 'worker',
         'description': 'Read one requested file.', 'workflow': 'Read the file named in query and return its exact token.',
         'tools': [{'name': 'read' if worker == 'pi' else 'read_file'}], 'toolsets': [],
-        'agent_function_schema': {'description': 'Read a note in an isolated Worker.',
-            'inputs': {'query': {'description': 'File to read.', 'required': True}},
-            'output': {'description': 'Actual file token.'}},
+        'input_schema': {
+            'type': 'object',
+            'properties': {'query': {'type': 'string', 'description': 'File to read.'}},
+            'required': ['query'],
+            'additionalProperties': False,
+        },
     })
     return workflow
 
