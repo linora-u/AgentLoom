@@ -13,7 +13,7 @@ def _base_config() -> dict:
     }
 
 
-def test_runner_validation_accepts_list_workflow() -> None:
+def test_runner_validation_rejects_list_workflow() -> None:
     config = {
         **_base_config(),
         "workflow": [
@@ -22,7 +22,8 @@ def test_runner_validation_accepts_list_workflow() -> None:
         ],
     }
 
-    validate_required_yaml_fields(config, Path("agent.yaml"))
+    with pytest.raises(ValueError, match="workflow"):
+        validate_required_yaml_fields(config, Path("agent.yaml"))
 
 
 @pytest.mark.parametrize(
