@@ -127,9 +127,7 @@ def test_empty_tool_result_preserves_canonical_value_for_the_model() -> None:
 
     assert record.output == ""
     assert record.direct_result() == ""
-    assert record.model_content() == (
-        '{"ok":true,"status":"completed","output":""}'
-    )
+    assert record.model_content() == ""
 
 
 def test_null_tool_result_preserves_json_null() -> None:
@@ -145,9 +143,7 @@ def test_null_tool_result_preserves_json_null() -> None:
 
     assert record.output is None
     assert record.direct_result() is None
-    assert record.model_content() == (
-        '{"ok":true,"status":"completed","output":null}'
-    )
+    assert record.model_content() == "null"
 
 
 def test_gateway_without_retrieval_tool_keeps_large_result_in_full() -> None:
@@ -193,7 +189,7 @@ def test_gateway_compresses_only_model_projection_for_retriever() -> None:
 
     assert record.output == raw
     assert record.direct_result() == raw
-    assert '"output":"[ContextRef ctx_123] preview"' in record.model_content()
+    assert record.model_content() == "[ContextRef ctx_123] preview"
     engine.compress_tool_result.assert_called_once()
 
 
@@ -237,9 +233,7 @@ def test_structured_model_content_has_stable_key_order() -> None:
         output={"z": 2, "a": 1},
     )
 
-    assert record.model_content() == (
-        '{"ok":true,"status":"completed","output":{"a":1,"z":2}}'
-    )
+    assert record.model_content() == '{"a":1,"z":2}'
 
 
 def test_trusted_evidence_is_captured_before_result_compression() -> None:
