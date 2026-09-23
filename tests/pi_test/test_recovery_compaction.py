@@ -47,11 +47,11 @@ def _terminal_states(events):
     return [event["details"]["state"] for event in events if event["kind"] == "terminal"]
 
 
-def test_continued_empty_task_recovers_context_overflow_through_session_lifecycle(tmp_path):
+def test_each_continued_empty_task_gets_independent_overflow_recovery(tmp_path):
     overflow = "Requested token count exceeds the model's maximum context length of 64 tokens"
     with model_service(
-        fail_requests={2: 400},
-        fail_messages={2: overflow},
+        fail_requests={2: 400, 4: 400, 5: 400},
+        fail_messages={2: overflow, 4: overflow, 5: overflow},
     ) as (url, requests):
         transport = PiTransport(uuid4().hex)
         try:
@@ -119,21 +119,24 @@ def test_continued_empty_task_recovers_context_overflow_through_session_lifecycl
                 return response.payload
 
             assert run("Seed the reusable session.", continue_session=False).state == "success"
+            exhausted = run(None, continue_session=True)
             result = run(None, continue_session=True)
         finally:
             transport.close()
 
+    assert exhausted.state == "failed"
     assert result.state == "success"
     assert result.output == "Pi answer"
-    assert len(requests) == 4
+    assert len(requests) == 7
     assert sum(message["role"] == "user" for message in requests[1][1]["messages"]) == 1
     assert "agentloom_instruction_only_turn" not in json.dumps(requests)
     assert _is_compaction(requests[2][1])
-    assert not _is_compaction(requests[3][1])
-    assert [event.payload.get("phase") for event in events if event.event == "checkpoint"] == [
-        "compaction_started",
-        "compaction_ended",
-    ]
+    assert _is_compaction(requests[5][1])
+    assert not _is_compaction(requests[6][1])
+    checkpoint_phases = [event.payload.get("phase") for event in events
+                         if event.event == "checkpoint"]
+    assert checkpoint_phases.count("compaction_started") == 2
+    assert checkpoint_phases[-2:] == ["compaction_started", "compaction_ended"]
 
 
 def test_compaction_sigint_resumes_assistant_tail_with_native_compaction_enabled(tmp_path):
