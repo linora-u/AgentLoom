@@ -289,14 +289,16 @@ class ToolCallRecord:
 
     def model_content(self) -> str:
         if self.status == "completed":
-            output = json.dumps(
-                self.model_output(),
+            output = self.model_output()
+            if isinstance(output, str):
+                return output
+            return json.dumps(
+                output,
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,
                 default=str,
             )
-            return f'{{"ok":true,"status":"completed","output":{output}}}'
         error = self.error or ToolErrorRecord(
             kind="interrupted",
             message="Tool execution did not reach a terminal result.",

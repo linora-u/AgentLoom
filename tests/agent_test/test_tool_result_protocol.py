@@ -535,12 +535,12 @@ def test_litellm_projects_parallel_success_results_before_message_cleaning() -> 
         {
             "role": "tool",
             "tool_call_id": "wire-ok-1",
-            "content": '{"ok":true,"status":"completed","output":"echo:one"}',
+            "content": "echo:one",
         },
         {
             "role": "tool",
             "tool_call_id": "wire-ok-2",
-            "content": '{"ok":true,"status":"completed","output":"echo:two"}',
+            "content": "echo:two",
         },
     ]
 
@@ -570,7 +570,7 @@ def test_litellm_projects_tool_errors_to_anthropic_and_bedrock_native_flags() ->
     success_message = {
         "role": "tool",
         "tool_call_id": "wire-success-8",
-        "content": '{"ok":true,"status":"completed","output":"done"}',
+        "content": "done",
     }
     assert "is_error" not in factory.convert_to_anthropic_tool_result(success_message)
     assert "status" not in factory._convert_to_bedrock_tool_call_result(success_message)["toolResult"]
