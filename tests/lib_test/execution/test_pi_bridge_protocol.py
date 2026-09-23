@@ -91,6 +91,7 @@ def test_run_error_preserves_output_validation_category():
         "payload": {
             "method": "run",
             "state": "max_steps_error",
+            "terminal_rejections": 2,
             "output": None,
             "usage": {},
             "artifacts": [],
@@ -105,6 +106,7 @@ def test_run_error_preserves_output_validation_category():
 
     roundtrip = json.loads(encode_message(decode_message(json.dumps(message))))
     assert roundtrip["payload"]["error"]["category"] == "output_validation"
+    assert roundtrip["payload"]["terminal_rejections"] == 2
 
 
 @pytest.mark.parametrize(

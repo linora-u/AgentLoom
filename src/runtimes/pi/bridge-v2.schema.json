@@ -1134,6 +1134,11 @@
           "title": "State",
           "type": "string"
         },
+        "terminal_rejections": {
+          "minimum": 0,
+          "title": "Terminal Rejections",
+          "type": "integer"
+        },
         "output": {
           "$ref": "#/$defs/JsonValue",
           "default": null
@@ -1180,7 +1185,8 @@
       },
       "required": [
         "method",
-        "state"
+        "state",
+        "terminal_rejections"
       ],
       "title": "RunResult",
       "type": "object"
