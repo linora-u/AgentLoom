@@ -194,10 +194,11 @@ def test_validator_rejects_goal_on_worker(tmp_path: Path) -> None:
             "description": "worker",
             "workflow": "work",
             "goal": False,
-            "agent_function_schema": {
-                "description": "worker tool",
-                "inputs": {"task": {"description": "task"}},
-                "output": {"description": "result"},
+            "input_schema": {
+                "type": "object",
+                "properties": {"task": {"type": "string"}},
+                "required": ["task"],
+                "additionalProperties": False,
             },
         },
     )
