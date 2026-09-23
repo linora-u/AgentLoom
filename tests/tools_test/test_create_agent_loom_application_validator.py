@@ -368,7 +368,7 @@ def test_markdown_without_yaml_block_is_rejected(tmp_path: Path) -> None:
 
 
 def _canonical_errors(project_root: Path, workflow_file: Path) -> list[str]:
-    from agentloom.application.definition import definition_error, load_agent_definition, validate_agent_definition
+    from agentloom.app.definition import definition_error, load_agent_definition, validate_agent_definition
 
     try:
         definition = load_agent_definition(workflow_file)
@@ -507,8 +507,8 @@ def test_validator_missing_model_catalog_is_a_failure(tmp_path: Path) -> None:
 
 
 def test_validator_unreferenced_nested_worker_uses_shared_role_validation(tmp_path: Path) -> None:
-    from agentloom.application.definition import definition_error, load_agent_definition
-    from agentloom.application.readiness import validate_runtime_worker_config
+    from agentloom.app.definition import definition_error, load_agent_definition
+    from agentloom.app.readiness import validate_runtime_worker_config
 
     app = _create_min_project(tmp_path)
     worker = app / "workflows/worker_agents/nested/orphan.yaml"
@@ -637,7 +637,7 @@ except SystemExit as exc:
     assert exc.code == 0, exc.code
 scanner = runpy.run_path(str(script.with_name('scan_tools.py')))
 assert 'should_not_import.py' in scanner['scan_app_structure'](str(app))
-for prefix in ('litellm', 'agentloom.application.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
+for prefix in ('litellm', 'agentloom.app.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not Path('.agentloom').exists()
 assert not Path('must-not-exist').exists()

@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from agentloom.configuration.config import EffectiveAgentConfigSnapshot
+from agentloom.config.config import EffectiveAgentConfigSnapshot
 
 _SOURCE_NAMES = {"global_system": "global", "application_system": "application", "agent": "agent"}
 _PRIVATE_KEYS = {"model", "llm", "langfuse"}

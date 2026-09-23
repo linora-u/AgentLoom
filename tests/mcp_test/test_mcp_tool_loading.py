@@ -43,7 +43,7 @@ class TestReturnType:
 
     def test_returns_tuple_without_mcp(self):
         """When no mcp_servers configured, returns (tools, None)."""
-        from agentloom.application.factory import YamlAgentFactory
+        from agentloom.app.factory import YamlAgentFactory
 
         result = YamlAgentFactory.get_tools_from_config(
             {"tools": []},
@@ -57,7 +57,7 @@ class TestReturnType:
 
     def test_returns_tuple_no_tools_key(self):
         """Config without 'tools' key still returns tuple."""
-        from agentloom.application.factory import YamlAgentFactory
+        from agentloom.app.factory import YamlAgentFactory
 
         result = YamlAgentFactory.get_tools_from_config(
             {},
@@ -82,7 +82,7 @@ class TestMcpToolsLoading:
         self, mock_merge, mock_parse, MockManager, tmp_path
     ):
         """When mcp_servers is configured and servers connect, tools are appended."""
-        from agentloom.application.factory import YamlAgentFactory
+        from agentloom.app.factory import YamlAgentFactory
 
         # Set up mocks
         fake_mcp_tool = _fake_tool("mcp__srv__search")
@@ -117,7 +117,7 @@ class TestMcpToolsLoading:
 class TestNoMcpServers:
 
     def test_no_mcp_servers_loads_default_toolsets(self):
-        from agentloom.application.factory import YamlAgentFactory
+        from agentloom.app.factory import YamlAgentFactory
 
         config = {}  # no tools, no mcp_servers
         tools, mcp_mgr = YamlAgentFactory.get_tools_from_config(

@@ -6,7 +6,7 @@ Public CLI:
       --app-root applications/<app_name>
 
 This adapter owns directory discovery and the JSON envelope only. Definition,
-Worker, model, configuration, and reference rules belong to agentloom.application.
+Worker, model, configuration, and reference rules belong to agentloom.app.
 """
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ import sys
 from pathlib import Path
 
 import yaml
-from agentloom.application.definition import (
+from agentloom.app.definition import (
     definition_error,
     discover_application_definition_files,
     inspect_application_definition,
     read_agent_definition,
 )
-from agentloom.configuration.config import load_project_config
+from agentloom.config.config import load_project_config
 
 
 def _discover_project_root(start: Path) -> Path | None:

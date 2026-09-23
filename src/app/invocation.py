@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution import get_current_run_context
 from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
@@ -30,7 +30,7 @@ from agentloom.execution.trace import (
 from agentloom.execution.workspace import ensure_workspace_mounted_once
 
 if TYPE_CHECKING:
-    from agentloom.application.lifecycle import ApplicationRunLifecycle
+    from agentloom.app.lifecycle import ApplicationRunLifecycle
 
 
 _RUNTIME_EVENT_SINK: ContextVar[RuntimeEventSink | None] = ContextVar(
@@ -133,7 +133,7 @@ class AgentInvocation:
         lifecycle = self.application_lifecycle
         owns_lifecycle = False
         if lifecycle is None and self.checkpoint_manager is not None:
-            from agentloom.application.lifecycle import ApplicationRunLifecycle
+            from agentloom.app.lifecycle import ApplicationRunLifecycle
 
             lifecycle = ApplicationRunLifecycle()
             lifecycle.enter_execution()
@@ -356,7 +356,7 @@ class AgentInvocation:
         effective_config = (
             self.owner._effective_agent_config or self.owner._config
         )
-        from agentloom.application.validation import AgentConfigNormalizer
+        from agentloom.app.validation import AgentConfigNormalizer
 
         requirements = AgentConfigNormalizer.runtime_requirements(
             self.owner._config, effective_config=effective_config,

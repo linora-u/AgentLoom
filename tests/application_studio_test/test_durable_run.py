@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.query_service import StudioQueryService
 
 
 def test_run_detail_uses_durable_events_after_success_checkpoint_cleanup(tmp_path: Path) -> None:

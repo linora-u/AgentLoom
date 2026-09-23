@@ -10,7 +10,7 @@ Usage (CLI)::
 
 Usage (Python API)::
 
-    from agentloom.application.scaffold import create_demo_script
+    from agentloom.app.scaffold import create_demo_script
     create_demo_script("applications/<app>/workflows/<agent>.yaml")
 """
 
@@ -24,8 +24,8 @@ from typing import Optional
 
 import click
 
-from agentloom.configuration import C
-from agentloom.application.workflows import infer_category_from_yaml_path
+from agentloom.config import C
+from agentloom.app.workflows import infer_category_from_yaml_path
 
 
 _DEMO_TEMPLATE = textwrap.dedent('''\
@@ -44,7 +44,7 @@ _DEMO_TEMPLATE = textwrap.dedent('''\
     project_root = (Path(__file__).resolve().parent / {project_relative_path}).resolve()
     os.environ.setdefault("AGENTLOOM_PROJECT_ROOT", str(project_root))
 
-    from agentloom.application.runner import run_app
+    from agentloom.app.runner import run_app
 
 
     def main():

@@ -19,7 +19,7 @@ def test_cold_cli_runtime_failures_never_import_provider_sdks():
             sys.meta_path.insert(0, DenyProviderImports())
 
             from agentloom.__main__ import main
-            from agentloom.application import runner
+            from agentloom.app import runner
             from agentloom.execution.agent_runtime import AgentRuntimeError
             from click.testing import CliRunner
 

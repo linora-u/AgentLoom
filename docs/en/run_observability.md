@@ -5,7 +5,7 @@ Use the structured interface when another program must track an AgentLoom run re
 ## Python API
 
 ```python
-from agentloom.application.runner import execute_app
+from agentloom.app.runner import execute_app
 
 events = []
 result = execute_app(

@@ -42,7 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.logging import get_logger
 from agentloom.execution import (
     RuntimeContext,

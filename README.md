@@ -325,16 +325,16 @@ For programmatic execution, `execute_app()` returns an `ApplicationRunResult`
 with output, timestamps, structured Goal state, and a `RunInfo` receipt:
 
 ```python
-from agentloom.application.runner import execute_app
+from agentloom.app.runner import execute_app
 
 result = execute_app("applications/release_review/workflows/release_review_agent.yaml")
 print(result.output, result.run.run_id)
 ```
 
-Framework source lives directly in `src/application/`, `src/execution/`,
+Framework source lives directly in `src/app/`, `src/execution/`,
 `src/integrations/`, and the other responsibility modules. Installation maps `src/`
 to the Python package name `agentloom`: the import above loads
-`src/application/runner.py`. There is no extra `agentloom` source directory.
+`src/app/runner.py`. There is no extra `agentloom` source directory.
 Use `uv sync --python 3.12 --locked --all-groups --extra smol --extra code` to install the checkout before
 calling Python APIs. The old `src.*` imports and module commands are removed;
 supported commands are `loom` and `python -m agentloom`. See the

@@ -6,8 +6,8 @@ from threading import Barrier
 import yaml
 import pytest
 
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from tests.pi_test.test_application import model_service, project
 
 
@@ -212,7 +212,7 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
 
 
 def test_completed_goal_cannot_hide_stop_rejection(tmp_path):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     hook = tmp_path / 'stop.py'
     hook.write_text('import json\nprint(json.dumps({"decision":"block", "reason":"Delivery rejected by Stop gate"}))\n')
     with model_service(turns=[[('complete-before-stop', 'update_goal', {'status': 'complete', 'evidence': 'Checked the work.'})]]) as (url, requests):
@@ -262,7 +262,7 @@ def test_application_cancels_and_reaps_a_pending_platform_callback(tmp_path, fau
 
 
 def test_completed_goal_final_delivery_cannot_execute_another_selected_tool(tmp_path):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     (tmp_path / 'after-complete.txt').write_text('Must not enter another tool result')
     marker = tmp_path / 'read-hook-started'
     hook = tmp_path / 'read_hook.py'

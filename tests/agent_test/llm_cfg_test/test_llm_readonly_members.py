@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 
 
 def _patch_active_config(monkeypatch, raw: dict) -> None:

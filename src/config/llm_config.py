@@ -7,8 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agentloom.configuration.config_validation import BoolParser, IntParser
-from agentloom.configuration.defaults import (
+from agentloom.config.config_validation import BoolParser, IntParser
+from agentloom.config.defaults import (
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_CONTEXT_CACHE,
@@ -19,8 +19,8 @@ from agentloom.configuration.defaults import (
     DEFAULT_MODEL_TEMPERATURE,
     DEFAULT_MODEL_TIMEOUT,
 )
-from agentloom.configuration.model_adapters import MODEL_ADAPTERS, AdapterKind
-from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.config.model_adapters import MODEL_ADAPTERS, AdapterKind
+from agentloom.config.yaml_loader import load_unique_yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _RESERVED_MODEL_KEYS = {"default_model_type", "common"}

@@ -880,14 +880,14 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
         "applications/memory_feature_validation/variants/on/workflows/analyze_without_memory.yaml",
         "src/self_learning/reviewer.py",
         "src/self_learning/persistence/memory_store.py",
-        "src/application/agent.py",
+        "src/app/agent.py",
         "src/execution/trusted_memory_evidence.py",
-        "src/application/runner.py",
-        "src/application/factory.py",
+        "src/app/runner.py",
+        "src/app/factory.py",
         "src/runtimes/smolagents/models/model_manager.py",
         "src/runtimes/smolagents/model_turn_bridge.py",
         "src/execution/model_protocol.py",
-        "src/configuration/llm_config.py",
+        "src/config/llm_config.py",
         "pyproject.toml",
         "uv.lock",
     } <= paths
@@ -896,7 +896,7 @@ def test_real_campaign_release_sources_bind_harness_workflows_and_runtime() -> N
 def test_review_off_cohort_uses_real_global_summary_application_opt_out(
     monkeypatch,
 ) -> None:
-    import agentloom.configuration.config as config_module
+    import agentloom.config.config as config_module
 
     specs = [
         spec for spec in build_full_plan()
@@ -981,7 +981,7 @@ from agentloom.execution.workspace import ensure_workspace_mounted_once
 ensure_workspace_mounted_once()
 workflow = yaml.safe_load(Path({workflow_relative!r}).read_text(encoding="utf-8"))
 tool = next(item for item in workflow["tools"] if item["name"] == "validation_memory_case")
-from agentloom.application.imports.dynamic_import import load_function
+from agentloom.app.imports.dynamic_import import load_function
 function = load_function(tool["module"], tool["function"])
 payload = json.loads(function())
 assert payload["case_id"] == {spec.case_id!r}

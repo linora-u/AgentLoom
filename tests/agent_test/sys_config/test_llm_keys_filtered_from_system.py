@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 
 
 @pytest.fixture(autouse=True)

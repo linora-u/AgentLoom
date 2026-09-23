@@ -80,7 +80,7 @@ class ContextEngineConfig:
 
     @classmethod
     def from_runtime(cls) -> "ContextEngineConfig":
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         raw = C.get("context_engine", {})
         return cls.from_mapping(raw)

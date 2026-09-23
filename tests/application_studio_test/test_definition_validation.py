@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.query_service import StudioQueryService
 
 
 def test_catalog_uses_runner_required_fields_for_agent_validation(tmp_path: Path) -> None:

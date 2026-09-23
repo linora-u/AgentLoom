@@ -8,8 +8,8 @@ import signal
 from pathlib import Path
 from typing import Any
 
-from agentloom.application.studio.errors import StudioServiceError
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.errors import StudioServiceError
+from agentloom.app.studio.query_service import StudioQueryService
 
 _DEFAULT_AGENT_PAGE_SIZE = 10
 _MAX_AGENT_PAGE_SIZE = 10
@@ -289,11 +289,11 @@ def _run_application(
     if action == "run.resume" and not isinstance(resume_task_id, str):
         raise StudioServiceError("invalid_params", "run.resume requires task_id")
 
-    from agentloom.application.run import (
+    from agentloom.app.run import (
         ApplicationRunError,
         ApplicationRunInterrupted,
     )
-    from agentloom.application.runner import execute_app
+    from agentloom.app.runner import execute_app
 
     events: list[dict[str, Any]] = []
 

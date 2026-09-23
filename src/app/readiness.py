@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentloom.application.validation import (
+from agentloom.app.validation import (
     AgentConfigNormalizer,
 )
 from agentloom.execution.goal import normalize_goal_config
@@ -60,7 +60,7 @@ def validate_runtime_agent_config(
 ) -> None:
     AgentConfigNormalizer.validate_removed_fields(config)
     AgentConfigNormalizer.validate_agent_runtime_config(config)
-    from agentloom.application.runtime_options import normalize_runtime_options
+    from agentloom.app.runtime_options import normalize_runtime_options
 
     normalize_runtime_options(config, agent_root=agent_root)
     validate_required_yaml_fields(config, yaml_path)

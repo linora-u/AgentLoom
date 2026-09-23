@@ -240,8 +240,8 @@ def run(profile, case, workspace, code_tools=False):
             if killed_children:
                 evidence["terminated_sdk_children"] = killed_children
         else:
-            from agentloom.application.runner import execute_app
-            from agentloom.configuration.config import bind_config, load_project_config
+            from agentloom.app.runner import execute_app
+            from agentloom.config.config import bind_config, load_project_config
             with bind_config(load_project_config(workspace)):
                 result = execute_app(app, file_logging=True)
             assert result.output == answer, result.output

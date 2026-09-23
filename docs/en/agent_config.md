@@ -610,7 +610,7 @@ tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
 # Build task list
 tasks = [
     {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/application/imports", "index_content": "..."},
+    {"dir_path": "src/app/imports", "index_content": "..."},
     {"dir_path": "src/core", "index_content": "..."},
 ]
 
@@ -760,7 +760,7 @@ The core idea of this pattern is: **Python control flow + Agent intelligence** â
 #### 4.4.3 Core API: `YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict â€” Worker YAML path (relative to AGENT_ROOT) or config dict
@@ -799,7 +799,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -857,7 +857,7 @@ import traceback
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -1250,7 +1250,7 @@ input_schema:
   properties:
     dir_path:
       type: string
-      description: "Relative directory path to analyze, e.g. src/application/imports"
+      description: "Relative directory path to analyze, e.g. src/app/imports"
     index_content:
       type: string
       description: "Complete text content of the directory's index.md"

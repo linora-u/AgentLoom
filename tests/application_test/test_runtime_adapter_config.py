@@ -5,13 +5,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import agentloom.application.agent as agent_module
-import agentloom.application.validation as validation_module
+import agentloom.app.agent as agent_module
+import agentloom.app.validation as validation_module
 import pytest
-from agentloom.application.definition import load_agent_definition
-from agentloom.application.factory import YamlAgentFactory
-from agentloom.application.readiness import validate_runtime_agent_config
-from agentloom.configuration.llm_config import LLMConfig
+from agentloom.app.definition import load_agent_definition
+from agentloom.app.factory import YamlAgentFactory
+from agentloom.app.readiness import validate_runtime_agent_config
+from agentloom.config.llm_config import LLMConfig
 from agentloom.execution.agent_runtime import (
     RuntimeCapabilities,
     RuntimeDefinition,
@@ -471,8 +471,8 @@ def test_context_engine_supervisors_fix_retrieval_parameters(
 
 
 def test_smol_runtime_options_keep_explicit_layers_and_source(tmp_path):
-    from agentloom.application.runtime_options import normalize_runtime_options
-    from agentloom.configuration.config import ConfigLayerSnapshot, EffectiveAgentConfigSnapshot
+    from agentloom.app.runtime_options import normalize_runtime_options
+    from agentloom.config.config import ConfigLayerSnapshot, EffectiveAgentConfigSnapshot
 
     config = _agent_config(agent_runtime="smolagents", runtime_options={"max_steps": 6, "planning_interval": 2})
     config["_yaml_file_path"] = str(tmp_path / "agent.yaml")
@@ -490,7 +490,7 @@ def test_smol_runtime_options_keep_explicit_layers_and_source(tmp_path):
 
 
 def test_old_smol_options_are_ignored_even_when_conflicting(tmp_path):
-    from agentloom.application.runtime_options import normalize_runtime_options
+    from agentloom.app.runtime_options import normalize_runtime_options
 
     config = _agent_config(agent_runtime="smolagents", max_steps={"invalid": True},
                           todo=False, prompt=["missing"], smart_summary="invalid",
@@ -504,7 +504,7 @@ def test_old_smol_options_are_ignored_even_when_conflicting(tmp_path):
 
 
 def test_legacy_prompt_does_not_affect_canonical_template_path(tmp_path):
-    from agentloom.application.runtime_options import normalize_runtime_options
+    from agentloom.app.runtime_options import normalize_runtime_options
 
     options, _ = normalize_runtime_options(_agent_config(
         agent_runtime="smolagents", prompt={"path": "missing/ignored.yaml"},

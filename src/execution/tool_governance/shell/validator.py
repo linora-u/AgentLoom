@@ -1,7 +1,7 @@
 import re
 from typing import Any, List, Tuple
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.tool_governance.shell.shell_command_ast import ShellCommandInvocation, analyze_shell_command
 from agentloom.execution.tool_governance.shell.security import validate_command_security
 from agentloom.execution.tool_governance.shell.path_validation import check_path_constraints

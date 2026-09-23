@@ -89,7 +89,7 @@ runpy.run_path(sys.argv[1], run_name='__main__')
 assert adapter.calls == 2, adapter.calls
 assert len(adapter.requests) == 2
 assert Path(sys.argv[2]).read_text() == 'external-tool-ok:helper'
-from agentloom.configuration import C
+from agentloom.config import C
 assert Path(C.agent_root) == Path(sys.argv[3])
 print('GENERATED_APPLICATION_PASS')
 '''
@@ -133,7 +133,7 @@ def probe(workspace: Path) -> dict:
     (app / "helper.py").write_text("SUFFIX = ':helper'\n")
     (app / "tools.py").write_text(textwrap.dedent('''\
         from pathlib import Path
-        from agentloom.configuration import C
+        from agentloom.config import C
         from .helper import SUFFIX
 
         def write_probe(value: str) -> str:
@@ -178,9 +178,9 @@ def probe(workspace: Path) -> dict:
         import importlib.util, json, sys
         import agentloom
         from importlib.resources import files
-        from agentloom.configuration import C
+        from agentloom.config import C
         from agentloom.tools.loader import resolve_tool_function
-        from agentloom.application.imports.dynamic_import import load_function
+        from agentloom.app.imports.dynamic_import import load_function
         assert importlib.util.find_spec('src') is None
         assert importlib.util.find_spec('agentloom._compat') is None
         assert not any(type(f).__name__ == '_LegacyFinder' for f in sys.meta_path)

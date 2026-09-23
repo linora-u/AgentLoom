@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 import yaml
-from agentloom.application.composition import build_schedule_mutations
-from agentloom.application.definition import (
+from agentloom.app.composition import build_schedule_mutations
+from agentloom.app.definition import (
     definition_error,
     load_agent_definition,
     validate_agent_definition,
 )
-from agentloom.application.studio.catalog import project_catalog
-from agentloom.application.studio.domain_actions import execute_domain_action
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.catalog import project_catalog
+from agentloom.app.studio.domain_actions import execute_domain_action
+from agentloom.app.studio.query_service import StudioQueryService
 from agentloom.schedules.store import ScheduleStore
 
 
@@ -182,15 +182,15 @@ def test_markdown_catalog_and_details_do_not_construct_runtime_or_write_files(tm
     program = """
 import json, sys
 from pathlib import Path
-from agentloom.application.studio.domain_actions import execute_domain_action
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.domain_actions import execute_domain_action
+from agentloom.app.studio.query_service import StudioQueryService
 root = Path(sys.argv[1])
 queries = StudioQueryService(root)
 assert len(queries.bootstrap()['systems']) == 1
 assert queries.system_detail(sys.argv[2])['definition']['workflow'] == 'Run the declared task.'
 assert queries.application_detail('nested/markdown')['application']['health'] == 'healthy'
 assert execute_domain_action(root, 'application.validate', {'application_id':'nested/markdown'})['valid'] is True
-for prefix in ('litellm', 'agentloom.application.agent', 'agentloom.application.runner', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
+for prefix in ('litellm', 'agentloom.app.agent', 'agentloom.app.runner', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
 assert not (root / 'must-not-exist').exists()

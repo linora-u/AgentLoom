@@ -7,8 +7,8 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
 import yaml
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 
 
 def main():
