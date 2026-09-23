@@ -48,12 +48,12 @@ try:
     import yaml
     content = yaml.safe_load(new_yaml.read_text())
     name = content.get("name", "")
-    schema = content.get("agent_function_schema", {})
-    inputs = schema.get("inputs", {})
+    input_schema = content.get("input_schema", {})
+    inputs = input_schema.get("properties", {})
     assert name == "dir_architecture_analysis", f"name={name}"
     assert "dir_path" in inputs, f"missing dir_path, got {list(inputs.keys())}"
-    assert "output_dir" in inputs, f"missing output_dir, got {list(inputs.keys())}"
-    assert "output" in schema, "missing output field"
+    assert "index_content" in inputs, f"missing index_content, got {list(inputs.keys())}"
+    assert "output_schema" not in content, "text output must use the default contract"
     print(f"[OK] yaml schema: name={name}, inputs={list(inputs.keys())}")
 except Exception as e:
     errors.append(f"[FAIL] yaml schema check: {e}")
