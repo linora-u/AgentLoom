@@ -405,18 +405,6 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
             inject_default_file_tools=False,
         )
 
-    def _transform_task(
-        self,
-        task: str | None,
-        *,
-        workflow_override: str | None = None,
-    ) -> str | None:
-        _ = workflow_override
-        return task
-
-    def _transform_tasks(self, task: str | None) -> list[str | None]:
-        return [self._transform_task(task)]
-
     def _get_tools(self) -> list:
         """Get the tool list from configuration."""
         tools = []
