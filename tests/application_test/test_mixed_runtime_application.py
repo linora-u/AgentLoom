@@ -5,11 +5,18 @@ from threading import Barrier
 
 import pytest
 import yaml
-
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
+
 from tests.application_test import mixed_runtime_support as support
-from tests.application_test.mixed_runtime_support import finish, model_service, project, runtime_events, tool_messages, write_yaml
+from tests.application_test.mixed_runtime_support import (
+    finish,
+    model_service,
+    project,
+    runtime_events,
+    tool_messages,
+    write_yaml,
+)
 
 
 @pytest.mark.parametrize("supervisor,worker", [("smolagents", "pi"), ("pi", "smolagents")])
@@ -72,9 +79,6 @@ def test_parallel_and_repeated_workers_have_separate_sessions_and_hook_owners(tm
                 assert f'{label}-TOKEN-2391' in messages[0]['content']
                 return [('same-probe-call', 'inspect_invocation', {'label': f'{label}-TOKEN-2391', 'synchronize': label != 'REPEAT'})]
             observation = json.loads(messages[-1]['content'])
-            if worker == 'smolagents':
-                assert observation['status'] == 'completed'
-                observation = json.loads(observation['output'])
             assert 'instance_id' in observation, observation
             observations.append(observation)
             return finish(request, json.dumps(observation))
