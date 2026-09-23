@@ -174,7 +174,7 @@ class PiRuntime:
                     except Exception as exc:
                         raise AgentRuntimeError("Pi checkpoint cannot be safely restored", category="configuration") from exc
             attempt = 0
-            stop_blocks = 0
+            terminal_rejections = 0
             while True:
                 if hook is not None:
                     context = hook.consume_pending_agent_context()
@@ -182,11 +182,14 @@ class PiRuntime:
                         task = "\n".join(
                             item for item in (task, *context) if item
                         )
+                remaining_terminal_attempts = max_stops - terminal_rejections
+                runtime_options = dict(definition.runtime_options)
+                runtime_options["max_stop_attempts"] = remaining_terminal_attempts
                 wire = Run(method="run", application_id=request.application_id or "standalone",
                     task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
-                        request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=dict(definition.runtime_options),
+                        request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=runtime_options,
                     output_contract=(OutputContract(name=definition.output_contract.name,
                         schema=dict(definition.output_contract.schema))
                         if definition.output_contract is not None else None),
@@ -197,6 +200,12 @@ class PiRuntime:
                                                   cancel_callbacks=cancel_callbacks)
                 result = response.payload
                 assert isinstance(result, RunResult)
+                if result.terminal_rejections > remaining_terminal_attempts:
+                    raise AgentRuntimeError(
+                        "Pi bridge exceeded the terminal delivery budget",
+                        category="internal",
+                    )
+                terminal_rejections += result.terminal_rejections
                 part = RuntimeUsage.from_value(result.usage)
                 usage = RuntimeUsage(input_tokens=usage.input_tokens + part.input_tokens,
                     output_tokens=usage.output_tokens + part.output_tokens, total_tokens=usage.total_tokens + part.total_tokens,
@@ -217,8 +226,8 @@ class PiRuntime:
                 if not decision.should_block() and (goal_state is None or goal_state.status == "complete"):
                     break
                 if decision.should_block():
-                    stop_blocks += 1
-                    if stop_blocks >= max_stops or (goal_state is not None and goal_state.status == "complete"):
+                    terminal_rejections += 1
+                    if terminal_rejections >= max_stops or (goal_state is not None and goal_state.status == "complete"):
                         raise AgentRuntimeError("Pi Stop gate remained blocked", category="tool")
                     task = decision.get_blocked_response()
                 elif goal_state is not None:

@@ -323,6 +323,56 @@ def test_invalid_structured_output_consumes_the_existing_delivery_budget(
     assert len(requests) == 2
 
 
+def test_structured_correction_and_stop_gate_share_one_delivery_budget(
+    tmp_path,
+):
+    from agentloom.application.run import ApplicationRunError
+
+    valid_output = json.dumps({"findings": []})
+    with model_service(outputs=["not-json", valid_output, valid_output]) as (
+        url,
+        requests,
+    ):
+        app = project(tmp_path, url)
+        stop_hook = tmp_path / "reject_stop.py"
+        stop_hook.write_text(
+            "import json\n"
+            "print(json.dumps({'decision': 'block', 'reason': 'Verify again.'}))\n"
+        )
+        import sys
+
+        config = yaml.safe_load(app.read_text())
+        config["runtime_options"] = {"max_stop_attempts": 2}
+        config["output_schema"] = {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        }
+        config["hooks"] = {
+            "Stop": [
+                {
+                    "id": "gate",
+                    "command": f"{sys.executable} {stop_hook}",
+                }
+            ]
+        }
+        app.write_text(yaml.safe_dump(config))
+
+        with (
+            bind_config(load_project_config(tmp_path)),
+            pytest.raises(ApplicationRunError, match="Stop gate remained blocked"),
+        ):
+            execute_app(app, file_logging=False)
+
+    assert len(requests) == 2
+
+
 @pytest.mark.parametrize("status,retries,expected", [(500, 2, 2), (429, 1, 2), (401, 3, 1), (400, 3, 1), (500, 0, 1)])
 def test_profile_retry_count_and_private_error_redaction(tmp_path, status, retries, expected):
     from agentloom.application.run import ApplicationRunError
