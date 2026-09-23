@@ -84,6 +84,51 @@ def test_lifecycle_collects_events_returned_only_in_runtime_result() -> None:
     assert lifecycle.runtime_events_snapshot() == (event,)
 
 
+def test_lifecycle_preserves_structured_result_through_checkpoint_and_receipt() -> None:
+    lifecycle = ApplicationRunLifecycle()
+    coordinator = MagicMock()
+    structured = {
+        "findings": [
+            {
+                "severity": "high",
+                "message": "missing guard",
+            }
+        ]
+    }
+    runtime_result = AgentRuntimeResult(
+        state="success",
+        output=structured,
+        checkpoint=RuntimeCheckpointEnvelope(
+            runtime_id="pi",
+            runtime_version="0.79.4",
+            state_schema_version=1,
+            payload={},
+        ),
+    )
+
+    lifecycle.enter_execution()
+    lifecycle.report_agent_invocation(
+        coordinator=coordinator,
+        runtime_result=runtime_result,
+        result=structured,
+        error=None,
+        goal=None,
+    )
+    lifecycle.settle_reported_agent_invocation()
+    lifecycle.commit_checkpoint(
+        checkpoint_manager=MagicMock(),
+        task_id="task-structured",
+    )
+
+    assert lifecycle.result == structured
+    coordinator.save_runtime_checkpoint.assert_called_once_with(
+        runtime_result.checkpoint,
+        "completed",
+        result=structured,
+        error=None,
+    )
+
+
 def test_finalization_failure_replaces_provisional_success_checkpoint() -> None:
     lifecycle = ApplicationRunLifecycle()
     coordinator = MagicMock()
@@ -171,6 +216,7 @@ def test_finalize_run_owns_evidence_manifest_and_success_cleanup(
         manager,
         "task-1",
         result="done",
+        has_result=True,
         event_start_offset=10,
         runtime_events=(),
         manifest_updates=manifest_updates,

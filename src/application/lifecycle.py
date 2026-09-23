@@ -19,7 +19,9 @@ from typing import Any, Literal
 from agentloom.application.run import RunPhase
 from agentloom.execution.agent_runtime import (
     AgentRuntimeResult,
+    JSONValue,
     RuntimeEvent,
+    copy_json_value,
 )
 from agentloom.execution.checkpoint import CheckpointManager
 
@@ -36,7 +38,7 @@ ApplicationRunOutcome = Literal[
 class _AgentInvocation:
     coordinator: Any | None
     runtime_result: AgentRuntimeResult | None
-    result: str | None
+    result: JSONValue
     error: BaseException | None
 
 
@@ -81,7 +83,7 @@ class ApplicationRunLifecycle:
         self._checkpoint_outcome: ApplicationRunOutcome | None = None
         self._phase: RunPhase = "initialization"
         self._outcome: ApplicationRunOutcome | None = None
-        self._result = ""
+        self._result: JSONValue = None
         self._error: BaseException | None = None
         self._checkpoint_deletion_started = False
         self._resumable = False
@@ -99,8 +101,8 @@ class ApplicationRunLifecycle:
         return self._outcome
 
     @property
-    def result(self) -> str:
-        return self._result
+    def result(self) -> JSONValue:
+        return copy_json_value(self._result, field_name="application result")
 
     @property
     def error(self) -> BaseException | None:
@@ -155,7 +157,7 @@ class ApplicationRunLifecycle:
         self._invocation = _AgentInvocation(
             coordinator=coordinator,
             runtime_result=runtime_result,
-            result=None if result is None else str(result),
+            result=copy_json_value(result, field_name="application result"),
             error=error,
         )
         if runtime_result is not None:
@@ -185,7 +187,7 @@ class ApplicationRunLifecycle:
     def complete_execution(self, result: object | None) -> None:
         if self._phase != "execution":
             raise RuntimeError(f"Application Run cannot complete execution from {self._phase}")
-        self._result = "" if result is None else str(result)
+        self._result = copy_json_value(result, field_name="application result")
         self._error = None
         self._outcome = "completed"
         self._phase = "finalization"
@@ -234,7 +236,7 @@ class ApplicationRunLifecycle:
 
         outcome = self.outcome
         error_message = self.error_message
-        result = self._result if outcome == "completed" else None
+        result = self.result if outcome == "completed" else None
         if self._checkpoint_outcome == outcome or checkpoint_manager is None:
             return
 
@@ -280,6 +282,7 @@ class ApplicationRunLifecycle:
                     finalization.checkpoint_manager,
                     finalization.task_id,
                     result=self.result,
+                    has_result=True,
                     event_start_offset=finalization.event_start_offset,
                     runtime_events=self.runtime_events_snapshot(),
                     manifest_updates=finalization.manifest_updates,
@@ -291,6 +294,7 @@ class ApplicationRunLifecycle:
                         finalization.checkpoint_manager,
                         finalization.task_id,
                         result=None,
+                        has_result=False,
                         event_start_offset=finalization.event_start_offset,
                         runtime_events=self.runtime_events_snapshot(),
                         manifest_updates=finalization.manifest_updates,
@@ -537,7 +541,8 @@ def _persist_run_observability(
     checkpoint_manager: CheckpointManager | None,
     task_id: str,
     *,
-    result: str | None,
+    result: JSONValue,
+    has_result: bool,
     event_start_offset: int | None,
     runtime_events: tuple[RuntimeEvent, ...] = (),
     manifest_updates: dict[str, Any] | None = None,
@@ -546,12 +551,17 @@ def _persist_run_observability(
 
     if manifest_updates is None:
         manifest_updates = {}
-    if result is not None:
+    if has_result:
+        rendered_result = (
+            result
+            if isinstance(result, str)
+            else json.dumps(result, ensure_ascii=False, indent=2)
+        )
         result_artifact = runtime_context.artifacts_dir / "result.txt"
-        runtime_context.atomic_write_run_file(result_artifact, result)
+        runtime_context.atomic_write_run_file(result_artifact, rendered_result)
         manifest_updates.update(
             result_artifact="artifacts/result.txt",
-            result_size=len(result.encode("utf-8")),
+            result_size=len(rendered_result.encode("utf-8")),
         )
 
     if runtime_events:

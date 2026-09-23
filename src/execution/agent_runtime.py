@@ -75,7 +75,7 @@ RUNTIME_ERROR_CATEGORIES: tuple[RuntimeErrorCategory, ...] = (
 )
 
 
-def _copy_json_value(value: object, *, field_name: str) -> JSONValue:
+def copy_json_value(value: object, *, field_name: str = "JSON value") -> JSONValue:
     """Return a defensive JSON-native copy without coercing unsupported values."""
 
     if value is None or isinstance(value, (bool, str)):
@@ -93,14 +93,14 @@ def _copy_json_value(value: object, *, field_name: str) -> JSONValue:
                 raise ValueError(
                     f"{field_name} must contain only string object keys"
                 )
-            normalized[key] = _copy_json_value(
+            normalized[key] = copy_json_value(
                 child,
                 field_name=f"{field_name}.{key}",
             )
         return normalized
     if isinstance(value, (list, tuple)):
         return [
-            _copy_json_value(child, field_name=f"{field_name}[{index}]")
+            copy_json_value(child, field_name=f"{field_name}[{index}]")
             for index, child in enumerate(value)
         ]
     raise ValueError(
@@ -113,7 +113,7 @@ def _frozen_json_mapping(
     *,
     field_name: str,
 ) -> Mapping[str, JSONValue]:
-    normalized = _copy_json_value(value, field_name=field_name)
+    normalized = copy_json_value(value, field_name=field_name)
     if not isinstance(normalized, dict):
         raise TypeError(f"{field_name} must be a mapping")
     return MappingProxyType(normalized)
@@ -174,7 +174,7 @@ class OutputContract:
         if not isinstance(self.schema, Mapping):
             raise TypeError("output contract schema must be a mapping")
 
-        normalized_schema = _copy_json_value(
+        normalized_schema = copy_json_value(
             self.schema,
             field_name="output contract schema",
         )
@@ -204,7 +204,7 @@ class OutputContract:
     def validate(self, value: object) -> JSONValue:
         """Return a defensive JSON value after validating the output contract."""
 
-        normalized = _copy_json_value(value, field_name="output")
+        normalized = copy_json_value(value, field_name="output")
         try:
             self._validator.validate(normalized)
         except ValidationError as exc:
@@ -795,7 +795,7 @@ class AgentRuntimeResult:
         object.__setattr__(
             self,
             "output",
-            _copy_json_value(self.output, field_name="runtime result output"),
+            copy_json_value(self.output, field_name="runtime result output"),
         )
         object.__setattr__(self, "usage", RuntimeUsage.from_value(self.usage))
         artifacts = tuple(self.artifacts)
