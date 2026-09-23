@@ -149,6 +149,8 @@ async function run(frame: Frame, abort: AbortController) {
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
+  let outputBudgetExhausted = false;
+  let outputAttempts = 0;
   let unsubscribe: (() => void) | undefined;
   let outputValidator: ValidateFunction | undefined;
   if (p.output_contract) {
@@ -214,7 +216,12 @@ async function run(frame: Frame, abort: AbortController) {
         parsed = JSON.parse(text);
       } catch {
         outputCorrection = true;
-        if (last.stopReason === "length") break;
+        outputAttempts += 1;
+        if (last.stopReason === "length" ||
+            outputAttempts >= (p.runtime_options.max_stop_attempts || 3)) {
+          outputBudgetExhausted = true;
+          break;
+        }
         await trigger("Your previous final output was not valid JSON. Return a corrected value matching the required JSON Schema.", true);
         last = session.messages.at(-1);
         continue;
@@ -222,7 +229,12 @@ async function run(frame: Frame, abort: AbortController) {
       if (!outputValidator(parsed)) {
         const detail = outputValidator.errors?.[0]?.message || "schema validation failed";
         outputCorrection = true;
-        if (last.stopReason === "length") break;
+        outputAttempts += 1;
+        if (last.stopReason === "length" ||
+            outputAttempts >= (p.runtime_options.max_stop_attempts || 3)) {
+          outputBudgetExhausted = true;
+          break;
+        }
         await trigger(`Your previous final output did not match the required JSON Schema: ${detail}. Return a corrected value.`, true);
         last = session.messages.at(-1);
         continue;
@@ -232,6 +244,7 @@ async function run(frame: Frame, abort: AbortController) {
     if (nativeIncomplete || modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
+      outputBudgetExhausted ? "max_steps_error" :
       last.stopReason === "length" ? "max_steps_error" : "success";
     const outputText = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
     const output = outputValidator && state === "success" ? JSON.parse(outputText) : outputText;
