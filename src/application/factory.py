@@ -208,27 +208,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
 
             # Factory mode: create a NEW agent for each call (thread-safe)
             agent = _create_fresh_agent()
-            result = agent.run(
-                user_input,
-            )
-            if not isinstance(result, str):
-                return result
-
-            from agentloom.execution.context_engine.runtime import (
-                get_active_context_engine,
-            )
-
-            engine = get_active_context_engine()
-            if engine is None:
-                return result
-            return (
-                engine.compress_tool_result(
-                    result,
-                    tool_name=function_name,
-                    source=f"worker_result:{function_name}",
-                )
-                or result
-            )
+            return agent.run(user_input)
 
         # ── Attach .batch() method for parallel execution ──
         def batch(tasks, concurrency=None, on_progress=None):
