@@ -122,7 +122,7 @@ Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: 
 当前代码里的 `_WORKFLOW_OVERLAY_KEYS` 是：
 
 ```text
-system, model_request_headers, runtime_options, context_engine,
+system, runtime_options, context_engine,
 tool_access_control, tools, shell_settings,
 default_toolsets, toolsets, mcp_servers, self_learning, hooks,
 skills, tool_metadata, tool_output_limits
@@ -145,7 +145,7 @@ skills, tool_metadata, tool_output_limits
 
 | 字段 | 说明 |
 |---|---|
-| `system` | `name/version/user_agent` 元信息 |
+| `system` | `name/version` 元信息 |
 | `runtime_options` | 由选中基座解释；混合应用推荐在各 Agent 定义中配置 |
 | `context_engine` | 可逆上下文压缩：工具原文进本地 store，模型可见压缩预览和 `ContextRef` |
 | `skills` | `{paths: [...]}` 额外 Skill 发现目录 |

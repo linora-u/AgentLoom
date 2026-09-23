@@ -9,19 +9,17 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Any
 
-from agentloom.integrations.litellm.litellm_retry import patch_litellm_completion
-from agentloom.integrations.litellm.model_turn import create_model_turn_adapter
-from agentloom.configuration.model_request_headers import (
-    build_model_request_headers,
-)
-from agentloom.integrations.litellm.tool_error_projection import (
-    patch_litellm_tool_error_projection,
-)
 from agentloom.configuration import C
+from agentloom.configuration.http_headers import normalize_http_headers
 from agentloom.configuration.llm_config import LlmModelTypeSettings
 from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnAdapter
+from agentloom.integrations.litellm.litellm_retry import patch_litellm_completion
+from agentloom.integrations.litellm.model_turn import create_model_turn_adapter
+from agentloom.integrations.litellm.tool_error_projection import (
+    patch_litellm_tool_error_projection,
+)
 
 AdapterFactory = Callable[..., ModelTurnAdapter]
 
@@ -201,7 +199,7 @@ def build_litellm_model_turn_binding(
     return _build_binding(
         model_type,
         settings,
-        request_headers=build_model_request_headers(settings.extra_headers),
+        request_headers=normalize_http_headers(settings.extra_headers),
         adapter_factory=adapter_factory,
     )
 
@@ -242,7 +240,7 @@ def resolve_litellm_model_turn_binding(
     resolved_type = _normalized_model_type(
         model_type if model_type else C.llm.default_model_type
     )
-    request_headers = build_model_request_headers(settings.extra_headers)
+    request_headers = normalize_http_headers(settings.extra_headers)
     if not model_cache:
         return _build_binding(
             resolved_type,

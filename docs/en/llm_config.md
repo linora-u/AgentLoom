@@ -195,7 +195,7 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 | `num_retries` | `int` | `5` | ❌ No | Number of retries on API call failure |
 | `retry_delay` | `float` | `15.0` | ❌ No | Initial retry delay (seconds). See [Section 6](#6-retry-mechanism-details) |
 | `max_retry_delay` | `float` | `100.0` | ❌ No | Maximum retry delay (seconds). Upper limit for exponential backoff |
-| `extra_headers` | `dict` \| `null` | `null` | ❌ No | Custom HTTP request headers. Configure independently for each model type; overrides same-name headers from `system.yaml` `model_request_headers` |
+| `extra_headers` | `dict` \| `null` | `null` | ❌ No | Custom HTTP request headers for this model type; no framework-level headers are added when unset |
 | `context_cache` | `bool` | `false` | ❌ No | Universal Prompt cache optimization. When `true`, the framework injects `cache_control: {"type": "ephemeral"}` for **ALL models** universally. litellm handles per-provider behavior automatically (Anthropic preserves, OpenAI strips, Vertex AI converts to Gemini format) |
 | `system_prompt_boundary` | `str` \| `null` | `null` | ❌ No | System prompt split marker. When set, the system prompt is split into **static (cached)** + **dynamic (uncached)** segments at this marker, improving cache hit rates. Example: `"<!-- DYNAMIC_BOUNDARY -->"` |
 | `requests_per_minute` | `int` | `60` | ❌ No | Rate limit for this model type |
@@ -218,9 +218,9 @@ against `context_window - max_output_tokens`; only `max_output_tokens` is sent t
 the provider as `max_tokens`. The legacy `max_tokens` field remains accepted when
 neither new field is set.
 
-### 3.4 extra_headers Override Behavior
+### 3.4 extra_headers Request Headers
 
-`system.yaml` `model_request_headers` first produces global default headers. The current model type's `extra_headers` is merged last and overrides same-name headers case-insensitively.
+`extra_headers` applies only to the current model type. When unset, the underlying SDK decides the HTTP request headers. Legacy `model_request_headers` entries in `system.yaml` are ignored.
 
 ```yaml
 model:
