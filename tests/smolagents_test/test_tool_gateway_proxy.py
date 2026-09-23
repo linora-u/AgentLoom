@@ -223,6 +223,7 @@ def test_final_answer_uses_and_validates_structured_output_contract() -> None:
             },
             "required": ["findings", "metadata"],
             "additionalProperties": False,
+            "additionalItems": {"$ref": "#/literal"},
         },
     )
     binding = final_answer_binding(contract)
@@ -239,6 +240,7 @@ def test_final_answer_uses_and_validates_structured_output_contract() -> None:
     assert answer_schema["$defs"]["scoped"]["properties"]["value"]["$ref"] == (
         "#/$defs/value"
     )
+    assert answer_schema["additionalItems"] == {"$ref": "#/literal"}
     assert definition.strict is True
     assert binding.input_validator is not None
     binding.input_validator(
