@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import subprocess
 import sys
 import textwrap
@@ -11,14 +12,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def imported_module_names(source: str) -> set[str]:
+def imported_module_names(source: str, *, package: str | None = None) -> set[str]:
     modules: set[str] = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module is not None:
-            modules.add(node.module)
-            modules.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level:
+                if package is None:
+                    continue
+                module = importlib.util.resolve_name(f"{'.' * node.level}{module}", package)
+            if module:
+                modules.add(module)
+                modules.update(f"{module}.{alias.name}" for alias in node.names)
     return modules
 
 
@@ -115,7 +122,11 @@ def test_tracked_python_sources_do_not_import_retired_package_names() -> None:
             continue
         relative_path = raw_path.decode()
         source = (ROOT / relative_path).read_text(encoding="utf-8")
-        for module in imported_module_names(source):
+        path = Path(relative_path)
+        package = None
+        if path.parts[0] == "src":
+            package = ".".join(("agentloom", *path.parts[1:-1]))
+        for module in imported_module_names(source, package=package):
             if any(module == prefix or module.startswith(f"{prefix}.") for prefix in retired):
                 offenders.append(f"{relative_path}:{module}")
 
@@ -129,14 +140,24 @@ def test_import_scanner_expands_from_import_members() -> None:
             import agentloom.application.runner
             from agentloom import configuration
             from agentloom.app import runner
+            from ..configuration import defaults
             """
-        )
+        ),
+        package="agentloom.app",
     ) == {
         "agentloom.application.runner",
         "agentloom",
         "agentloom.configuration",
         "agentloom.app",
         "agentloom.app.runner",
+        "agentloom.configuration.defaults",
+    }
+    assert imported_module_names(
+        "from . import application",
+        package="agentloom",
+    ) == {
+        "agentloom",
+        "agentloom.application",
     }
 
 
