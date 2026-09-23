@@ -18,10 +18,10 @@ Use `goal: false` or omit it to disable. Mapping form requires boolean `enabled`
 Legacy `token_budget` values are silently ignored; Goal has no cost/token ceiling.
 Worker YAML cannot define Goal Mode.
 
-The objective combines `description`, one required non-empty `workflow` string,
-and an optional runtime task. The `workflow` remains a Runtime instruction. A
-supplied task is a separate user message; an absent task creates no substitute
-message.
+The Goal objective tracks one required non-empty `workflow` string and an
+optional runtime task. The Agent `description` remains display and Tool metadata;
+it is not execution input. The `workflow` remains a Runtime instruction. A supplied
+task is a separate user message; an absent task creates no substitute message.
 
 ## Lifecycle and tools
 
