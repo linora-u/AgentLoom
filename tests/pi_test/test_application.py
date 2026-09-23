@@ -254,6 +254,39 @@ def test_invalid_structured_output_is_corrected_in_same_session_without_tools(
     assert "not valid JSON" in json.dumps(requests[1][1])
 
 
+def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
+    tmp_path,
+):
+    from agentloom.application.run import ApplicationRunError
+
+    with model_service(outputs=["not-json"], finish="length") as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["output_schema"] = {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        }
+        app.write_text(yaml.safe_dump(config))
+
+        with (
+            bind_config(load_project_config(tmp_path)),
+            pytest.raises(ApplicationRunError) as captured,
+        ):
+            execute_app(app, file_logging=False)
+
+    assert captured.value.original_error.category == "output_validation"
+    assert captured.value.original_error.kind == "output_validation"
+    assert captured.value.original_error.stage == "output_validation"
+    assert len(requests) == 1
+
+
 @pytest.mark.parametrize("status,retries,expected", [(500, 2, 2), (429, 1, 2), (401, 3, 1), (400, 3, 1), (500, 0, 1)])
 def test_profile_retry_count_and_private_error_redaction(tmp_path, status, retries, expected):
     from agentloom.application.run import ApplicationRunError
