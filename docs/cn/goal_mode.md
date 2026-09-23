@@ -17,8 +17,9 @@ goal: true
 旧 `token_budget` 无论取值都静默忽略，Goal 不再有成本/token 预算上限。
 Worker YAML 不能配置 Goal Mode。
 
-目标由 `description`、`workflow` 和 runtime task 组成。workflow 列表会按顺序编号并
-合并成一个目标上下文；普通非 Goal workflow 列表仍按原有逐项执行语义运行。
+目标由 `description`、必填的非空 `workflow` 字符串和可选的 runtime task 组成。
+`workflow` 作为 Runtime instruction；提供 task 时，它作为独立 user message，省略时
+不会生成替代消息。
 
 ## 生命周期与工具
 
