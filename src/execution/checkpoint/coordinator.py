@@ -29,7 +29,7 @@ from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
 
-from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.agent_runtime import JSONValue, RuntimeCheckpointEnvelope
 from agentloom.execution.context_engine import (
     ContextEngine,
     ContextEngineConfig,
@@ -226,7 +226,7 @@ class CheckpointCoordinator:
         checkpoint: RuntimeCheckpointEnvelope,
         status: str,
         *,
-        result: str | None = None,
+        result: JSONValue = None,
         error: str | None = None,
         require_durable: bool = False,
     ) -> None:

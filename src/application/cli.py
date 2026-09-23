@@ -48,7 +48,9 @@ def _run_event_payload(event: Any) -> dict[str, object]:
     }
     for field in ("output", "error", "phase", "goal"):
         value = getattr(event, field, None)
-        if value is not None:
+        if field == "output" and event.event == "run.completed":
+            payload[field] = value
+        elif value is not None:
             payload[field] = dict(value) if field == "goal" else value
     return payload
 
@@ -144,7 +146,7 @@ def _has_transient_provider_error(error: BaseException) -> bool:
             litellm_errors.RateLimitError,
         )
     )
-    denied_types = (
+    denied_types: tuple[type[BaseException], ...] = (
         SystemExit,
         KeyboardInterrupt,
         click.ClickException,
@@ -280,7 +282,12 @@ def run(
                     task_override=task_override,
                     require_valid_supervisor_target=require_valid_supervisor_target,
                 )
-                click.echo(completed.output)
+                rendered_output = (
+                    completed.output
+                    if isinstance(completed.output, str)
+                    else json.dumps(completed.output, ensure_ascii=False, indent=2)
+                )
+                click.echo(rendered_output)
                 completed_goal = getattr(completed, "goal", None)
                 if isinstance(completed_goal, Mapping):
                     click.echo(_goal_text(completed_goal))

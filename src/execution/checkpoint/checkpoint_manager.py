@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.execution import SecureDirectory, portable_runtime_component
+from agentloom.execution.agent_runtime import JSONValue, copy_json_value
 from agentloom.execution.heartbeat.status import (
     detect_crashed_status as _detect_crashed_status,
 )
@@ -222,8 +223,8 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
         status = event.get("status")
         if status:
             tree["status"] = status
-        if event.get("result") is not None:
-            tree["result"] = event.get("result")
+        if "result" in event:
+            tree["result"] = event["result"]
         if event.get("error") is not None:
             tree["error"] = event.get("error")
         if status == "interrupted":
@@ -829,7 +830,7 @@ class CheckpointManager:
         task_id: str,
         status: str,
         *,
-        result: str | None = None,
+        result: JSONValue = None,
         error: str | None = None,
     ) -> dict:
         """Append a task status event and refresh the projection."""
@@ -837,8 +838,11 @@ class CheckpointManager:
             "type": "task_status_changed",
             "status": status,
         }
-        if result is not None:
-            event["result"] = result
+        if status == "completed" or result is not None:
+            event["result"] = copy_json_value(
+                result,
+                field_name="task checkpoint result",
+            )
         if error is not None:
             event["error"] = error
         if status == "interrupted":
@@ -1040,7 +1044,7 @@ class CheckpointManager:
         task_text: str,
         status: str,
         config_snapshot: dict | None = None,
-        result: str | None = None,
+        result: JSONValue = None,
         error: str | None = None,
         context_store: dict | None = None,
     ) -> Path:
@@ -1063,8 +1067,11 @@ class CheckpointManager:
             data["run_id"] = self._run_id
         if config_snapshot:
             data["config_snapshot"] = config_snapshot
-        if result is not None:
-            data["result"] = result
+        if status == "completed" or result is not None:
+            data["result"] = copy_json_value(
+                result,
+                field_name="supervisor checkpoint result",
+            )
         if error is not None:
             data["error"] = error
         if context_store is not None:
