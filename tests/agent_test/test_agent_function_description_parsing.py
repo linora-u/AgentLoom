@@ -1,23 +1,23 @@
 from agentloom.application.factory import YamlConfiguredAgent
 
 
-def test_agent_function_schema_docstring_rendering():
+def test_native_input_schema_docstring_uses_agent_metadata():
     config = {
         "name": "test_agent",
         "agent_runtime": "smolagents",
         "description": "test agent desc",
         "workflow": "test workflow",
         "tools": [],
-        "agent_function_schema": {
-            "description": "子 agent，用于隔离 shell 执行环境。",
-            "inputs": {
+        "input_schema": {
+            "type": "object",
+            "properties": {
                 "query": {
+                    "type": "string",
                     "description": "传递给 worker 的具体 shell 执行指令或任务描述。",
                 }
             },
-            "output": {
-                "description": "shell 的真实执行输出结果文本。"
-            },
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }
 
@@ -32,6 +32,7 @@ def test_agent_function_schema_docstring_rendering():
 
     assert tool is not None
 
+    assert (tool.__doc__ or "").startswith("test agent desc")
     assert "Args:" in (tool.__doc__ or "")
-    assert "Returns:" in (tool.__doc__ or "")
     assert "query" in (tool.__doc__ or "")
+    assert "传递给 worker" in (tool.__doc__ or "")
