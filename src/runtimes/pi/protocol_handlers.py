@@ -41,6 +41,7 @@ from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedE
 def terminal(record: ToolCallRecord) -> TerminalRecord:
     values = record.to_dict()
     values["error"] = record.error
+    values["model_output"] = record.model_output()
     return TerminalRecord(**values)
 
 

@@ -146,6 +146,7 @@ class TerminalRecord(WireValue):
     input: JsonValue = Field(repr=False)
     status: Literal["completed", "error", "blocked"]
     output: JsonValue = Field(default=None, repr=False)
+    model_output: JsonValue = Field(default=None, repr=False)
     error: ToolErrorRecord | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     started_at: float | None = None
