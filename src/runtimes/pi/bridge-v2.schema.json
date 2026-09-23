@@ -10,6 +10,7 @@
             "unsupported_capability",
             "provider",
             "tool",
+            "output_validation",
             "interrupted",
             "internal"
           ],
