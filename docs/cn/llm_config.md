@@ -195,7 +195,7 @@ model:
 | `num_retries` | `int` | `5` | ❌ 否 | API 调用失败重试次数 |
 | `retry_delay` | `float` | `15.0` | ❌ 否 | 重试初始延迟（秒）。详见 [第 6 节](#6-重试机制详解) |
 | `max_retry_delay` | `float` | `100.0` | ❌ 否 | 重试最大延迟（秒）。指数退避的上限 |
-| `extra_headers` | `dict` \| `null` | `null` | ❌ 否 | 自定义 HTTP 请求头。每个模型类型独立配置；会覆盖 `system.yaml` 的 `model_request_headers` 同名 header |
+| `extra_headers` | `dict` \| `null` | `null` | ❌ 否 | 自定义 HTTP 请求头，按模型类型独立配置；未设置时不注入框架级请求头 |
 | `context_cache` | `bool` | `false` | ❌ 否 | 通用 Prompt 缓存优化。`true` 时框架对**所有模型**统一注入 `cache_control: {"type": "ephemeral"}`，litellm 根据 Provider 自动处理（Anthropic 保留、OpenAI 剥离、Vertex AI 转换为 Gemini 格式） |
 | `system_prompt_boundary` | `str` \| `null` | `null` | ❌ 否 | 系统提示词分割标记。设置后，系统提示词以此标记分割为 **静态（缓存）** + **动态（不缓存）** 两段，提升缓存命中率。例如：`"<!-- DYNAMIC_BOUNDARY -->"` |
 | `requests_per_minute` | `int` | `60` | ❌ 否 | 该模型类型的速率限制 |
@@ -217,9 +217,9 @@ model:
 只把 `max_output_tokens` 作为 `max_tokens` 发送给模型服务。仅当两个新字段都未设置时，
 继续接受旧的 `max_tokens` 配置。
 
-### 3.4 extra_headers 覆盖行为
+### 3.4 extra_headers 请求头
 
-`system.yaml` 的 `model_request_headers` 会先生成全局默认 header；当前模型类型的 `extra_headers` 最后合入，并按 header 名大小写不敏感覆盖同名值。
+`extra_headers` 只作用于当前模型类型。未配置时，HTTP 请求头由底层 SDK 决定。旧版 `system.yaml` 的 `model_request_headers` 配置会被忽略。
 
 ```yaml
 model:

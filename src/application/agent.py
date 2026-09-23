@@ -133,7 +133,7 @@ class BaseAgent(ABC):
             if self._model_binding is None:
                 self._model_binding = self._resolve_model_binding(model_cache=model_cache)
         else:
-            from agentloom.configuration.model_request_headers import build_model_request_headers
+            from agentloom.configuration.http_headers import normalize_http_headers
 
             settings = C.llm.for_type(self.default_model_type)
             self._model_selection = RuntimeModelSelection(
@@ -141,10 +141,7 @@ class BaseAgent(ABC):
                 model_id=settings.model,
                 protocol=settings.adapter,
                 settings=settings.model_dump(mode="json"),
-                request_headers=build_model_request_headers(
-                    settings.extra_headers,
-                    config_map=getattr(self, "_effective_agent_config", None),
-                ),
+                request_headers=normalize_http_headers(settings.extra_headers),
             )
         if self._model_binding is not None and not isinstance(self._model_binding, ModelTurnBinding):
             raise TypeError("model_binding must be a ModelTurnBinding")
