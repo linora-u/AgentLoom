@@ -1,6 +1,6 @@
-name: "goal_workflow_list_agent"
+name: "goal_contract_agent"
 agent_runtime: smolagents
-description: "Validate explicit Goal completion and Goal-mode workflow-list merging."
+description: "Validate explicit Goal completion and the native string workflow contract."
 model_type: "powerful"
 runtime_options:
   max_steps: 20
@@ -10,7 +10,7 @@ goal:
 
 workflow: |
   Call run_goal_audit_batch for worker_name=contract, concurrency=1, and one task
-  config_contract covering strict config, stable goal_id, and numbered list semantics;
+  config_contract covering strict config, stable goal_id, and native prompt semantics;
   retain its completed result.
 
   Call run_goal_audit_batch for worker_name=lifecycle, concurrency=1, and one task
@@ -22,7 +22,7 @@ workflow: |
   disabled-mode zero-impact agreement; retain its completed result.
 
   Send the three results to goal_evidence_synthesizer, persist them as run_name
-  workflow_list, and verify markers ["# Goal Mode Validation",
+  contract_validation, and verify markers ["# Goal Mode Validation",
   "## Configuration Contract", "## Verdict"].
 
   Call get_goal, verify the goal_id and active state, then call
