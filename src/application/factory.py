@@ -2,6 +2,7 @@ import copy
 import hashlib
 import inspect
 import json
+import keyword
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -277,10 +278,41 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         dynamic_agent_tool.__name__ = function_name
         dynamic_agent_tool.__doc__ = generated_docstring
 
-        # JSON object property names are not constrained to Python identifiers.
-        # Keep the callable's native ``*args, **kwargs`` boundary and publish the
-        # exact JSON Schema through the canonical Tool definition below.
         dynamic_agent_tool.__annotations__ = {"return": Any}
+        if all(
+            name.isidentifier() and not keyword.iskeyword(name)
+            for name in ordered_input_names
+        ):
+            signature_parameters = [
+                inspect.Parameter(
+                    name=name,
+                    kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    default=(
+                        inspect.Parameter.empty
+                        if name in required_names
+                        else None
+                    ),
+                    annotation=Any,
+                )
+                for name in ordered_input_names
+            ]
+            if accepts_additional_properties:
+                extra_name = "kwargs"
+                while extra_name in properties:
+                    extra_name = f"_{extra_name}"
+                signature_parameters.append(
+                    inspect.Parameter(
+                        name=extra_name,
+                        kind=inspect.Parameter.VAR_KEYWORD,
+                        annotation=Any,
+                    )
+                )
+            dynamic_agent_tool.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+                parameters=signature_parameters,
+                return_annotation=Any,
+            )
+        # Arbitrary JSON property names cannot be represented by a Python
+        # signature; those callables intentionally retain ``*args, **kwargs``.
         dynamic_agent_tool._agentloom_tool_definition = ToolDefinition(  # type: ignore[attr-defined]
             name=function_name,
             description=self.description.strip(),
