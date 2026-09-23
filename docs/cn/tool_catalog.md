@@ -53,12 +53,10 @@ Goal 工具由 Goal Mode 注入，也不属于默认 catalog。
 | `skills` | `skill` |
 | `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
 | `planning` | `todo_write` |
-| `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
-| `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
 
 当前默认启用 `core_shell`、`core_file`、`core_search`、`context`、`skills` 和
-`self_learning`。`planning` 由 Todo 策略选择；Markdown 报告与代码导航为显式
-启用的 toolset。
+`self_learning`。`planning` 由 Todo 策略选择。需要更强代码导航或文档生成能力时，
+应由 Application 声明业务工具或连接 MCP server，不再扩展框架内置工具面。
 
 ## 新增内置工具
 
@@ -108,7 +106,5 @@ implementation 不可调用或循环导入错误。
 | Application | Run ID | 已审计结果 |
 |---|---|---|
 | Core catalog | `run_20260805T121722420197Z_c82db5eab6e6` | `CORE_TOOL_REGISTRY_VALIDATION: PASS` |
-| Markdown toolset | `run_20260805T121722420159Z_2299de139dc2` | `MARKDOWN_TOOLSET_VALIDATION: PASS` |
-| Search 与 LSP | `run_20260805T121722420285Z_67c9db03778a` | 7 项检查全部通过 |
 | Context retrieval | `run_20260805T121722420262Z_67f264434fcd` | 从 context store 取回 `JSON-CTX-4927` |
 | Self-learning | `run_20260805T121722420417Z_496aaaa4cd2f` | memory/skill proposal、reference 写入、文件读取均为 `ok: true` |

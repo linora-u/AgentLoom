@@ -10,8 +10,6 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-  - "markdown_report"
-  - "code_nav"
 workflow: |
   You are a **senior software engineer and reliability expert**. In this phase you act as the **"Error Handling & Robustness"** worker agent, responsible for systematically auditing how the codebase handles errors, exceptions, resource cleanup, and edge-case inputs.
 
@@ -96,7 +94,7 @@ workflow: |
 
   Write analysis results as Markdown to `temp/QA_ErrorHandling.md`.
 
-  **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
+  **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
 
 input_schema:
   type: object

@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.agent_runtime import (
     AgentRuntimeResult,
     RuntimeCapabilities,
@@ -31,7 +31,7 @@ def native_project(tmp_path, monkeypatch):
 
     def forbidden_binding(*args, **kwargs):
         raise AssertionError("native runtime attempted Python provider binding")
-    monkeypatch.setattr("agentloom.application.agent.BaseAgent._resolve_model_binding", forbidden_binding)
+    monkeypatch.setattr("agentloom.app.agent.BaseAgent._resolve_model_binding", forbidden_binding)
 
     class NativeRuntime:
         runtime_id = "native-fixture"
@@ -58,11 +58,11 @@ def native_project(tmp_path, monkeypatch):
         def close(self):
             pass
 
-    from agentloom.application.composition import build_builtin_runtime_registry
+    from agentloom.app.composition import build_builtin_runtime_registry
     registry = build_builtin_runtime_registry()
     registry.register("native-fixture", capabilities=NativeRuntime.capabilities, factory=NativeRuntime)
-    monkeypatch.setattr("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry)
-    monkeypatch.setattr("agentloom.application.agent.build_builtin_runtime_registry", lambda: registry)
+    monkeypatch.setattr("agentloom.app.validation.build_builtin_runtime_registry", lambda: registry)
+    monkeypatch.setattr("agentloom.app.agent.build_builtin_runtime_registry", lambda: registry)
     with bind_config(load_project_config(tmp_path)):
         yield path, definitions, requests
 
@@ -90,8 +90,8 @@ def test_no_tools_no_goal_application_uses_native_model_selection(native_project
 def test_binding_free_workers_have_fresh_instances_and_hook_runs(native_project, monkeypatch):
     from io import StringIO
 
-    from agentloom.application.definition import load_agent_definition
-    from agentloom.application.factory import YamlConfiguredAgent
+    from agentloom.app.definition import load_agent_definition
+    from agentloom.app.factory import YamlConfiguredAgent
     from agentloom.execution.logging import RichLoggerBackend
     from rich.console import Console
 
@@ -156,7 +156,7 @@ def test_native_runtime_rejects_configured_stop_without_support(native_project, 
 
 def test_native_application_ignores_historical_global_smol_prompt(native_project):
     path, definitions, _ = native_project
-    from agentloom.configuration.config import get_config
+    from agentloom.config.config import get_config
     system = get_config().agent_root / "config/system.yaml"
     system.write_text(system.read_text() + "prompt: missing-historical-smol-template.yaml\n")
     assert execute_app(path, file_logging=False).output == "native answer"
@@ -165,7 +165,7 @@ def test_native_application_ignores_historical_global_smol_prompt(native_project
 
 def test_native_application_does_not_inherit_smol_basic_tool_defaults(native_project):
     path, definitions, _ = native_project
-    from agentloom.configuration.config import get_config
+    from agentloom.config.config import get_config
     system = get_config().agent_root / "config/system.yaml"
     system.write_text(system.read_text().replace(
         "default_toolsets: []", "default_toolsets: [core_file, core_shell, core_search]",
@@ -206,7 +206,7 @@ def test_duplicate_explicit_tool_names_are_rejected_before_construction(native_p
 
 def test_native_model_projection_uses_only_model_headers(native_project):
     path, definitions, _ = native_project
-    from agentloom.configuration.config import get_config
+    from agentloom.config.config import get_config
     root = get_config().agent_root
     system = root / "config/system.yaml"
     system.write_text(system.read_text() + (

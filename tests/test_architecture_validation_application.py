@@ -511,8 +511,8 @@ def test_json_query_envelopes_cannot_disguise_changed_or_unreadable_original_dat
 
 
 def test_native_definition_has_four_real_typed_workers():
-    from agentloom.application.factory import YamlAgentFactory
-    from agentloom.application.readiness import validate_runtime_agent_config
+    from agentloom.app.factory import YamlAgentFactory
+    from agentloom.app.readiness import validate_runtime_agent_config
 
     source = APP_ROOT / "workflows/native.yaml"
     definition = YamlAgentFactory._load_config_from_file(source)
@@ -531,15 +531,14 @@ def test_native_definition_has_four_real_typed_workers():
     assert (APP_ROOT / "workflows/worker_agents/change_planner.md").is_file()
 
 
-def test_application_config_retains_run_evidence_and_disables_unused_connections():
+def test_application_config_retains_run_evidence_and_disables_unused_mcp():
     config = yaml.safe_load((APP_ROOT / "config/system.yaml").read_text())
     assert config["checkpoint"]["cleanup_on_success"] is False
-    assert config["lsp_servers"]["enabled"] is False
     assert config["mcp_servers"] is None
 
 
 def test_prepared_nested_application_relocates_only_tool_namespaces_and_loads_local_tools(tmp_path, monkeypatch):
-    from agentloom.application.definition import load_agent_definition
+    from agentloom.app.definition import load_agent_definition
 
     from applications.architecture_contract_validation import run_acceptance
 
@@ -574,9 +573,9 @@ def test_prepared_nested_application_relocates_only_tool_namespaces_and_loads_lo
     script = r'''
 import importlib.util, json, sys
 from pathlib import Path
-from agentloom.application.definition import load_agent_definition, validate_agent_definition
-from agentloom.configuration import C
-from agentloom.application.imports.dynamic_import import load_function
+from agentloom.app.definition import load_agent_definition, validate_agent_definition
+from agentloom.config import C
+from agentloom.app.imports.dynamic_import import load_function
 definition, outside = map(Path, sys.argv[1:])
 config = load_agent_definition(definition)
 assert validate_agent_definition(C.agent_root, str(definition.relative_to(C.agent_root)), config) == []

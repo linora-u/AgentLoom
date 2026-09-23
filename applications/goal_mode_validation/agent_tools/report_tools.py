@@ -22,8 +22,8 @@ _EVIDENCE_FILES = {
     "contract": (
         "src/execution/goal/model.py",
         "src/execution/goal/provider.py",
-        "src/application/readiness.py",
-        "src/application/factory.py",
+        "src/app/readiness.py",
+        "src/app/factory.py",
         "tests/goal_test/test_goal_config.py",
         "tests/goal_test/test_goal_state.py",
         "tests/agent_test/llm_cfg_test/test_supervisor_task_spec_format.py",
@@ -32,16 +32,16 @@ _EVIDENCE_FILES = {
     "lifecycle": (
         "src/execution/goal/model.py",
         "src/execution/goal/provider.py",
-        "src/application/agent.py",
+        "src/app/agent.py",
         "src/execution/checkpoint/checkpoint_manager.py",
         "src/execution/checkpoint/coordinator.py",
-        "src/application/runner.py",
+        "src/app/runner.py",
         "tests/goal_test/test_goal_model_accounting.py",
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
     ),
     "observability": (
-        "src/application/run.py",
-        "src/application/runner.py",
+        "src/app/run.py",
+        "src/app/runner.py",
         "src/schedules/runner.py",
         "src/schedules/store.py",
         "studio/python/agentloom_studio_adapter/__main__.py",
@@ -169,7 +169,7 @@ def run_goal_audit_batch(
             }
         )
 
-    from agentloom.application.factory import YamlAgentFactory
+    from agentloom.app.factory import YamlAgentFactory
 
     worker_path = _APP_ROOT / "workflows" / "worker_agents" / filename
     results = YamlAgentFactory.run_agents_parallel(

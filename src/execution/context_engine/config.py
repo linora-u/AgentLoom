@@ -22,9 +22,6 @@ def _default_skip_tools() -> tuple[str, ...]:
     return (
         "edit_file",
         "write_file",
-        "write_markdown_file",
-        "write_markdown_file_raw",
-        "append_markdown_sections",
     )
 
 
@@ -80,7 +77,7 @@ class ContextEngineConfig:
 
     @classmethod
     def from_runtime(cls) -> "ContextEngineConfig":
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         raw = C.get("context_engine", {})
         return cls.from_mapping(raw)

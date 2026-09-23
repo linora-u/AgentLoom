@@ -9,7 +9,7 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-from agentloom.application.factory import YamlAgentFactory, YamlConfiguredAgent
+from agentloom.app.factory import YamlAgentFactory, YamlConfiguredAgent
 
 def test_open_function():
     """Test whether the agent can use the `open` function."""

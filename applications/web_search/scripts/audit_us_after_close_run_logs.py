@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 
 SEARCH_CALL_RE = re.compile(r"Calling tool: 'mcp__AnySearch__batch_search'")
 EXTRACT_CALL_RE = re.compile(r"Calling tool: 'mcp__AnySearch__extract'")
-WRITE_CALL_RE = re.compile(r"Calling tool: 'write_markdown_file_raw'")
 TOOL_CALL_RE = re.compile(r"Calling tool: '([^']+)'")
 MAX_RESULTS_RE = re.compile(r"'max_results':\s*(\d+)")
 QUOTE_HOST_PATTERNS = ("exa.ai",)
@@ -67,7 +66,7 @@ def _tool_event_blocks(text: str) -> list[tuple[str, int, str, bool]]:
             events.append(("search", start, block, blocked))
         elif tool == "mcp__AnySearch__extract":
             events.append(("extract", start, block, blocked))
-        elif tool == "write_markdown_file_raw":
+        elif tool == "write_file":
             events.append(("write", start, block, blocked))
     return events
 

@@ -750,7 +750,7 @@ def test_mapped_canonical_capsule_launcher_executes_only_approved_source(
 
 
 @pytest.mark.parametrize("mapping", [
-    'agentloom = "../src"', 'agentloom = "/mutable/src"', 'agentloom = "src/application"',
+    'agentloom = "../src"', 'agentloom = "/mutable/src"', 'agentloom = "src/app"',
     'agentloom = "src"\nother = "src"', 'src = "src"', '"" = "src"',
     'agentloom = "src"\nagentloom_studio_adapter = "../studio"',
     'agentloom = "src"\nagentloom_studio_adapter = "studio/python/agentloom_studio_adapter"\nother = "src"',

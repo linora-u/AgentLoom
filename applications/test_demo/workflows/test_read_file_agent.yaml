@@ -23,7 +23,7 @@ workflow: |
   Verify: first displayed line number is 5, last is 7.
 
   ## Step 3: Read a Python file
-  Use read_file to read "src/tools/file_ops/read_file/read_file.py".
+  Use read_file to read "src/runtimes/smolagents/tools/file_ops/read_file/read_file.py".
   Expected: output contains Python code with line numbers.
   Verify: output contains "def read_file" and line numbers.
 

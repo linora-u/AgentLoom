@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def imported_module_names(source: str, *, package: str | None = None) -> set[str]:
+    modules: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level:
+                if package is None:
+                    continue
+                module = importlib.util.resolve_name(f"{'.' * node.level}{module}", package)
+            if module:
+                modules.add(module)
+                modules.update(f"{module}.{alias.name}" for alias in node.names)
+    return modules
 
 
 def run_fresh(source: str) -> None:
@@ -26,10 +44,10 @@ def test_canonical_modules_own_configuration_and_context_state() -> None:
     run_fresh("""
         import importlib
         import agentloom
-        from agentloom.configuration import config
-        from agentloom.application import invocation
-        assert agentloom.C is importlib.import_module('agentloom.configuration').C
-        assert config.__spec__.name == 'agentloom.configuration.config'
+        from agentloom.config import config
+        from agentloom.app import invocation
+        assert agentloom.C is importlib.import_module('agentloom.config').C
+        assert config.__spec__.name == 'agentloom.config.config'
         sentinel = object()
         config._ACTIVE_CONFIG = sentinel
         assert agentloom.get_config() is sentinel
@@ -45,20 +63,26 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         import importlib.util
         import sys
         import agentloom
-        for name in ('src', 'src.application', 'src.execution'):
+        for name in ('src', 'src.application', 'src.configuration', 'src.execution'):
             try:
                 importlib.import_module(name)
             except ImportError as exc:
                 assert "Import AgentLoom as 'agentloom'" in str(exc)
             else:
                 raise AssertionError(f'legacy import succeeded: {name}')
+        assert importlib.util.find_spec("agentloom.app") is not None
+        assert importlib.util.find_spec("agentloom.config") is not None
+        assert importlib.util.find_spec("agentloom.application") is None
+        assert importlib.util.find_spec("agentloom.configuration") is None
         assert importlib.util.find_spec('agentloom._compat') is None
         assert not any(type(finder).__name__ == '_LegacyFinder' for finder in sys.meta_path)
         assert not any(name == 'src' or name.startswith('src.') for name in sys.modules)
     """)
     assert not (ROOT / "agentloom").exists()
-    for package in ("application", "configuration", "execution", "runtimes", "integrations", "tools"):
+    for package in ("app", "config", "execution", "runtimes", "integrations", "tools"):
         assert (ROOT / "src" / package).is_dir()
+    for removed in ("application", "configuration"):
+        assert not (ROOT / "src" / removed).exists()
     assert not (ROOT / "src" / "runtime").exists()
     for removed in ("adapters", "encoding", "ui", "utils", "tui_bridge"):
         assert not (ROOT / "src" / removed).exists()
@@ -66,8 +90,8 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
     assert not (ROOT / "src" / "execution" / "agent.py").exists()
     assert not (ROOT / "src" / "execution" / "factory.py").exists()
     assert not (ROOT / "src" / "execution" / "invocation.py").exists()
-    assert not (ROOT / "src" / "application" / "studio" / "bridge.py").exists()
-    assert not (ROOT / "src" / "application" / "studio" / "domain_cli.py").exists()
+    assert not (ROOT / "src" / "app" / "studio" / "bridge.py").exists()
+    assert not (ROOT / "src" / "app" / "studio" / "domain_cli.py").exists()
     assert not (ROOT / "agentloom-tui").exists()
     assert (ROOT / "studio").is_dir()
     run_fresh("""
@@ -76,11 +100,65 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
         assert importlib.util.find_spec("agentloom.execution.agent") is None
         assert importlib.util.find_spec("agentloom.execution.factory") is None
         assert importlib.util.find_spec("agentloom.execution.invocation") is None
-        assert importlib.util.find_spec("agentloom.application.studio.bridge") is None
-        assert importlib.util.find_spec("agentloom.application.studio.domain_cli") is None
+        assert importlib.util.find_spec("agentloom.app.studio.bridge") is None
+        assert importlib.util.find_spec("agentloom.app.studio.domain_cli") is None
         assert importlib.util.find_spec("agentloom_tui_bridge") is None
         assert importlib.util.find_spec("agentloom_studio_adapter") is not None
     """)
+
+
+def test_tracked_python_sources_do_not_import_retired_package_names() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.py"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.split(b"\0")
+    retired = ("agentloom.application", "agentloom.configuration")
+    offenders: list[str] = []
+
+    for raw_path in tracked:
+        if not raw_path:
+            continue
+        relative_path = raw_path.decode()
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        path = Path(relative_path)
+        package = None
+        if path.parts[0] == "src":
+            package = ".".join(("agentloom", *path.parts[1:-1]))
+        for module in imported_module_names(source, package=package):
+            if any(module == prefix or module.startswith(f"{prefix}.") for prefix in retired):
+                offenders.append(f"{relative_path}:{module}")
+
+    assert offenders == []
+
+
+def test_import_scanner_expands_from_import_members() -> None:
+    assert imported_module_names(
+        textwrap.dedent(
+            """
+            import agentloom.application.runner
+            from agentloom import configuration
+            from agentloom.app import runner
+            from ..configuration import defaults
+            """
+        ),
+        package="agentloom.app",
+    ) == {
+        "agentloom.application.runner",
+        "agentloom",
+        "agentloom.configuration",
+        "agentloom.app",
+        "agentloom.app.runner",
+        "agentloom.configuration.defaults",
+    }
+    assert imported_module_names(
+        "from . import application",
+        package="agentloom",
+    ) == {
+        "agentloom",
+        "agentloom.application",
+    }
 
 
 def test_root_cli_is_only_a_command_composition_root() -> None:
@@ -106,10 +184,10 @@ def test_runtime_contract_does_not_export_smolagents_capabilities() -> None:
 def test_configuration_does_not_load_runtime_implementations() -> None:
     run_fresh("""
         import sys
-        from agentloom.configuration import config, llm_config
-        from agentloom.configuration import model_adapters, runtime_options
-        assert config.__spec__.name == "agentloom.configuration.config"
-        assert llm_config.__spec__.name == "agentloom.configuration.llm_config"
+        from agentloom.config import config, llm_config
+        from agentloom.config import model_adapters, runtime_options
+        assert config.__spec__.name == "agentloom.config.config"
+        assert llm_config.__spec__.name == "agentloom.config.llm_config"
         assert model_adapters.MODEL_ADAPTERS
         assert runtime_options.runtime_config_layers
         assert not any(
@@ -138,14 +216,14 @@ def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
                     offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}")
                 if module == "agentloom.execution.model_protocol" and name in {"AdapterKind", "MODEL_ADAPTERS"}:
                     offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}.{name}")
-                if module == "agentloom.application.runtime_options" and name == "runtime_config_layers":
+                if module == "agentloom.app.runtime_options" and name == "runtime_config_layers":
                     offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{module}.{name}")
     assert offenders == []
 
 
 def test_model_protocol_does_not_reexport_configuration_vocabulary() -> None:
     run_fresh("""
-        from agentloom.application import runtime_options
+        from agentloom.app import runtime_options
         from agentloom.execution import model_protocol
         assert not hasattr(runtime_options, "runtime_config_layers")
         assert not hasattr(model_protocol, "AdapterKind")
@@ -162,7 +240,7 @@ def test_tool_gateway_does_not_export_smolagents_final_answer_binding() -> None:
 
 def test_application_invocation_does_not_reexport_goal_rendering_helpers() -> None:
     run_fresh("""
-        from agentloom.application import invocation
+        from agentloom.app import invocation
         assert not hasattr(invocation, "goal_continuation_prompt")
         assert not hasattr(invocation, "goal_completion_output")
     """)
@@ -180,7 +258,7 @@ def test_schedules_do_not_depend_on_application_implementations() -> None:
             else:
                 continue
             for name in names:
-                if name == "agentloom.application" or name.startswith("agentloom.application."):
+                if name == "agentloom.app" or name.startswith("agentloom.app."):
                     offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{name}")
     assert offenders == []
 
@@ -201,7 +279,7 @@ def test_studio_adapter_does_not_assemble_schedule_business_dependencies() -> No
         forbidden_imports.extend(
             name
             for name in imports
-            if name == "agentloom.application.definition" or name == "agentloom.schedules.mutations"
+            if name == "agentloom.app.definition" or name == "agentloom.schedules.mutations"
         )
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "ScheduleMutationService":
             forbidden_calls.append(f"{source_path.relative_to(ROOT)}:{node.lineno}")
@@ -230,19 +308,19 @@ def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> Non
 def test_definition_inspection_preserves_lazy_engine_patch_installation() -> None:
     run_fresh("""
         import sys
-        from agentloom.application.definition import read_agent_definition
-        from agentloom.application.validation import AgentConfigNormalizer
+        from agentloom.app.definition import read_agent_definition
+        from agentloom.app.validation import AgentConfigNormalizer
         from agentloom.tools import catalog
         assert 'agentloom.runtimes.smolagents.agents' not in sys.modules
         assert 'agentloom.runtimes.smolagents.monkey_patch' not in sys.modules
-        assert 'agentloom.application.agent' not in sys.modules
+        assert 'agentloom.app.agent' not in sys.modules
         assert not any(name.startswith('agentloom.runtimes.smolagents.tools.shell') for name in sys.modules)
 
         from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
         from agentloom.runtimes.smolagents import monkey_patch
-        from agentloom.application.agent import RoleDrivenAgent
+        from agentloom.app.agent import RoleDrivenAgent
         assert ToolCallingAgentV2.__module__ == 'agentloom.runtimes.smolagents.agents'
-        assert RoleDrivenAgent.__module__ == 'agentloom.application.agent'
+        assert RoleDrivenAgent.__module__ == 'agentloom.app.agent'
         assert monkey_patch._INSTALLED is True
     """)
 

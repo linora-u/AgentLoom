@@ -4,9 +4,9 @@ import shutil
 from pathlib import Path
 
 import pytest
-from agentloom.application.definition import load_agent_definition, skill_sources
-from agentloom.configuration.config import UnifiedConfig, build_effective_agent_config_snapshot
-from agentloom.configuration.llm_config import LLMConfig
+from agentloom.app.definition import load_agent_definition, skill_sources
+from agentloom.config.config import UnifiedConfig, build_effective_agent_config_snapshot
+from agentloom.config.llm_config import LLMConfig
 from agentloom.execution.skills.catalog import SkillCatalog, SkillSource
 
 ROOT = Path(__file__).resolve().parents[2]

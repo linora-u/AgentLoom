@@ -23,19 +23,6 @@ context_engine:
 # Hook directories are never auto-discovered.
 
 # ============================================
-# LSP Language Server Configuration
-# ============================================
-# LSP servers start when agent initializes and remain alive for the session.
-# After `uv sync`, all required binaries are in .venv/bin/.
-lsp_servers:
-  enabled: true
-  max_restarts: 3              # crash recovery limit (applies to all servers)
-  servers:
-    - python                   # jedi-language-server (pip, in .venv/bin)
-    - go                       # gopls (via go-bin + go install)
-    - typescript               # typescript-language-server (via nodejs-bin + npm)
-
-# ============================================
 # MCP (Model Context Protocol) Client Configuration
 # ============================================
 # Point to a .mcp.json file (Claude Code compatible format) containing
@@ -106,16 +93,6 @@ tool_access_control:
         - "list_directory"
         - "grep_search"
         - "glob_search"
-        - "write_markdown_file"
-        - "write_markdown_file_raw"
-        - "append_markdown_sections"
-        - "get_file_outline"
-        - "ast_grep_search_file"
-        - "lsp_find_definition"
-        - "lsp_find_references"
-        - "lsp_get_document_symbols"
-        - "lsp_hover"
-        - "lsp_get_workspace_symbols"
       include_paths:
         - "*"
   # Example:

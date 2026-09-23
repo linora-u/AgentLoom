@@ -53,7 +53,7 @@ def _create_tool(config):
             self.description = config.get("description", "")
 
         def _ensure_normalized(self):
-            from agentloom.application.validation import AgentConfigNormalizer
+            from agentloom.app.validation import AgentConfigNormalizer
             return AgentConfigNormalizer.build_worker_normalized_config(
                 self._config, agent_root=".", source_name="test",
             )
@@ -65,7 +65,7 @@ def _create_tool(config):
             return "mock_result"
 
         def agent_as_tool(self):
-            from agentloom.application.factory import YamlConfiguredAgent
+            from agentloom.app.factory import YamlConfiguredAgent
             return YamlConfiguredAgent.__dict__['agent_as_tool'](self)
 
     agent = SimpleAgent(config, model_binding=MagicMock())

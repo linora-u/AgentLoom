@@ -4,17 +4,17 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import agentloom.application.factory as application_factory
-import agentloom.application.runner as runner
+import agentloom.app.factory as application_factory
+import agentloom.app.runner as runner
 import pytest
-from agentloom.application import definition as application_definition
-from agentloom.application.definition import (
+from agentloom.app import definition as application_definition
+from agentloom.app.definition import (
     inspect_supervisor_definition,
     load_agent_definition,
     prepare_application_definition,
 )
-from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
-from agentloom.configuration.config import UnifiedConfig, load_project_config
+from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.config.config import UnifiedConfig, load_project_config
 
 
 def _project_config(root: Path) -> UnifiedConfig:
@@ -81,7 +81,7 @@ def test_scheduled_supervisor_target_is_revalidated_before_run_allocation(
             worker.unlink()
             worker.symlink_to(outside)
         else:
-            from agentloom.application import paths as application_paths
+            from agentloom.app import paths as application_paths
 
             original_candidate = application_paths.worker_reference_candidate
 
@@ -265,7 +265,7 @@ def test_scheduled_worker_path_is_not_resolved_again_after_snapshot(
         worker.read_text(encoding="utf-8").replace("name: worker", "name: outside"),
         encoding="utf-8",
     )
-    from agentloom.application import paths as application_paths
+    from agentloom.app import paths as application_paths
 
     original_candidate = application_paths.worker_reference_candidate
     calls = 0

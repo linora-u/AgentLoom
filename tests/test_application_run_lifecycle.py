@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, call
 
 import pytest
-from agentloom.application.lifecycle import (
+from agentloom.app.lifecycle import (
     ApplicationRunFinalization,
     ApplicationRunLifecycle,
     ApplicationRunResources,
@@ -187,7 +187,7 @@ def test_finalize_run_owns_evidence_manifest_and_success_cleanup(
     persist_observability = MagicMock()
     manifest_updates: dict[str, object] = {}
     monkeypatch.setattr(
-        "agentloom.application.lifecycle._persist_run_observability",
+        "agentloom.app.lifecycle._persist_run_observability",
         persist_observability,
     )
 

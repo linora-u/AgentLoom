@@ -111,7 +111,7 @@ class TestAutoBackgroundOnTimeout:
 
         proc.cleanup()
 
-    @patch("agentloom.configuration.C.get_nested")
+    @patch("agentloom.config.C.get_nested")
     def test_timeout_without_runtime_context_is_never_promoted(self, mock_get_nested):
         mock_get_nested.side_effect = lambda *args, default=None: {
             ("shell_settings", "background_tasks", "enabled"): True,
@@ -139,7 +139,7 @@ class TestAutoBackgroundOnTimeout:
         assert "Background Task" not in result
         assert BackgroundTaskRegistry.get_instance().list_all() == []
 
-    @patch("agentloom.configuration.C.get_nested")
+    @patch("agentloom.config.C.get_nested")
     def test_auto_background_disabled(self, mock_get_nested):
         """When auto-background is disabled, timeout should kill and
         return timeout error."""

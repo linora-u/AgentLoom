@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from threading import Lock
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.logging import get_logger
 
 logger = get_logger(__name__)

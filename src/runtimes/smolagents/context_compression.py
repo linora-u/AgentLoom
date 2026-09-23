@@ -9,8 +9,7 @@ Compression Pipeline (executed in order by ``get_compressed_messages``):
 =========================================================================
 
   Layer 1 – File Read Deduplication  (``_apply_tool_dedup``)
-      Detects repeated reads of the same file (read_file,
-      read_file, get_file_outline).  All but the latest response
+      Detects repeated read_file calls for the same file. All but the latest response
       for each file are replaced with a short placeholder.
       *Idempotent – running twice has no additional effect.*
 
@@ -63,7 +62,7 @@ from dataclasses import dataclass
 from agentloom.integrations.litellm.model_binding import (
     resolve_litellm_model_turn_binding,
 )
-from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
+from agentloom.config.defaults import DEFAULT_MAX_TOKENS
 from agentloom.execution.context_engine.engine import CONTEXT_REF_PREFIX
 from agentloom.execution.context_engine.runtime import get_current_context_engine
 from agentloom.execution.logging import get_logger
@@ -105,9 +104,7 @@ FILE_DEDUP_PLACEHOLDER: str = (
     "Please refer to the latest read operation for the most up-to-date content.]"
 )
 
-FILE_READ_TOOL_NAMES: frozenset[str] = frozenset(
-    {"read_file", "get_file_outline"}
-)
+FILE_READ_TOOL_NAMES: frozenset[str] = frozenset({"read_file"})
 
 # ===========================================================================
 # Layer 2 Constants – Tool Output Hard Truncation
@@ -120,7 +117,6 @@ TOOL_MAX_RETAIN_CHARS: dict[str, int | None] = {
     "glob_search": 1500,
     "grep_search": 3000,
     "read_file": None,
-    "get_file_outline": None,
     "default": 3000,
 }
 
@@ -761,7 +757,7 @@ def _apply_tool_dedup(
     """Layer 1: File Read Deduplication.
 
     Scans TOOL_CALL / TOOL_RESPONSE pairs to detect repeated reads of the
-    same file (via read_file, read_file, get_file_outline).
+    same file through repeated read_file calls.
     All but the *latest* response for each file are replaced with
     ``FILE_DEDUP_PLACEHOLDER``.
 

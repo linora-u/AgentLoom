@@ -22,7 +22,6 @@ tools:
   # File operations for analysis and generation
   - name: "write_file"
   - name: "read_file"
-  - name: "get_file_outline"
   - name: "list_directory"
 
 worker_agents:

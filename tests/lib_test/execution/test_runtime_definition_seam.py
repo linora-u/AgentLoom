@@ -28,7 +28,7 @@ from agentloom.execution.tool_gateway import ToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNTIME_OWNER = PROJECT_ROOT / "src" / "application" / "agent.py"
+RUNTIME_OWNER = PROJECT_ROOT / "src" / "app" / "agent.py"
 
 _FORBIDDEN_RUNTIME_IMPORT_PREFIXES = (
     "smolagents",
@@ -153,15 +153,15 @@ def test_generic_runtime_owner_has_no_smolagents_dependency_or_symbol() -> None:
     )
 
     assert forbidden_imports == [], (
-        "src/application/agent.py is an Application runtime owner and must not import "
+        "src/app/agent.py is an Application runtime owner and must not import "
         f"the smolagents adapter: {forbidden_imports}"
     )
     assert referenced_symbols == set(), (
-        "src/application/agent.py must not construct or type against smolagents "
+        "src/app/agent.py must not construct or type against smolagents "
         f"implementation symbols: {sorted(referenced_symbols)}"
     )
     assert leaked_fragments == [], (
-        "src/application/agent.py still contains smolagents-specific source; move "
+        "src/app/agent.py still contains smolagents-specific source; move "
         f"construction and model-manager knowledge behind the adapter: {leaked_fragments}"
     )
 
@@ -174,7 +174,7 @@ def test_importing_generic_runtime_owner_does_not_load_smolagents() -> None:
             textwrap.dedent(
                 """
                 import sys
-                import agentloom.application.agent
+                import agentloom.app.agent
 
                 loaded = sorted(
                     name
@@ -184,7 +184,7 @@ def test_importing_generic_runtime_owner_does_not_load_smolagents() -> None:
                 )
                 if loaded:
                     raise AssertionError(
-                        "agentloom.application.agent imported engine/provider modules: "
+                        "agentloom.app.agent imported engine/provider modules: "
                         + ", ".join(loaded)
                     )
                 """

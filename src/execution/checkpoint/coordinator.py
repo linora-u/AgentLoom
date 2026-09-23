@@ -186,7 +186,7 @@ class CheckpointCoordinator:
     ) -> None:
         if effective_config is None:
             config = ContextEngineConfig.from_runtime()
-            from agentloom.configuration import C
+            from agentloom.config import C
 
             checkpoint_config = C.get("checkpoint", {})
         else:

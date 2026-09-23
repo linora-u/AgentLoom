@@ -73,10 +73,10 @@ class TestFilterExcludedPaths:
             _RESOLVE_MOCK_TARGET,
             _mock_resolve_factory(_make_tac_config(rules)),
         )
-        files = ["src/main.py", "src/application/imports.py", "secrets/key.pem", "secrets/config.py"]
+        files = ["src/main.py", "src/app/imports.py", "secrets/key.pem", "secrets/config.py"]
         filtered = _filter_excluded_paths(files)
         assert "src/main.py" in filtered
-        assert "src/application/imports.py" in filtered
+        assert "src/app/imports.py" in filtered
         assert not any("secrets" in f for f in filtered)
 
     def test_excludes_multiple_directories(self, monkeypatch):

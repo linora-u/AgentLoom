@@ -31,16 +31,16 @@
 
 | 要修改的行为 | 源码位置 |
 |---|---|
-| YAML/Markdown 定义、Worker 引用、有效配置来源、Application 与 Run 身份、Supervisor/Worker 编排 | `src/application/` |
+| YAML/Markdown 定义、Worker 引用、有效配置来源、Application 与 Run 身份、Supervisor/Worker 编排 | `src/app/` |
 | Hook、Skill、checkpoint、Goal、上下文与持久化 | `src/execution/` |
 | 与 smolagents 对象和执行器直接耦合的适配 | `src/runtimes/smolagents/` |
 | MCP/LSP 外部协议连接 | `src/integrations/mcp/`、`src/integrations/lsp/` |
-| 全局和模型配置读取、规范化 | `src/configuration/` |
+| 全局和模型配置读取、规范化 | `src/config/` |
 | 工具目录与具体工具实现 | `src/tools/` |
-| Studio 展示、私有适配器、命令与调度入口 | `studio/`、`src/application/studio/`、`src/__main__.py`、`src/schedules/` |
+| Studio 展示、私有适配器、命令与调度入口 | `studio/`、`src/app/studio/`、`src/__main__.py`、`src/schedules/` |
 
-这些目录通过安装配置统一属于 `agentloom` 包，例如 `agentloom.application`
-对应 `src/application/`。定义规则由 Application 模块提供，Studio、运行入口和
+这些目录通过安装配置统一属于 `agentloom` 包，例如 `agentloom.app`
+对应 `src/app/`。定义规则由 Application 模块提供，Studio、运行入口和
 Skill 脚本应复用它；不要各自解析 YAML、维护字段白名单或推导 Worker 路径。
 
 ## 单 Agent / 多 Agent 判断

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agentloom.application.factory import (
+from agentloom.app.factory import (
     YamlAgentFactory,
     YamlConfiguredSupervisorAgent,
 )

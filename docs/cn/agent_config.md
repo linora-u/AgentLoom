@@ -135,7 +135,6 @@ workflow: |
 tools:
   - name: "read_file"
   - name: "write_file"
-  - name: "get_file_outline"
   - name: "get_module_context"
     module: "applications.my_app.agent_tools.module_context"
     function: "get_module_context"
@@ -598,7 +597,7 @@ tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
 # 构造任务列表
 tasks = [
     {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/application/imports", "index_content": "..."},
+    {"dir_path": "src/app/imports", "index_content": "..."},
     {"dir_path": "src/core", "index_content": "..."},
 ]
 
@@ -700,19 +699,9 @@ tools:
 | `read_file` | 读取文件内容（支持 offset/limit 分段读取） |
 | `write_file` | 创建新文件或覆盖已有文件 |
 | `edit_file` | 应用一个或多个唯一文本编辑 |
-| `write_markdown_file` | 写入 Markdown 文件 |
-| `write_markdown_file_raw` | 写入原始 Markdown 文件 |
-| `append_markdown_sections` | 追加 Markdown 章节内容 |
-| `get_file_outline` | 获取代码大纲（函数/类/结构体） |
 | `list_directory` | 列出目录结构 |
 | `grep_search` | 正则搜索文件内容（基于 ripgrep） |
 | `glob_search` | Glob 模式搜索文件 |
-| `ast_grep_search_file` | AST 模式搜索 |
-| `lsp_find_definition` | 查找符号定义 |
-| `lsp_find_references` | 查找符号引用 |
-| `lsp_get_document_symbols` | 列出文档符号 |
-| `lsp_hover` | 查看 hover/type 信息 |
-| `lsp_get_workspace_symbols` | 搜索工作区符号 |
 | `loom_retrieve_context` | 读取压缩上下文引用 |
 | `shell_tool` | 执行 shell 命令（受白名单限制） |
 | `check_background_task` | 读取后台任务状态与输出 |
@@ -771,7 +760,7 @@ toolset 归属、implementation 加载规则和真实验收矩阵见
 #### 4.4.3 核心 API：`YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict — Worker YAML 路径（相对于 AGENT_ROOT）或配置字典
@@ -808,7 +797,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -866,7 +855,7 @@ import traceback
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -1266,7 +1255,7 @@ input_schema:
   properties:
     dir_path:
       type: string
-      description: "要分析的相对目录路径，如 src/application/imports"
+      description: "要分析的相对目录路径，如 src/app/imports"
     index_content:
       type: string
       description: "该目录 index.md 的完整文本内容"

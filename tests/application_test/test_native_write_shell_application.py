@@ -1,10 +1,10 @@
 """Production Application entry; deterministic model only at the CI boundary."""
 import json
-from pathlib import Path
+
 import pytest
 import yaml
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.model_protocol import FunctionCallItem, MessageItem, ModelTurnResult
 from tests.application_test.native_write_shell_support import SCENARIOS, external_write_runtime, planned_calls, verify_native, write_application
 
@@ -12,7 +12,7 @@ from tests.application_test.native_write_shell_support import SCENARIOS, externa
 def test_application_governs_native_mutation_and_shell(tmp_path, scenario):
     config = tmp_path / "config"
     config.mkdir()
-    (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(tmp_path / "runtime")}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "lsp_servers": {"enabled": False}, "default_toolsets": []}))
+    (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(tmp_path / "runtime")}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "default_toolsets": []}))
     (config / "llm.yaml").write_text("model:\n  default_model_type: test\n  test: {model: fixture, adapter: openai_chat}\n  summary: {model: fixture, adapter: openai_chat}\n")
     workflow, marker = write_application(tmp_path, "write_case", "test", scenario)
     plan = planned_calls(workflow.parent.parent / "files", scenario, marker)

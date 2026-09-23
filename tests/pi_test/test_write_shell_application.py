@@ -2,8 +2,8 @@
 import json
 import pytest
 
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_tools_application import select
 from tests.pi_test.test_governance_application import audit
@@ -170,7 +170,7 @@ def test_cancelled_native_bash_reaps_managed_detached_descendants(tmp_path, faul
 
 
 def test_bash_without_an_exit_code_cannot_become_successful_evidence(tmp_path):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     with model_service(turns=[[("killed-shell", "bash", {"command": "kill -KILL $$"})]]) as (url, requests):
         app = project(tmp_path, url)
         select(app, tools=[{"name": "bash"}], shell_settings={"allowed_commands": ["*"], "allowed_operators": ["*"], "sandbox": {"enabled": False}})
@@ -262,7 +262,7 @@ def test_large_bash_artifact_is_retrievable_without_reexecution(tmp_path):
 
 
 def test_timed_out_bash_stops_application_and_keeps_uncertain_journal(tmp_path):
-    from agentloom.application.run import ApplicationRunError
+    from agentloom.app.run import ApplicationRunError
     with model_service(turns=[[('timeout', 'bash', {'command': 'sleep 10', 'timeout': 0.1})]]) as (url, requests):
         app = project(tmp_path, url)
         select(app, tools=[{'name': 'bash'}], shell_settings={'allowed_commands': ['sleep'], 'sandbox': {'enabled': False}})
