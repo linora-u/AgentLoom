@@ -262,13 +262,6 @@ class AgentConfigNormalizer:
         raise ValueError(_WORKFLOW_VALIDATION_ERROR)
 
     @staticmethod
-    def normalize_workflow_items(workflow: Any) -> list[str]:
-        """Return the single validated workflow instruction."""
-        if isinstance(workflow, str) and workflow.strip():
-            return [workflow]
-        raise ValueError(_WORKFLOW_VALIDATION_ERROR)
-
-    @staticmethod
     def validate_skills_config(config: dict) -> None:
         if "skills" not in config:
             return
