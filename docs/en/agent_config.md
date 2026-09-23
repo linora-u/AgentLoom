@@ -58,7 +58,7 @@ the same validation diagnostics. Reading these views does not start a Run or mod
 | Role | Purpose | File Location | Core Characteristic |
 |------|------|----------|----------|
 | **Supervisor** | Multi-Agent collaboration orchestrator | `applications/<app>/workflows/<name>.yaml` | Has `worker_agents` field, schedules multiple Workers |
-| **Worker** | Specific task executor | `applications/<app>/workflows/worker_agents/<name>.yaml` | Has `agent_function_schema` field, can be exported as a tool for Supervisor to call |
+| **Worker** | Specific task executor | `applications/<app>/workflows/worker_agents/<name>.yaml` | Becomes a Tool only when explicitly selected by a Supervisor's `worker_agents` |
 
 ```
 Supervisor (Main Agent)
@@ -147,20 +147,30 @@ runtime_options:
   planning_interval: 3                     # Force re-planning every N steps
   todo_mode: "auto"                     # auto | on | off
 
-# ---- Worker-Specific: Callable Tool Contract ----
-# Note: Parameter names under inputs are customizable, as long as they are valid Python identifiers
-agent_function_schema:
-  description: |
-    Preparation phase analysis agent, responsible for static code scanning...
-  inputs:
-    param1:                              # Custom parameter name, valid Python identifier
-      description: "Description of the first parameter"
-      required: true
-    param2:
-      description: "Description of the second parameter"
-      required: false
-  output:
-    description: "Analysis summary text, detailed report generated in workspace"
+# ---- Optional Worker Input Contract ----
+input_schema:
+  type: object
+  properties:
+    target_path:
+      type: string
+      description: "Path to analyze"
+    include_tests:
+      type: boolean
+  required: [target_path]
+  additionalProperties: false
+
+# ---- Optional Agent Output Contract ----
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+    files:
+      type: array
+      items:
+        type: string
+  required: [summary, files]
+  additionalProperties: false
 ```
 
 ---
@@ -175,8 +185,8 @@ Supervisor and Worker share 4 required fields:
 |------|------|----------|------|
 | `name` | `str` | Non-empty string | Agent unique identifier. In Worker, also serves as the exported tool function name |
 | `agent_runtime` | `str` | Must be registered: `smolagents` / `pi` | Selects the complete Agent runtime. Missing and unknown values fail during preflight |
-| `description` | `str` | Non-empty string | Agent role description. In Supervisor single-string workflows, participates in task assembly; list workflow items are executed as authored |
-| `workflow` | `str` or `list[str]` | Non-empty string, or non-empty list of non-empty strings | Workflow instruction text. Supports Markdown and Mermaid flowcharts. See [Writing Guidelines](#workflow-writing-guidelines-and-recommendations) below |
+| `description` | `str` | Non-empty string | Agent capability metadata; it becomes the Subagent Tool description and is never used as invocation input |
+| `workflow` | `str` | Non-empty string | Agent system instructions. Markdown and Mermaid are ordinary text. See [Writing Guidelines](#workflow-writing-guidelines-and-recommendations) below |
 
 #### Division of `description` and `workflow`
 
@@ -185,19 +195,10 @@ Supervisor and Worker share 4 required fields:
 | `description` | **Role positioning** (one or two sentences) | "As XX agent, your core responsibility is YY" | Don't write detailed processes or specific steps |
 | `workflow` | **Complete execution instructions** | Background, responsibilities, flowchart, stage descriptions, output requirements | Don't repeat the role positioning from description |
 
-> For `workflow: |`, the framework keeps the existing single-run behavior and sends one assembled task to the LLM. For top-level Supervisor execution (`loom run` / `run_app`), `workflow: list[str]` executes each list item sequentially with the same runtime Agent; the first run uses normal reset behavior, later runs use `reset=False`, and the returned value is the last run result. AgentLoom does not add stage labels or wrapper instructions to list items. When a Worker is exported as a tool, list items are embedded in order in the generated task spec for that single tool call.
-
-Sequential workflow example:
-
-```yaml
-workflow:
-  - |
-    # First workflow
-    Build the initial analysis and save any findings that the next step should use.
-  - |
-    # Second workflow
-    Continue from the previous run's memory and produce the final answer.
-```
+`workflow` is sent once through the Runtime instructions channel. A supplied task
+is a separate user message; when no task is supplied, AgentLoom does not invent
+one from `description`. Express multi-stage behavior inside the instruction text
+or explicit orchestration. A YAML list is invalid and does not control run count.
 
 #### Goal Mode (Supervisor only)
 
@@ -210,16 +211,17 @@ goal:
 `enabled`. Legacy `token_budget` is silently ignored. Worker YAML must not contain
 any `goal` key.
 
-When enabled, the objective is derived from `description + workflow + runtime
-task`. Prefer one multiline workflow. A list is numbered and merged into one
-initial objective context instead of using the ordinary sequential multi-run
-semantics above. Normal final answers and `max_steps` end only one continuation
-segment; the root Supervisor must call `update_goal(complete, evidence)`. Ordinary model usage remains in runtime audit records. See [Goal Mode](goal_mode.md)
+When enabled, Goal Mode still uses the single workflow string as instructions and
+keeps the runtime task separate. Normal final answers and `max_steps` end only one
+continuation segment; the root Supervisor must call `update_goal(complete,
+evidence)`. Ordinary model usage remains in runtime audit records. See [Goal Mode](goal_mode.md)
 for lifecycle, resume, persistence, CLI, Studio, and schedule behavior.
 
 #### Workflow Writing Guidelines and Recommendations
 
-`workflow` is the Agent's most critical configuration — it is essentially the **task instruction (Prompt)** sent to the LLM. A well-structured workflow can significantly improve Agent execution quality.
+`workflow` is the Agent's reusable system instruction. The current task remains a
+separate user input. A well-structured workflow can significantly improve Agent
+execution quality.
 
 **Recommended Structure (Five-Part)**:
 
@@ -269,7 +271,9 @@ Use **numbered lists** to clearly define the Agent's mandatory responsibilities 
 
 Use Mermaid to define the core execution flow.
 
-> ⚠️ **Framework Special Handling**: The framework automatically detects ` ```mermaid ` code blocks in workflow, extracts them, and wraps them with `<workflow>` XML tags. **When Mermaid blocks are present, the framework additionally injects a "must be followed strictly" instruction to the LLM**. Therefore, placing the core flow in a Mermaid block not only improves readability but also lets the framework strengthen flow constraints for you.
+Mermaid blocks are ordinary instruction text. AgentLoom does not extract, validate,
+wrap, or strengthen them; use Mermaid only when it makes the instructions clearer
+to readers and the model.
 
 **Example**:
 
@@ -289,7 +293,7 @@ flowchart TD
 > - The flowchart should only show **main flow and key branches**; don't cram every detail into it
 > - Node names should be clear, use descriptive text rather than coded abbreviations
 > - Branch conditions use `{condition?}`, e.g., `C{Failed items?} -- Yes --> D[Retry]`
-> - Mermaid syntax is validated by the framework (depends on `mermaid-syntax-parser`); syntax errors output a warning at runtime
+> - Check Mermaid syntax in your documentation tooling if rendering matters; the Runtime forwards it unchanged
 
 **④ Detailed Step Descriptions**
 
@@ -387,12 +391,12 @@ workflow: |
 
 #### Writing Notes
 
-- **YAML format**: for a single workflow, use `workflow: |` to preserve newlines and indentation. For sequential workflows, use `workflow:` as a non-empty list of `|` blocks.
+- **YAML format**: use one `workflow: |` scalar to preserve newlines and indentation. Lists are invalid.
 - **Avoid hardcoded paths**: Don't hardcode file paths in workflow; get them dynamically via tools (e.g., `get_module_context`)
 - **Bold critical rules**: Use `**bold**` to highlight rules the LLM must follow
 - **Numbered for ordering**: Use numbered lists (`1. 2. 3.`) for multi-step processes, not unordered lists
 - **Mark inferences**: Require the LLM to label uncertain content with 【Inference】 to avoid hallucinations mixing into conclusions
-- **Mermaid syntax**: Ensure Mermaid syntax is correct; the framework validates and outputs warnings on errors
+- **Mermaid syntax**: Mermaid is ordinary text; validate it separately if a renderer will consume it
 
 ---
 
@@ -426,7 +430,8 @@ The `runtime_options.*` fields above belong to smol. `smart_summary` accepts a b
 
 | Field | Type | Default | Description |
 |------|------|--------|------|
-| `agent_function_schema` | `dict` | Not set | Worker callable tool contract. Worker is exported as a tool when present and valid. See [Section 5](#5-worker-export-as-callable-tool) |
+| `input_schema` | Draft 2020-12 object schema | `{task: string}` | Worker Tool arguments. See [Section 5](#5-worker-export-as-callable-tool) |
+| `output_schema` | Draft 2020-12 schema | Text output | Optional executable Agent result contract; any JSON root type is allowed |
 
 > ⚠️ **Worker config isolation**: A Worker's effective configuration is resolved from global/app config plus the **Worker YAML itself**. It does **not** inherit permission overrides from the Supervisor that called it. If a Worker needs extra filesystem or shell permissions, repeat the relevant whitelisted overrides (for example `tool_access_control.path_validation`) in the Worker YAML.
 
@@ -763,13 +768,16 @@ tools = YamlAgentFactory.create_agent_as_tool(
     model=None,         # Optional, model instance
     logger=None,        # Optional, AgentLogger instance
 )
-# Returns: List[Callable] — Contains one callable function, signature defined by Worker's agent_function_schema
+# Returns: one callable Tool whose signature comes from the Worker's input_schema
 ```
 
 **Return value notes**:
-- The function in the returned list is **called like a regular Python function**, with parameter names and types defined by `agent_function_schema.inputs`
-- Return value is always a **string** (`None` → `""`, other values → `str(result)`)
-- Worker YAML **must** contain a valid `agent_function_schema`; otherwise returns an empty list
+- The Tool is called like a regular Python function with the JSON types declared by
+  `input_schema`; without one it accepts a required `task: string` argument.
+- Without `output_schema`, the return value is text. With `output_schema`, the
+  validated JSON-compatible value is returned without string coercion.
+- Every invocation constructs a fresh Worker owner and Runtime while reusing safe
+  shared bindings such as model configuration.
 
 #### 4.4.4 Design Principles (Four Best Practices)
 
@@ -981,7 +989,7 @@ Supervisor (repo_map_agent)
 
 **Key Design Decisions**:
 
-1. **`dir_architecture_analysis`** is a standard Worker Agent (with `agent_function_schema`), but is **NOT auto-registered to Supervisor via `worker_agents`**
+1. **`dir_architecture_analysis`** is a standard Worker Agent, but is **NOT auto-registered to Supervisor via `worker_agents`**
 2. Instead, **`run_analysis_loop()` manually loads and loop-calls it at the Python layer**, passing different directory `index.md` content each time
 3. Python layer handles: read index.md (pre) → call Agent (LLM analysis) → write analysis.md (post) → update progress (persistence)
 4. Single directory analysis failure doesn't affect other directories; failure info is recorded in `progress.json` for later inspection or retry
@@ -1005,77 +1013,75 @@ applications/repo_map/
 
 ## 5. Worker Export as Callable Tool
 
-> 💡 If your Worker Agent needs **pre/post processing** (file read/write, loops, error isolation, etc.), see [4.4 Advanced Pattern: Wrapping Agent as Python Tool Function](#44-advanced-pattern-wrapping-agent-as-a-python-tool-function). This section covers the **simplest approach** — Worker auto-exports as a tool via `agent_function_schema`, no extra Python code needed.
+> 💡 If your Worker Agent needs **pre/post processing** (file read/write, loops,
+> error isolation, etc.), see [4.4 Advanced Pattern: Wrapping Agent as Python Tool Function](#44-advanced-pattern-wrapping-agent-as-a-python-tool-function).
+> This section covers direct Subagent-as-Tool registration.
 
 ### 5.1 Core Mechanism
 
-When a Worker YAML contains a valid `agent_function_schema`, the framework automatically exports that Worker as a callable tool. The Supervisor calls it directly by function name (i.e., the Worker's `name`). This is the simplest Agent-Tool path, suitable for scenarios without extra pre/post processing.
+Each Worker explicitly referenced by a Supervisor's `worker_agents` becomes a
+callable Tool. The Worker's top-level `name` is the Tool name and its
+`description` is the Tool description. Files merely present in the directory are
+not authorized or registered.
 
 ```
-Supervisor → calls project_scan(query="Check CAN module") → Worker executes → Returns string result
+Supervisor → calls project_scan(task="Check CAN module") → fresh Worker executes → returns text
 ```
 
-### 5.2 `agent_function_schema` Complete Structure
+### 5.2 Optional JSON Schema Contracts
 
-> Parameter names are customizable, as long as they are valid Python identifiers (e.g., `query`, `file_path`, `module_name`).
+Omit both schemas for the concise default: one required `task: string` Tool
+argument and a text result. Use Draft 2020-12 schemas when the contract is truly
+typed:
 
 ```yaml
-agent_function_schema:
-  description: |                     # ✅ Required: tool description
-    Preparation phase analysis agent...
-  inputs:                            # ✅ Required: parameter definition dictionary (at least 1 parameter)
-    param1:                          # Custom parameter name, valid Python identifier
-      description: |                 # ✅ Required: parameter description
-        Description of the first parameter
-      required: true                 # ❌ Optional: whether required (default true)
-    param2:                          # Optional parameter
-      description: "Description of the second parameter"
-      required: false
-  output:                            # ✅ Required: output definition
-    description: |                   # ✅ Required: output description
-      Returns analysis summary text
+name: project_scan
+description: Analyze one project area.
+
+input_schema:
+  type: object
+  properties:
+    target_path:
+      type: string
+    include_tests:
+      type: boolean
+  required: [target_path]
+  additionalProperties: false
+
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+    risks:
+      type: array
+      items:
+        type: string
+  required: [summary, risks]
+  additionalProperties: false
 ```
 
 ### 5.3 Validation Rules
 
 | Validation Item | Rule | Error Example |
 |--------|------|----------|
-| `description` | Non-empty string | `agent_function_schema.description must be a non-empty string` |
-| `inputs` | Non-empty dictionary | `agent_function_schema.inputs must be a non-empty dictionary` |
-| `inputs.<name>` key | Valid Python identifier (`isidentifier()`) | `inputs key 'xxx' must be a valid identifier` |
-| `inputs.<name>.description` | Non-empty string | `inputs.xxx.description must be a non-empty string` |
-| `inputs.<name>.required` | Boolean (can be omitted, defaults to true) | `inputs.xxx.required must be a boolean` |
-| `inputs.<name>.type` | Can be omitted in YAML, normalized to `"string"` at runtime | — |
-| `output` | Must be a dictionary | `output must be a dictionary` |
-| `output.description` | Non-empty string | `output.description must be a non-empty string` |
+| `input_schema` root | Must be an object schema because model Tool arguments are objects | `input_schema root type must be object` |
+| `input_schema` / `output_schema` | Valid JSON Schema Draft 2020-12 | `... must be valid Draft 2020-12` |
+| `$ref` / `$dynamicRef` | Local `#...` references only; remote resolution is rejected | `... contains a remote reference` |
+| Tool arguments | Strictly decoded and validated before Worker construction | Validation error; no Worker side effect |
+| Structured output support | Runtime and Provider must support semantic enforcement | Preparation fails before model/Tool execution |
 
-> ⚠️ **Parameter Type Constraints (Important)**: When defining `inputs` parameters, **do NOT use ambiguous type annotations such as `Optional[...]` or `Union[...]`**.
->
-> | Constraint | Explanation |
-> |-----------|-------------|
-> | **No `Optional[...]`** | The framework will raise an exception for such ambiguous types |
-> | **No `Union[...]`** | Same reason — ambiguous parameter types confuse the Agent about what to pass, degrading AI decision quality |
-> | **Express optionality correctly** | Use the `required: false` field to indicate a parameter is optional |
-> | **Type normalization** | All parameters are normalized to `"string"` type at runtime |
->
-> ```yaml
-> # ✅ Correct: use `required` field for optionality
-> inputs:
->   target_path:
->     description: "Analysis target path"
->     required: true
->   mode:
->     description: "Execution mode, defaults to standard"
->     required: false           # Use required: false, NOT Optional
->
-> # ❌ Wrong: do NOT use ambiguous types
-> # type: "Optional[str]"     → Framework will raise an exception
-> # type: "Union[str, int]"   → Framework will raise an exception
-> ```
+Schemas may use standard JSON types, `properties`, `items`, `required`, `enum`,
+`additionalProperties`, and local definitions/references. Values keep their JSON
+types; integers, booleans, arrays, and objects are not coerced to strings.
 
 ### 5.4 Return Value Behavior
 
-- Return value is **always a string**: `None` → `""`, other values → `str(result)`
+- A text Worker returns plain text.
+- A structured Worker returns the validated JSON-compatible value.
+- Invalid terminal output stays inside the current Agent session for correction
+  and consumes the existing execution-step budget. Exhaustion fails the run; it
+  is not converted to prose or retried as a transport error.
 
 ---
 
@@ -1152,7 +1158,7 @@ The system performs a full pre-check on **all** entries before loading (director
 |----------|------|
 | `Configuration is missing required field: name` | Add `name: "xxx"` |
 | `Configuration is missing required field: description` | Add `description: "xxx"` |
-| `workflow field must be a non-empty string or non-empty list of non-empty strings` | Use `workflow: \|` for one workflow, or a non-empty `workflow:` list whose items are non-empty strings |
+| `workflow field must be a non-empty string` | Use one non-empty `workflow: \|` scalar |
 
 ### 7.2 Tool Configuration Errors
 
@@ -1239,18 +1245,17 @@ workflow: |
 
 tools: []
 
-agent_function_schema:
-  description: |
-    Perform LLM architecture analysis on a single directory, returning Markdown analysis text.
-  inputs:
+input_schema:
+  type: object
+  properties:
     dir_path:
+      type: string
       description: "Relative directory path to analyze, e.g. src/application/imports"
-      required: true
     index_content:
+      type: string
       description: "Complete text content of the directory's index.md"
-      required: true
-  output:
-    description: "Markdown-formatted architecture analysis text"
+  required: [dir_path, index_content]
+  additionalProperties: false
 ```
 
 ### 8.2 Minimal Configuration
@@ -1279,14 +1284,14 @@ description: "Project structure scanning agent"
 model_type: "powerful"
 tools:
   - name: "read_file"
-agent_function_schema:
-  description: "Preparation phase analysis tool"
-  inputs:
+input_schema:
+  type: object
+  properties:
     param1:                          # Custom parameter name
+      type: string
       description: "Task description"
-      required: true
-  output:
-    description: "Analysis summary"
+  required: [param1]
+  additionalProperties: false
 ```
 
 # The following content automatically becomes the workflow
@@ -1350,7 +1355,7 @@ The following fields are processed independently as Agent properties and are not
 |------|----------|
 | `name` / `description` / `workflow` | Agent's own properties |
 | `tools` (`list[dict]`) | Agent tool list, different from system `tools` (dict) |
-| `worker_agents` / `agent_function_schema` | Role-specific properties |
+| `worker_agents` / `input_schema` / `output_schema` | Role-specific contracts |
 | `skills` | Independent three-layer stacking loading (see [3.8](#38-skills--skill-package-configuration)) |
 | `agent_runtime` / `model_type` | Agent runtime and model-type selectors |
 
@@ -1595,7 +1600,7 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `name` | ✅ | ✅ | ✅ | `str` | — |
 | `agent_runtime` | ✅ | ✅ | ✅ | `str` | None; select `smolagents` / `pi` explicitly |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
-| `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
+| `workflow` | ✅ | ✅ | ✅ | `str` | — |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
@@ -1608,4 +1613,5 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |
 | `runtime_options.max_consecutive_model_errors` | ❌ | ✅ | ✅ | `int` | `5` |
 | `runtime_options.max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
-| `agent_function_schema` | ❌ | ❌ | ✅ | `dict` | Not set |
+| `input_schema` | ❌ | ❌ | ✅ | JSON Schema object | Default required `task: string` |
+| `output_schema` | ❌ | ✅ | ✅ | JSON Schema | Text output |
