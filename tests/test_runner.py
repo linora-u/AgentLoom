@@ -1128,10 +1128,10 @@ class TestRunApp:
         with pytest.raises(ValueError, match="缺少必填字段.*name"):
             run_app(str(fake_yaml_no_name))
 
-    def test_missing_workflow_raises(self, fake_yaml_no_workflow: Path):
+    def test_empty_workflow_raises(self, fake_yaml_no_workflow: Path):
         from agentloom.application.runner import run_app
 
-        with pytest.raises(ValueError, match="缺少必填字段.*workflow"):
+        with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
             run_app(str(fake_yaml_no_workflow))
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
