@@ -161,6 +161,19 @@ def test_output_contract_rejects_invalid_or_remote_schemas() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("schema", "value"),
+    [
+        ({"const": {"$ref": "literal-not-a-schema-reference"}}, {"$ref": "literal-not-a-schema-reference"}),
+        ({"enum": [{"$ref": "literal-not-a-schema-reference"}]}, {"$ref": "literal-not-a-schema-reference"}),
+    ],
+)
+def test_output_contract_allows_reference_shaped_instance_data(schema, value) -> None:
+    contract = OutputContract(name="reference_data", schema=schema)
+
+    assert contract.validate(value) == value
+
+
 def test_runtime_definition_carries_an_immutable_output_contract() -> None:
     source_schema = {
         "type": "object",

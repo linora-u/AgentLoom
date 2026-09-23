@@ -79,13 +79,13 @@ def _compile_input_schema(
     if not isinstance(raw_schema, dict):
         raise ValueError("input_schema must be a JSON Schema mapping")
     schema = deepcopy(raw_schema)
-    reject_remote_schema_references(schema, field_name="input_schema")
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
         raise ValueError(
             f"input_schema must be valid Draft 2020-12: {exc.message}"
         ) from exc
+    reject_remote_schema_references(schema, field_name="input_schema")
     resolve_input_schema_object(schema)
     validator = Draft202012Validator(schema, registry=Registry())
     return schema, validator.validate

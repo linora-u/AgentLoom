@@ -168,16 +168,16 @@ class OutputContract:
         )
         if not isinstance(normalized_schema, dict):
             raise TypeError("output contract schema must be a mapping")
-        reject_remote_schema_references(
-            normalized_schema,
-            field_name="output schema",
-        )
         try:
             Draft202012Validator.check_schema(normalized_schema)
         except SchemaError as exc:
             raise ValueError(
                 f"output schema must be valid Draft 2020-12: {exc.message}"
             ) from exc
+        reject_remote_schema_references(
+            normalized_schema,
+            field_name="output schema",
+        )
 
         validator_schema = deepcopy(normalized_schema)
         object.__setattr__(self, "name", self.name.strip())
