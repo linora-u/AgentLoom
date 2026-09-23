@@ -1009,7 +1009,8 @@ def _transform_tool_input(
             tool_name=tool_name,
             arguments=candidate_input,
             message=str(exc),
-            stage="final_decode",
+            stage=str(getattr(exc, "stage", "final_decode")),
+            kind=str(getattr(exc, "kind", "invalid_arguments")),
             started_at=started_at,
         )
 

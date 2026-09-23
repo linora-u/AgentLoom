@@ -304,6 +304,9 @@ def test_invalid_structured_final_answer_does_not_end_react_loop() -> None:
         gateway.close()
 
     assert invalid.tool_results[0].status != "completed"
+    assert invalid.tool_results[0].error is not None
+    assert invalid.tool_results[0].error.kind == "output_validation"
+    assert invalid.tool_results[0].error.stage == "output_validation"
     assert invalid_outputs[-1].is_final_answer is False
     assert "output does not satisfy" in invalid_outputs[-1].observation
     assert valid.tool_results[0].status == "completed"
