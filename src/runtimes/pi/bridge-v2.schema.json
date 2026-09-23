@@ -703,11 +703,15 @@
         },
         "record": {
           "$ref": "#/$defs/TerminalRecord"
+        },
+        "model_output": {
+          "$ref": "#/$defs/JsonValue"
         }
       },
       "required": [
         "method",
-        "record"
+        "record",
+        "model_output"
       ],
       "title": "PlatformResult",
       "type": "object"
@@ -1489,10 +1493,6 @@
           "type": "string"
         },
         "output": {
-          "$ref": "#/$defs/JsonValue",
-          "default": null
-        },
-        "model_output": {
           "$ref": "#/$defs/JsonValue",
           "default": null
         },
