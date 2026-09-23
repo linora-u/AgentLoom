@@ -51,7 +51,7 @@ def campaign(destination: Path, source: Path, limit: int):
         (root / "config").mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, root / "config/llm.yaml")
         (root / "config/llm.yaml").chmod(0o600)
-        (root / "config/system.yaml").write_text("lsp_servers: {enabled: false}\ncheckpoint: {enabled: false}\nself_learning: {enabled: false}\ndefault_toolsets: []\n")
+        (root / "config/system.yaml").write_text("checkpoint: {enabled: false}\nself_learning: {enabled: false}\ndefault_toolsets: []\n")
         app = root / "applications/live/workflows/root.yaml"
         app.parent.mkdir(parents=True, exist_ok=True)
         app.write_text(yaml.safe_dump({"name": case, "agent_runtime": "pi", "model_type": profile,

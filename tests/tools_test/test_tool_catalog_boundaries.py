@@ -31,8 +31,6 @@ def test_tools_package_is_not_a_public_export_facade() -> None:
         implementation_prefixes = (
             "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
-            "agentloom.tools.file_ops",
-            "agentloom.tools.search",
             "agentloom.tools.self_learning",
             "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
@@ -72,8 +70,6 @@ def test_catalog_metadata_does_not_load_tool_implementations() -> None:
         implementation_prefixes = (
             "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
-            "agentloom.tools.file_ops",
-            "agentloom.tools.search",
             "agentloom.tools.self_learning",
             "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
@@ -108,10 +104,8 @@ def test_loader_imports_only_the_selected_tool_implementation() -> None:
 
         resolved = resolve_tool_function("grep_search")
         sibling_prefixes = (
-            "agentloom.tools.search.ast_grep_tool",
             "agentloom.runtimes.smolagents.tools.search.glob_tool",
             "agentloom.runtimes.smolagents.tools.search.glob_tool",
-            "agentloom.tools.search.lsp_tool",
         )
         loaded_siblings = sorted(
             prefix
@@ -222,8 +216,6 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
         implementation_prefixes = (
             "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
-            "agentloom.tools.file_ops",
-            "agentloom.tools.search",
             "agentloom.tools.self_learning",
             "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
@@ -261,8 +253,6 @@ def test_context_engine_metadata_lookup_does_not_load_implementations() -> None:
         implementation_prefixes = (
             "agentloom.runtimes.smolagents.tools",
             "agentloom.tools.context",
-            "agentloom.tools.file_ops",
-            "agentloom.tools.search",
             "agentloom.tools.self_learning",
             "agentloom.runtimes.smolagents.tools.shell",
             "agentloom.tools.skills",
@@ -292,7 +282,7 @@ def test_catalog_partitions_expose_ownership_without_loading_executors() -> None
         print(json.dumps({
             "owners": {name: [get_tool_spec(name).owner, get_tool_spec(name).provider,
                               get_tool_spec(name).capability]
-                       for name in ("read_file", "todo_write", "memory", "get_file_outline")},
+                       for name in ("read_file", "todo_write", "memory")},
             "loaded": [spec.implementation.module for spec in specs
                        if spec.implementation.module in sys.modules],
         }))
@@ -302,7 +292,6 @@ def test_catalog_partitions_expose_ownership_without_loading_executors() -> None
             "read_file": ["runtime", "smolagents", "file.read"],
             "todo_write": ["runtime", "smolagents", "planning.todo"],
             "memory": ["platform", "agentloom", "memory"],
-            "get_file_outline": ["optional", "agentloom", "get_file_outline"],
         },
         "loaded": [],
     }

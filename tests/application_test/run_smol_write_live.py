@@ -26,7 +26,7 @@ def main():
     for profile in args.profiles.split(","):
         settings["model"][profile].update(timeout=60, num_retries=0, max_tokens=2048, max_output_tokens=2048)
     (config / "llm.yaml").write_text(yaml.safe_dump(settings))
-    (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(root / "runtime")}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "default_toolsets": [], "skills": {"paths": []}, "lsp_servers": {"enabled": False}, "logging": {"console_enabled": False, "file_enabled": False}}))
+    (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(root / "runtime")}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "default_toolsets": [], "skills": {"paths": []}, "logging": {"console_enabled": False, "file_enabled": False}}))
     cases = []
     for profile in args.profiles.split(","):
         for scenario in ("create", "overwrite", "command_denied", "search_excluded"):

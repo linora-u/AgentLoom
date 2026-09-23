@@ -52,7 +52,6 @@ def main():
                 "runtime": {"root_dir": str(root / "runtime")},
                 "checkpoint": {"enabled": False},
                 "self_learning": {"enabled": False},
-                "lsp_servers": {"enabled": False},
                 "default_toolsets": [],
                 "logging": {"console_enabled": False, "file_enabled": False},
                 "skills": {"paths": []},

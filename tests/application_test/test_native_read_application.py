@@ -26,7 +26,6 @@ def test_application_native_read_runs_production_hooks_and_durable_host(tmp_path
                 "runtime": {"root_dir": str(tmp_path / "runtime")},
                 "checkpoint": {"enabled": False},
                 "self_learning": {"enabled": False},
-                "lsp_servers": {"enabled": False},
                 "default_toolsets": [],
             }
         )

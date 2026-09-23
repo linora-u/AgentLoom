@@ -15,9 +15,6 @@ tool_access_control:
         - "edit_file"
         - "write_file"
         - "list_directory"
-        - "write_markdown_file"
-        - "write_markdown_file_raw"
-        - "append_markdown_sections"
         - "grep_search"
         - "glob_search"
       include_paths:

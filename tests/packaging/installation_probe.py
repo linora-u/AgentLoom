@@ -113,8 +113,6 @@ def probe(workspace: Path) -> dict:
           enabled: false
         self_learning:
           enabled: false
-        lsp_servers:
-          enabled: false
         default_toolsets: []
     """))
     (config / "llm.yaml").write_text(
@@ -187,17 +185,8 @@ def probe(workspace: Path) -> dict:
         assert load_function('agentloom.runtimes.smolagents.tools.file_ops.read_file.read_file', 'read_file') is resolve_tool_function('read_file')
         root = files('agentloom')
         assert root.joinpath('runtimes/smolagents/prompts/toolcalling_agent.example.yaml').read_text()
-        query_root = root.joinpath('tools/queries')
-        queries = list(query_root.rglob('*.scm'))
-        assert len(queries) == 56, len(queries)
-        assert not query_root.joinpath('queries').exists()
-        from agentloom.tools.file_ops.file_outliner import _get_scm_path as outline_query
-        from agentloom.tools.search.lsp_tool.treesitter_fallback import _get_scm_path as lsp_query
-        for language in ('python', 'typescript'):
-            outline_path = outline_query(language)
-            assert outline_path == lsp_query(language)
-            assert outline_path is not None and outline_path.read_text()
-        print(json.dumps({'package_origin': agentloom.__file__, 'project_root': str(C.agent_root), 'queries': len(queries)}))
+        assert not root.joinpath('tools/queries').exists()
+        print(json.dumps({'package_origin': agentloom.__file__, 'project_root': str(C.agent_root)}))
     ''')]))
     assert identity["project_root"] == str(project)
     checks += ["canonical-only imports", "explicit project context", "dynamic builtin identity", "bundled resources"]

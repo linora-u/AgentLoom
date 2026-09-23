@@ -10,7 +10,7 @@ workflow: |
   Execute ALL steps below. Report PASS or FAIL for each.
 
   ## Step 1: Normal search — result within limits
-  Use grep_search to search for "import" in path "src/tools/search/" with max_results=5.
+  Use grep_search to search for "import" in path "src/runtimes/smolagents/tools/search/" with max_results=5.
   Expected: normal result with matches and metadata footer.
   Verify: output contains line numbers and file paths.
 
@@ -20,7 +20,7 @@ workflow: |
   Verify: output contains "[Use offset=" guidance for fetching more results.
 
   ## Step 3: Empty directory search
-  Use grep_search to search for "UNLIKELY_PATTERN_XYZ_123" in path "src/tools/search/".
+  Use grep_search to search for "UNLIKELY_PATTERN_XYZ_123" in path "src/runtimes/smolagents/tools/search/".
   Expected: "No matches found." message (non-empty response).
   Verify: output is NOT empty, contains "No matches found".
 

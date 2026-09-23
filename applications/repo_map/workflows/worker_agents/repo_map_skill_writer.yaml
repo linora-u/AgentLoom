@@ -5,12 +5,11 @@ runtime_options:
 description: |
   写入 repo_map 导航技能文档。
   输入仅为 output_dir，读取工具层准备的 context 后，
-  使用 write_markdown_file 写入 SKILL.md 与 assets/examples/*.md。
+  使用 write_file 写入 SKILL.md 与 assets/examples/*.md。
 
 model_type: "powerful"
 toolsets:
   - "core_file"
-  - "markdown_report"
 
 workflow: |
   # Repo Map Skill Writer
@@ -24,13 +23,10 @@ workflow: |
   - 这是 tool_call 模式。每一步都必须通过工具调用完成；不要输出空消息、裸 Markdown 或纯文本进度。
   - 最终结果必须调用 `final_answer(answer=<summary>)` 返回。
   - 只从 `<output_dir>/data/skill_build_context.json` 读取 skill 路径和元信息（用 `read_file` 工具读取）。
-  - 所有 Markdown 文件必须通过 `write_markdown_file(...)` 工具写入。
-  - 调用 `write_markdown_file` 时必须传结构化参数对象，不能把整段 JSON 当作字符串参数。
+  - 所有 Markdown 文件必须通过 `write_file(file_path=..., content=...)` 工具完整写入。
+  - 调用 `write_file` 时必须传结构化参数对象，`content` 是完整文件内容。
   - `SKILL.md` frontmatter 必须且只能包含 `name` 和 `description`。
-  - 使用 `write_markdown_file` 写 `SKILL.md` 时：
-    - `title=""`（不要标题）
-    - 不要传 `metadata` 参数（不要 metadata 引用块）
-    - 将完整 YAML frontmatter（`---` 包裹）放在第一个 section 的 `body` 开头。
+  - `SKILL.md` 的 `content` 必须以完整 YAML frontmatter（`---` 包裹）开头。
   - 禁止调用 `skill` / `shell_tool`，不要加载外部 skill 上下文。
   - Worker 不直接生成 `agents/openai.yaml`；该文件由 `prepare_repo_map_skill_workspace` 确定性生成，并由 `validate_repo_map_skill` 校验。
   - 不生成 README / INSTALL / CHANGELOG 等额外文档。
@@ -49,7 +45,7 @@ workflow: |
   拿到：`skill_name`、`project_name`、`source_root`、`skill_root`、`description`。
 
   ### Step 2：写入 SKILL.md
-  调用 `write_markdown_file(file_path=<skill_root>/SKILL.md, sections=[...], title="")` 写入。
+  调用 `write_file(file_path=<skill_root>/SKILL.md, content=<完整 Markdown>)` 写入。
 
   SKILL.md 正文使用命令式语气，必须按以下顺序包含 7 个段落：
 
@@ -67,7 +63,7 @@ workflow: |
   - 优先使用 context 中的 skill_description 字段，若超 200 字符则截断
 
   ### Step 3：写入示例文件
-  调用 `write_markdown_file` 写入两个示例文件：
+  调用 `write_file` 写入两个示例文件：
 
   **resolve-by-source-path.md** - 3 个场景：
   - 场景 1：精确目录命中（如 src/api/routes.py -> references/repo_map/src/api/）
@@ -88,7 +84,7 @@ workflow: |
   - 正文至少出现 3 次 index.md
   - 正文包含 dependencies.md
   - 正文包含 manifest.jsonl
-  - 若任一校验失败，立刻重新调用 write_markdown_file 覆盖写入
+  - 若任一校验失败，读取最新内容后重新调用 `write_file` 完整覆盖
 
   ### Step 5：返回结果
   调用 `final_answer(...)` 返回简短写入结果摘要，包含：

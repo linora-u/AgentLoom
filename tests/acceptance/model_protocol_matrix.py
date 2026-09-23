@@ -382,7 +382,6 @@ def run_case(case: MatrixCase, workspace: Path) -> dict[str, object]:
     C.raw.setdefault("checkpoint", {}).update(
         {"enabled": True, "cleanup_on_success": False}
     )
-    C.raw.setdefault("lsp_servers", {})["enabled"] = False
     C.raw["skills"] = {"paths": []}
     C.raw.setdefault("logging", {})["console_enabled"] = False
     lifecycle: list[dict[str, object]] = []

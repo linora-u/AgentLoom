@@ -136,7 +136,6 @@ workflow: |
 tools:
   - name: "read_file"
   - name: "write_file"
-  - name: "get_file_outline"
   - name: "get_module_context"
     module: "applications.my_app.agent_tools.module_context"
     function: "get_module_context"
@@ -689,19 +688,9 @@ tools:
 | `read_file` | Read file content (supports offset/limit for ranges) |
 | `write_file` | Create new file or overwrite existing |
 | `edit_file` | Apply one or more unique text edits |
-| `write_markdown_file` | Write Markdown file |
-| `write_markdown_file_raw` | Write raw Markdown file |
-| `append_markdown_sections` | Append Markdown sections |
-| `get_file_outline` | Get code outline (functions/classes/structs) |
 | `list_directory` | List directory structure |
 | `grep_search` | Regex search file contents (powered by ripgrep) |
 | `glob_search` | Glob pattern file search |
-| `ast_grep_search_file` | AST pattern search |
-| `lsp_find_definition` | Find symbol definition |
-| `lsp_find_references` | Find symbol references |
-| `lsp_get_document_symbols` | List document symbols |
-| `lsp_hover` | Show hover/type information |
-| `lsp_get_workspace_symbols` | Search workspace symbols |
 | `loom_retrieve_context` | Retrieve compressed context refs |
 | `shell_tool` | Execute shell commands (whitelist-restricted) |
 | `check_background_task` | Read background task status and output |

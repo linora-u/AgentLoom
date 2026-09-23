@@ -95,8 +95,7 @@ def identity(profile, code_tools=False):
     assert "site-packages" in origin.parts, origin
     assert not importlib.util.find_spec("src"), "source tree leaked into environment"
     distributions = {d.metadata["Name"].lower().replace("_", "-") for d in importlib.metadata.distributions()}
-    professional = {"serena-agent", "ast-grep-cli", "grep-ast", "tree-sitter-language-pack",
-                    "go-bin", "nodejs-bin", "libclang", "tree-sitter-c", "networkx"}
+    professional = {"grep-ast", "tree-sitter-language-pack", "networkx"}
     if code_tools:
         assert professional <= distributions, professional - distributions
     elif profile == "pi":
@@ -114,14 +113,10 @@ def identity(profile, code_tools=False):
 def configure(workspace, profile, case, url):
     config = workspace / "config"
     config.mkdir(parents=True)
-    source = workspace / "sample.py"
-    source.write_text("def installed_entrypoint(value):\n    return value + 42\n")
-    typescript = workspace / "sample.ts"
-    typescript.write_text("export function installed_entrypoint(value: number) { return value + 42; }\n")
     (workspace / "note.txt").write_text("INSTALLED-READ-7541\n")
     system = {"runtime": {"root_dir": str(workspace / "runtime")},
         "checkpoint": {"enabled": False}, "logging": {"console_enabled": False},
-        "self_learning": {"enabled": case == "memory"}, "lsp_servers": {"enabled": False},
+        "self_learning": {"enabled": case == "memory"},
         "default_toolsets": []}
     model = {"model": "openai/profile-fixture", "adapter": "openai_chat", "base_url": url,
         "api_key": "synthetic-fixture", "context_window": 32768, "max_output_tokens": 1000,
@@ -143,15 +138,6 @@ def configure(workspace, profile, case, url):
         arguments = {"path" if profile == "pi" else "file_path": str(workspace / "note.txt")}
         calls = [(name, arguments)]
         marker = "INSTALLED-READ-7541"
-    elif case.startswith("outline"):
-        calls = [("get_file_outline", {"file_path": str(typescript if case.endswith("typescript") else source)})]
-        marker = "installed_entrypoint"
-    elif case == "ast":
-        calls = [("ast_grep_search_file", {"file_path": str(source), "keyword": "installed_entrypoint", "language": "python"})]
-        marker = "installed_entrypoint"
-    elif case == "lsp":
-        calls = [("lsp_get_document_symbols", {"file_path": str(source), "language": "python"})]
-        marker = "installed_entrypoint"
     elif case == "memory":
         calls = [("memory", {"action": "list", "scope": "app"}),
                  ("memory", {"action": "list", "scope": "project"}),
@@ -292,9 +278,6 @@ def run(profile, case, workspace, code_tools=False):
             "smolagents.", "agentloom.runtimes.smolagents.tools", "agentloom.runtimes.smolagents.runtime",
             "agentloom.runtimes.smolagents.agents", "agentloom.runtimes.smolagents.monkey_patch"))]
         assert not forbidden, forbidden
-        if case in {"no_tools", "read"}:
-            assert "agentloom.tools.file_ops.file_outliner" not in sys.modules
-            assert "agentloom.tools.search.lsp_tool" not in sys.modules
     evidence.update(case=case, status="passed")
     (workspace / "report.json").write_text(json.dumps(evidence, indent=2) + "\n")
     return evidence

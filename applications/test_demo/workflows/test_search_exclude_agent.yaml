@@ -10,7 +10,7 @@ workflow: |
   Execute ALL steps below. Report PASS or FAIL for each.
 
   ## Step 1: Normal search — non-excluded directory
-  Use grep_search to search for "import" in path="src/tools/search/" with max_results=5.
+  Use grep_search to search for "import" in path="src/runtimes/smolagents/tools/search/" with max_results=5.
   Expected: results found (directory is not excluded).
   Verify: output contains matches.
 
@@ -20,7 +20,7 @@ workflow: |
   Verify: output contains file paths.
 
   ## Step 3: glob_search — find Python files
-  Use glob_search to find "**/*.py" under path="src/tools/search/".
+  Use glob_search to find "**/*.py" under path="src/runtimes/smolagents/tools/search/".
   Expected: multiple Python files found.
   Verify: output contains .py file paths.
 

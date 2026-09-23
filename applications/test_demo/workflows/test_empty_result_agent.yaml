@@ -15,7 +15,7 @@ workflow: |
   Verify: output does NOT contain "completed with no output".
 
   ## Step 2: Search with no matches
-  Use grep_search to search for "VERY_UNLIKELY_PATTERN_ZZZZZ_99999" in path="src/tools/search/".
+  Use grep_search to search for "VERY_UNLIKELY_PATTERN_ZZZZZ_99999" in path="src/runtimes/smolagents/tools/search/".
   Expected: "No matches found." (non-empty string, should NOT trigger empty marker).
   Verify: output contains "No matches found", does NOT contain "completed with no output".
 

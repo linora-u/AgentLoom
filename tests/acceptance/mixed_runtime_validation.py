@@ -145,8 +145,12 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
         tokens = ['CORIANDER_5287']
         source = fixtures / 'release_catalog.py'
         source.write_text(''.join(f'def release_item_{i}():\n    return {i}\n\n' for i in range(180)) + 'def TARGET_RECORD_CORIANDER_5287():\n    return 5287\n')
-        worker['tools'] = [{'name': 'get_file_outline'}]
-        worker['workflow'] = 'Call get_file_outline(file_path=query, max_items_per_section=250). Return the exact ContextRef identifier from its result, without retrieving it yourself.'
+        worker['tools'] = [{
+            'name': 'read_context_fixture',
+            'module': 'tests.application_test.mixed_runtime_support',
+            'function': 'read_context_fixture',
+        }]
+        worker['workflow'] = 'Call read_context_fixture(file_path=query). Return the exact ContextRef identifier from its result, without retrieving it yourself.'
         definition['tools'] = [{'name': 'loom_retrieve_context'}]
         definition['workflow'] = (f'Call inspect_note(query="{source}"). Using the Worker ContextRef, call loom_retrieve_context(ref=<actual ref>, query="TARGET_RECORD", limit=3). Report the function name returned by retrieval.')
     write_yaml(worker_path, worker)
@@ -156,9 +160,9 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
     rows = proof['ledger']['tool_results']
     assert all(token in result.output for token in tokens), 'Missing independently known file token'
     if mode == 'context':
-        assert {'get_file_outline', 'loom_retrieve_context'} <= {row['tool_name'] for row in rows}
+        assert {'read_context_fixture', 'loom_retrieve_context'} <= {row['tool_name'] for row in rows}
         entries = [json.loads(p.read_text()) for p in (workspace / 'runtime').rglob('ctx_*.json')]
-        assert any(entry.get('tool_name') == 'get_file_outline' and 'TARGET_RECORD_CORIANDER_5287' in entry['original'] for entry in entries)
+        assert any(entry.get('tool_name') == 'read_context_fixture' and 'TARGET_RECORD_CORIANDER_5287' in entry['original'] for entry in entries)
         assert any(row['tool_name'] == 'loom_retrieve_context' and 'CORIANDER_5287' in str(row['output_json']) for row in rows)
     else:
         reads = [row for row in rows if row['tool_name'] == native]
@@ -192,7 +196,7 @@ def child(case: str, workspace: Path, profile: str) -> None:
     (config / 'llm.yaml').chmod(0o600)
     write_yaml(config / 'system.yaml', {'runtime': {'root_dir': str(workspace / 'runtime')},
         'self_learning': review_settings(profile), 'default_toolsets': [], 'checkpoint': {'enabled': False},
-        'lsp_servers': {'enabled': False}, 'logging': {'console_enabled': False},
+        'logging': {'console_enabled': False},
         'context_engine': {'min_chars': 1000, 'preview_max_chars': 300}})
     from agentloom.config.config import bind_config, load_project_config
     with bind_config(load_project_config(workspace)):

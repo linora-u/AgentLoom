@@ -58,12 +58,12 @@ disables built-in tools for that Agent.
 | `skills` | `skill` |
 | `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
 | `planning` | `todo_write` |
-| `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
-| `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
 
 The default set currently includes `core_shell`, `core_file`, `core_search`,
-`context`, `skills`, and `self_learning`. `planning` is selected by Todo policy;
-the reporting and code-navigation sets are opt-in.
+`context`, `skills`, and `self_learning`. `planning` is selected by Todo policy.
+Applications that need richer code navigation or document generation should
+declare an Application tool or connect an MCP server instead of extending the
+framework's built-in surface.
 
 ## Adding a built-in tool
 
@@ -92,8 +92,6 @@ For a catalog or loader change, run at least these real workflows:
 ```bash
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-core \
   uv run loom run applications/tool_registry_core_validation/workflows/core_tools_agent.yaml
-AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-markdown \
-  uv run loom run applications/tool_registry_markdown_validation/workflows/markdown_report_agent.yaml
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-resolve \
   uv run loom run applications/test_demo/workflows/test_tool_resolve_agent.yaml
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-context \
@@ -116,7 +114,5 @@ implementation, or circular-import error.
 | Application | Run ID | Audited result |
 |---|---|---|
 | Core catalog | `run_20260805T121722420197Z_c82db5eab6e6` | `CORE_TOOL_REGISTRY_VALIDATION: PASS` |
-| Markdown toolset | `run_20260805T121722420159Z_2299de139dc2` | `MARKDOWN_TOOLSET_VALIDATION: PASS` |
-| Search and LSP | `run_20260805T121722420285Z_67c9db03778a` | all seven checks passed |
 | Context retrieval | `run_20260805T121722420262Z_67f264434fcd` | `JSON-CTX-4927` retrieved from the context store |
 | Self-learning | `run_20260805T121722420417Z_496aaaa4cd2f` | memory and skill proposals, reference write, and file read all returned `ok: true` |
