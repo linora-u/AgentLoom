@@ -83,6 +83,8 @@ uv run pytest \
 ```bash
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-core \
   uv run loom run applications/tool_registry_core_validation/workflows/core_tools_agent.yaml
+AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-markdown \
+  uv run loom run applications/tool_registry_markdown_validation/workflows/markdown_report_agent.yaml
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-resolve \
   uv run loom run applications/test_demo/workflows/test_tool_resolve_agent.yaml
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-context \
