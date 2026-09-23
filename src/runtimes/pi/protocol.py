@@ -173,6 +173,7 @@ class HandshakeResult(WireValue):
 class RunResult(WireValue):
     method: Literal["run"]
     state: RuntimeState
+    terminal_rejections: Annotated[int, Field(ge=0)]
     output: JsonValue = Field(default=None, repr=False)
     usage: dict[str, JsonValue] = Field(default_factory=dict)
     artifacts: list[dict[str, JsonValue]] = Field(default_factory=list)

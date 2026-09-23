@@ -150,7 +150,7 @@ async function run(frame: Frame, abort: AbortController) {
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
   let outputBudgetExhausted = false;
-  let outputAttempts = 0;
+  let terminalRejections = 0;
   let unsubscribe: (() => void) | undefined;
   let outputValidator: ValidateFunction | undefined;
   if (p.output_contract) {
@@ -207,34 +207,34 @@ async function run(frame: Frame, abort: AbortController) {
       }, {triggerTurn: true});
     } else await trigger(p.task);
     let last = session.messages.at(-1);
+    const correctOutput = async (message: string): Promise<boolean> => {
+      outputCorrection = true;
+      terminalRejections += 1;
+      if (last?.role === "assistant" && (last.stopReason === "length" ||
+          terminalRejections >= (p.runtime_options.max_stop_attempts || 3))) {
+        outputBudgetExhausted = true;
+        return false;
+      }
+      await trigger(message, true);
+      last = session!.messages.at(-1);
+      return true;
+    };
     while (outputValidator && last?.role === "assistant" && last.stopReason !== "error") {
       const text = last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("");
       let parsed: unknown;
       try {
         parsed = JSON.parse(text);
       } catch {
-        outputCorrection = true;
-        outputAttempts += 1;
-        if (last.stopReason === "length" ||
-            outputAttempts >= (p.runtime_options.max_stop_attempts || 3)) {
-          outputBudgetExhausted = true;
-          break;
-        }
-        await trigger("Your previous final output was not valid JSON. Return a corrected value matching the required JSON Schema.", true);
-        last = session.messages.at(-1);
+        if (!await correctOutput(
+          "Your previous final output was not valid JSON. Return a corrected value matching the required JSON Schema.",
+        )) break;
         continue;
       }
       if (!outputValidator(parsed)) {
         const detail = outputValidator.errors?.[0]?.message || "schema validation failed";
-        outputCorrection = true;
-        outputAttempts += 1;
-        if (last.stopReason === "length" ||
-            outputAttempts >= (p.runtime_options.max_stop_attempts || 3)) {
-          outputBudgetExhausted = true;
-          break;
-        }
-        await trigger(`Your previous final output did not match the required JSON Schema: ${detail}. Return a corrected value.`, true);
-        last = session.messages.at(-1);
+        if (!await correctOutput(
+          `Your previous final output did not match the required JSON Schema: ${detail}. Return a corrected value.`,
+        )) break;
         continue;
       }
       break;
@@ -249,12 +249,14 @@ async function run(frame: Frame, abort: AbortController) {
     if (state === "success") await persistence!.save("complete");
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
-    response(frame, {method: "run", state, output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
+    response(frame, {method: "run", state, terminal_rejections: terminalRejections,
+      output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
       error: outputCorrection && state !== "success" ? {category: "output_validation", message: "Agent exhausted its execution budget with an invalid structured output", retryable: true} :
         state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} : null});
   } catch {
     const interrupted = abort.signal.aborted;
-    response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
+    response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
+      output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
       error: {category: interrupted ? "interrupted" : nativeIncomplete ? "tool" : "provider", message: nativeIncomplete ? "Pi native execution could not be durably completed" : unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
   } finally {
     rejectCallbacks();
