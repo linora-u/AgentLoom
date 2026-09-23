@@ -60,6 +60,7 @@ from agentloom.execution import (
     resolve_application_id,
     resolve_runtime_home,
 )
+from agentloom.execution.agent_runtime import JSONValue
 from agentloom.execution.checkpoint import CheckpointManager
 from agentloom.execution.checkpoint.file_history import FileHistoryManager
 from agentloom.execution.goal import normalize_goal_config
@@ -720,8 +721,8 @@ def run_app(
     resume_task_id: str | None = None,
     task_override: str | None = None,
     file_logging: bool | None = None,
-) -> str:
-    """Run one Application and return only its final string output.
+) -> JSONValue:
+    """Run one Application and return only its final JSON-compatible output.
 
     This compatibility entry point intentionally hides the structured receipt.
     Call :func:`execute_app` when the run identity or canonical paths are needed.

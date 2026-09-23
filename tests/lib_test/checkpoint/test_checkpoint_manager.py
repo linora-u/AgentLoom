@@ -99,6 +99,32 @@ class TestTaskEvents:
         assert loaded["workers"]["worker_a"][0]["status"] == "completed"
         assert loaded["workers"]["worker_a"][0]["result"] == "done"
 
+    def test_completed_task_preserves_structured_and_null_results(
+        self,
+        cm: CheckpointManager,
+    ) -> None:
+        for task_id, result in (
+            ("task_structured_result", {"findings": ["missing guard"]}),
+            ("task_null_result", None),
+        ):
+            cm.record_task_created(
+                task_id,
+                yaml_path="applications/demo/workflows/agent.yaml",
+                agent_name="test_supervisor",
+                task_text="do work",
+                created_at="2026-06-15T12:00:00+08:00",
+            )
+            cm.record_task_status_changed(
+                task_id,
+                "completed",
+                result=result,
+            )
+
+            tree = cm.load_task_tree(task_id)
+            assert tree is not None
+            assert "result" in tree
+            assert tree["result"] == result
+
     def test_task_tree_without_canonical_event_log_is_rejected(self, cm: CheckpointManager):
         task_id = "task_legacy_only"
         path = cm._task_tree_path(task_id)

@@ -207,7 +207,7 @@ class TestRunApp:
     """Tests for run_app (agent execution is mocked)."""
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
-    def test_uses_description_as_default_task(self, mock_cls, fake_yaml: Path):
+    def test_omits_task_when_no_override_is_supplied(self, mock_cls, fake_yaml: Path):
         from agentloom.application.runner import run_app
 
         mock_agent = MagicMock()
@@ -216,9 +216,8 @@ class TestRunApp:
 
         result = run_app(str(fake_yaml))
 
-        # Supervisor.run() was called with the description text from YAML.
         called_task = mock_agent.run.call_args[0][0]
-        assert "测试 agent 的描述" in called_task
+        assert called_task is None
         assert result == "ok"
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
@@ -1234,7 +1233,7 @@ tools:
             run_app(str(fake_yaml))
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
-    def test_none_result_returns_empty_string(self, mock_cls, fake_yaml: Path):
+    def test_none_result_remains_native_null(self, mock_cls, fake_yaml: Path):
         from agentloom.application.runner import run_app
 
         mock_agent = MagicMock()
@@ -1242,7 +1241,7 @@ tools:
         mock_cls.return_value = mock_agent
 
         result = run_app(str(fake_yaml))
-        assert result == ""
+        assert result is None
 
 
 # ===================================================================
@@ -1539,6 +1538,47 @@ class TestExecuteApp:
         assert (result.run.run_dir / manifest["result_artifact"]).read_text(
             encoding="utf-8"
         ) == "structured-output"
+
+    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    def test_structured_output_survives_public_result_event_and_checkpoint(
+        self,
+        mock_cls,
+        fake_yaml: Path,
+    ) -> None:
+        from agentloom.application.runner import execute_app
+
+        output = {
+            "findings": [
+                {
+                    "severity": "high",
+                    "message": "missing guard",
+                }
+            ]
+        }
+        mock_cls.return_value.run.return_value = output
+        events = []
+
+        result = execute_app(
+            str(fake_yaml),
+            file_logging=False,
+            event_sink=events.append,
+        )
+
+        assert result.output == output
+        assert events[-1].output == output
+        manifest = json.loads(result.run.manifest_path.read_text(encoding="utf-8"))
+        assert json.loads(
+            (result.run.run_dir / manifest["task_tree_artifact"]).read_text(
+                encoding="utf-8"
+            )
+        )["result"] == output
+        assert (
+            result.run.run_dir / manifest["result_artifact"]
+        ).read_text(encoding="utf-8") == json.dumps(
+            output,
+            ensure_ascii=False,
+            indent=2,
+        )
 
     @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
     def test_emits_started_then_completed_and_ignores_sink_errors(

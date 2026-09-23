@@ -9,6 +9,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Protocol
 
+from agentloom.execution.agent_runtime import JSONValue, copy_json_value
+
 RunEventType = Literal[
     "run.started",
     "run.completed",
@@ -62,13 +64,18 @@ class RunInfo:
 class ApplicationRunResult:
     """The Application output together with its durable run receipt."""
 
-    output: str
+    output: JSONValue
     run: RunInfo
     started_at: datetime
     ended_at: datetime
     goal: GoalSnapshot | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "output",
+            copy_json_value(self.output, field_name="application result output"),
+        )
         object.__setattr__(self, "goal", _goal_snapshot(self.goal))
 
 
@@ -79,13 +86,18 @@ class RunLifecycleEvent:
     event: RunEventType
     run: RunInfo
     occurred_at: datetime
-    output: str | None = None
+    output: JSONValue = None
     error: str | None = None
     phase: RunPhase | None = None
     goal: GoalSnapshot | None = None
     schema_version: int = 1
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "output",
+            copy_json_value(self.output, field_name="run lifecycle event output"),
+        )
         object.__setattr__(self, "goal", _goal_snapshot(self.goal))
 
 
