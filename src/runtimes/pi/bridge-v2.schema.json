@@ -10,6 +10,7 @@
             "unsupported_capability",
             "provider",
             "tool",
+            "output_validation",
             "interrupted",
             "internal"
           ],
@@ -569,6 +570,29 @@
       "title": "NativePrepareRequest",
       "type": "object"
     },
+    "OutputContract": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "schema": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Schema",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "schema"
+      ],
+      "title": "OutputContract",
+      "type": "object"
+    },
     "PlatformInvoke": {
       "additionalProperties": false,
       "properties": {
@@ -679,11 +703,15 @@
         },
         "record": {
           "$ref": "#/$defs/TerminalRecord"
+        },
+        "model_output": {
+          "$ref": "#/$defs/JsonValue"
         }
       },
       "required": [
         "method",
-        "record"
+        "record",
+        "model_output"
       ],
       "title": "PlatformResult",
       "type": "object"
@@ -988,9 +1016,17 @@
           "type": "string"
         },
         "task": {
-          "minLength": 1,
-          "title": "Task",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
         },
         "cwd": {
           "minLength": 1,
@@ -1025,6 +1061,17 @@
           },
           "title": "Runtime Options",
           "type": "object"
+        },
+        "output_contract": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputContract"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "continue_session": {
           "default": false,
@@ -1064,7 +1111,6 @@
         "method",
         "application_id",
         "task_id",
-        "task",
         "cwd",
         "instructions",
         "model",
@@ -1091,6 +1137,11 @@
           ],
           "title": "State",
           "type": "string"
+        },
+        "terminal_rejections": {
+          "minimum": 0,
+          "title": "Terminal Rejections",
+          "type": "integer"
         },
         "output": {
           "$ref": "#/$defs/JsonValue",
@@ -1138,7 +1189,8 @@
       },
       "required": [
         "method",
-        "state"
+        "state",
+        "terminal_rejections"
       ],
       "title": "RunResult",
       "type": "object"
@@ -1169,6 +1221,11 @@
         "stop_hooks": {
           "default": false,
           "title": "Stop Hooks",
+          "type": "boolean"
+        },
+        "structured_output": {
+          "default": false,
+          "title": "Structured Output",
           "type": "boolean"
         }
       },

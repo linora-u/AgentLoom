@@ -60,6 +60,7 @@ from agentloom.execution import (
     resolve_application_id,
     resolve_runtime_home,
 )
+from agentloom.execution.agent_runtime import JSONValue
 from agentloom.execution.checkpoint import CheckpointManager
 from agentloom.execution.checkpoint.file_history import FileHistoryManager
 from agentloom.execution.goal import normalize_goal_config
@@ -296,9 +297,7 @@ def _execute_app(
         )
 
         agent_name = config["name"]
-        effective_task = (
-            task_override.strip() if task_override else config["description"].strip()
-        )
+        effective_task = task_override.strip() if task_override else None
         application_id = validated_application_id or resolve_application_id(
             config,
             resolved_path,
@@ -493,8 +492,8 @@ def _execute_app(
                             )
                         if task_override is None:
                             persisted_task = tree.get("task_text")
-                            if isinstance(persisted_task, str) and persisted_task.strip():
-                                effective_task = persisted_task
+                            if isinstance(persisted_task, str):
+                                effective_task = persisted_task or None
                         checkpoint_mgr.record_run_resumed(task_id)
                         log.info(
                             "Resuming task %s (status=%s)",
@@ -506,7 +505,7 @@ def _execute_app(
                             task_id,
                             yaml_path=str(resolved_path),
                             agent_name=agent_name,
-                            task_text=effective_task,
+                            task_text=effective_task or "",
                             created_at=datetime.now().astimezone().isoformat(),
                         )
                         checkpoint_mgr.record_run_started(task_id)
@@ -563,7 +562,7 @@ def _execute_app(
                     log.info("Task ID:     %s", task_id)
                     log.info("Run ID:      %s", run_id)
                     log.info("Mode:        %s", "RESUME" if is_resume else "NEW")
-                    log.info("Task: %s", effective_task[:200])
+                    log.info("Task: %s", (effective_task or "<none>")[:200])
                     log.info("=" * 70)
 
                     agent_result = supervisor.run(
@@ -722,8 +721,8 @@ def run_app(
     resume_task_id: str | None = None,
     task_override: str | None = None,
     file_logging: bool | None = None,
-) -> str:
-    """Run one Application and return only its final string output.
+) -> JSONValue:
+    """Run one Application and return only its final JSON-compatible output.
 
     This compatibility entry point intentionally hides the structured receipt.
     Call :func:`execute_app` when the run identity or canonical paths are needed.

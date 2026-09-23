@@ -33,9 +33,10 @@ Application Studio 可以修改这份契约、展示 Diff、为副作用请求�
 
 ### Worker 会成为类型化工具
 
-Worker 通过 `agent_function_schema` 声明接口，Runtime 将它转换成 Supervisor
-可调用、带参数校验的工具。不同 Worker 可以使用不同模型和工具、并发执行，同时保持
-稳定的输入输出契约，不依赖提示词里的口头约定。
+Supervisor 通过 `worker_agents` 显式选择 Worker；每个被选中的 Worker 会自动成为
+以自身 `name` 和 `description` 命名、说明的可调用 Tool。简单 Worker 默认使用
+`task: string` 输入与文本输出；复杂 Worker 使用 Draft 2020-12
+`input_schema` / `output_schema` 声明由 Runtime 真正执行的结构化契约。
 
 ### Run 产出证据，不靠解析终端猜状态
 
@@ -200,7 +201,8 @@ goal:
   enabled: true
 ```
 
-每个 Worker 声明 Supervisor 看到的接口：
+每个 Worker 声明 Supervisor 看到的接口。省略两个 schema 时使用默认
+`task: string` 输入与文本输出；只有真实需要类型化 JSON 时才声明：
 
 ```yaml
 name: "api_reviewer"
@@ -208,14 +210,27 @@ agent_runtime: "smolagents"
 description: "Review API compatibility risks."
 model_type: "fast"
 
-agent_function_schema:
-  description: "Review one release request."
-  inputs:
+input_schema:
+  type: object
+  properties:
     request:
+      type: string
       description: "Release scope and API diff."
-      required: true
-  output:
-    description: "Evidence-backed compatibility findings."
+  required: [request]
+  additionalProperties: false
+
+output_schema:
+  type: object
+  properties:
+    decision:
+      type: string
+      enum: [compatible, incompatible]
+    findings:
+      type: array
+      items:
+        type: string
+  required: [decision, findings]
+  additionalProperties: false
 
 workflow: |
   Review the request, cite evidence, and return prioritized findings.

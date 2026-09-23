@@ -19,15 +19,15 @@ tools:
   - name: "glob_search"
   - name: "grep_search"
 
-agent_function_schema:
-  description: "Create a skill proposal package and write references/evidence.json."
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: "JSON string containing marker, history, and memory evidence."
-      required: true
-  output:
-    description: "JSON evidence for proposal package creation and file write."
-
+      type: string
+      description: JSON string containing marker, history, and memory evidence.
+  required:
+  - query
+  additionalProperties: false
 workflow: |
   # Skill Packager Worker
 

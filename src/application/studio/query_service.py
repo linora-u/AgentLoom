@@ -2362,11 +2362,7 @@ class StudioQueryService:
 
     @staticmethod
     def _workflow_text(raw_workflow: Any) -> str:
-        if isinstance(raw_workflow, str):
-            return raw_workflow
-        if isinstance(raw_workflow, list):
-            return "\n\n".join(str(item) for item in raw_workflow)
-        return ""
+        return raw_workflow if isinstance(raw_workflow, str) else ""
 
     @staticmethod
     def _read_definition(

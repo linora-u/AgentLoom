@@ -13,6 +13,7 @@ from agentloom.execution import get_current_run_context
 from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    JSONValue,
     RuntimeEvent,
     RuntimeEventSink,
     require_runtime_state,
@@ -62,7 +63,7 @@ class AgentInvocation:
     """Execute exactly one Agent invocation and release everything it owns."""
 
     owner: Any
-    task: str
+    task: str | None
     task_id: str | None = None
     checkpoint_manager: Any | None = None
     application_lifecycle: ApplicationRunLifecycle | None = None
@@ -70,7 +71,7 @@ class AgentInvocation:
     additional_args: dict[str, Any] | None = None
     owns_root_run: bool = False
 
-    def run(self) -> str:
+    def run(self) -> JSONValue:
         from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
         from agentloom.execution.goal import (
             GoalStateProvider,
@@ -87,7 +88,9 @@ class AgentInvocation:
         # its trusted wrapper in lifecycle events would make the untrusted
         # history sanitizer correctly treat the wrapper as a forged fence.
         transformed_tasks = owner._inject_memory_snapshot(lifecycle_tasks)
-        transformed_task = "\n\n".join(transformed_tasks)
+        transformed_task = "\n\n".join(
+            task for task in transformed_tasks if task is not None
+        )
 
         goal_config = normalize_goal_config(
             owner._config,
@@ -99,12 +102,10 @@ class AgentInvocation:
             if not self.owns_root_run:
                 raise ValueError("Goal mode can only be configured by the root Supervisor Agent")
             goal_objective = build_goal_objective(
-                description=str(owner._config.get("description", "")),
                 workflow=owner._config["workflow"],
                 task=self.task,
             )
             goal_fingerprint = goal_objective_fingerprint(
-                description=str(owner._config.get("description", "")),
                 workflow=owner._config["workflow"],
                 task=self.task,
             )
@@ -153,7 +154,7 @@ class AgentInvocation:
                     CheckpointCoordinator.deactivate(coordinator)
                 raise
 
-        def execute() -> str:
+        def execute() -> JSONValue:
             from agentloom.execution.context_engine.runtime import ensure_task_context_engine
             with ensure_task_context_engine(owner._effective_agent_config or owner._config):
                 return self._execute_bound(
@@ -175,19 +176,21 @@ class AgentInvocation:
     def _execute_bound(
         self,
         *,
-        transformed_tasks: list[str],
-        lifecycle_tasks: list[str],
+        transformed_tasks: list[str | None],
+        lifecycle_tasks: list[str | None],
         final_task_id: str,
         goal_config: Any,
         goal_provider: Any,
         coordinator: Any,
         lifecycle: ApplicationRunLifecycle | None,
         owns_lifecycle: bool,
-    ) -> str:
+    ) -> JSONValue:
         from agentloom.execution.goal import bind_goal_state_provider
 
         owner = self.owner
-        lifecycle_task = "\n\n".join(lifecycle_tasks)
+        lifecycle_task = "\n\n".join(
+            task for task in lifecycle_tasks if task is not None
+        )
         session_started = False
         session_result = None
         runtime_result = None
@@ -341,8 +344,8 @@ class AgentInvocation:
         self,
         runtime_agent: Any,
         *,
-        transformed_tasks: list[str],
-        lifecycle_tasks: list[str],
+        transformed_tasks: list[str | None],
+        lifecycle_tasks: list[str | None],
         goal_provider: Any,
         lifecycle: ApplicationRunLifecycle | None,
         runtime_checkpoint: Any = None,
@@ -411,7 +414,7 @@ class AgentInvocation:
             for task_index, current_task in enumerate(transformed_tasks):
                 self.owner._emit_task_start(
                     runtime_agent,
-                    lifecycle_tasks[task_index],
+                    lifecycle_tasks[task_index] or "",
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)
@@ -459,7 +462,8 @@ class AgentInvocation:
             try:
                 self.owner._emit_task_start(
                     runtime_agent,
-                    lifecycle_tasks[0] if use_initial_context else current_task,
+                    (lifecycle_tasks[0] if use_initial_context else current_task)
+                    or "",
                     additional_args=self.additional_args or {},
                 )
                 segment_start = len(runtime_events)

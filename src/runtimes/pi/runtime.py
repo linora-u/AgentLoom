@@ -6,19 +6,6 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
-from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
-from agentloom.runtimes.pi.protocol import (
-    PI_BRIDGE_PROTOCOL_VERSION,
-    Handshake,
-    HandshakeResult,
-    ModelSelection,
-    Run,
-    RunResult,
-)
-from agentloom.runtimes.pi.protocol_handlers import PiProtocolCoordinator
-from agentloom.runtimes.pi.recovery import reconcile
-from agentloom.runtimes.pi.transport import PiTransport
 from agentloom.execution import get_current_run_context
 from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
@@ -28,6 +15,7 @@ from agentloom.execution.agent_runtime import (
     RuntimeDefinition,
     RuntimeEvent,
     RuntimeUsage,
+    copy_json_value,
 )
 from agentloom.execution.goal import (
     get_current_goal_provider,
@@ -38,6 +26,20 @@ from agentloom.execution.native_tool_host import NativeToolHost
 from agentloom.execution.native_tools import NativeCallIdentity
 from agentloom.execution.tool_gateway import PreparedToolGateway
 from agentloom.execution.trace import capture_explicit_execution_context
+from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
+from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
+from agentloom.runtimes.pi.protocol import (
+    PI_BRIDGE_PROTOCOL_VERSION,
+    Handshake,
+    HandshakeResult,
+    ModelSelection,
+    OutputContract,
+    Run,
+    RunResult,
+)
+from agentloom.runtimes.pi.protocol_handlers import PiProtocolCoordinator
+from agentloom.runtimes.pi.recovery import reconcile
+from agentloom.runtimes.pi.transport import PiTransport
 from agentloom.tools.tool_meta import tool_is_concurrency_safe
 
 
@@ -98,6 +100,17 @@ class PiRuntime:
         definition = self.definition
         selection = definition.model_selection
         assert selection is not None
+        wire_output_contract = None
+        if definition.output_contract is not None:
+            output_schema = copy_json_value(
+                definition.output_contract.schema,
+                field_name="output contract schema",
+            )
+            assert isinstance(output_schema, dict)
+            wire_output_contract = OutputContract(
+                name=definition.output_contract.name,
+                schema=output_schema,
+            )
 
         def emit(kind, details):
             event = RuntimeEvent(kind=kind, application_id=request.application_id, task_id=request.task_id,
@@ -173,17 +186,23 @@ class PiRuntime:
                     except Exception as exc:
                         raise AgentRuntimeError("Pi checkpoint cannot be safely restored", category="configuration") from exc
             attempt = 0
-            stop_blocks = 0
+            terminal_rejections = 0
             while True:
                 if hook is not None:
                     context = hook.consume_pending_agent_context()
                     if context:
-                        task += "\n" + "\n".join(context)
+                        task = "\n".join(
+                            item for item in (task, *context) if item
+                        )
+                remaining_terminal_attempts = max_stops - terminal_rejections
+                runtime_options = dict(definition.runtime_options)
+                runtime_options["max_stop_attempts"] = remaining_terminal_attempts
                 wire = Run(method="run", application_id=request.application_id or "standalone",
                     task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
-                        request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=dict(definition.runtime_options),
+                        request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=runtime_options,
+                    output_contract=wire_output_contract,
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
                     additional_args=dict(request.additional_args), checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)
@@ -191,6 +210,12 @@ class PiRuntime:
                                                   cancel_callbacks=cancel_callbacks)
                 result = response.payload
                 assert isinstance(result, RunResult)
+                if result.terminal_rejections > remaining_terminal_attempts:
+                    raise AgentRuntimeError(
+                        "Pi bridge exceeded the terminal delivery budget",
+                        category="internal",
+                    )
+                terminal_rejections += result.terminal_rejections
                 part = RuntimeUsage.from_value(result.usage)
                 usage = RuntimeUsage(input_tokens=usage.input_tokens + part.input_tokens,
                     output_tokens=usage.output_tokens + part.output_tokens, total_tokens=usage.total_tokens + part.total_tokens,
@@ -199,6 +224,10 @@ class PiRuntime:
                     error = result.error
                     raise AgentRuntimeError(error.message, category="internal" if error.category == "protocol" else error.category,
                                             retryable=error.retryable)
+                if definition.output_contract is not None and result.state == "success":
+                    result = result.model_copy(
+                        update={"output": definition.output_contract.validate(result.output)}
+                    )
                 if result.state != "success" or hook is None:
                     break
                 decision = hook.dispatch(HookEvent.STOP, "final_answer", {"final_answer": result.output})
@@ -207,8 +236,8 @@ class PiRuntime:
                 if not decision.should_block() and (goal_state is None or goal_state.status == "complete"):
                     break
                 if decision.should_block():
-                    stop_blocks += 1
-                    if stop_blocks >= max_stops or (goal_state is not None and goal_state.status == "complete"):
+                    terminal_rejections += 1
+                    if terminal_rejections >= max_stops or (goal_state is not None and goal_state.status == "complete"):
                         raise AgentRuntimeError("Pi Stop gate remained blocked", category="tool")
                     task = decision.get_blocked_response()
                 elif goal_state is not None:

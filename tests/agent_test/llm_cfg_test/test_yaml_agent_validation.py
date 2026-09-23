@@ -66,7 +66,18 @@ def test_build_worker_normalized_config_defaults(tmp_path: Path):
 
     assert isinstance(normalized, NormalizedAgentConfig)
     assert not hasattr(normalized, "prompt_template_path")
-    assert normalized.agent_function_schema is None
+    assert normalized.input_schema == {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "Task for this Agent.",
+            },
+        },
+        "required": ["task"],
+        "additionalProperties": False,
+    }
+    assert normalized.output_contract is None
 
 
 def test_build_supervisor_normalized_config_defaults(tmp_path: Path):
@@ -80,7 +91,8 @@ def test_build_supervisor_normalized_config_defaults(tmp_path: Path):
 
     assert isinstance(normalized, NormalizedAgentConfig)
     assert not hasattr(normalized, "prompt_template_path")
-    assert normalized.agent_function_schema is None
+    assert normalized.input_schema is None
+    assert normalized.output_contract is None
 
 
 def test_canonical_prompt_template_path_resolves_relative_string(tmp_path: Path):
@@ -122,27 +134,45 @@ def test_common_validation_ignores_malformed_old_smol_fields(maker, config_build
     assert maker(config)._validate_config() is not None
 
 
-def test_validate_agent_function_schema_normalizes_and_rejects():
+def test_validate_agent_schemas_preserve_types_and_build_output_contract():
     config = {
-        "agent_function_schema": {
-            "description": "tool description",
-            "inputs": {
-                "query": {
-                    "description": "query text",
-                    "type": "number",
-                }
+        "name": "typed_worker",
+        "input_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer"},
+                "options": {
+                    "type": "object",
+                    "properties": {"strict": {"type": "boolean"}},
+                    "required": ["strict"],
+                    "additionalProperties": False,
+                },
             },
-            "output": {
-                "description": "final text",
-            },
-        }
+            "required": ["count"],
+            "additionalProperties": False,
+        },
+        "output_schema": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
     }
-    normalized = AgentConfigNormalizer.validate_agent_function_schema(config)
-    assert normalized is not None
-    assert normalized["inputs"]["query"]["type"] == "string"
+    normalized = AgentConfigNormalizer.build_worker_normalized_config(
+        config,
+        agent_root=Path("."),
+        source_name="typed_worker",
+    )
+    assert normalized.input_schema["properties"]["count"]["type"] == "integer"
+    assert normalized.input_schema["properties"]["options"]["type"] == "object"
+    assert normalized.output_contract is not None
+    assert normalized.output_contract.validate(["one", "two"]) == ["one", "two"]
 
-    with pytest.raises(ValueError, match="description must be a non-empty string"):
-        AgentConfigNormalizer.validate_agent_function_schema({"agent_function_schema": {"inputs": {"x": {"description": "d"}}, "output": {"description": "o"}}})
+    with pytest.raises(ValueError, match="agent_function_schema was removed"):
+        AgentConfigNormalizer.build_worker_normalized_config(
+            {"agent_function_schema": {}},
+            agent_root=Path("."),
+            source_name="legacy_worker",
+        )
 
 
 def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
@@ -155,10 +185,11 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     worker._config = {
         **_worker_config(),
         "runtime_options": {"prompt_template_path": "prompts/worker_prompt.yaml"},
-        "agent_function_schema": {
-            "description": "desc",
-            "inputs": {"query": {"description": "q"}},
-            "output": {"description": "o"},
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "q"}},
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }
     worker._normalized = None
@@ -166,7 +197,7 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     normalized = worker._validate_config()
     assert isinstance(normalized, NormalizedAgentConfig)
     assert not hasattr(normalized, "prompt_template_path")
-    assert normalized.agent_function_schema is not None
+    assert normalized.input_schema["required"] == ["query"]
 
     supervisor = object.__new__(YamlConfiguredSupervisorAgent)
     supervisor._config = {
@@ -177,7 +208,7 @@ def test_validate_config_returns_normalized_object(monkeypatch, tmp_path: Path):
     normalized_supervisor = supervisor._validate_config()
     assert isinstance(normalized_supervisor, NormalizedAgentConfig)
     assert not hasattr(normalized_supervisor, "prompt_template_path")
-    assert normalized_supervisor.agent_function_schema is None
+    assert normalized_supervisor.input_schema is None
 
 
 def test_ensure_normalized_autobuilds():
@@ -185,14 +216,14 @@ def test_ensure_normalized_autobuilds():
     worker._config = _worker_config()
     worker._normalized = None
     normalized = worker._ensure_normalized()
-    assert normalized.agent_function_schema is None
+    assert normalized.input_schema["required"] == ["task"]
     assert worker._normalized is not None
 
     supervisor = object.__new__(YamlConfiguredSupervisorAgent)
     supervisor._config = _supervisor_config()
     supervisor._normalized = None
     normalized_supervisor = supervisor._ensure_normalized()
-    assert normalized_supervisor.agent_function_schema is None
+    assert normalized_supervisor.input_schema is None
     assert supervisor._normalized is not None
 
 
@@ -247,14 +278,15 @@ def test_common_validate_config_accepts_string_workflow(maker, config_builder):
     (_make_worker, _worker_config),
     (_make_supervisor, _supervisor_config),
 ])
-def test_common_validate_config_accepts_list_workflow(maker, config_builder):
+def test_common_validate_config_rejects_list_workflow(maker, config_builder):
     agent = maker(config_builder())
     agent._config["workflow"] = [
         "First workflow item.",
         "Second workflow item.",
     ]
 
-    assert agent._validate_config() is not None
+    with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
+        agent._validate_config()
 
 
 @pytest.mark.parametrize(
@@ -276,7 +308,7 @@ def test_common_validate_config_rejects_invalid_workflow_values(maker, config_bu
     agent = maker(config_builder())
     agent._config["workflow"] = workflow_value
 
-    with pytest.raises(ValueError, match="workflow field must be a non-empty string or non-empty list"):
+    with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
         agent._validate_config()
 
 
@@ -288,7 +320,7 @@ def test_common_validate_config_rejects_dict_workflow(maker, config_builder):
     agent = maker(config_builder())
     agent._config["workflow"] = {"bad": True}
 
-    with pytest.raises(ValueError, match="workflow field must be a non-empty string or non-empty list"):
+    with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
         agent._validate_config()
 
 

@@ -2,19 +2,17 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 errors = []
 
 # 1. pipeline_agent_tools 导入
 _DIR_ANALYSIS_YAML = None
 try:
-    from applications.repo_map.agent_tools.pipeline_agent_tools import (
-        run_analysis_loop, get_analysis_summary
-    )
     import applications.repo_map.agent_tools.pipeline_agent_tools as _pat
+
     _DIR_ANALYSIS_YAML = _pat._DIR_ANALYSIS_YAML
-    print(f"[OK] pipeline_agent_tools imports fine")
+    print("[OK] pipeline_agent_tools imports fine")
     print(f"     _DIR_ANALYSIS_YAML = {_DIR_ANALYSIS_YAML}")
 except Exception as e:
     errors.append(f"[FAIL] pipeline_agent_tools import: {e}")
@@ -31,9 +29,9 @@ else:
 # 3. 新 yaml 文件存在
 new_yaml = Path("applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml")
 if new_yaml.exists():
-    print(f"[OK] dir_architecture_analysis.yaml exists")
+    print("[OK] dir_architecture_analysis.yaml exists")
 else:
-    errors.append(f"[FAIL] dir_architecture_analysis.yaml NOT FOUND")
+    errors.append("[FAIL] dir_architecture_analysis.yaml NOT FOUND")
 
 # 4. 旧 yaml 已删除
 for old in ["step1_scan_extract_rank.yaml", "step2_generate_markdown.yaml", "step3_architecture_analysis.yaml"]:
@@ -48,12 +46,12 @@ try:
     import yaml
     content = yaml.safe_load(new_yaml.read_text())
     name = content.get("name", "")
-    schema = content.get("agent_function_schema", {})
-    inputs = schema.get("inputs", {})
+    input_schema = content.get("input_schema", {})
+    inputs = input_schema.get("properties", {})
     assert name == "dir_architecture_analysis", f"name={name}"
     assert "dir_path" in inputs, f"missing dir_path, got {list(inputs.keys())}"
-    assert "output_dir" in inputs, f"missing output_dir, got {list(inputs.keys())}"
-    assert "output" in schema, "missing output field"
+    assert "index_content" in inputs, f"missing index_content, got {list(inputs.keys())}"
+    assert "output_schema" not in content, "text output must use the default contract"
     print(f"[OK] yaml schema: name={name}, inputs={list(inputs.keys())}")
 except Exception as e:
     errors.append(f"[FAIL] yaml schema check: {e}")

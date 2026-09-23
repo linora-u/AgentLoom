@@ -19,15 +19,15 @@ tools:
   - name: "glob_search"
   - name: "grep_search"
 
-agent_function_schema:
-  description: "Create an Application memory proposal and verify its pending candidate result."
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: "JSON string containing marker, workspace, and history evidence."
-      required: true
-  output:
-    description: "JSON evidence for proposal-only memory behavior."
-
+      type: string
+      description: JSON string containing marker, workspace, and history evidence.
+  required:
+  - query
+  additionalProperties: false
 workflow: |
   # Memory Reviewer Worker
 

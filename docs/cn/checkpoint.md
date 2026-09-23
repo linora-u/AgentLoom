@@ -125,7 +125,7 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 loom run applications/<app>/workflows/<agent>.yaml --resume task_xxx
 ```
 
-Goal resume 额外校验 description、规范化 workflow 和原 runtime task 的指纹。
+Goal resume 额外校验规范化 workflow 和原 runtime task 的指纹。
 旧预算字段静默忽略，旧 `budget_limited` Goal 按活动状态恢复。活动 Goal 对应 YAML
 改为禁用或目标内容改变仍会拒绝恢复。详见 [Goal Mode](goal_mode.md)。
 

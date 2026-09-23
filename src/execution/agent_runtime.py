@@ -5,13 +5,18 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Literal, Protocol, cast, runtime_checkable
+from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.native_tools import ToolManifestEntry
+from agentloom.execution.schema_validation import reject_remote_schema_references
 from agentloom.execution.tool_gateway import ToolGateway, tool_manifest_snapshot
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+from referencing import Registry
 
 RuntimeState = Literal[
     "success",
@@ -34,6 +39,15 @@ type JSONValue = (
     | str
     | list[JSONValue]
     | dict[str, JSONValue]
+)
+type FrozenJSONValue = (
+    None
+    | bool
+    | int
+    | float
+    | str
+    | tuple[FrozenJSONValue, ...]
+    | Mapping[str, FrozenJSONValue]
 )
 type RuntimeEventKind = Literal[
     "run",
@@ -58,6 +72,7 @@ type RuntimeErrorCategory = Literal[
     "unsupported_capability",
     "provider",
     "tool",
+    "output_validation",
     "interrupted",
     "internal",
 ]
@@ -66,12 +81,13 @@ RUNTIME_ERROR_CATEGORIES: tuple[RuntimeErrorCategory, ...] = (
     "unsupported_capability",
     "provider",
     "tool",
+    "output_validation",
     "interrupted",
     "internal",
 )
 
 
-def _copy_json_value(value: object, *, field_name: str) -> JSONValue:
+def copy_json_value(value: object, *, field_name: str = "JSON value") -> JSONValue:
     """Return a defensive JSON-native copy without coercing unsupported values."""
 
     if value is None or isinstance(value, (bool, str)):
@@ -89,14 +105,14 @@ def _copy_json_value(value: object, *, field_name: str) -> JSONValue:
                 raise ValueError(
                     f"{field_name} must contain only string object keys"
                 )
-            normalized[key] = _copy_json_value(
+            normalized[key] = copy_json_value(
                 child,
                 field_name=f"{field_name}.{key}",
             )
         return normalized
     if isinstance(value, (list, tuple)):
         return [
-            _copy_json_value(child, field_name=f"{field_name}[{index}]")
+            copy_json_value(child, field_name=f"{field_name}[{index}]")
             for index, child in enumerate(value)
         ]
     raise ValueError(
@@ -109,10 +125,23 @@ def _frozen_json_mapping(
     *,
     field_name: str,
 ) -> Mapping[str, JSONValue]:
-    normalized = _copy_json_value(value, field_name=field_name)
+    normalized = copy_json_value(value, field_name=field_name)
     if not isinstance(normalized, dict):
         raise TypeError(f"{field_name} must be a mapping")
     return MappingProxyType(normalized)
+
+
+def _freeze_json_value(value: JSONValue) -> FrozenJSONValue:
+    """Return a recursively immutable view of an already-normalized JSON value."""
+
+    if isinstance(value, dict):
+        return MappingProxyType({
+            key: _freeze_json_value(child)
+            for key, child in value.items()
+        })
+    if isinstance(value, list):
+        return tuple(_freeze_json_value(child) for child in value)
+    return value
 
 
 def _optional_identity(value: str | None, *, field_name: str) -> str | None:
@@ -141,6 +170,61 @@ def _optional_non_empty_string(
     return value.strip()
 
 
+@dataclass(frozen=True, slots=True)
+class OutputContract:
+    """One validated Draft 2020-12 contract for an Agent's final output."""
+
+    name: str
+    schema: Mapping[str, FrozenJSONValue]
+    _validator: Any = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("output contract name must be a non-empty string")
+        if not isinstance(self.schema, Mapping):
+            raise TypeError("output contract schema must be a mapping")
+
+        normalized_schema = copy_json_value(
+            self.schema,
+            field_name="output contract schema",
+        )
+        if not isinstance(normalized_schema, dict):
+            raise TypeError("output contract schema must be a mapping")
+        try:
+            Draft202012Validator.check_schema(normalized_schema)
+        except SchemaError as exc:
+            raise ValueError(
+                f"output schema must be valid Draft 2020-12: {exc.message}"
+            ) from exc
+        reject_remote_schema_references(
+            normalized_schema,
+            field_name="output schema",
+        )
+
+        validator_schema = deepcopy(normalized_schema)
+        object.__setattr__(self, "name", self.name.strip())
+        object.__setattr__(self, "schema", _freeze_json_value(normalized_schema))
+        object.__setattr__(
+            self,
+            "_validator",
+            Draft202012Validator(validator_schema, registry=Registry()),
+        )
+
+    def validate(self, value: object) -> JSONValue:
+        """Return a defensive JSON value after validating the output contract."""
+
+        normalized = copy_json_value(value, field_name="output")
+        try:
+            self._validator.validate(normalized)
+        except ValidationError as exc:
+            location = ".".join(str(part) for part in exc.absolute_path)
+            suffix = f" at {location}" if location else ""
+            raise ValueError(
+                f"output does not satisfy schema{suffix}: {exc.message}"
+            ) from exc
+        return normalized
+
+
 class UnsupportedRuntimeError(ValueError):
     """A requested Agent runtime or checkpoint contract is unsupported."""
 
@@ -166,6 +250,9 @@ class AgentRuntimeError(RuntimeError):
         self.category = category
         self.cause = cause
         self.retryable = retryable
+        if category == "output_validation":
+            self.kind = "output_validation"
+            self.stage = "output_validation"
         if cause is not None:
             self.__cause__ = cause
 
@@ -197,6 +284,7 @@ class RuntimeCapabilities:
     subagents: bool
     goal: bool = False
     stop_hooks: bool = False
+    structured_output: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +297,7 @@ class RuntimeRequirements:
     subagents: bool = False
     goal: bool = False
     stop_hooks: bool = False
+    structured_output: bool = False
 
     def unsupported_by(
         self,
@@ -223,6 +312,7 @@ class RuntimeRequirements:
                 "subagents",
                 "goal",
                 "stop_hooks",
+                "structured_output",
             )
             if getattr(self, name) and not getattr(capabilities, name)
         )
@@ -475,6 +565,7 @@ class RuntimeDefinition:
     option_sources: Mapping[str, JSONValue] = field(default_factory=dict)
     requirements: RuntimeRequirements = field(default_factory=RuntimeRequirements)
     instructions: str = ""
+    output_contract: OutputContract | None = None
     project_root: str | None = None
     metadata: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
 
@@ -501,6 +592,11 @@ class RuntimeDefinition:
             raise ValueError("runtime definition requires model_selection or a legacy model binding")
         if not isinstance(self.requirements, RuntimeRequirements):
             raise TypeError("requirements must be RuntimeRequirements")
+        if self.output_contract is not None and not isinstance(
+            self.output_contract,
+            OutputContract,
+        ):
+            raise TypeError("output_contract must be an OutputContract")
         if not isinstance(self.tool_gateway, ToolGateway):
             raise TypeError("tool_gateway must satisfy ToolGateway")
         object.__setattr__(self, "tool_manifest", tool_manifest_snapshot(self.tool_gateway))
@@ -641,7 +737,7 @@ class RuntimeCheckpointEnvelope:
 class AgentRuntimeRequest:
     """Input for one complete Agent runtime execution."""
 
-    task: str
+    task: str | None
     application_id: str | None = None
     task_id: str | None = None
     run_id: str | None = None
@@ -654,8 +750,12 @@ class AgentRuntimeRequest:
     checkpoint_sink: Callable[[RuntimeCheckpointEnvelope], None] | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.task, str) or not self.task:
-            raise ValueError("runtime task must be a non-empty string")
+        if self.task is not None and (
+            not isinstance(self.task, str) or not self.task.strip()
+        ):
+            raise ValueError(
+                "runtime task must be a non-empty string when provided"
+            )
         for field_name in ("application_id", "task_id", "run_id"):
             object.__setattr__(
                 self,
@@ -707,7 +807,7 @@ class AgentRuntimeResult:
         object.__setattr__(
             self,
             "output",
-            _copy_json_value(self.output, field_name="runtime result output"),
+            copy_json_value(self.output, field_name="runtime result output"),
         )
         object.__setattr__(self, "usage", RuntimeUsage.from_value(self.usage))
         artifacts = tuple(self.artifacts)
@@ -814,6 +914,10 @@ class RuntimeRegistry:
         requirements = replace(
             definition.requirements,
             structured_tools=(definition.requirements.structured_tools or bool(definition.tool_gateway.definitions)),
+            structured_output=(
+                definition.requirements.structured_output
+                or definition.output_contract is not None
+            ),
         )
         registration = self.validate(definition.runtime_id, requirements=requirements)
         if registration.factory is None:

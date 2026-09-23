@@ -16,18 +16,19 @@ workflow: |
   response under 2000 words. Do not call tools or request more evidence.
   Your first model response must be the final verdict.
 
-agent_function_schema:
-  description: "Audit one adversarial Goal lifecycle and recovery scenario."
-  inputs:
+input_schema:
+  type: object
+  properties:
     task_id:
-      description: "Stable audit case identifier used by the batch ledger."
-      required: true
+      type: string
+      description: Stable audit case identifier used by the batch ledger.
     query:
-      description: "Failure scenario, required invariants, and repository paths."
-      required: true
-  output:
-    description: "Traceable lifecycle verdict and any uncovered failure modes."
-
+      type: string
+      description: Failure scenario, required invariants, and repository paths.
+  required:
+  - task_id
+  - query
+  additionalProperties: false
 tools: []
 
 worker_agents: []

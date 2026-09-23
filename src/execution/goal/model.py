@@ -42,35 +42,25 @@ def normalize_goal_config(config: dict[str, Any], *, source: str) -> GoalConfig:
     return GoalConfig(enabled=enabled)
 
 
-def normalize_workflow_for_goal(workflow: str | list[str]) -> str:
-    if isinstance(workflow, str):
-        return workflow.strip()
-    return "\n".join(f"{index}. {item.strip()}" for index, item in enumerate(workflow, 1))
-
-
 def build_goal_objective(
     *,
-    description: str,
-    workflow: str | list[str],
-    task: str,
+    workflow: str,
+    task: str | None,
 ) -> str:
-    parts = [f"Description:\n{description.strip()}"]
-    parts.append(f"Workflow:\n{normalize_workflow_for_goal(workflow)}")
-    if task.strip():
+    parts = [f"Workflow:\n{workflow.strip()}"]
+    if task is not None and task.strip():
         parts.append(f"Runtime request:\n{task.strip()}")
     return "\n\n".join(parts)
 
 
 def goal_objective_fingerprint(
     *,
-    description: str,
-    workflow: str | list[str],
-    task: str,
+    workflow: str,
+    task: str | None,
 ) -> str:
     payload = {
-        "description": description.strip(),
-        "workflow": normalize_workflow_for_goal(workflow),
-        "task": task.strip(),
+        "workflow": workflow.strip(),
+        "task": task.strip() if task is not None else "",
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

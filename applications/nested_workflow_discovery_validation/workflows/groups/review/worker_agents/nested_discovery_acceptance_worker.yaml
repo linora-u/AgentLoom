@@ -9,13 +9,13 @@ runtime_options:
 workflow: |
   Return exactly the token requested by the query. Do not add any other text.
 
-agent_function_schema:
-  description: "Return the exact validation token requested by the Supervisor."
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: "The exact token request."
-      required: true
-  output:
-    description: "The exact requested token."
-
+      type: string
+      description: The exact token request.
+  required:
+  - query
+  additionalProperties: false
 worker_agents: []

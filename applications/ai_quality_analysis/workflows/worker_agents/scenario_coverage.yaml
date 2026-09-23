@@ -89,21 +89,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Validates risk coverage across runtime scenarios, identifies blind spots,
-    and analyzes edge cases.
-
-    Core capabilities:
-    1. Define scenario taxonomy and map risks to scenarios
-    2. Identify uncovered scenario gaps
-    3. Analyze edge cases and boundary conditions
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with prior stage risk findings and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_ScenarioCoverage.md containing coverage matrix and gap analysis
+      type: string
+      description: 'Analysis task description with prior stage risk findings and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

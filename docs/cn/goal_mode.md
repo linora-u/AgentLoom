@@ -17,8 +17,9 @@ goal: true
 旧 `token_budget` 无论取值都静默忽略，Goal 不再有成本/token 预算上限。
 Worker YAML 不能配置 Goal Mode。
 
-目标由 `description`、`workflow` 和 runtime task 组成。workflow 列表会按顺序编号并
-合并成一个目标上下文；普通非 Goal workflow 列表仍按原有逐项执行语义运行。
+Goal objective 只记录必填的非空 `workflow` 字符串和可选的 runtime task。Agent
+`description` 仍是展示和 Tool 元数据，不进入执行输入。`workflow` 作为 Runtime
+instruction；提供 task 时，它作为独立 user message，省略时不会生成替代消息。
 
 ## 生命周期与工具
 
@@ -36,8 +37,8 @@ Worker YAML 不能配置 Goal Mode。
 ## 恢复与可观测性
 
 启用 checkpoint 后，`<application_id>/<task_id>/goal.json` 保存身份、目标指纹、状态、
-`goal_started`、证据与时间戳。恢复保留 Goal，并校验 description、workflow 和 runtime
-任务一致。损坏状态或禁用活动 Goal 仍沿用原有错误语义。
+`goal_started`、证据与时间戳。恢复保留 Goal，并校验 workflow 和 runtime task 一致。
+损坏状态或禁用活动 Goal 仍沿用原有错误语义。
 
 旧 checkpoint 的预算和 Goal 用量字段静默忽略；旧 `budget_limited` Goal 按 `active`
 恢复，已完成 Goal 仍保持完成。无需提高预算或迁移配置。

@@ -402,10 +402,7 @@ def test_cli_schedule_add_rejects_non_supervisor_before_storage_creation(
                 "name: worker\n"
                 "agent_runtime: smolagents\n"
                 "description: Worker.\n"
-                "agent_function_schema:\n"
-                "  description: Work.\n"
-                "  inputs: {task: {description: Task, required: true}}\n"
-                "  output: {description: Result}\n"
+                "workflow: Complete the delegated task.\n"
             ),
             encoding="utf-8",
         )

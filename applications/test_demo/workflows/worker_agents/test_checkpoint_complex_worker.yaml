@@ -29,18 +29,17 @@ workflow: |
        grep -q 'manifest_status=ready' /tmp/agentloom_ckpt_complex/worker_report.txt
   4. Return a final answer saying the report files were created.
 
-agent_function_schema:
-  description: |
-    Build a checkpoint validation report from supervisor-provided inputs.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Instructions for the report files to read and write.
-      required: true
-  output:
-    description: |
-      A concise plain-text summary of the report files created.
+      type: string
+      description: 'Instructions for the report files to read and write.
 
+        '
+  required:
+  - query
+  additionalProperties: false
 tools:
   - name: "read_file"
   - name: "edit_file"

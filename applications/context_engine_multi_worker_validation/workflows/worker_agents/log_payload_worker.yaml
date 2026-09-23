@@ -15,15 +15,15 @@ workflow: |
      Extract the `ctx_...` reference without retrieving the original payload.
   3. Call `final_answer` exactly once with only that ContextRef.
 
-agent_function_schema:
-  description: "Create the large log validation payload and return its ContextRef."
-  inputs:
+input_schema:
+  type: object
+  properties:
     user_request:
-      description: "Validation request from the supervisor."
-      required: true
-  output:
-    description: "The ContextRef for the complete large log payload."
-
+      type: string
+      description: Validation request from the supervisor.
+  required:
+  - user_request
+  additionalProperties: false
 tools:
   - name: "make_context_engine_log_payload"
     module: "applications.context_engine_multi_worker_validation.agent_tools.payload_tools"

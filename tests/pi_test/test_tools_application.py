@@ -189,8 +189,9 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
         worker.write_text(yaml.safe_dump({'name': 'probe', 'agent_runtime': 'pi', 'model_type': 'worker',
             'description': 'Read the requested fact.', 'workflow': 'Call parallel_probe then return the fact.',
             'tools': [{'name': 'parallel_probe', 'module': __name__, 'function': 'parallel_probe'}], 'toolsets': [],
-            'agent_function_schema': {'description': 'Read a fact.', 'inputs': {'query': {'description': 'Requested fact.'}},
-                                      'output': {'description': 'The requested fact.'}}}))
+            'input_schema': {'type': 'object', 'properties': {
+                'query': {'type': 'string', 'description': 'Requested fact.'}},
+                'required': ['query'], 'additionalProperties': False}}))
         select(app, concurrency=2, worker_agents=[{'path': 'probe.yaml'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)

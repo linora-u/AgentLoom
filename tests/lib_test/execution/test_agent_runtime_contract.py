@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -11,6 +11,7 @@ from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    OutputContract,
     RuntimeArtifact,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
@@ -67,7 +68,6 @@ class _ToolGateway:
 
 
 def test_runtime_definition_exposes_selected_tool_manifest_and_keeps_legacy_gateway():
-    from dataclasses import replace
     from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.loader import resolve_tool_function
 
@@ -92,7 +92,6 @@ def test_runtime_definition_exposes_selected_tool_manifest_and_keeps_legacy_gate
 
 @pytest.mark.parametrize("mismatch", ["missing", "schema", "duplicate_definition"])
 def test_runtime_definition_rejects_manifest_that_disagrees_with_selected_tools(mismatch):
-    from dataclasses import replace
     from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.tools.loader import resolve_tool_function
 
@@ -124,6 +123,87 @@ def _definition(runtime_id: str) -> RuntimeDefinition:
         tool_gateway=gateway,
         runtime_options={'max_steps': 5},
     )
+
+
+def test_output_contract_validates_draft_2020_12_values_and_local_refs() -> None:
+    contract = OutputContract(
+        name="review_result",
+        schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "finding": {
+                    "type": "object",
+                    "properties": {"message": {"type": "string"}},
+                    "required": ["message"],
+                    "additionalProperties": False,
+                },
+            },
+            "type": "array",
+            "items": {"$ref": "#/$defs/finding"},
+        },
+    )
+
+    assert contract.validate([{"message": "missing guard"}]) == [
+        {"message": "missing guard"}
+    ]
+    with pytest.raises(ValueError, match="output does not satisfy"):
+        contract.validate([{"message": 3}])
+
+
+def test_output_contract_rejects_invalid_or_remote_schemas() -> None:
+    with pytest.raises(ValueError, match="valid Draft 2020-12"):
+        OutputContract(name="invalid", schema={"type": "not-a-json-type"})
+
+    with pytest.raises(ValueError, match="remote"):
+        OutputContract(
+            name="remote",
+            schema={"$ref": "https://schemas.example.test/result.json"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("schema", "value"),
+    [
+        ({"const": {"$ref": "literal-not-a-schema-reference"}}, {"$ref": "literal-not-a-schema-reference"}),
+        ({"enum": [{"$ref": "literal-not-a-schema-reference"}]}, {"$ref": "literal-not-a-schema-reference"}),
+    ],
+)
+def test_output_contract_allows_reference_shaped_instance_data(schema, value) -> None:
+    contract = OutputContract(name="reference_data", schema=schema)
+
+    assert contract.validate(value) == value
+
+
+def test_runtime_definition_carries_an_immutable_output_contract() -> None:
+    source_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+    }
+    contract = OutputContract(name="answer", schema=source_schema)
+    definition = replace(_definition("test"), output_contract=contract)
+    source_schema["properties"]["answer"]["type"] = "integer"
+
+    assert definition.output_contract is contract
+    assert definition.output_contract.schema["properties"]["answer"]["type"] == "string"
+
+    properties = definition.output_contract.schema["properties"]
+    assert isinstance(properties, Mapping)
+    answer = properties["answer"]
+    assert isinstance(answer, Mapping)
+    with pytest.raises(TypeError):
+        answer["type"] = "integer"  # type: ignore[index]
+
+    required = definition.output_contract.schema["required"]
+    assert isinstance(required, tuple)
+    with pytest.raises(AttributeError):
+        required.append("other")  # type: ignore[attr-defined]
+
+
+def test_runtime_request_allows_an_absent_user_task() -> None:
+    request = AgentRuntimeRequest(task=None)
+
+    assert request.task is None
 
 
 @dataclass
@@ -210,11 +290,24 @@ def test_builtin_registry_registers_only_explicit_smolagents_factory() -> None:
     requests: list[AgentRuntimeRequest] = []
     created: list[str] = []
 
+    class BuiltinSmolRuntime(_RecordingRuntime):
+        @property
+        def capabilities(self) -> RuntimeCapabilities:
+            return RuntimeCapabilities(
+                structured_tools=True,
+                parallel_tools=True,
+                checkpoint_resume=True,
+                subagents=True,
+                goal=True,
+                stop_hooks=True,
+                structured_output=True,
+            )
+
     def build_smolagents(
         _definition: RuntimeDefinition,
-    ) -> _RecordingRuntime:
+    ) -> BuiltinSmolRuntime:
         created.append("smolagents")
-        return _RecordingRuntime("smolagents", requests)
+        return BuiltinSmolRuntime("smolagents", requests)
 
     registry = build_builtin_runtime_registry(
         smolagents_factory=build_smolagents,
@@ -262,6 +355,33 @@ def test_registry_validates_capabilities_without_constructing_runtime() -> None:
         )
     with pytest.raises(UnsupportedRuntimeError, match="no runtime factory"):
         registry.create(_definition("minimal"))
+
+
+def test_registry_requires_structured_output_for_an_output_contract() -> None:
+    registry = RuntimeRegistry()
+    registry.register(
+        "minimal",
+        capabilities=RuntimeCapabilities(
+            structured_tools=True,
+            parallel_tools=False,
+            checkpoint_resume=False,
+            subagents=False,
+        ),
+        factory=lambda _definition: _RecordingRuntime("minimal", []),
+    )
+    definition = replace(
+        _definition("minimal"),
+        output_contract=OutputContract(
+            name="answer",
+            schema={"type": "string"},
+        ),
+    )
+
+    with pytest.raises(
+        UnsupportedRuntimeError,
+        match="structured_output",
+    ):
+        registry.create(definition)
 
 
 def test_registry_closes_runtime_whose_capabilities_drift_from_registration() -> None:

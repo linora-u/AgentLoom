@@ -20,15 +20,15 @@ tools:
   - name: "glob_search"
   - name: "grep_search"
 
-agent_function_schema:
-  description: "Search prior self-learning validation runs and scroll around one hit."
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: "JSON string containing marker and workspace."
-      required: true
-  output:
-    description: "JSON evidence with search counts, run ids, and scroll counts."
-
+      type: string
+      description: JSON string containing marker and workspace.
+  required:
+  - query
+  additionalProperties: false
 workflow: |
   # History Research Worker
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
 from agentloom.execution.agent_runtime import (
-    AgentRuntimeResult, RuntimeCapabilities,
+    AgentRuntimeResult,
+    RuntimeCapabilities,
 )
 
 
@@ -88,18 +88,22 @@ def test_no_tools_no_goal_application_uses_native_model_selection(native_project
 
 
 def test_binding_free_workers_have_fresh_instances_and_hook_runs(native_project, monkeypatch):
+    from io import StringIO
+
     from agentloom.application.definition import load_agent_definition
     from agentloom.application.factory import YamlConfiguredAgent
     from agentloom.execution.logging import RichLoggerBackend
     from rich.console import Console
-    from io import StringIO
 
     path, definitions, requests = native_project
     config = load_agent_definition(path)
-    config["agent_function_schema"] = {
-        "description": "Answer one request.",
-        "inputs": {"query": {"description": "The request."}},
-        "output": {"description": "The answer."},
+    config["input_schema"] = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "The request."},
+        },
+        "required": ["query"],
+        "additionalProperties": False,
     }
     from threading import Barrier
     requests.barrier = Barrier(2)

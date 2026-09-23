@@ -16,18 +16,19 @@ workflow: |
   Keep the response under 1800 words. Do not call any other tool or request more
   evidence. Do not call tools. Your first model response must be the final verdict.
 
-agent_function_schema:
-  description: "Audit one cross-surface Goal observability contract."
-  inputs:
+input_schema:
+  type: object
+  properties:
     task_id:
-      description: "Stable audit case identifier used by the batch ledger."
-      required: true
+      type: string
+      description: Stable audit case identifier used by the batch ledger.
     query:
-      description: "Surface boundary, invariants, and repository paths."
-      required: true
-  output:
-    description: "Cross-surface observability verdict with drift analysis."
-
+      type: string
+      description: Surface boundary, invariants, and repository paths.
+  required:
+  - task_id
+  - query
+  additionalProperties: false
 tools: []
 
 worker_agents: []
