@@ -9,7 +9,7 @@ from typing import Any
 def project_root() -> Path:
     """Return the AgentLoom project root without importing heavy runtime code."""
     try:
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         return Path(C.agent_root).resolve()
     except Exception:
@@ -22,7 +22,7 @@ def project_root() -> Path:
 
 def _config_section() -> dict[str, Any]:
     try:
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         section = C.get("self_learning", {})
         return section if isinstance(section, dict) else {}
@@ -32,7 +32,7 @@ def _config_section() -> dict[str, Any]:
 
 def _runtime_config_section() -> dict[str, Any]:
     try:
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         section = C.get("runtime", {})
         return section if isinstance(section, dict) else {}

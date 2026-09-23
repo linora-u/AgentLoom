@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 from agentloom.execution.hooks.path_validators import (
     DEFAULT_PATH_PARAM_PATTERNS,
     _find_rule_for_tool,

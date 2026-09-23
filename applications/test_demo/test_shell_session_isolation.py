@@ -9,7 +9,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
 from agentloom.execution.trace import generate_id
 
 

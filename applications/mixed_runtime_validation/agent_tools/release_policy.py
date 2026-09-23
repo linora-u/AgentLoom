@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.trusted_memory_evidence import trusted_memory_evidence
 
 

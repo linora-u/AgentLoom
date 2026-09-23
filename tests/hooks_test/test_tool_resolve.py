@@ -4,7 +4,7 @@ import importlib
 
 import pytest
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.tools.catalog import (
     DEFAULT_TOOLSETS,
     get_tool_spec,

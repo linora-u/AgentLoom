@@ -8,7 +8,7 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
 
-from agentloom.application.composition import build_builtin_runtime_registry
+from agentloom.app.composition import build_builtin_runtime_registry
 from agentloom.execution.agent_runtime import (
     OutputContract,
     RuntimeRequirements,
@@ -371,7 +371,7 @@ class AgentConfigNormalizer:
         *,
         agent_root: Path | str,
     ) -> Path:
-        from agentloom.application.paths import resolve_worker_reference
+        from agentloom.app.paths import resolve_worker_reference
         return resolve_worker_reference(path_value, worker_agents_folder, project_root=agent_root)
 
     @classmethod

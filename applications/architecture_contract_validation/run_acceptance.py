@@ -141,8 +141,8 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
 
 
 def _run_child(attempt: Path, request: dict) -> int:
-    from agentloom.application.runner import execute_app
-    from agentloom.configuration import C
+    from agentloom.app.runner import execute_app
+    from agentloom.config import C
 
     receipt = {**request, "status": "failed"}
     events = []
@@ -199,8 +199,8 @@ def _policy_definition(attempt: Path, request: dict) -> Path:
 
 def _rejection_child(attempt: Path, request: dict) -> int:
     """Negative case: audit network attempts and require run-less preflight rejection."""
-    from agentloom.application.runner import execute_app
-    from agentloom.application.studio.domain_actions import execute_domain_action
+    from agentloom.app.runner import execute_app
+    from agentloom.app.studio.domain_actions import execute_domain_action
 
     project = Path(request["project"])
     base = Path(request["definition"])

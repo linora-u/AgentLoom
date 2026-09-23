@@ -1,10 +1,10 @@
 import inspect
 from pathlib import Path
 
-import agentloom.application.factory as yaml_factory_module
+import agentloom.app.factory as yaml_factory_module
 import pytest
-from agentloom.application.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
-from agentloom.application.validation import AgentConfigNormalizer
+from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.app.validation import AgentConfigNormalizer
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnResult
 
@@ -327,7 +327,7 @@ workflow: "wf"
 
 
 def _config_at(root):
-    from agentloom.configuration import C
+    from agentloom.config import C
 
     class ProjectConfig:
         agent_root = root

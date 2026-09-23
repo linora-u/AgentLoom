@@ -13,13 +13,13 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agentloom.application.lifecycle import ApplicationRunLifecycle
+    from agentloom.app.lifecycle import ApplicationRunLifecycle
 
-from agentloom.application.composition import build_builtin_runtime_registry
-from agentloom.application.validation import (
+from agentloom.app.composition import build_builtin_runtime_registry
+from agentloom.app.validation import (
     AgentConfigNormalizer,
 )
-from agentloom.configuration import (
+from agentloom.config import (
     C,
     build_effective_agent_config_snapshot,
 )
@@ -133,7 +133,7 @@ class BaseAgent(ABC):
             if self._model_binding is None:
                 self._model_binding = self._resolve_model_binding(model_cache=model_cache)
         else:
-            from agentloom.configuration.http_headers import normalize_http_headers
+            from agentloom.config.http_headers import normalize_http_headers
 
             settings = C.llm.for_type(self.default_model_type)
             self._model_selection = RuntimeModelSelection(
@@ -590,7 +590,7 @@ class RoleDrivenAgent(BaseAgent):
     def initialize_skill_catalog(self, logger: Any | None = None) -> SkillCatalog:
         """Resolve conventional and explicitly configured Skill sources once."""
         log = get_logger(logger, __name__)
-        from agentloom.application.definition import skill_catalog
+        from agentloom.app.definition import skill_catalog
 
         catalog = skill_catalog(self._effective_agent_config_snapshot, logger=log)
         log.info("Agent '%s' resolved Skills: %s", self.name, [item.name for item in catalog.summaries()])
@@ -685,7 +685,7 @@ class RoleDrivenAgent(BaseAgent):
                     "The smol runtime is not installed. Install 'AgentLoom[smol]' "
                     "or run uv sync --locked --extra smol in the checkout."
                 )
-        from agentloom.application.runtime_options import normalize_runtime_options
+        from agentloom.app.runtime_options import normalize_runtime_options
 
         options, sources = normalize_runtime_options(
             self._config, snapshot=self._effective_agent_config_snapshot,
@@ -756,7 +756,7 @@ class RoleDrivenAgent(BaseAgent):
         """
 
         def _run_once() -> JSONValue:
-            from agentloom.application.invocation import AgentInvocation
+            from agentloom.app.invocation import AgentInvocation
 
             # Every invocation gets a fresh local id. The outermost invocation
             # also owns it as the root; delegated workers keep their own local id.

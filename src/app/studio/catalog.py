@@ -18,7 +18,7 @@ import yaml
 from agentloom.schedules import presentation as schedule_presentation
 
 if TYPE_CHECKING:
-    from agentloom.application.definition import AgentDefinitionCache
+    from agentloom.app.definition import AgentDefinitionCache
 
 AGENT_YAML_MAX_BYTES = 1024 * 1024
 SKILL_MANIFEST_MAX_BYTES = 128 * 1024
@@ -205,7 +205,7 @@ def _worker_path(
     raw_path = raw_worker.get("path")
     if not isinstance(raw_path, str) or not raw_path.strip() or "\\" in raw_path:
         return None
-    from agentloom.application.definition import resolve_worker_path
+    from agentloom.app.definition import resolve_worker_path
     try:
         candidate = resolve_worker_path(root, supervisor_path, raw_path)
     except ValueError:
@@ -481,7 +481,7 @@ def _read_agent_definition_object(
             return {}
     except OSError:
         return {}
-    from agentloom.application.definition import read_agent_definition
+    from agentloom.app.definition import read_agent_definition
 
     result = read_agent_definition(safe, cache=cache)
     if result.definition is None:

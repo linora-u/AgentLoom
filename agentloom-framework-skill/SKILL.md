@@ -12,7 +12,7 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 - 先进入 AgentLoom 根目录。运行时代码用 `pyproject.toml` 中 `[project].name == "AgentLoom"` 发现项目根；本 Skill 的操作前置检查额外要求 `config/llm.yaml` 存在，因为它是被忽略的本地模型配置，也是生成/验证 Application 前必须确认的环境条件。不要只用 `config/system.yaml` 判定环境可用。
 - 新建 worktree 或干净 checkout 后先检查 `config/llm.yaml`；该文件通常被 `.gitignore` 忽略，不会随 worktree 自动生成。缺失时从同机可信工作区复制，或让用户提供本地配置；不要提交该文件，也不要凭空生成模型配置。
 - 当前本地环境可能没有 `uv`；验证优先用 `.venv/bin/python` 和 `.venv/bin/loom`。
-- 框架 Python 导入统一使用 `agentloom.*`；职责模块的物理源码直接位于 `src/application/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等目录，由安装配置映射为 `agentloom`。不要新增 `src.*` 导入或旧路径转发。
+- 框架 Python 导入统一使用 `agentloom.*`；职责模块的物理源码直接位于 `src/app/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等目录，由安装配置映射为 `agentloom`。不要新增 `src.*` 导入或旧路径转发。
 - 写 Application 前先读真实仓库结构与 `config/llm.yaml`，`model_type` 只能来自项目配置。
 - 如果用户目标不清晰，先问清“功能目标、输入、输出、验收标准”；不要为了显得完整而发明需求。
 
@@ -75,7 +75,7 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 - `run.start` / `run.resume` / `run.restart` / `run.stop`：标准 Run 生命周期；
 - `run.detail`：结构化、限长的 Run 证据。
 
-Studio 检查和 Run 准备共用 `agentloom.application.definition` 的完整拓扑预检。
+Studio 检查和 Run 准备共用 `agentloom.app.definition` 的完整拓扑预检。
 它解析 Supervisor 与所有 Worker 的 Skill 目录、校验 frontmatter 和同层重名，
 在分配 Run 前拒绝静态错误。运行复用已解析的 Skill 正文；新的检查或调用重新读取，
 不把磁盘编辑热切换到已有调用。静态检查不创建模型、连接 MCP、执行 Hook 或加载工具实现。
@@ -103,7 +103,7 @@ Studio 检查和 Run 准备共用 `agentloom.application.definition` 的完整�
 
 ## 定义发现
 
-结构扫描和 YAML 校验共用 `agentloom.application.definition` 的递归发现规则：
+结构扫描和 YAML 校验共用 `agentloom.app.definition` 的递归发现规则：
 `workflows/` 下所有 YAML/Markdown 定义都会被发现；相对路径中包含
 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。
 发现过程不跟随 symlink。YAML 校验随后复用共享定义预检，覆盖嵌套 Supervisor、

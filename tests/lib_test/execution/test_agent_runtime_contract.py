@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
-from agentloom.application.composition import build_builtin_runtime_registry
+from agentloom.app.composition import build_builtin_runtime_registry
 from agentloom.execution.agent_runtime import (
     RUNTIME_EVENT_KINDS,
     AgentRuntimeError,

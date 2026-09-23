@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentloom.application.studio.builder import DraftConflictError
+from agentloom.app.studio.builder import DraftConflictError
 from agentloom_studio_adapter.dispatcher import (
     StudioAdapterError,
     StudioDispatcher,

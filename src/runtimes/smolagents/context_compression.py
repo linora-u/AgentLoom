@@ -63,7 +63,7 @@ from dataclasses import dataclass
 from agentloom.integrations.litellm.model_binding import (
     resolve_litellm_model_turn_binding,
 )
-from agentloom.configuration.defaults import DEFAULT_MAX_TOKENS
+from agentloom.config.defaults import DEFAULT_MAX_TOKENS
 from agentloom.execution.context_engine.engine import CONTEXT_REF_PREFIX
 from agentloom.execution.context_engine.runtime import get_current_context_engine
 from agentloom.execution.logging import get_logger
