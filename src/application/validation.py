@@ -55,8 +55,10 @@ def resolve_input_schema_object(schema: dict[str, Any]) -> dict[str, Any]:
         ),
     ).resolver("urn:agentloom:input-schema")
     visited: set[str] = set()
-    while isinstance(candidate, dict) and "$ref" in candidate:
-        reference = candidate["$ref"]
+    while isinstance(candidate, dict) and (
+        "$ref" in candidate or "$dynamicRef" in candidate
+    ):
+        reference = candidate.get("$ref", candidate.get("$dynamicRef"))
         if not isinstance(reference, str) or reference in visited:
             raise ValueError("input_schema root reference must resolve to an object")
         visited.add(reference)
