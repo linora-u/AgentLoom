@@ -1,0 +1,28 @@
+name: "tool_registry_markdown_validation"
+agent_runtime: smolagents
+description: "Validate Markdown artifact creation through the canonical core_file tools."
+
+model_type: "powerful"
+toolsets:
+  - "core_file"
+runtime_options:
+  max_steps: 6
+  smart_summary: false
+
+workflow: |
+  # Core File Markdown Validation
+
+  Use native structured tool calls and do not simulate results:
+  1. Call `write_file` for
+     `/tmp/agentloom_tool_registry_markdown_validation/report.md` with exactly:
+     `# Core File Markdown Validation`, a blank line,
+     `## Summary`, `Markdown output uses the canonical write_file tool.`, a
+     blank line, `## Result`, and `MARKDOWN_WRITE_MIGRATION_VALIDATION: PASS`.
+  2. If the write is refused because the existing file has not been read, call
+     `read_file` on that exact path and retry `write_file` once with the same
+     complete content.
+  3. Call `read_file` on that exact path after the successful write.
+  4. Call `final_answer` with `MARKDOWN_WRITE_MIGRATION_VALIDATION: PASS` and the
+     output path only when the write return reports success and the read-back
+     contains the title and result marker. Otherwise return FAIL with actual
+     evidence.

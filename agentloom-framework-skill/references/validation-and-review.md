@@ -92,7 +92,7 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 |---|---|
 | 默认工具 / ToolSpec / toolsets / implementation loader | `applications/tool_registry_core_validation`、`applications/tool_registry_markdown_validation`、`applications/test_demo/workflows/test_tool_resolve_agent.yaml`、`applications/context_engine_text_retrieve_validation`、`applications/self_learning_smoke`；catalog/loader 改动五条都跑 |
 | 文件工具 / checkpoint file history | `applications/test_demo/workflows/test_edit_file_agent.yaml`、`test_file_rewind_agent.yaml`、`test_checkpoint_agent.yaml` |
-| 搜索 / 代码导航 | `applications/test_demo/workflows/test_search_tools_agent.yaml` |
+| 搜索 | `applications/tool_registry_core_validation`，必须验证 `grep_search` 与 `glob_search` 的真实调用和结果 |
 | ContextEngine / 压缩 | `applications/context_engine_*_retrieve_validation` 三个应用 |
 | shell 权限 / audit | `applications/test_shell_audit/*`、`applications/test_shell_allowlist_matrix/*` |
 | 多 Worker 调度 | `applications/context_engine_multi_worker_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
