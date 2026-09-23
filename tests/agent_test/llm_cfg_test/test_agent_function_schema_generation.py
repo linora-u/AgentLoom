@@ -1,5 +1,4 @@
 import json
-from inspect import signature
 from pathlib import Path
 
 from agentloom.application.factory import YamlAgentFactory, YamlConfiguredAgent
@@ -21,7 +20,7 @@ def _build_worker(config: dict) -> YamlConfiguredAgent:
     return WorkerFixture(config)
 
 
-def test_generated_function_signature_from_schema():
+def test_generated_tool_uses_declared_json_schema():
     config = {
         "name": "test_agent",
         "agent_runtime": "smolagents",
@@ -48,20 +47,11 @@ def test_generated_function_signature_from_schema():
     worker = _build_worker(config)
     tool = worker.agent_as_tool()
 
-    sig = signature(tool)
-
-    print(f"\nFunction name: {tool.__name__}")
-    print(f"Function signature: {sig}")
-    for param_name, param in sig.parameters.items():
-        print(f"Parameter: {param_name}, Type: {param.annotation}, Default: {param.default}")
-    print(f"Return type: {sig.return_annotation}")
-    print(f"\nDocstring passed to LLM:\n{tool.__doc__}")
-
     assert tool.__name__ == "test_agent"
-    assert list(sig.parameters.keys()) == ["query", "source"]
-    assert sig.parameters["query"].annotation is not str
-    assert sig.parameters["source"].default is None
     assert bind_tool(tool).definition.parameters == config["input_schema"]
+    assert tool(query="run command", source="manual") == (
+        'RUN::{"query":"run command","source":"manual"}'
+    )
 
 
 def test_print_function_schema_generation_from_worker_yaml():
