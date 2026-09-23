@@ -5,6 +5,7 @@ from agentloom.application.factory import YamlAgentFactory
 from agentloom.execution.logging import get_global_logger, initialize_global_logger_once, set_global_logger
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnResult
+from agentloom.execution.tool_gateway import bind_tool
 
 
 class _NoopAdapter:
@@ -47,10 +48,10 @@ def test_real_worker_yaml_parses_and_registers_tool():
     assert tool is not None
     assert tool.__name__ == "shell_worker"
     assert "Args:" in (tool.__doc__ or "")
-    assert "Returns:" in (tool.__doc__ or "")
+    assert bind_tool(tool).definition.description == config["description"].strip()
 
 
-def test_worker_without_agent_function_schema_is_not_registered():
+def test_worker_without_input_schema_registers_default_task_tool():
     config = {
         "name": "demo_worker",
         "agent_runtime": "smolagents",
@@ -63,28 +64,57 @@ def test_worker_without_agent_function_schema_is_not_registered():
         config,
         model_binding=make_test_model_binding(),
     )
-    assert tool is None
+    assert tool is not None
+    assert bind_tool(tool).definition.parameters == {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "Task for this Agent.",
+            },
+        },
+        "required": ["task"],
+        "additionalProperties": False,
+    }
 
 
-def test_invalid_agent_function_schema_raises_value_error():
+def test_explicit_input_schema_preserves_typed_tool_contract():
     config = {
         "name": "demo_worker",
         "agent_runtime": "smolagents",
         "description": "worker desc",
         "tools": [],
         "workflow": "demo workflow",
-        "agent_function_schema": {
-            "description": "invalid schema",
-            "inputs": {
-                "query": {
-                    # missing description
-                }
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "count": {"type": "integer"},
+                "dry_run": {"type": "boolean"},
             },
-            "output": {"description": "result text"},
+            "required": ["count"],
+            "additionalProperties": False,
         },
     }
 
-    with pytest.raises(ValueError, match="description"):
+    tool = YamlAgentFactory.create_agent_as_tool(
+        config,
+        model_binding=make_test_model_binding(),
+    )
+    assert tool is not None
+    assert bind_tool(tool).definition.parameters == config["input_schema"]
+
+
+def test_removed_agent_function_schema_is_rejected():
+    config = {
+        "name": "demo_worker",
+        "agent_runtime": "smolagents",
+        "description": "worker desc",
+        "tools": [],
+        "workflow": "demo workflow",
+        "agent_function_schema": {},
+    }
+
+    with pytest.raises(ValueError, match="agent_function_schema was removed"):
         YamlAgentFactory.create_agent_as_tool(
             config,
             model_binding=make_test_model_binding(),

@@ -18,15 +18,15 @@ tools:
   - name: "glob_search"
   - name: "grep_search"
 
-agent_function_schema:
-  description: "Verify durable files, proposal package files, and skill discovery isolation."
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: "JSON string containing marker and all prior worker outputs."
-      required: true
-  output:
-    description: "JSON audit evidence."
-
+      type: string
+      description: JSON string containing marker and all prior worker outputs.
+  required:
+  - query
+  additionalProperties: false
 workflow: |
   # Artifact Auditor Worker
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from agentloom.execution.agent_runtime import RuntimeCapabilities, RuntimeCheckpointEnvelope, RuntimeState
 from agentloom.execution.native_tools import (
@@ -46,17 +46,23 @@ class ModelSelection(WireValue):
     request_headers: dict[str, str] = Field(repr=False)
 
 
+class OutputContract(WireValue):
+    name: NonEmpty
+    schema_: dict[str, JsonValue] = Field(alias="schema", repr=False)
+
+
 class Run(WireValue):
     method: Literal["run"]
     application_id: NonEmpty
     task_id: NonEmpty
-    task: NonEmpty
+    task: NonEmpty | None = None
     cwd: NonEmpty
     instructions: str
     model: ModelSelection = Field(repr=False)
     tools: list[ToolManifestEntry]
     serial_tools: list[NonEmpty] = Field(default_factory=list)
     runtime_options: dict[str, JsonValue] = Field(repr=False)
+    output_contract: OutputContract | None = Field(default=None, repr=False)
     continue_session: bool = False
     record_task: bool = True
     additional_args: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
@@ -122,13 +128,14 @@ class PlatformPrepare(WireValue):
 
 
 RequestPayload = Annotated[
-    Union[Handshake, Run, Snapshot, Cancel, Close, Prepare, Dispatch, Settle, PlatformInvoke, PlatformPrepare, ModelPrepare, SessionCheckpoint], Field(discriminator="method")
+    Handshake | Run | Snapshot | Cancel | Close | Prepare | Dispatch | Settle | PlatformInvoke | PlatformPrepare | ModelPrepare | SessionCheckpoint, Field(discriminator="method")
 ]
 
 
 class BridgeError(WireValue):
     category: Literal[
-        "protocol", "configuration", "unsupported_capability", "provider", "tool", "interrupted", "internal"
+        "protocol", "configuration", "unsupported_capability", "provider", "tool",
+        "output_validation", "interrupted", "internal"
     ]
     message: str
     retryable: bool = False
@@ -165,6 +172,7 @@ class HandshakeResult(WireValue):
 class RunResult(WireValue):
     method: Literal["run"]
     state: RuntimeState
+    terminal_rejections: Annotated[int, Field(ge=0)]
     output: JsonValue = Field(default=None, repr=False)
     usage: dict[str, JsonValue] = Field(default_factory=dict)
     artifacts: list[dict[str, JsonValue]] = Field(default_factory=list)
@@ -239,6 +247,7 @@ class ModelPermit(WireValue):
 class PlatformResult(WireValue):
     method: Literal["platform_invoke"]
     record: TerminalRecord = Field(repr=False)
+    model_output: JsonValue = Field(repr=False)
 
 
 class PlatformPrepared(WireValue):
@@ -248,7 +257,7 @@ class PlatformPrepared(WireValue):
 
 
 ResultPayload = Annotated[
-    Union[HandshakeResult, RunResult, SnapshotResult, ControlResult, PrepareResult, SettleResult, PlatformResult, PlatformPrepared, ModelPermit, SessionCheckpointResult],
+    HandshakeResult | RunResult | SnapshotResult | ControlResult | PrepareResult | SettleResult | PlatformResult | PlatformPrepared | ModelPermit | SessionCheckpointResult,
     Field(discriminator="method"),
 ]
 
@@ -319,7 +328,7 @@ class Event(Envelope):
     payload: dict[str, JsonValue] = Field(repr=False)
 
 
-Message = Annotated[Union[Request, Response, Event], Field(discriminator="kind")]
+Message = Annotated[Request | Response | Event, Field(discriminator="kind")]
 _message: TypeAdapter[Request | Response | Event] = TypeAdapter(Message)
 
 
@@ -352,7 +361,12 @@ def decode_message(line: str) -> Request | Response | Event:
 def encode_message(message: Request | Response | Event) -> str:
     def wire(value: Any) -> Any:
         if isinstance(value, BaseModel):
-            return {name: wire(getattr(value, name)) for name in type(value).model_fields}
+            return {
+                (field.serialization_alias or field.alias or name): wire(
+                    getattr(value, name)
+                )
+                for name, field in type(value).model_fields.items()
+            }
         if is_dataclass(value) and not isinstance(value, type):
             return {item.name: wire(getattr(value, item.name)) for item in fields(value)}
         if isinstance(value, Mapping):

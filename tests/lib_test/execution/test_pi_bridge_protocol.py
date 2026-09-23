@@ -15,6 +15,32 @@ def test_published_bridge_schema_matches_the_python_codec():
     assert published == protocol_schema()
 
 
+def test_platform_projection_stays_out_of_the_canonical_terminal_record():
+    from agentloom.execution.tool_protocol import (
+        MODEL_OUTPUT_METADATA_KEY,
+        ToolCallRecord,
+    )
+    from agentloom.runtimes.pi.protocol import PlatformResult
+    from agentloom.runtimes.pi.protocol_handlers import terminal
+
+    record = ToolCallRecord.completed(
+        call_id="platform-call",
+        tool_name="worker",
+        input={"task": "inspect"},
+        output={"full": "canonical"},
+        metadata={MODEL_OUTPUT_METADATA_KEY: "[ContextRef ctx_test] preview"},
+    )
+    canonical = terminal(record)
+
+    assert canonical.model_dump() == record.to_dict()
+    projected = PlatformResult(
+        method="platform_invoke",
+        record=canonical,
+        model_output=record.model_output(),
+    )
+    assert projected.model_output == "[ContextRef ctx_test] preview"
+
+
 def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
     from agentloom.runtimes.pi.protocol import decode_message, encode_message
 
@@ -55,6 +81,7 @@ def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
                 "subagents": True,
                 "goal": True,
                 "stop_hooks": True,
+                "structured_output": True,
             },
         },
         "error": None,
@@ -76,6 +103,36 @@ def test_snapshot_can_acknowledge_no_checkpoint():
         "payload": {"method": "snapshot", "checkpoint": None},
     }
     assert json.loads(encode_message(decode_message(json.dumps(message))))["payload"] == message["payload"]
+
+
+def test_run_error_preserves_output_validation_category():
+    from agentloom.runtimes.pi.protocol import decode_message, encode_message
+
+    message = {
+        "version": 2,
+        "kind": "response",
+        "request_id": "host:output-validation",
+        "instance_id": "worker-a",
+        "run_id": "run",
+        "payload": {
+            "method": "run",
+            "state": "max_steps_error",
+            "terminal_rejections": 2,
+            "output": None,
+            "usage": {},
+            "artifacts": [],
+            "checkpoint": None,
+            "error": {
+                "category": "output_validation",
+                "message": "Agent exhausted its output correction budget",
+                "retryable": True,
+            },
+        },
+    }
+
+    roundtrip = json.loads(encode_message(decode_message(json.dumps(message))))
+    assert roundtrip["payload"]["error"]["category"] == "output_validation"
+    assert roundtrip["payload"]["terminal_rejections"] == 2
 
 
 @pytest.mark.parametrize(

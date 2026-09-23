@@ -8,22 +8,12 @@ from importlib.metadata import PackageNotFoundError, version
 from threading import RLock
 from typing import Any
 
-from agentloom.runtimes.smolagents.checkpoint_codec import (
-    CANONICAL_MODEL_ITEMS_KEY,
-    SmolagentsCheckpointCodec,
-)
-from agentloom.runtimes.smolagents.conversation_recovery import (
-    prepare_steps_for_resume,
-)
-from agentloom.runtimes.smolagents.metadata import CAPABILITIES
-from agentloom.runtimes.smolagents.recoverable_errors import (
-    is_recoverable_agent_error,
-)
 from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
     AgentRuntimeResult,
     JSONValue,
+    OutputContract,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeEvent,
@@ -36,6 +26,17 @@ from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelProtocolError, ModelTurnResult
 from agentloom.execution.tool_gateway import ToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.runtimes.smolagents.checkpoint_codec import (
+    CANONICAL_MODEL_ITEMS_KEY,
+    SmolagentsCheckpointCodec,
+)
+from agentloom.runtimes.smolagents.conversation_recovery import (
+    prepare_steps_for_resume,
+)
+from agentloom.runtimes.smolagents.metadata import CAPABILITIES
+from agentloom.runtimes.smolagents.recoverable_errors import (
+    is_recoverable_agent_error,
+)
 
 try:
     _SMOLAGENTS_VERSION = version("smolagents")
@@ -132,6 +133,25 @@ def _runtime_error(error: Exception) -> AgentRuntimeError:
     )
 
 
+def _exhausted_output_correction(native_runtime: Any) -> bool:
+    """Return whether max steps followed a rejected structured final answer."""
+
+    steps = getattr(getattr(native_runtime, "memory", None), "steps", ())
+    for step in reversed(steps):
+        records = getattr(step, "tool_results", None) or ()
+        for record in reversed(records):
+            if not isinstance(record, ToolCallRecord):
+                continue
+            if record.tool_name != "final_answer" or record.status == "completed":
+                continue
+            return bool(
+                record.error is not None
+                and record.error.kind == "output_validation"
+                and record.error.stage == "output_validation"
+            )
+    return False
+
+
 class SmolagentsRuntimeAdapter:
     """Hide smolagents run arguments and result types behind AgentLoom contracts."""
 
@@ -148,6 +168,7 @@ class SmolagentsRuntimeAdapter:
         model_binding: ModelTurnBinding,
         checkpoint_sink: Any | None = None,
         tool_gateway: ToolGateway | None = None,
+        output_contract: OutputContract | None = None,
     ) -> None:
         if not isinstance(model_binding, ModelTurnBinding):
             raise TypeError("model_binding must be a ModelTurnBinding")
@@ -157,6 +178,7 @@ class SmolagentsRuntimeAdapter:
         self._native_runtime = native_runtime
         self._model_binding = model_binding
         self._tool_gateway = tool_gateway
+        self._output_contract = output_contract
         self._default_checkpoint_sink = checkpoint_sink
         self._checkpoint_sink_context: ContextVar[Any | None] = ContextVar(
             f"agentloom_smolagents_checkpoint_sink_{id(self)}",
@@ -293,6 +315,7 @@ class SmolagentsRuntimeAdapter:
                     "call_id": record.call_id,
                     "name": record.tool_name,
                     "status": record.status,
+                    "record": record.to_dict(),
                 },
             )
 
@@ -433,10 +456,12 @@ class SmolagentsRuntimeAdapter:
 
             continue_session = request.continue_session or request.checkpoint is not None
             run_kwargs: dict[str, Any] = {
-                "task": request.task,
+                "task": request.task or "",
                 "return_full_result": True,
                 "reset": not continue_session,
             }
+            if request.task is None:
+                run_kwargs["_skip_task_step"] = True
             if continue_session and request.record_task:
                 run_kwargs["_skip_task_step_on_reset_false"] = False
             if request.additional_args:
@@ -456,6 +481,16 @@ class SmolagentsRuntimeAdapter:
                     native_result = self._native_runtime.run(**run_kwargs)
             finally:
                 self._checkpoint_sink_context.reset(checkpoint_token)
+            if (
+                self._output_contract is not None
+                and getattr(native_result, "state", None) == "max_steps_error"
+                and _exhausted_output_correction(native)
+            ):
+                raise AgentRuntimeError(
+                    "Agent exhausted its execution budget with an invalid structured output",
+                    category="output_validation",
+                    retryable=True,
+                )
             require_runtime_state(
                 native_result,
                 allowed_states={"success", "max_steps_error"},

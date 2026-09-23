@@ -131,23 +131,14 @@ tools:
     function: "get_module_context"
     description: "获取指定模块的上下文信息，包括模块描述和相关代码文件列表。在调用具体的检查 Agent 之前，必须先调用此工具获取上下文。"
 
-agent_function_schema:
-  description: |
-    数据一致性检查智能体，负责对模块级数据一致性相关要素进行静态扫描与整理，覆盖跨核并发场景下的共享数据入口识别与建档。
-    
-    该智能体聚焦于多核/多任务运行环境中的全局与模块级共享变量，输出可追溯（可定位到文件与行号）的共享变量清单，并对关键结构体进行字段级拆解，为后续并发安全审计提供输入。
-    
-    核心能力：
-    
-    识别所有共享变量（含全局变量、文件静态状态量、配置/状态/计数器、缓冲区/队列、链表/树入口指针、句柄/上下文指针等）
-    分析关键数据结构（对共享结构体与高风险字段：指针/数组/状态/计数器/链表指针进行字段级信息整理）
-    生成共享变量清单（包含定义位置与访问证据，必要时标注“待确认/待补充”）
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        检查任务描述，包含待检查的模块名称、代码范围（文件清单/路径）以及项目并发上下文（核数、RTOS/中断信息如可获得）。
-      required: true
-  output:
-    description: |
-      str: 检查结果摘要；详细报告将生成在 workspace 中；
-          输出包含所有已识别共享变量的文档 CAN_SharedVariables.md（含变量清单表与关键数据结构字段分析）。
+      type: string
+      description: '检查任务描述，包含待检查的模块名称、代码范围（文件清单/路径）以及项目并发上下文（核数、RTOS/中断信息如可获得）。
+
+        '
+  required:
+  - query
+  additionalProperties: false

@@ -12,18 +12,17 @@ workflow: |
   You are a file processing worker. Follow the query instructions exactly.
   Read the specified input files, merge their content, and write the output with write_file.
 
-agent_function_schema:
-  description: |
-    File processing worker that reads input files and creates merged output.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Instructions for which files to read and what output to produce.
-      required: true
-  output:
-    description: |
-      A text summary of what was processed and the output file created.
+      type: string
+      description: 'Instructions for which files to read and what output to produce.
 
+        '
+  required:
+  - query
+  additionalProperties: false
 tools:
   - name: "read_file"
   - name: "write_file"

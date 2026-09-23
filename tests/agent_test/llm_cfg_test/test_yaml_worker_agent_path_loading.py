@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import agentloom.application.factory as yaml_factory_module
@@ -239,10 +240,7 @@ def test_resolve_bare_name_without_extension_raises(tmp_path):
         )
 
 
-def test_get_tools_registers_worker_as_tool_when_schema_present(tmp_path, monkeypatch):
-    """
-    Test that supervisor actually registers the worker as a tool if agent_function_schema is present.
-    """
+def test_get_tools_registers_worker_as_tool_with_explicit_input_schema(tmp_path, monkeypatch):
     worker_folder = tmp_path / "applications" / "demo" / "workflows" / "worker_agents"
     worker_folder.mkdir(parents=True, exist_ok=True)
     valid_file = worker_folder / "valid.yaml"
@@ -252,14 +250,14 @@ agent_runtime: smolagents
 description: "desc"
 tools: []
 workflow: "wf"
-agent_function_schema:
-  description: "valid description"
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
+      type: string
       description: "tool query"
-      required: true
-  output:
-    description: "worker textual output"
+  required: [query]
+  additionalProperties: false
 """, encoding="utf-8")
 
     monkeypatch.setattr(yaml_factory_module, "C", _config_at(tmp_path))
@@ -286,14 +284,11 @@ agent_function_schema:
     # With the new Optional[Callable] return, each worker becomes one tool
     assert len(tools) == 1
     assert tools[0].__name__ == "valid_worker"
-    assert "valid description" in (tools[0].__doc__ or "")
+    assert "desc" in (tools[0].__doc__ or "")
     assert "Args:" in (tools[0].__doc__ or "")
 
 
-def test_get_tools_ignores_worker_as_tool_when_schema_missing(tmp_path, monkeypatch):
-    """
-    Test that supervisor ignores the worker (does not register as a tool) if agent_function_schema is missing.
-    """
+def test_get_tools_registers_default_task_tool_when_schema_missing(tmp_path, monkeypatch):
     worker_folder = tmp_path / "applications" / "demo" / "workflows" / "worker_agents"
     worker_folder.mkdir(parents=True, exist_ok=True)
     missing_desc_file = worker_folder / "missing.yaml"
@@ -326,7 +321,9 @@ workflow: "wf"
     supervisor = _build_supervisor_for_get_tools([{"path": "missing.yaml"}])
     tools = supervisor._get_tools()
 
-    assert len(tools) == 0
+    assert len(tools) == 1
+    assert tools[0].__name__ == "missing_worker"
+    assert "task" in inspect.signature(tools[0]).parameters
 
 
 def _config_at(root):

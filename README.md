@@ -34,10 +34,11 @@ structured evidence, and continue repairing failures.
 
 ### Workers become typed tools
 
-A Worker declares `agent_function_schema`; the runtime turns it into a validated
-callable tool for its Supervisor. Workers can use different models and tools,
-run concurrently, and expose stable input/output contracts instead of relying on
-prompt conventions.
+A Supervisor explicitly selects Workers through `worker_agents`; each selected
+Worker becomes a callable tool named and described by that Worker. Simple Workers
+use the default `task: string` input and text output. Complex Workers declare
+Draft 2020-12 `input_schema` and `output_schema`, which runtimes validate as
+executable contracts rather than prompt conventions.
 
 ### Runs produce evidence, not terminal guesses
 
@@ -220,7 +221,9 @@ goal:
   enabled: true
 ```
 
-Each Worker exposes the contract seen by its Supervisor:
+Each Worker exposes the contract seen by its Supervisor. Omit both schemas for
+the default `task: string` input and text output; declare them when typed JSON is
+part of the actual contract:
 
 ```yaml
 name: "api_reviewer"
@@ -228,14 +231,27 @@ agent_runtime: "smolagents"
 description: "Review API compatibility risks."
 model_type: "fast"
 
-agent_function_schema:
-  description: "Review one release request."
-  inputs:
+input_schema:
+  type: object
+  properties:
     request:
+      type: string
       description: "Release scope and API diff."
-      required: true
-  output:
-    description: "Evidence-backed compatibility findings."
+  required: [request]
+  additionalProperties: false
+
+output_schema:
+  type: object
+  properties:
+    decision:
+      type: string
+      enum: [compatible, incompatible]
+    findings:
+      type: array
+      items:
+        type: string
+  required: [decision, findings]
+  additionalProperties: false
 
 workflow: |
   Review the request, cite evidence, and return prioritized findings.

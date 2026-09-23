@@ -25,7 +25,7 @@ def scan_app_structure(app_path: str) -> str:
 
     返回结构化的文本摘要，包含：
     - Supervisor 配置摘要（name、description 前 80 字、tools 列表、worker_agents 列表、agent_runtime、model_type、max_steps）
-    - 每个 Worker 的配置摘要（name、agent_function_schema 的 inputs/output、tools 列表、agent_runtime、model_type、max_steps）
+    - 每个 Worker 的配置摘要（name、input_schema、output_schema、tools 列表、agent_runtime、model_type、max_steps）
     - agent_tools/ 下的 Python 文件名、公开函数名与 docstring 摘要
     - 入口脚本路径（如有）
     - 动态能力发现（有效 tools 与 toolsets）
@@ -194,12 +194,7 @@ def _resolve_app_path(path_str: str) -> Path:
 
 
 def _render_workflow_text(workflow: Any) -> str:
-    """Render workflow strings or list[str] as readable sequential text."""
-    if isinstance(workflow, list):
-        parts: list[str] = []
-        for idx, item in enumerate(workflow, start=1):
-            parts.append(f"## Workflow {idx}\n\n{item}")
-        return "\n\n".join(parts)
+    """Render the stored value without inventing list execution semantics."""
     return str(workflow)
 
 
@@ -327,17 +322,8 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     else:
         worker_paths = []
 
-    schema = data.get("agent_function_schema", {})
-    schema_text = ""
-    if schema and isinstance(schema, dict):
-        inputs = schema.get("inputs", {})
-        output = schema.get("output", {})
-        input_names = list(inputs.keys()) if isinstance(inputs, dict) else []
-        output_desc = output.get("description", "(未定义)") if isinstance(output, dict) else str(output)
-        schema_text = (
-            f"  - **inputs**: {', '.join(input_names) if input_names else '(无)'}\n"
-            f"  - **output**: {output_desc}\n"
-        )
+    input_schema_text = _format_json_schema_summary(data.get("input_schema"))
+    output_schema_text = _format_json_schema_summary(data.get("output_schema"))
 
     lines = [f"\n### {agent_file.name} ({role})\n"]
     lines.append(f"- **name**: {name}")
@@ -372,12 +358,56 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     if worker_paths:
         lines.append(f"- **worker_agents**: {', '.join(worker_paths)}")
 
-    if schema_text:
-        lines.append(f"- **agent_function_schema**:\n{schema_text}")
+    if input_schema_text:
+        lines.append(f"- **input_schema**:\n{input_schema_text}")
+
+    if output_schema_text:
+        lines.append(f"- **output_schema**:\n{output_schema_text}")
 
     if skills_cfg is not None:
         lines.append(f"- **skills**: {_format_skills_summary(skills_cfg)}")
 
+    return "\n".join(lines)
+
+
+def _format_json_schema_summary(schema: Any) -> str:
+    """Summarize a JSON Schema without interpreting or validating it."""
+    if schema is None:
+        return ""
+    if not isinstance(schema, dict):
+        return f"  - **value**: {schema}"
+
+    lines = [f"  - **type**: {schema.get('type', '(未指定)')}"]
+    description = schema.get("description")
+    if description:
+        lines.append(f"  - **description**: {description}")
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        property_names = list(properties)
+        lines.append(
+            "  - **properties**: "
+            + (", ".join(property_names) if property_names else "(无)")
+        )
+        property_descriptions = []
+        for name, property_schema in properties.items():
+            if not isinstance(property_schema, dict):
+                continue
+            property_description = property_schema.get("description")
+            if property_description:
+                property_descriptions.append(f"{name}={property_description}")
+        if property_descriptions:
+            lines.append(
+                "  - **property descriptions**: "
+                + "; ".join(property_descriptions)
+            )
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        lines.append(
+            "  - **required**: "
+            + (", ".join(str(name) for name in required) if required else "(无)")
+        )
     return "\n".join(lines)
 
 

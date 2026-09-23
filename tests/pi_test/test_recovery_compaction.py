@@ -5,13 +5,25 @@ import json
 import os
 import signal
 from threading import Event
+from uuid import uuid4
 
 import psutil
 import pytest
-
 from agentloom.application.run import ApplicationRunError
 from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.runtimes.pi.metadata import BRIDGE_VERSION
+from agentloom.runtimes.pi.protocol import (
+    PI_BRIDGE_PROTOCOL_VERSION,
+    Handshake,
+    ModelPermit,
+    ModelPrepare,
+    ModelSelection,
+    Run,
+    RunResult,
+)
+from agentloom.runtimes.pi.transport import PiTransport
+
 from tests.pi_test.test_application import change_model, model_service, project
 from tests.pi_test.test_process_lifecycle import assert_gone, start_cli
 from tests.pi_test.test_recovery_application import audit, checkpoints, enable
@@ -33,6 +45,98 @@ def _sdk_pid(parent_pid):
 
 def _terminal_states(events):
     return [event["details"]["state"] for event in events if event["kind"] == "terminal"]
+
+
+def test_each_continued_empty_task_gets_independent_overflow_recovery(tmp_path):
+    overflow = "Requested token count exceeds the model's maximum context length of 64 tokens"
+    with model_service(
+        fail_requests={2: 400, 4: 400, 5: 400},
+        fail_messages={2: overflow, 4: overflow, 5: overflow},
+    ) as (url, requests):
+        transport = PiTransport(uuid4().hex)
+        try:
+            handshake = transport.request(Handshake(
+                method="handshake",
+                protocol_version=PI_BRIDGE_PROTOCOL_VERSION,
+                bridge_version=BRIDGE_VERSION,
+                native_tool_contract=1,
+            ), timeout=15)
+            assert handshake.payload is not None
+
+            model = ModelSelection(
+                model_type="test",
+                model_id="openai/fixture-model",
+                protocol="openai_chat",
+                settings={
+                    "api_key": "fixture-secret",
+                    "base_url": url,
+                    "temperature": 0,
+                    "context_window": 64,
+                    "max_output_tokens": 16,
+                    "timeout": 10,
+                    "num_retries": 0,
+                    "retry_delay": 0,
+                    "max_retry_delay": 0,
+                    "requests_per_minute": 2_000_000,
+                    "context_cache": False,
+                    "extra_completion_params": {},
+                },
+                request_headers={},
+            )
+            runtime_options = {
+                "max_stop_attempts": 3,
+                "compaction": {
+                    "enabled": True,
+                    "reserveTokens": 48,
+                    "keepRecentTokens": 1,
+                },
+            }
+            events = []
+
+            def permit(payload):
+                assert isinstance(payload, ModelPrepare)
+                return ModelPermit(
+                    method="model_prepare",
+                    identity=payload.identity,
+                    state="work",
+                )
+
+            def run(task, *, continue_session):
+                run_id = uuid4().hex
+                response = transport.request(Run(
+                    method="run",
+                    application_id="pi",
+                    task_id=run_id,
+                    task=task,
+                    cwd=str(tmp_path),
+                    instructions="Answer directly.",
+                    model=model,
+                    tools=[],
+                    runtime_options=runtime_options,
+                    continue_session=continue_session,
+                ), run_id=run_id, observe=events.append, callback=permit)
+                assert isinstance(response.payload, RunResult)
+                return response.payload
+
+            assert run("Seed the reusable session.", continue_session=False).state == "success"
+            exhausted = run(None, continue_session=True)
+            result = run(None, continue_session=True)
+        finally:
+            transport.close()
+
+    assert exhausted.state == "failed"
+    assert result.state == "success"
+    assert result.output == "Pi answer"
+    assert len(requests) == 7
+    assert sum(message["role"] == "user" for message in requests[1][1]["messages"]) == 1
+    assert "agentloom_instruction_only_turn" not in json.dumps(requests)
+    assert _is_compaction(requests[2][1])
+    assert _is_compaction(requests[5][1])
+    assert not _is_compaction(requests[6][1])
+    checkpoint_phases = [event.payload.get("phase") for event in events
+                         if event.event == "checkpoint"]
+    assert checkpoint_phases.count("compaction_started") == 2
+    assert checkpoint_phases[-2:] == ["compaction_started", "compaction_ended"]
 
 
 def test_compaction_sigint_resumes_assistant_tail_with_native_compaction_enabled(tmp_path):

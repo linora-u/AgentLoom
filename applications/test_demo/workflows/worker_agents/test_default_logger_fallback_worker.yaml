@@ -13,18 +13,17 @@ workflow: |
   2. 执行 shell_tool。
   3. 返回真实执行结果文本。
 
-agent_function_schema:
-  description: |
-    子 agent：执行 shell 指令并返回结果。
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        需要子 agent 执行的 shell 指令描述。
-      required: true
-  output:
-    description: |
-      Worker execution result text
+      type: string
+      description: '需要子 agent 执行的 shell 指令描述。
 
+        '
+  required:
+  - query
+  additionalProperties: false
 tools:
   - name: "shell_tool"
 

@@ -10,8 +10,6 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock
 
-import pytest
-
 # ─── Helpers ────────────────────────────────────────────────────── #
 
 def _make_minimal_config(concurrency=None):
@@ -22,18 +20,16 @@ def _make_minimal_config(concurrency=None):
         "workflow": "Analyze the input and return a result.",
         "model_type": "powerful",
         "agent_runtime": "smolagents",
-        "agent_function_schema": {
-            "description": "Test tool",
-            "inputs": {
+        "input_schema": {
+            "type": "object",
+            "properties": {
                 "query": {
-                    "description": "The query to process",
                     "type": "string",
-                    "required": True,
+                    "description": "The query to process",
                 },
             },
-            "output": {
-                "description": "Analysis result",
-            },
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }
     if concurrency is not None:
@@ -76,6 +72,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
             return query
 
         def run(self, formatted_query, additional_args=None):
+            self.task = formatted_query
             self.additional_args = additional_args
             return f"result_from_{self._id}"
 
@@ -124,15 +121,16 @@ class TestFactoryMode:
         call_agents = instances[1:]
         assert call_agents[0]._model_binding is call_agents[1]._model_binding
 
-    def test_tool_inputs_are_passed_as_additional_args(self):
-        """Schema inputs should become executor state, not just prompt text."""
+    def test_tool_inputs_are_passed_once_as_the_worker_user_task(self):
+        """A single string argument becomes the Worker user message."""
         instances = []
         tool, _, _ = _create_tool_with_mock_agent(agent_instances=instances)
 
         tool(query="payload")
 
         call_agent = instances[1]
-        assert call_agent.additional_args == {"query": "payload"}
+        assert call_agent.task == "payload"
+        assert call_agent.additional_args is None
 
     def test_concurrent_calls_no_memory_crosstalk(self):
         """Concurrent calls should each get their own Agent (no shared state)."""
@@ -223,7 +221,7 @@ class TestFactoryMode:
         assert len(errors) == 1
         assert len(results) == 3
 
-    def test_large_worker_result_returns_context_ref(self, tmp_path):
+    def test_large_worker_result_stays_canonical(self, tmp_path):
         from agentloom.application.factory import YamlConfiguredAgent
         from agentloom.execution.context_engine import ContextEngine, ContextEngineConfig
         from agentloom.execution.context_engine.runtime import clear_current_context_engine, set_current_context_engine
@@ -264,13 +262,12 @@ class TestFactoryMode:
             tool = LargeResultAgent(config).agent_as_tool()
             result = tool(query="payload")
 
-            assert result.startswith("[ContextRef ctx_")
-            ref = result.split()[1]
-            assert "worker payload" in engine.retrieve(ref, offset=0, limit=1)
+            assert result == "worker payload\n" * 80
+            assert list((tmp_path / "context_store").glob("*.json")) == []
         finally:
             clear_current_context_engine(engine)
 
-    def test_worker_context_engine_failure_is_visible(self):
+    def test_worker_context_engine_failure_does_not_change_canonical_result(self):
         from agentloom.execution.context_engine.runtime import clear_current_context_engine, set_current_context_engine
 
         bad_engine = MagicMock()
@@ -278,8 +275,10 @@ class TestFactoryMode:
         set_current_context_engine(bad_engine)
         try:
             tool, _, _ = _create_tool_with_mock_agent()
-            with pytest.raises(RuntimeError, match="worker context store unavailable"):
-                tool(query="test")
+            result = tool(query="test")
+
+            assert result.startswith("result_from_")
+            bad_engine.compress_tool_result.assert_not_called()
         finally:
             clear_current_context_engine(bad_engine)
 

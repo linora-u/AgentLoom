@@ -10,9 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from click.testing import CliRunner
-from litellm.exceptions import Timeout
-
 from agentloom.__main__ import main
 from agentloom.application.run import (
     ApplicationRunError,
@@ -22,6 +19,8 @@ from agentloom.application.run import (
     RunRejectedEvent,
     RunRejection,
 )
+from click.testing import CliRunner
+from litellm.exceptions import Timeout
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,7 +40,7 @@ def _run_info() -> RunInfo:
 def _event(
     event: str,
     *,
-    output: str | None = None,
+    output: object | None = None,
     error: str | None = None,
     phase: str | None = None,
     goal: dict | None = None,
@@ -91,6 +90,25 @@ def test_text_run_displays_goal_status(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 0
     assert result.stdout == "completed\nGoal: complete\n"
+
+
+def test_text_run_pretty_prints_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def succeed(*_args, **_kwargs):
+        return SimpleNamespace(
+            output={"findings": ["missing guard"]},
+            goal=None,
+        )
+
+    monkeypatch.setattr("agentloom.application.runner.execute_app", succeed)
+
+    result = CliRunner().invoke(main, ["run", "unused.yaml"])
+
+    assert result.exit_code == 0
+    assert result.stdout == (
+        '{\n  "findings": [\n    "missing guard"\n  ]\n}\n'
+    )
 
 
 
@@ -149,6 +167,54 @@ def test_json_run_emits_one_terminal_object_with_structured_goal(
         "output": "final answer",
         "goal": goal,
     }
+
+
+def test_json_run_preserves_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = {"findings": ["missing guard"]}
+
+    def execute(*_args, event_sink=None, **_kwargs):
+        event_sink(_event("run.started"))
+        event_sink(_event("run.completed", output=output))
+        return SimpleNamespace(output=output, goal=None)
+
+    monkeypatch.setattr(
+        "agentloom.application.runner.execute_app",
+        execute,
+        raising=False,
+    )
+
+    result = CliRunner().invoke(
+        main,
+        ["run", "unused.yaml", "--output-format", "json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["output"] == output
+
+
+def test_json_run_preserves_explicit_null_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def execute(*_args, event_sink=None, **_kwargs):
+        event_sink(_event("run.started"))
+        event_sink(_event("run.completed", output=None))
+        return SimpleNamespace(output=None, goal=None)
+
+    monkeypatch.setattr(
+        "agentloom.application.runner.execute_app",
+        execute,
+        raising=False,
+    )
+
+    result = CliRunner().invoke(
+        main,
+        ["run", "unused.yaml", "--output-format", "json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["output"] is None
 
 
 def test_jsonl_run_emits_only_lifecycle_events_on_stdout(

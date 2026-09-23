@@ -127,8 +127,8 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 loom run applications/<app>/workflows/<agent>.yaml --resume task_xxx
 ```
 
-Goal resume also verifies the description, normalized workflow, and original
-runtime-task fingerprint. Old budget fields are silently ignored; a legacy
+Goal resume also verifies the normalized workflow and original runtime-task
+fingerprint. Old budget fields are silently ignored; a legacy
 `budget_limited` Goal resumes as active. Disabling an active Goal or changing its
 objective rejects resume. See [Goal Mode](goal_mode.md).
 

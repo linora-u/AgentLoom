@@ -117,21 +117,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Integrates all analysis stage outputs into a comprehensive final review report
-    with executive summary and risk dashboard.
-
-    Core capabilities:
-    1. Consolidate all prior stage artifacts into unified report
-    2. Build executive summary and risk dashboard
-    3. Cross-reference findings and compile uncertainty register
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with references to all prior stage reports.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_FinalReport.md containing the comprehensive final review report
+      type: string
+      description: 'Analysis task description with references to all prior stage reports.
+
+        '
+  required:
+  - query
+  additionalProperties: false

@@ -7,6 +7,17 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from agentloom.execution.agent_runtime import OutputContract, RuntimeDefinition
+from agentloom.execution.logging import RichLoggerBackend
+from agentloom.execution.model_binding import ModelTurnBinding
+from agentloom.execution.model_protocol import (
+    MessageItem,
+    ModelTurnRequest,
+    ModelTurnResult,
+    ToolDefinition,
+)
+from agentloom.execution.tool_gateway import ToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
 from agentloom.runtimes.smolagents import runtime_factory as factory_module
 from agentloom.runtimes.smolagents.model_turn_bridge import (
     SmolagentsModelTurnBridge,
@@ -20,17 +31,6 @@ from agentloom.runtimes.smolagents.runtime_factory import (
 from agentloom.runtimes.smolagents.tool_proxy import (
     SmolagentsToolGatewayProxy,
 )
-from agentloom.execution.agent_runtime import RuntimeDefinition
-from agentloom.execution.logging import RichLoggerBackend
-from agentloom.execution.model_binding import ModelTurnBinding
-from agentloom.execution.model_protocol import (
-    MessageItem,
-    ModelTurnRequest,
-    ModelTurnResult,
-    ToolDefinition,
-)
-from agentloom.execution.tool_gateway import ToolGateway
-from agentloom.execution.tool_protocol import ToolCallRecord
 from rich.console import Console
 from smolagents import AgentLogger
 
@@ -111,6 +111,7 @@ def _definition(
     prompt_template_path: str | None = None,
     project_root: str | None = None,
     max_consecutive_model_errors: int = 9,
+    output_contract: OutputContract | None = None,
 ) -> RuntimeDefinition:
     resolved_gateway = gateway or _RecordingGateway()
     assert isinstance(resolved_gateway, ToolGateway)
@@ -133,6 +134,7 @@ def _definition(
         runtime_options={'max_steps': 7, 'planning_interval': planning_interval, 'smart_summary': False, 'todo_mode': "on", 'prompt_template_path': prompt_template_path, 'max_consecutive_model_errors': max_consecutive_model_errors},
         project_root=project_root or str(Path.cwd()),
         metadata=metadata or {},
+        output_contract=output_contract,
     )
 
 
@@ -184,6 +186,46 @@ def test_factory_builds_native_runtime_from_complete_definition(
     native = runtime._native_runtime
     assert native._agent_loom_todo_mode == "on"
     assert native._max_consecutive_parse_errors == 9
+
+
+def test_factory_projects_output_contract_to_terminal_tool(
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _NativeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            self.memory = SimpleNamespace(steps=[])
+            self.step_callbacks = SimpleNamespace(
+                register=lambda *_args, **_kwargs: None
+            )
+
+    monkeypatch.setattr(factory_module, "ToolCallingAgentV2", _NativeAgent)
+    monkeypatch.setattr(
+        factory_module,
+        "get_global_logger",
+        lambda **_kwargs: None,
+    )
+    contract = OutputContract(
+        name="proof_output",
+        schema={
+            "type": "array",
+            "items": {"type": "integer"},
+        },
+    )
+
+    SmolagentsRuntimeFactory()(
+        _definition(output_contract=contract)
+    )
+
+    terminal = next(
+        tool
+        for tool in captured["tool_gateway"].definitions
+        if tool.name == "final_answer"
+    )
+    assert terminal.parameters["properties"]["answer"] == contract.schema
+    assert terminal.strict is True
 
 
 def test_factory_adapts_runtime_neutral_logger_only_at_smolagents_boundary(
@@ -451,6 +493,7 @@ def test_factory_rejects_non_smolagents_definition() -> None:
 @pytest.mark.parametrize("mode,present", [("auto", True), ("on", True), ("off", False)])
 def test_smol_adapter_owns_todo_and_terminal_tools(mode, present):
     from dataclasses import replace
+
     from agentloom.execution.tool_gateway import AgentLoomToolGateway, bind_tool
     from agentloom.runtimes.smolagents.tools.todo import todo_write
 

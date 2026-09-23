@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 import yaml
+from agentloom.application.composition import build_schedule_mutations
 from agentloom.application.definition import (
     definition_error,
     load_agent_definition,
     validate_agent_definition,
 )
-from agentloom.application.composition import build_schedule_mutations
 from agentloom.application.studio.catalog import project_catalog
 from agentloom.application.studio.domain_actions import execute_domain_action
 from agentloom.application.studio.query_service import StudioQueryService
@@ -49,10 +49,13 @@ def _project(root: Path, app_id: str = "markdown", folder: str = "") -> tuple[Pa
             "name": "markdown_worker",
             "agent_runtime": "smolagents",
             "description": "Read the declared task",
-            "agent_function_schema": {
-                "description": "Work on one task",
-                "inputs": {"task": {"description": "Task", "required": True}},
-                "output": {"description": "Evidence"},
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "Task"},
+                },
+                "required": ["task"],
+                "additionalProperties": False,
             },
         },
     )
