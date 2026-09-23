@@ -71,16 +71,8 @@ workflow: |
 name: researcher
 agent_runtime: smolagents
 description: Finds evidence.
-agent_function_schema:
-  description: Research one question.
-  inputs:
-    query:
-      description: Question to research.
-      required: true
-  output:
-    description: Evidence summary.
 workflow: |
-  Research the supplied query.
+  Research the supplied task.
 """.strip(),
     )
     return tmp_path

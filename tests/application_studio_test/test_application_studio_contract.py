@@ -83,13 +83,6 @@ name: researcher
 agent_runtime: smolagents
 description: Finds evidence
 workflow: Find evidence for the requested report.
-agent_function_schema:
-  description: Research one topic.
-  inputs:
-    task:
-      description: Topic to research.
-  output:
-    description: Evidence summary.
 """,
     )
 
