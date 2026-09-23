@@ -195,9 +195,7 @@ async function run(frame: Frame, abort: AbortController) {
           content: content || "",
         }, {triggerTurn: true});
       } else if (content === null) {
-        await session!.sendCustomMessage({
-          customType: "agentloom_instruction_turn", display: false, content: "",
-        }, {triggerTurn: true});
+        await session!.agent.prompt([]);
       } else {
         await session!.prompt(content, {expandPromptTemplates: false});
       }
