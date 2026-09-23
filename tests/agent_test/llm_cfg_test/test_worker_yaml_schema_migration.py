@@ -8,6 +8,7 @@ FIXTURE_WORKER_ROOT = FIXTURE_ROOT / "worker"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 ACTIVE_AGENT_DOCS = (
     REPOSITORY_ROOT / "README.md",
+    REPOSITORY_ROOT / "applications/goal_mode_validation/README.md",
     REPOSITORY_ROOT / "docs/cn/README.md",
     REPOSITORY_ROOT / "docs/en/agent_config.md",
     REPOSITORY_ROOT / "docs/cn/agent_config.md",
@@ -62,6 +63,7 @@ def test_active_agent_docs_only_teach_native_prompt_and_schema_contracts():
         assert "<task_request>" not in content, file_path
         assert "str`/`list[str]" not in content, file_path
         assert "workflow lists" not in content.lower(), file_path
+        assert "workflow list" not in content.lower(), file_path
         assert "workflow 列表" not in content, file_path
         assert "objective combines `description`" not in content.lower(), file_path
         assert "目标由 `description`" not in content, file_path
