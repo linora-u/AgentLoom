@@ -315,6 +315,7 @@ class SmolagentsRuntimeAdapter:
                     "call_id": record.call_id,
                     "name": record.tool_name,
                     "status": record.status,
+                    "record": record.to_dict(),
                 },
             )
 
