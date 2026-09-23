@@ -49,7 +49,7 @@ def _decode_provider_tool_arguments(arguments: Any) -> dict[str, Any]:
 
 
 class _SuccessfulRunStateMixin:
-    """Preserve the runtime return shape while rejecting failed run states."""
+    """Let Runtime adapters classify full results; guard output-only calls."""
 
     def run(
         self,
@@ -87,12 +87,14 @@ class _SuccessfulRunStateMixin:
             return_full_result=True,
             **kwargs,
         )
+        if wants_full_result:
+            return run_result
         require_runtime_state(
             run_result,
             allowed_states={"success"},
             error_prefix="Agent run did not complete successfully",
         )
-        return run_result if wants_full_result else run_result.output
+        return run_result.output
 
 
 class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAgent):
