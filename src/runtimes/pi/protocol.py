@@ -147,7 +147,6 @@ class TerminalRecord(WireValue):
     input: JsonValue = Field(repr=False)
     status: Literal["completed", "error", "blocked"]
     output: JsonValue = Field(default=None, repr=False)
-    model_output: JsonValue = Field(default=None, repr=False)
     error: ToolErrorRecord | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     started_at: float | None = None
@@ -248,6 +247,7 @@ class ModelPermit(WireValue):
 class PlatformResult(WireValue):
     method: Literal["platform_invoke"]
     record: TerminalRecord = Field(repr=False)
+    model_output: JsonValue = Field(repr=False)
 
 
 class PlatformPrepared(WireValue):

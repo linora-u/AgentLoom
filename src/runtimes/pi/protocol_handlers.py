@@ -7,6 +7,17 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, cast
 
+from agentloom.execution.agent_runtime import (
+    AgentRuntimeError,
+    AgentRuntimeRequest,
+    RuntimeCheckpointEnvelope,
+    RuntimeDefinition,
+)
+from agentloom.execution.goal import GoalCompleteError
+from agentloom.execution.native_tool_host import NativeToolHost
+from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, ToolManifestEntry
+from agentloom.execution.tool_gateway import PreparedToolCall, PreparedToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
 from agentloom.runtimes.pi.capture import read_capture
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 from agentloom.runtimes.pi.protocol import (
@@ -25,23 +36,11 @@ from agentloom.runtimes.pi.protocol import (
     SettleResult,
     TerminalRecord,
 )
-from agentloom.execution.agent_runtime import (
-    AgentRuntimeError,
-    AgentRuntimeRequest,
-    RuntimeCheckpointEnvelope,
-    RuntimeDefinition,
-)
-from agentloom.execution.goal import GoalCompleteError
-from agentloom.execution.native_tool_host import NativeToolHost
-from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, ToolManifestEntry
-from agentloom.execution.tool_gateway import PreparedToolCall, PreparedToolGateway
-from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
 
 
 def terminal(record: ToolCallRecord) -> TerminalRecord:
     values = record.to_dict()
     values["error"] = record.error
-    values["model_output"] = record.model_output()
     return TerminalRecord(**values)
 
 
@@ -204,7 +203,11 @@ class PiPlatformToolHandler:
         if self._checkpoint.store is not None:
             self._checkpoint.store.commit_platform(identity, record)
         self._record_tool(record, self._platform_entries[payload.tool_name], identity)
-        return PlatformResult(method="platform_invoke", record=terminal(record))
+        return PlatformResult(
+            method="platform_invoke",
+            record=terminal(record),
+            model_output=record.model_output(),
+        )
 
 
 class PiNativeToolHandler:
