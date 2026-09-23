@@ -11,9 +11,11 @@ from agentloom.application.runner import execute_app
 from agentloom.configuration.config import bind_config, load_project_config
 
 from tests.application_test.mixed_runtime_support import (
+    ModelReply,
     finish,
     model_service,
     project,
+    runtime_events,
     tool_messages,
     write_yaml,
 )
@@ -229,3 +231,81 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
         for request in requests
         for tag in ("<task_spec>", "<workflow>", "<task_request>", "<inputs>")
     )
+
+
+@pytest.mark.parametrize(
+    ("supervisor_runtime", "worker_runtime"),
+    [("smolagents", "pi"), ("pi", "smolagents")],
+)
+def test_invalid_subagent_output_becomes_an_output_validation_tool_record(
+    tmp_path,
+    supervisor_runtime,
+    worker_runtime,
+):
+    def program(request):
+        messages = tool_messages(request)
+        if request["model"] == "worker":
+            if worker_runtime == "pi":
+                assert not messages
+                return ModelReply('{"findings":[3]}', "length")
+            return _structured_finish(request, {"findings": [3]})
+
+        if not messages:
+            return [("invalid-call", "invalid_structured", {"task": "inspect"})]
+        assert "invalid structured output" in messages[-1]["content"].lower()
+        return finish(request, "Handled invalid Worker output")
+
+    with model_service(program) as (url, _requests):
+        workflow = project(
+            tmp_path,
+            url,
+            supervisor=supervisor_runtime,
+            worker=worker_runtime,
+        )
+        root = yaml.safe_load(workflow.read_text())
+        root["workflow"] = "Call the Worker once and handle its contract failure."
+        root["worker_agents"] = [{"path": "invalid.yaml"}]
+        write_yaml(workflow, root)
+
+        worker = _worker_definition(
+            name="invalid_structured",
+            runtime=worker_runtime,
+            workflow="Return findings that satisfy the output contract.",
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "findings": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["findings"],
+                "additionalProperties": False,
+            },
+        )
+        worker["runtime_options"] = (
+            {"max_stop_attempts": 1}
+            if worker_runtime == "pi"
+            else {
+                "max_steps": 1,
+                "smart_summary": False,
+                "todo_mode": "off",
+            }
+        )
+        write_yaml(workflow.parent / "worker_agents" / "invalid.yaml", worker)
+
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+
+    assert result.output == "Handled invalid Worker output"
+    records = [
+        event["details"]["record"]
+        for event in runtime_events(result)
+        if event["kind"] == "tool"
+        and event["details"].get("record", {}).get("tool_name")
+        == "invalid_structured"
+    ]
+    assert len(records) == 1
+    assert records[0]["status"] == "error"
+    assert records[0]["error"]["kind"] == "output_validation"
+    assert records[0]["error"]["stage"] == "output_validation"
