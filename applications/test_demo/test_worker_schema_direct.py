@@ -28,15 +28,15 @@ def run_direct_worker_demo() -> None:
         return
 
     config = YamlAgentFactory._load_config_from_file(worker_yaml)
-    print("\n--- YAML agent_function_schema ---")
-    print(config.get("agent_function_schema"))
+    print("\n--- YAML input_schema ---")
+    print(config.get("input_schema"))
 
     tool_fn = YamlAgentFactory.create_agent_as_tool(config)
 
     print("\n--- Registration ---")
     print(f"tool registered: {tool_fn is not None}")
     if tool_fn is None:
-        print("No tool registered. Check agent_function_schema.")
+        print("No tool registered. Check the Worker definition.")
         return
     print(f"tool name: {tool_fn.__name__}")
     print(f"tool docstring:\n{tool_fn.__doc__}")

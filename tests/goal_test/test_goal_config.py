@@ -1,11 +1,16 @@
 from pathlib import Path
 
+import agentloom.execution.goal as goal_contract
 import pytest
 from agentloom.application.readiness import (
     validate_runtime_agent_config,
     validate_runtime_worker_config,
 )
-from agentloom.execution.goal import GoalConfig, normalize_goal_config
+from agentloom.execution.goal import (
+    GoalConfig,
+    build_goal_objective,
+    normalize_goal_config,
+)
 
 
 def _config(**overrides):
@@ -17,6 +22,20 @@ def _config(**overrides):
         "tools": [],
         **overrides,
     }
+
+
+def test_goal_contract_has_no_list_workflow_normalizer():
+    assert not hasattr(goal_contract, "normalize_workflow_for_goal")
+
+
+def test_goal_objective_excludes_agent_description_metadata():
+    assert build_goal_objective(
+        workflow="Inspect, implement, and verify.",
+        task="Repair the release.",
+    ) == (
+        "Workflow:\nInspect, implement, and verify.\n\n"
+        "Runtime request:\nRepair the release."
+    )
 
 
 @pytest.mark.parametrize(
@@ -66,10 +85,11 @@ def test_runtime_supervisor_validation_accepts_goal(tmp_path: Path):
 def test_runtime_worker_validation_rejects_any_goal_key(tmp_path: Path, goal):
     config = _config(
         goal=goal,
-        agent_function_schema={
-            "description": "worker",
-            "inputs": {"task": {"description": "task"}},
-            "output": {"description": "result"},
+        input_schema={
+            "type": "object",
+            "properties": {"task": {"type": "string"}},
+            "required": ["task"],
+            "additionalProperties": False,
         },
     )
     with pytest.raises(ValueError, match="Worker Agent.*goal"):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import math
 import os
 import re
@@ -27,7 +28,7 @@ from typing import (
 from agentloom.execution.logging import get_logger
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.native_tools import ToolManifestEntry
-from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord
 
 logger = get_logger(__name__)
 
@@ -348,10 +349,24 @@ def bind_tool(
         parameters = dict(definition.parameters)
         properties = parameters.get("properties")
         if not isinstance(properties, Mapping):
+            object_schema = getattr(tool, "_agentloom_input_object_schema", None)
+            properties = (
+                object_schema.get("properties", {})
+                if isinstance(object_schema, Mapping)
+                else None
+            )
+        if not isinstance(properties, Mapping):
             raise ValueError(
                 f"Tool {definition.name!r} parameters must contain object properties"
             )
         required = parameters.get("required")
+        if not isinstance(required, list):
+            object_schema = getattr(tool, "_agentloom_input_object_schema", None)
+            required = (
+                object_schema.get("required")
+                if isinstance(object_schema, Mapping)
+                else None
+            )
         required_names = (
             tuple(str(name) for name in required)
             if isinstance(required, list)
@@ -440,6 +455,9 @@ def bind_tool(
         candidate = getattr(tool, "_agentloom_output_normalizer", None)
         if callable(candidate):
             selected_normalizer = candidate
+    input_validator = getattr(tool, "_agentloom_input_validator", None)
+    if not callable(input_validator):
+        input_validator = None
 
     return ToolBinding(
         definition=definition,
@@ -456,6 +474,7 @@ def bind_tool(
         clone_factory=clone_factory,
         output_normalizer=selected_normalizer,
         compression_source=compression_source,
+        input_validator=input_validator,
         manifest_entry=(
             ToolManifestEntry(
                 logical_name=catalog_spec.logical_name or catalog_spec.name,
@@ -757,11 +776,20 @@ def _compress_tool_result(
     )
 
 
-def _canonical_tool_output(tool_name: str, result: Any) -> Any:
-    """Apply the stable empty-result projection shared by execution and recovery."""
-    if result is None or (isinstance(result, str) and not result.strip()):
-        return f"({tool_name} completed with no output)"
-    return result
+def _model_projection_text(result: Any) -> str | None:
+    """Serialize JSON-compatible Tool results for model-only compression."""
+
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(
+            result,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -981,7 +1009,8 @@ def _transform_tool_input(
             tool_name=tool_name,
             arguments=candidate_input,
             message=str(exc),
-            stage="final_decode",
+            stage=str(getattr(exc, "stage", "final_decode")),
+            kind=str(getattr(exc, "kind", "invalid_arguments")),
             started_at=started_at,
         )
 
@@ -1128,6 +1157,7 @@ class AgentLoomToolGateway:
         self._definitions = tuple(
             binding.definition for binding in by_name.values()
         )
+        self._can_retrieve_context = "loom_retrieve_context" in by_name
         self._resource_closers = closers
         self._close_lock = RLock()
         self._closed = False
@@ -1387,17 +1417,25 @@ class AgentLoomToolGateway:
                 )
                 return failed
 
-        result = _canonical_tool_output(tool_name, raw_result)
-        if isinstance(result, str):
+        result = raw_result
+        metadata: dict[str, Any] = {}
+        projection_text = (
+            _model_projection_text(result)
+            if self._can_retrieve_context
+            else None
+        )
+        if projection_text is not None:
             try:
-                result = _compress_tool_result(
+                model_output = _compress_tool_result(
                     tool_name=tool_name,
                     source=(
                         binding.compression_source
                         or f"tool_result:{tool_name}"
                     ),
-                    result=result,
+                    result=projection_text,
                 )
+                if model_output != projection_text:
+                    metadata[MODEL_OUTPUT_METADATA_KEY] = model_output
             except Exception as processing_error:
                 logger.warning(
                     "Context compression failed open for tool %s; "
@@ -1421,6 +1459,7 @@ class AgentLoomToolGateway:
             tool_name=tool_name,
             input=effective_input,
             output=result,
+            metadata=metadata,
             started_at=started_at,
             ended_at=time.time(),
         )
@@ -1476,7 +1515,7 @@ class AgentLoomToolGateway:
             call_id=call_id,
             tool_name=tool_name,
             input=dict(arguments),
-            output=_canonical_tool_output(tool_name, result),
+            output=result,
             ended_at=time.time(),
         )
 

@@ -62,12 +62,12 @@ tools:
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"
     function: "validate_and_refine_generated_tests"
 
-agent_function_schema:
-  description: |
-    Validate generated tests and apply minimal refinement to keep files usable.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
+      type: string
       description: JSON output from pytest_generator.
-      required: true
-  output:
-    description: JSON with generated_files and refinement details.
+  required:
+  - query
+  additionalProperties: false

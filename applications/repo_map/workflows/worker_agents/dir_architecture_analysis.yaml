@@ -147,22 +147,25 @@ workflow: |
 
 tools: []
 
-agent_function_schema:
-  description: |
-    对单个目录进行 LLM 架构分析，返回 Markdown 格式分析文本。
-    不做文件读写，由调用方负责前置读 index.md、后置写 analysis.md。
-  inputs:
+input_schema:
+  type: object
+  properties:
     dir_path:
+      type: string
       description: 要分析的相对目录路径，如 "src/utils" 或 "(root)"（项目根目录），用于标题
-      required: true
     index_content:
+      type: string
       description: 该目录 index.md 的完整文本内容，由调用方前置读取传入
-      required: true
     children_analyses:
-      description: |
-        该目录直接子目录的架构分析全文，多个子目录用 --- 分隔。
+      type: string
+      description: '该目录直接子目录的架构分析全文，多个子目录用 --- 分隔。
+
         由调用方收集已完成分析的子目录 analysis.md 内容拼接而成。
+
         为空字符串时表示无已分析的子目录（叶子目录或子目录均未完成分析）。
-      required: false
-  output:
-    description: Markdown 格式的架构分析文本，由调用方写入 analysis.md
+
+        '
+  required:
+  - dir_path
+  - index_content
+  additionalProperties: false

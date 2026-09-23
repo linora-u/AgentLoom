@@ -101,8 +101,9 @@ def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_p
         worker.write_text(yaml.safe_dump({'name': 'probe', 'agent_runtime': 'pi', 'model_type': 'worker',
             'description': 'Verify permissions.', 'workflow': 'Verify the Goal boundary.', 'toolsets': [],
             'tools': [{'name': 'update_goal', 'module': 'agentloom.tools.goal', 'function': 'update_goal'}],
-            'agent_function_schema': {'description': 'Check permissions.', 'inputs': {'query': {'description': 'Request.'}},
-                                      'output': {'description': 'Permission result.'}}}))
+            'input_schema': {'type': 'object', 'properties': {
+                'query': {'type': 'string', 'description': 'Request.'}},
+                'required': ['query'], 'additionalProperties': False}}))
         select(app, goal=True, worker_agents=[{'path': 'probe.yaml'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
@@ -180,8 +181,8 @@ def test_context_refs_remain_retrievable_with_pi_checkpoint_disabled(tmp_path):
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     records = {event['details']['record']['call_id']: event['details']['record'] for event in audit(result) if event['kind'] == 'tool'}
-    assert '[ContextRef ' in records['large-output']['output']
-    assert 'PLATFORM-CTX-8426' not in records['large-output']['output']
+    assert '[ContextRef ' not in records['large-output']['output']
+    assert 'PLATFORM-CTX-8426' in records['large-output']['output']
     assert 'PLATFORM-CTX-8426' in records['retrieve-original']['output']
     assert records['retrieve-original']['status'] == 'completed'
 

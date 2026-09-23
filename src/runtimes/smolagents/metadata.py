@@ -9,4 +9,5 @@ CAPABILITIES = RuntimeCapabilities(
     subagents=True,
     goal=True,
     stop_hooks=True,
+    structured_output=True,
 )

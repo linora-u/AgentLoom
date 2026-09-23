@@ -308,13 +308,10 @@ def test_worker_completion_before_platform_receipt_recovers_without_reexecution(
             return finish(request, worker_result)
         if not messages:
             return [('delegate', 'inspect_note', {'query': 'note.txt'})]
-        expected = (
-            worker_result
-            or '(inspect_note completed with no output)'
-            if worker == 'pi'
-            else worker_result or '(final_answer completed with no output)'
-        )
-        assert expected in str(messages)
+        if worker_result:
+            assert worker_result in str(messages)
+        else:
+            assert any(message.get('content') == '' for message in messages)
         return 'Verified worker-window-proof-739'
 
     with mixed_service(program) as (url, requests):

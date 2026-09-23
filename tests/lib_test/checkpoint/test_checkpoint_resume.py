@@ -211,7 +211,13 @@ class TestWorkerCheckpoint:
             }
             assert coordinator.completed_worker_result(**arguments) == (False, "")
 
-        for result in ("", None):
+        for result in (
+            "",
+            None,
+            {"findings": ["missing guard"]},
+            ["first", 2, False],
+            True,
+        ):
             manager.update_task_tree(
                 task_id,
                 lambda tree, value=result: {
@@ -229,7 +235,7 @@ class TestWorkerCheckpoint:
                 input_hash="hash",
                 task_input="task",
                 run_id="run-original",
-            ) == (True, "")
+            ) == (True, result)
 
         manager.update_task_tree(
             task_id,
@@ -300,6 +306,47 @@ class TestWorkerCheckpoint:
         assert checkpoint["status"] == "completed"
         assert checkpoint["result"] == ""
         assert call["result"] == ""
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {"findings": ["missing guard"], "count": 1},
+            ["first", 2, False],
+            True,
+            None,
+        ],
+    )
+    def test_worker_success_preserves_canonical_json_result(
+        self,
+        cm: CheckpointManager,
+        task_id: str,
+        result,
+    ) -> None:
+        call_index = cm.record_worker_started(
+            task_id,
+            "structured_worker",
+            input_hash="hash",
+            task_input="return structured data",
+        )
+        coord = CheckpointCoordinator(cm, task_id, "supervise")
+
+        coord.record_worker_success(
+            "structured_worker",
+            call_index,
+            "hash",
+            "return structured data",
+            result,
+            None,
+        )
+
+        checkpoint = cm.load_worker_checkpoint(
+            task_id,
+            "structured_worker",
+            call_index=call_index,
+        )
+        call = cm.load_task_tree(task_id)["workers"]["structured_worker"][0]
+        assert checkpoint["result"] == result
+        assert call["result"] == result
 
     def test_worker_success_checkpoint_write_failure_propagates_without_losing_completion(
         self,

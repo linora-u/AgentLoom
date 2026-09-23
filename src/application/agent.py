@@ -27,6 +27,7 @@ from agentloom.execution.agent_runtime import (
     AgentRuntime,
     AgentRuntimeRequest,
     AgentRuntimeResult,
+    JSONValue,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeDefinition,
@@ -335,7 +336,10 @@ class BaseAgent(ABC):
             if self._logger:
                 self._logger.warning("%s hook error: %s", event.value, exc)
 
-    def _inject_memory_snapshot(self, tasks: list[str]) -> list[str]:
+    def _inject_memory_snapshot(
+        self,
+        tasks: list[str | None],
+    ) -> list[str | None]:
         if not tasks:
             return tasks
         root_state = None
@@ -360,7 +364,11 @@ class BaseAgent(ABC):
             return tasks
         if not snapshot:
             return tasks
-        return [f"{snapshot}\n\n{tasks[0]}", *tasks[1:]]
+        first = tasks[0]
+        return [
+            snapshot if first is None else f"{snapshot}\n\n{first}",
+            *tasks[1:],
+        ]
 
     def get_all_tools(self, agent_type: str = "worker") -> list:
         """
@@ -604,11 +612,11 @@ class RoleDrivenAgent(BaseAgent):
         """Optional runtime-level description passed to the selected runtime."""
         return None
 
-    def _transform_task(self, task: str) -> str:
+    def _transform_task(self, task: str | None) -> str | None:
         """Task transformation hook."""
         return task
 
-    def _transform_tasks(self, task: str) -> list[str]:
+    def _transform_tasks(self, task: str | None) -> list[str | None]:
         """Transform a caller task into one or more runtime tasks."""
         transformed_task = self._transform_task(task)
         return [transformed_task]
@@ -630,8 +638,8 @@ class RoleDrivenAgent(BaseAgent):
                 source=self._config.get("name", "supervisor"),
             )
             if goal.enabled:
-                from agentloom.tools.goal import get_goal, update_goal
                 from agentloom.execution.native_tools import ToolManifestEntry
+                from agentloom.tools.goal import get_goal, update_goal
 
                 tools = list(tools)
                 for tool, capability in ((get_goal, "goal.read"), (update_goal, "goal.update")):
@@ -660,7 +668,7 @@ class RoleDrivenAgent(BaseAgent):
         )
 
     def _build_runtime_instructions(self, gateway: AgentLoomToolGateway) -> str:
-        sections = [get_agent_environment_prompt()]
+        sections = [str(self._config["workflow"]).strip(), get_agent_environment_prompt()]
         if any(item.name == "skill" for item in gateway.definitions):
             if self._skill_catalog is None:
                 raise RuntimeError("Skill Tool requires a resolved Skill catalog")
@@ -671,6 +679,7 @@ class RoleDrivenAgent(BaseAgent):
         runtime_id = AgentConfigNormalizer.validate_agent_runtime_config(
             self._config
         )
+        normalized = self._ensure_normalized()
         if runtime_id == "smolagents":
             from importlib.util import find_spec
 
@@ -701,6 +710,7 @@ class RoleDrivenAgent(BaseAgent):
                 hook_plan=self._hook_plan,
             ),
             instructions=self._build_runtime_instructions(gateway),
+            output_contract=getattr(normalized, "output_contract", None),
             project_root=str(C.agent_root),
         )
 
@@ -733,14 +743,14 @@ class RoleDrivenAgent(BaseAgent):
 
     def run(
         self,
-        task: str,
+        task: str | None = None,
         task_id: str | None = None,
         run_id: str | None = None,
         checkpoint_manager: Any | None = None,
         application_lifecycle: "ApplicationRunLifecycle | None" = None,
         resume: bool = False,
         additional_args: dict[str, Any] | None = None,
-    ) -> str:
+    ) -> JSONValue:
         """Run inside one explicit root-run binding.
 
         The first agent in the call tree owns the binding and the session
@@ -748,7 +758,7 @@ class RoleDrivenAgent(BaseAgent):
         propagation and therefore cannot emit duplicate SessionStart/End.
         """
 
-        def _run_once() -> str:
+        def _run_once() -> JSONValue:
             from agentloom.application.invocation import AgentInvocation
 
             # Every invocation gets a fresh local id. The outermost invocation
@@ -806,7 +816,7 @@ class SubTaskTrackedAgent:
         return getattr(self._runtime, "logger", None)
 
     @staticmethod
-    def _compute_input_hash(task_text: str) -> str:
+    def _compute_input_hash(task_text: str | None) -> str:
         """Short hash of the worker input for skip-on-resume matching."""
         return _hashlib.sha256(str(task_text).encode()).hexdigest()[:16]
 
@@ -873,6 +883,7 @@ class SubTaskTrackedAgent:
 
             coord = CheckpointCoordinator.current()
             input_hash = self._compute_input_hash(request.task)
+            task_text = request.task or ""
 
             # Claim/allocate exactly one logical call before side effects.  The
             # explicit outcome distinguishes a cached ``None``/empty result
@@ -881,7 +892,7 @@ class SubTaskTrackedAgent:
                 preparation = coord.prepare_worker_call(
                     self._agent_name,
                     input_hash,
-                    request.task,
+                    task_text,
                 )
                 if not preparation.should_execute:
                     self._log.info(
@@ -941,7 +952,7 @@ class SubTaskTrackedAgent:
                     self._agent_name,
                     call_index,
                     input_hash,
-                    request.task,
+                    task_text,
                 )
                 if coord is not None
                 else request.checkpoint_sink
@@ -972,7 +983,7 @@ class SubTaskTrackedAgent:
                         self._agent_name,
                         call_index,
                         input_hash,
-                        request.task,
+                        task_text,
                         self._snapshot_runtime(),
                     )
                 raise
@@ -988,7 +999,7 @@ class SubTaskTrackedAgent:
                         self._agent_name,
                         call_index,
                         input_hash,
-                        request.task,
+                        task_text,
                         str(exc),
                         self._snapshot_runtime(),
                     )
@@ -1009,7 +1020,7 @@ class SubTaskTrackedAgent:
                     self._agent_name,
                     call_index,
                     input_hash,
-                    request.task,
+                    task_text,
                     result.output,
                     result.checkpoint or self._snapshot_runtime(),
                 )

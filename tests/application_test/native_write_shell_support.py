@@ -5,10 +5,10 @@ The fixture supplies file/subprocess execution only; policies, Hooks and
 persistence are production code. Pi's own tool mapping belongs to ticket 10.
 """
 from __future__ import annotations
+
 import json
 import subprocess
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -18,10 +18,16 @@ from agentloom.application.composition import build_builtin_runtime_registry
 from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities
 from agentloom.execution.model_protocol import FunctionCallItem, FunctionCallOutputItem, MessageItem, ToolDefinition
 from agentloom.execution.native_tool_host import NativeToolHost
-from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, NativeExecutionOutcome, NativePrepareRequest
+from agentloom.execution.native_tools import (
+    NativeCallIdentity,
+    NativeCommitAck,
+    NativeExecutionOutcome,
+    NativePrepareRequest,
+)
 from agentloom.execution.tool_protocol import ToolErrorRecord
+
 from tests.application_test.native_read_support import READ
-from tests.lib_test.execution.test_native_write_shell_host import write_manifest, shell_manifest
+from tests.lib_test.execution.test_native_write_shell_host import shell_manifest, write_manifest
 
 WRITE = write_manifest()
 SHELL = shell_manifest()
@@ -60,7 +66,11 @@ def external_write_runtime(model_factory, observations):
             scenario = definition.runtime_options["scenario"]
             cwd = definition.runtime_options["cwd"]
             model = model_factory(definition)
-            items = [MessageItem("user", request.task)]
+            items = (
+                []
+                if request.task is None
+                else [MessageItem("user", request.task)]
+            )
             calls, executions = [], 0
             with NativeToolHost(tools=TOOLS, cwd=cwd) as host:
                 for _ in range(5):

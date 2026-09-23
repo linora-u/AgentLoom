@@ -25,7 +25,7 @@
 | 本地模型配置 | `config/llm.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立加载，不被 app/Agent YAML 覆盖；通常被 `.gitignore` 忽略 |
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
 | Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的角色、workflow、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
-| Worker YAML | `applications/<app>/workflows/worker_agents/*.yaml` | 被 Supervisor 调用的 Agent 工具 | 有 `agent_function_schema` 才能导出为 callable tool |
+| Worker YAML | `applications/<app>/workflows/worker_agents/*.yaml` | 被 Supervisor 调用的 Agent 工具 | 仅被 `worker_agents` 显式引用时注册；Tool 复用 Worker 的 `name` 和 `description` |
 | Skill 包 | `applications/<app>/skills/<name>/SKILL.md` 或 `skills/<name>/SKILL.md` | 可按需加载的长期能力、脚本和资源 | `SKILL.md`/`skill.md` 入口；不得声明 Hook |
 | Hook Bundle | `applications/<app>/hooks/<name>/HOOK.yaml` 或 `hooks/<name>/HOOK.yaml` | 显式授权的确定性事件行为 | 只由顶层 `hooks.bundles` 引用；永不自动发现 |
 | MCP 配置 | `mcp_servers` 指向的 JSON 文件 | 外部 MCP server 工具 | `mcp_servers` 支持 string/list/dict；`null` 表示空配置 |
@@ -68,6 +68,8 @@ workflow: |
 | `runtime_options.prompt_template_path` | 非空字符串 | smol 系统 prompt 模板路径；不接受 mapping |
 | `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
 | `goal` | `bool` 或 `{enabled: bool}` | 仅顶层 Supervisor；开启 continuation 和显式完成 |
+| `input_schema` | JSON Schema object | 仅 Worker；省略时使用必填 `task: string` Tool 参数 |
+| `output_schema` | JSON Schema | 任意 Agent；省略时返回普通文本，可描述任意 JSON 根值 |
 
 后端参数仅解释 `runtime_options`；旧顶层 smol 参数静默忽略，不转换、不拒绝。生成应用必须使用上面的 canonical 参数，`on` / `off` 必须加引号，`prompt_template_path` 必须是字符串。smol 专属参数不要复制到 Pi。
 
@@ -84,23 +86,34 @@ worker_agents:
 规则：`worker_agents` item 只支持 `path`，不支持 `name`。路径可以是绝对路径、项目根相对路径、`worker_agents/` 下的文件名，或不带后缀的 worker 名。
 
 Supervisor 还可配置 `goal: true/false`，或显式 mapping。Goal mapping 不做类型宽松
-转换；旧 `token_budget` 静默忽略。开启后 workflow list 合并为一个目标上下文，
-并提供仅根 Supervisor 可见的 `get_goal` / `update_goal`。Schedule 可以使用同一 YAML。
+转换；旧 `token_budget` 静默忽略。`workflow` 在任何模式下都必须是单个非空
+字符串，list 会在预检阶段失败。Goal 提供仅根 Supervisor 可见的 `get_goal` /
+`update_goal`。Schedule 可以使用同一 YAML。
 
 Worker 专属：
 
 ```yaml
-agent_function_schema:
-  description: "<Worker 作为工具时的说明>"
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
+      type: string
       description: "输入说明"
-      required: true
-  output:
-    description: "输出说明"
+    count:
+      type: integer
+  required: [query]
+  additionalProperties: false
+output_schema:
+  type: array
+  items:
+    type: string
 ```
 
-规则：`inputs` 的 key 必须是合法 Python 标识符；`required` 只能是 bool；runtime 会把所有参数类型归一为 `"string"`，不要用 `Optional[...]` 或 `Union[...]` 表达可选性。
+规则：Worker 的 Tool 名称和说明来自顶层 `name` 与 `description`。省略
+`input_schema` 时使用必填 `task: string`；省略 `output_schema` 时返回文本。
+`input_schema` 必须是 Draft 2020-12 object schema，参数保持原始 JSON 类型；
+`output_schema` 可使用任意 JSON 根类型。本地引用可用，远程引用会被拒绝。
+结构化输出必须由所选 Runtime/Provider 原生支持并在终态校验，不提供 prompt fallback。
 
 Worker YAML 如果出现任何 `goal` key 必须 fail-closed；不能用 `goal: false` 占位。
 

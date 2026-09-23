@@ -117,22 +117,14 @@ workflow: |
 
   **Important: Use `write_markdown_file` tool with `sections` parameter. For large content, use `append_markdown_sections`.**
 
-agent_function_schema:
-  description: |
-    Performs comprehensive concurrency safety audit: shared state identification,
-    access interface mapping, synchronization analysis, and race/deadlock detection.
-
-    Core capabilities:
-    1. Identify all shared variables and global state
-    2. Map read/write access interfaces and execution contexts
-    3. Catalog synchronization mechanisms
-    4. Detect data races, deadlocks, and atomicity violations
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: |
-        Analysis task description with target module/files and project context.
-      required: true
-  output:
-    description: |
-      str: Analysis summary. Detailed report written to:
-              - QA_ConcurrencySafety.md containing shared state, access maps, and risk findings
+      type: string
+      description: 'Analysis task description with target module/files and project context.
+
+        '
+  required:
+  - query
+  additionalProperties: false

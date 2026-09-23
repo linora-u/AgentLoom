@@ -345,9 +345,20 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
     for path, definition in definitions:
         # Shipped mixed Applications can select either supported native runtime.
         assert definition.get("agent_runtime") in {"smolagents", "pi"}, path
+        assert isinstance(definition.get("workflow"), str), path
+        assert definition["workflow"].strip(), path
+        assert "agent_function_schema" not in definition, path
         assert "tool_call_type" not in definition, path
         assert "execution_env" not in definition, path
         assert "code_agent" not in definition, path
+        if "worker_agents" in path.parts:
+            input_schema = definition.get("input_schema")
+            if input_schema is not None:
+                assert isinstance(input_schema, dict), path
+                assert input_schema.get("type") == "object", path
+            output_schema = definition.get("output_schema")
+            if output_schema is not None:
+                assert isinstance(output_schema, dict), path
 
 
 def test_shipped_llm_example_declares_adapter_for_every_model_type() -> None:

@@ -18,9 +18,10 @@ Use `goal: false` or omit it to disable. Mapping form requires boolean `enabled`
 Legacy `token_budget` values are silently ignored; Goal has no cost/token ceiling.
 Worker YAML cannot define Goal Mode.
 
-The objective combines `description`, `workflow`, and the runtime task. A workflow
-list is numbered and merged into one objective; ordinary non-Goal workflow lists
-retain their sequential execution semantics.
+The Goal objective tracks one required non-empty `workflow` string and an
+optional runtime task. The Agent `description` remains display and Tool metadata;
+it is not execution input. The `workflow` remains a Runtime instruction. A supplied
+task is a separate user message; an absent task creates no substitute message.
 
 ## Lifecycle and tools
 
@@ -41,8 +42,8 @@ completed Goal returns its stored evidence without rerunning work.
 
 With checkpoints enabled, `<application_id>/<task_id>/goal.json` stores identity,
 objective fingerprint, state, `goal_started`, evidence, and timestamps. Resume
-preserves the Goal and checks that description, workflow, and runtime task still
-match. Corrupt Goal state or disabling an active Goal remains an error.
+preserves the Goal and checks that workflow and runtime task still match. Corrupt
+Goal state or disabling an active Goal remains an error.
 
 Old budget and usage fields in Goal checkpoints are silently ignored. A legacy
 `budget_limited` Goal resumes as `active`; an already completed Goal stays complete.

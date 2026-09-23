@@ -118,7 +118,7 @@ def test_removed_tools_mapping_is_rejected(tmp_path: Path) -> None:
     assert "tools_mapping was removed" in _messages(payload)
 
 
-def test_validator_accepts_list_workflow(tmp_path: Path) -> None:
+def test_validator_rejects_list_workflow(tmp_path: Path) -> None:
     _create_min_project(tmp_path)
     workflow_file = tmp_path / "applications" / "demo" / "workflows" / "demo_agent.yaml"
     config = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
@@ -130,9 +130,9 @@ def test_validator_accepts_list_workflow(tmp_path: Path) -> None:
 
     completed, payload = _run_validator(tmp_path)
 
-    assert completed.returncode == 0
-    assert payload["summary"]["valid"] is True
-    assert payload["errors"] == []
+    assert completed.returncode == 1
+    assert payload["summary"]["valid"] is False
+    assert "workflow field must be a non-empty string" in _messages(payload)
 
 
 def test_validator_rejects_invalid_list_workflow_item(tmp_path: Path) -> None:
@@ -194,10 +194,11 @@ def test_validator_rejects_goal_on_worker(tmp_path: Path) -> None:
             "description": "worker",
             "workflow": "work",
             "goal": False,
-            "agent_function_schema": {
-                "description": "worker tool",
-                "inputs": {"task": {"description": "task"}},
-                "output": {"description": "result"},
+            "input_schema": {
+                "type": "object",
+                "properties": {"task": {"type": "string"}},
+                "required": ["task"],
+                "additionalProperties": False,
             },
         },
     )
@@ -394,10 +395,16 @@ def _write_worker(path: Path, **overrides) -> None:
         "agent_runtime": "smolagents",
         "description": "Worker contract",
         "workflow": "Return the requested evidence.",
-        "agent_function_schema": {
-            "description": "Return evidence",
-            "inputs": {"query": {"description": "Requested task", "required": True}},
-            "output": {"description": "Evidence"},
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Requested task",
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": False,
         },
         **overrides,
     })
@@ -417,11 +424,12 @@ name: second
 agent_runtime: smolagents
 description: Markdown Worker
 mcp_servers: null
-agent_function_schema:
-  description: Return evidence
-  inputs:
-    query: {description: Requested task, required: true}
-  output: {description: Evidence}
+input_schema:
+  type: object
+  properties:
+    query: {type: string, description: Requested task}
+  required: [query]
+  additionalProperties: false
 ```
 
 Return the evidence.
@@ -446,7 +454,7 @@ def test_validator_duplicate_keys_match_shared_parser(tmp_path: Path, suffix: st
     assert "Duplicate YAML mapping key" in _messages(payload)
 
 
-@pytest.mark.parametrize("role_error", ["goal", "missing_schema"])
+@pytest.mark.parametrize("role_error", ["goal", "invalid_input_schema"])
 def test_validator_invalid_referenced_worker_matches_shared_walk(tmp_path: Path, role_error: str) -> None:
     app = _create_min_project(tmp_path)
     workflow = app / "workflows/demo_agent.yaml"
@@ -459,11 +467,11 @@ def test_validator_invalid_referenced_worker_matches_shared_walk(tmp_path: Path,
     if role_error == "goal":
         config["goal"] = False
     else:
-        del config["agent_function_schema"]
+        config["input_schema"] = []
     _write_yaml(worker, config)
 
     payload = _assert_canonical_parity(tmp_path, workflow, valid=False)
-    assert ("goal" if role_error == "goal" else "agent_function_schema") in _messages(payload)
+    assert ("goal" if role_error == "goal" else "input_schema") in _messages(payload)
 
 
 @pytest.mark.parametrize("yaml_workflow,body,valid", [

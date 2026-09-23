@@ -102,14 +102,12 @@ workflow: |
 
   analysis.md 典型内容：核心功能概述、关键模块及原因、设计模式识别（如 Middleware/Decorator、Chain of Responsibility）、依赖关系（含循环依赖风险）、注意事项与风险点。
 
-agent_function_schema:
-  description: |
-    Write SKILL.md and example markdown files for repo_map navigator.
-    The worker accepts output_dir only and reads skill_build_context.json.
-  inputs:
+input_schema:
+  type: object
+  properties:
     output_dir:
+      type: string
       description: Repo map output directory containing data/skill_build_context.json
-      required: true
-  output:
-    description: |
-      A short summary string of written markdown files and skill root path.
+  required:
+  - output_dir
+  additionalProperties: false

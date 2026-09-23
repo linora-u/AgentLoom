@@ -57,7 +57,7 @@ class GoalStateProvider:
             if state.objective_fingerprint != objective_fingerprint:
                 raise ValueError(
                     "Cannot resume Goal mode because the objective changed; "
-                    "description, workflow, and runtime task must match"
+                    "workflow and runtime task must match"
                 )
         else:
             if raw is not None:

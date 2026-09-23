@@ -57,7 +57,7 @@ Supervisor，并复用执行入口的定义读取器。Worker 仍通过 Supervis
 | 角色 | 定位 | 文件位置 | 核心特征 |
 |------|------|----------|----------|
 | **Supervisor** | 多 Agent 协作的编排者 | `applications/<app>/workflows/<name>.yaml` | 有 `worker_agents` 字段，调度多个 Worker |
-| **Worker** | 具体任务的执行者 | `applications/<app>/workflows/worker_agents/<name>.yaml` | 有 `agent_function_schema` 字段，可导出为工具被 Supervisor 调用 |
+| **Worker** | 具体任务的执行者 | `applications/<app>/workflows/worker_agents/<name>.yaml` | 只有被 Supervisor 的 `worker_agents` 显式选择时才注册为 Tool |
 
 ```
 Supervisor (主 Agent)
@@ -146,20 +146,30 @@ runtime_options:
   planning_interval: 3                     # 每 N 步强制规划
   todo_mode: "auto"                     # auto | on | off
 
-# ---- Worker 专属: 可调用工具契约 ----
-# 注意：inputs 下的参数名可自定义，只要是合法 Python 标识符即可
-agent_function_schema:
-  description: |
-    准备阶段分析智能体，负责静态代码扫描...
-  inputs:
-    param1:                              # 参数名自定义，合法 Python 标识符即可
-      description: "第一个参数的描述"
-      required: true
-    param2:
-      description: "第二个参数的描述"
-      required: false
-  output:
-    description: "分析摘要文本，详细报告生成在 workspace 中"
+# ---- Worker 可选输入契约 ----
+input_schema:
+  type: object
+  properties:
+    target_path:
+      type: string
+      description: "要分析的路径"
+    include_tests:
+      type: boolean
+  required: [target_path]
+  additionalProperties: false
+
+# ---- Agent 可选输出契约 ----
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+    files:
+      type: array
+      items:
+        type: string
+  required: [summary, files]
+  additionalProperties: false
 ```
 
 ---
@@ -174,8 +184,8 @@ Supervisor 和 Worker 共有 4 个必填字段：
 |------|------|----------|------|
 | `name` | `str` | 非空字符串 | Agent 唯一标识符。Worker 中同时作为导出工具的函数名 |
 | `agent_runtime` | `str` | 必须是已注册值：`smolagents` / `pi` | 选择完整 Agent runtime。缺失或未知值在预检阶段失败 |
-| `description` | `str` | 非空字符串 | Agent 角色描述。Supervisor 的单字符串 workflow 会参与任务拼装；列表 workflow 项按用户编写内容直接执行 |
-| `workflow` | `str` 或 `list[str]` | 非空字符串，或非空且每项为非空字符串的列表 | 工作流指令文本。支持 Markdown 和 Mermaid 流程图。详见下方 [书写规范](#workflow-书写规范与建议) |
+| `description` | `str` | 非空字符串 | Agent 能力元数据；作为 Subagent Tool 说明，但绝不作为本轮输入 |
+| `workflow` | `str` | 非空字符串 | Agent system instructions。Markdown 与 Mermaid 都是普通文本。详见下方 [书写规范](#workflow-书写规范与建议) |
 
 #### `description` 与 `workflow` 的分工
 
@@ -184,19 +194,9 @@ Supervisor 和 Worker 共有 4 个必填字段：
 | `description` | **角色定位**（一两句话） | "作为 XX 智能体，你的核心职责是 YY" | 不写详细流程、不写具体步骤 |
 | `workflow` | **完整执行指令** | 背景、职责、流程图、各阶段说明、输出要求 | 不重复 description 已说的角色定位 |
 
-> `workflow: |` 保持原有单次运行行为，框架只调用一次 runtime Agent。对于顶层 Supervisor 执行（`loom run` / `run_app`），`workflow: list[str]` 会按列表顺序执行多个工作流项，复用同一个 runtime Agent；第一次运行使用默认 reset 行为，后续运行使用 `reset=False` 保留前一次记忆，最终返回最后一次运行结果。AgentLoom 不会为列表项额外添加阶段标签或包装指令。Worker 导出为工具时，列表项会按顺序嵌入该次工具调用的 task spec 中。
-
-顺序工作流示例：
-
-```yaml
-workflow:
-  - |
-    # 第一段工作流
-    完成初始分析，并保留下一段需要使用的发现。
-  - |
-    # 第二段工作流
-    基于上一轮记忆继续执行，并输出最终结果。
-```
+`workflow` 只通过 Runtime instructions 通道发送一次。本轮 task 是独立的 user
+message；没有 task 时，AgentLoom 不会从 `description` 伪造输入。多阶段行为应写在
+指令文本或显式编排中。YAML list 非法，也不会暗中改变运行次数。
 
 #### Goal Mode（仅 Supervisor）
 
@@ -208,16 +208,16 @@ goal:
 也可使用 `goal: true` / `goal: false`。Mapping 必须显式包含布尔 `enabled`。
 旧 `token_budget` 字段静默忽略。Worker YAML 不允许出现任何 `goal` key。
 
-Goal 开启时，objective 由 `description + workflow + runtime task` 生成。推荐单个
-多行 workflow；如果配置 list，框架会按原顺序编号并合并成一个初始目标上下文，
-不会采用上面普通模式的逐项多 run 语义。普通 final 与 `max_steps` 只结束一个
-continuation segment；根 Supervisor 必须调用 `update_goal(complete, evidence)` 才会
+Goal 开启时仍以单个 workflow 字符串作为 instructions，并保持 runtime task 独立。
+普通 final 与 `max_steps` 只结束一个 continuation segment；根 Supervisor 必须调用
+`update_goal(complete, evidence)` 才会
 完成。普通模型用量仍保留在运行时审计中。配置、状态、恢复和可观测性详见
 [Goal Mode](goal_mode.md)。
 
 #### Workflow 书写规范与建议
 
-`workflow` 是 Agent 最核心的配置——它本质上是发送给 LLM 的**任务指令（Prompt）**。一个结构清晰的 workflow 能显著提升 Agent 的执行质量。
+`workflow` 是 Agent 可复用的 system instructions；本轮 task 始终是独立 user
+input。一个结构清晰的 workflow 能显著提升 Agent 的执行质量。
 
 **推荐结构（五段式）**：
 
@@ -267,7 +267,8 @@ continuation segment；根 Supervisor 必须调用 `update_goal(complete, eviden
 
 用 Mermaid 定义核心执行流程。
 
-> ⚠️ **框架特殊处理**：框架会自动检测 workflow 中的 ` ```mermaid ` 代码块，将其提取并用 `<workflow>` XML 标签封装。**当存在 Mermaid 块时，框架会额外向 LLM 注入 "must be followed strictly"（必须严格遵守）指令**。因此，将核心流程放在 Mermaid 块内不仅提升可读性，还能让框架帮你强化流程约束。
+Mermaid 块只是普通指令文本。AgentLoom 不提取、不校验、不包装，也不会额外强化；
+只有当它能让读者和模型更容易理解时才使用。
 
 **示例**：
 
@@ -287,7 +288,7 @@ flowchart TD
 > - 流程图只画**主干流程和关键分支**，不要把每个细节都塞进去
 > - 节点命名要清晰，使用 `[中文描述]` 而非编码缩写
 > - 分支判断用 `{条件?}`，如 `C{有失败项?} -- 是 --> D[重试]`
-> - Mermaid 语法会被框架校验（依赖 `mermaid-syntax-parser`），语法错误会在运行时输出 warning
+> - 如果需要渲染，请使用文档工具单独校验 Mermaid；Runtime 会原样传递
 
 **④ 各步骤详细说明**
 
@@ -385,12 +386,12 @@ workflow: |
 
 #### 书写注意事项
 
-- **YAML 格式**：单个工作流使用 `workflow: |` 保留换行和缩进；顺序工作流使用非空 `workflow:` 列表，每一项建议用 `|` 多行文本块。
+- **YAML 格式**：使用单个 `workflow: |` scalar 保留换行和缩进；list 非法。
 - **避免硬编码路径**：不要在 workflow 中写死文件路径，应通过工具（如 `get_module_context`）动态获取
 - **关键规则加粗**：对 LLM 必须遵守的规则使用 `**加粗**` 突出
 - **编号保证顺序**：多步骤流程使用编号列表（`1. 2. 3.`），不要用无序列表
 - **推断须标注**：要求 LLM 对不确定的内容标注【推断】，避免幻觉混入结论
-- **Mermaid 语法**：确保 Mermaid 语法正确，框架会校验并在错误时输出 warning
+- **Mermaid 语法**：Mermaid 是普通文本；需要渲染时在框架外校验
 
 ---
 
@@ -424,7 +425,8 @@ workflow: |
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `agent_function_schema` | `dict` | 不设置 | Worker 可调用工具契约。存在且合法时 Worker 被导出为工具。详见 [第 5 节](#5-worker-导出为可调用工具) |
+| `input_schema` | Draft 2020-12 object schema | `{task: string}` | Worker Tool 参数。详见 [第 5 节](#5-worker-导出为可调用工具) |
+| `output_schema` | Draft 2020-12 schema | 文本输出 | 可选的可执行 Agent 结果契约；允许任意 JSON 根类型 |
 
 > ⚠️ **Worker 配置隔离**：Worker 的最终生效配置来自全局 / 应用配置叠加，再加上 **Worker 自己的 YAML**。它**不会**继承调用它的 Supervisor 的权限覆盖项。如果 Worker 需要额外的文件系统或 Shell 权限，必须在 Worker YAML 中重复声明相应的白名单覆盖（例如 `tool_access_control.path_validation`）。
 
@@ -777,13 +779,14 @@ tools = YamlAgentFactory.create_agent_as_tool(
     model=None,         # 可选，模型实例
     logger=None,        # 可选，AgentLogger 实例
 )
-# 返回: List[Callable] — 包含一个可调用函数，签名由 Worker 的 agent_function_schema 定义
+# 返回一个 callable Tool，签名来自 Worker 的 input_schema
 ```
 
 **返回值说明**：
-- 返回列表中的函数**像普通 Python 函数一样调用**，参数名和类型由 `agent_function_schema.inputs` 定义
-- 返回值始终是**字符串**（`None` → `""`，其他值 → `str(result)`）
-- Worker YAML **必须**包含合法的 `agent_function_schema`，否则返回空列表
+- Tool 像普通 Python 函数一样调用，参数保持 `input_schema` 声明的 JSON 类型；
+  省略时接受必填 `task: string`。
+- 未配置 `output_schema` 时返回文本；配置后返回经过校验的原生 JSON 值，不做字符串强转。
+- 每次调用都会创建全新的 Worker owner 与 Runtime，只复用模型配置等安全绑定。
 
 #### 4.4.4 设计原则（四条最佳实践）
 
@@ -995,7 +998,7 @@ Supervisor (repo_map_agent)
 
 **关键设计**：
 
-1. **`dir_architecture_analysis`** 是一个标准 Worker Agent（有 `agent_function_schema`），但**不通过 `worker_agents` 自动注册给 Supervisor**
+1. **`dir_architecture_analysis`** 是一个标准 Worker Agent，但**不通过 `worker_agents` 自动注册给 Supervisor**
 2. 而是由 **`run_analysis_loop()` 在 Python 层手动加载并循环调用**，每次传入不同目录的 `index.md` 内容
 3. Python 层负责：读 index.md（前置）→ 调用 Agent（LLM 分析）→ 写 analysis.md（后置）→ 更新进度（持久化）
 4. 单个目录分析失败不影响其他目录，失败信息记录到 `progress.json` 供后续检查或重试
@@ -1019,77 +1022,72 @@ applications/repo_map/
 
 ## 5. Worker 导出为可调用工具
 
-> 💡 如果你的 Worker Agent 需要**前后置处理**（读写文件、循环、错误隔离等），请参阅 [4.4 高级模式：Agent 封装为 Python 工具函数](#44-高级模式agent-封装为-python-工具函数)。本节介绍的是**最简单的方式**——Worker 通过 `agent_function_schema` 自动导出为工具，无需额外 Python 代码。
+> 💡 如果 Worker Agent 需要**前后置处理**（读写文件、循环、错误隔离等），
+> 请参阅 [4.4 高级模式：Agent 封装为 Python 工具函数](#44-高级模式agent-封装为-python-工具函数)。
+> 本节介绍直接的 Subagent-as-Tool 注册。
 
 ### 5.1 核心机制
 
-当 Worker YAML 包含合法的 `agent_function_schema` 时，框架自动将该 Worker 导出为可调用工具，Supervisor 通过函数名（即 Worker 的 `name`）直接调用它。这是最简单的 Agent-Tool 路径，适合不需要额外前后置处理的场景。
+Supervisor 的 `worker_agents` 显式引用某个 Worker 后，框架才把它注册为可调用
+Tool。Worker 顶层 `name` 就是 Tool 名称，`description` 就是 Tool 说明。仅仅把文件
+放进目录不会授权或注册它。
 
 ```
-Supervisor → 调用 project_scan(query="检查 CAN 模块") → Worker 执行 → 返回字符串结果
+Supervisor → 调用 project_scan(task="检查 CAN 模块") → 新 Worker 执行 → 返回文本
 ```
 
-### 5.2 `agent_function_schema` 完整结构
+### 5.2 可选 JSON Schema 契约
 
-> 参数名可自定义，只要是合法 Python 标识符即可（如 `query`、`file_path`、`module_name` 等）。
+省略两个 schema 时使用最简默认契约：一个必填 `task: string` Tool 参数和文本结果。
+只有真实需要类型化数据时才声明 Draft 2020-12 schema：
 
 ```yaml
-agent_function_schema:
-  description: |                     # ✅ 必填：工具描述
-    准备阶段分析智能体...
-  inputs:                            # ✅ 必填：参数定义字典（至少 1 个参数）
-    param1:                          # 参数名自定义，合法 Python 标识符即可
-      description: |                 # ✅ 必填：参数描述
-        第一个参数的描述
-      required: true                 # ❌ 可选：是否必填（默认 true）
-    param2:                          # 可选参数
-      description: "第二个参数的描述"
-      required: false
-  output:                            # ✅ 必填：输出定义
-    description: |                   # ✅ 必填：输出描述
-      返回分析摘要文本
+name: project_scan
+description: 分析一个项目区域。
+
+input_schema:
+  type: object
+  properties:
+    target_path:
+      type: string
+    include_tests:
+      type: boolean
+  required: [target_path]
+  additionalProperties: false
+
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+    risks:
+      type: array
+      items:
+        type: string
+  required: [summary, risks]
+  additionalProperties: false
 ```
 
 ### 5.3 校验规则
 
 | 校验项 | 规则 | 报错示例 |
 |--------|------|----------|
-| `description` | 非空字符串 | `agent_function_schema.description must be a non-empty string` |
-| `inputs` | 非空字典 | `agent_function_schema.inputs must be a non-empty dictionary` |
-| `inputs.<name>` 键 | 合法 Python 标识符（`isidentifier()`） | `inputs key 'xxx' must be a valid identifier` |
-| `inputs.<name>.description` | 非空字符串 | `inputs.xxx.description must be a non-empty string` |
-| `inputs.<name>.required` | 布尔值（可省略，默认 true） | `inputs.xxx.required must be a boolean` |
-| `inputs.<name>.type` | YAML 中可省略，运行时归一化为 `"string"` | — |
-| `output` | 必须是字典 | `output must be a dictionary` |
-| `output.description` | 非空字符串 | `output.description must be a non-empty string` |
+| `input_schema` 根 | 必须是 object schema，因为模型 Tool 参数是对象 | `input_schema root type must be object` |
+| `input_schema` / `output_schema` | 合法 JSON Schema Draft 2020-12 | `... must be valid Draft 2020-12` |
+| `$ref` / `$dynamicRef` | 只允许本地 `#...` 引用；拒绝远程解析 | `... contains a remote reference` |
+| Tool 参数 | 创建 Worker 前严格解码并校验 | 校验失败，无 Worker 副作用 |
+| 结构化输出能力 | Runtime 与 Provider 必须语义支持 | 模型/Tool 执行前的准备阶段失败 |
 
-> ⚠️ **参数类型约束（重要）**：定义 `inputs` 参数时，**严禁使用 `Optional[...]`、`Union[...]` 等不明确的类型注解**。
->
-> | 约束 | 说明 |
-> |------|------|
-> | **禁止 `Optional[...]`** | 框架层会对此类不明确类型抛出异常 |
-> | **禁止 `Union[...]`** | 同上，不明确的形参会让 Agent 不知道传什么参数，影响 AI 的判断性 |
-> | **正确表示可选** | 使用 `required: false` 字段来表示参数是可选的 |
-> | **类型归一化** | 所有参数在运行时统一归一化为 `"string"` 类型 |
->
-> ```yaml
-> # ✅ 正确：用 required 字段表示可选
-> inputs:
->   target_path:
->     description: "分析目标路径"
->     required: true
->   mode:
->     description: "执行模式，默认为 standard"
->     required: false           # 用 required: false 表示可选，不要用 Optional
->
-> # ❌ 错误：不要在参数中使用不明确的类型
-> # type: "Optional[str]"     → 框架会抛出异常
-> # type: "Union[str, int]"   → 框架会抛出异常
-> ```
+schema 可使用标准 JSON 类型、`properties`、`items`、`required`、`enum`、
+`additionalProperties` 以及本地定义/引用。值保持 JSON 原始类型；整数、布尔、数组
+和对象不会被强制转成字符串。
 
 ### 5.4 返回值行为
 
-- 返回值**始终是字符串**：`None` → `""`，其他值 → `str(result)`
+- 文本 Worker 返回普通文本。
+- 结构化 Worker 返回经过校验的原生 JSON 值。
+- 终态结果无效时，在当前 Agent 会话内纠正并消耗既有执行步数；预算耗尽则失败，
+  不会转成 prose，也不会当成传输错误重试。
 
 ---
 
@@ -1166,7 +1164,7 @@ worker_agents:
 |----------|------|
 | `Configuration is missing required field: name` | 添加 `name: "xxx"` |
 | `Configuration is missing required field: description` | 添加 `description: "xxx"` |
-| `workflow field must be a non-empty string or non-empty list of non-empty strings` | 单个工作流使用 `workflow: \|`；顺序工作流使用非空 `workflow:` 列表且每项为非空字符串 |
+| `workflow field must be a non-empty string` | 使用一个非空 `workflow: \|` scalar |
 
 ### 7.2 工具配置错误
 
@@ -1263,18 +1261,17 @@ workflow: |
 
 tools: []
 
-agent_function_schema:
-  description: |
-    对单个目录进行 LLM 架构分析，返回 Markdown 格式分析文本。
-  inputs:
+input_schema:
+  type: object
+  properties:
     dir_path:
+      type: string
       description: "要分析的相对目录路径，如 src/application/imports"
-      required: true
     index_content:
+      type: string
       description: "该目录 index.md 的完整文本内容"
-      required: true
-  output:
-    description: "Markdown 格式的架构分析文本"
+  required: [dir_path, index_content]
+  additionalProperties: false
 ```
 
 ### 8.2 最小化配置
@@ -1303,14 +1300,14 @@ description: "项目结构扫描智能体"
 model_type: "powerful"
 tools:
   - name: "read_file"
-agent_function_schema:
-  description: "准备阶段分析工具"
-  inputs:
+input_schema:
+  type: object
+  properties:
     param1:                          # 参数名自定义
+      type: string
       description: "任务描述"
-      required: true
-  output:
-    description: "分析摘要"
+  required: [param1]
+  additionalProperties: false
 ```
 
 # 以下内容自动成为 workflow
@@ -1374,7 +1371,7 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 |------|----------|
 | `name` / `description` / `workflow` | Agent 自身属性 |
 | `tools`（`list[dict]`） | Agent 工具列表，与系统 `tools`（dict）不同 |
-| `worker_agents` / `agent_function_schema` | 角色专属属性 |
+| `worker_agents` / `input_schema` / `output_schema` | 角色专属契约 |
 | `skills` | 独立三层叠加加载（详见 [3.8](#38-skills--技能包配置)） |
 | `agent_runtime` / `model_type` | Agent runtime 与模型类型选择参数 |
 
@@ -1622,7 +1619,7 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `name` | ✅ | ✅ | ✅ | `str` | — |
 | `agent_runtime` | ✅ | ✅ | ✅ | `str` | 无默认；显式选择 `smolagents` / `pi` |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
-| `workflow` | ✅ | ✅ | ✅ | `str`/`list[str]` | — |
+| `workflow` | ✅ | ✅ | ✅ | `str` | — |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
@@ -1635,4 +1632,5 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |
 | `runtime_options.max_consecutive_model_errors` | ❌ | ✅ | ✅ | `int` | `5` |
 | `runtime_options.max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
-| `agent_function_schema` | ❌ | ❌ | ✅ | `dict` | 不设置 |
+| `input_schema` | ❌ | ❌ | ✅ | JSON Schema object | 默认必填 `task: string` |
+| `output_schema` | ❌ | ✅ | ✅ | JSON Schema | 文本输出 |

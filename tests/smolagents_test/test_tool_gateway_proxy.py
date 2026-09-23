@@ -7,14 +7,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from agentloom.execution.agent_runtime import OutputContract
+from agentloom.execution.hooks import HookPlan, HookRun
+from agentloom.execution.model_protocol import ToolDefinition
+from agentloom.execution.tool_gateway import AgentLoomToolGateway
+from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.execution.trace import (
+    clear_current_hook_run,
+    set_current_hook_run,
+)
 from agentloom.runtimes.smolagents.agents import ToolCallingAgentV2
+from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from agentloom.runtimes.smolagents.tool_proxy import (
     SmolagentsToolGatewayProxy,
     build_smolagents_tool_proxies,
 )
-from agentloom.runtimes.smolagents.terminal import final_answer_binding
-from agentloom.execution.model_protocol import ToolDefinition
-from agentloom.execution.tool_protocol import ToolCallRecord
 from smolagents.memory import ActionStep
 from smolagents.models import (
     ChatMessage,
@@ -185,6 +192,159 @@ def test_final_answer_uses_provider_supported_string_schema() -> None:
 
     assert definition.parameters["properties"]["answer"]["type"] == "string"
     assert definition.parameters["required"] == ["answer"]
+
+
+def test_final_answer_uses_and_validates_structured_output_contract() -> None:
+    contract = OutputContract(
+        name="review_output",
+        schema={
+            "type": "object",
+            "$defs": {
+                "finding": {
+                    "type": "string",
+                },
+                "scoped": {
+                    "$id": "urn:agentloom:scoped-output",
+                    "$defs": {"value": {"type": "string"}},
+                    "type": "object",
+                    "properties": {
+                        "value": {"$ref": "#/$defs/value"},
+                    },
+                },
+            },
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/finding"},
+                },
+                "metadata": {
+                    "const": {"$ref": "#/literal"},
+                },
+            },
+            "required": ["findings", "metadata"],
+            "additionalProperties": False,
+            "additionalItems": {"$ref": "#/literal"},
+        },
+    )
+    binding = final_answer_binding(contract)
+    definition = binding.definition
+
+    answer_schema = definition.parameters["properties"]["answer"]
+    assert answer_schema["type"] == "object"
+    assert answer_schema["properties"]["findings"]["items"]["$ref"] == (
+        "#/properties/answer/$defs/finding"
+    )
+    assert answer_schema["properties"]["metadata"]["const"] == {
+        "$ref": "#/literal"
+    }
+    assert answer_schema["$defs"]["scoped"]["properties"]["value"]["$ref"] == (
+        "#/$defs/value"
+    )
+    assert answer_schema["additionalItems"] == {"$ref": "#/literal"}
+    assert definition.strict is True
+    assert binding.input_validator is not None
+    binding.input_validator(
+        {
+            "answer": {
+                "findings": ["missing guard"],
+                "metadata": {"$ref": "#/literal"},
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="output does not satisfy"):
+        binding.input_validator(
+            {
+                "answer": {
+                    "findings": [3],
+                    "metadata": {"$ref": "#/literal"},
+                }
+            }
+        )
+
+
+def test_invalid_structured_final_answer_does_not_end_react_loop() -> None:
+    contract = OutputContract(
+        name="review_output",
+        schema={
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        },
+    )
+    gateway = AgentLoomToolGateway([final_answer_binding(contract)])
+    agent = ToolCallingAgentV2(
+        tool_gateway=gateway,
+        model=_BatchModel([]),
+        max_steps=2,
+        max_tokens=4096,
+        verbosity_level=0,
+    )
+    hook_run = HookRun(
+        HookPlan(),
+        local_run_id="local",
+        root_run_id="root",
+    )
+    set_current_hook_run(hook_run)
+    try:
+        invalid = ActionStep(
+            step_number=1,
+            timing=Timing(start_time=time.time()),
+        )
+        invalid_outputs = list(
+            agent.process_tool_calls(
+                ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content="",
+                    tool_calls=[
+                        _call(
+                            "invalid-final",
+                            "final_answer",
+                            {"answer": {"findings": [3]}},
+                        )
+                    ],
+                ),
+                invalid,
+            )
+        )
+        valid = ActionStep(
+            step_number=2,
+            timing=Timing(start_time=time.time()),
+        )
+        valid_outputs = list(
+            agent.process_tool_calls(
+                ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content="",
+                    tool_calls=[
+                        _call(
+                            "valid-final",
+                            "final_answer",
+                            {"answer": {"findings": ["missing guard"]}},
+                        )
+                    ],
+                ),
+                valid,
+            )
+        )
+    finally:
+        clear_current_hook_run()
+        gateway.close()
+
+    assert invalid.tool_results[0].status != "completed"
+    assert invalid.tool_results[0].error is not None
+    assert invalid.tool_results[0].error.kind == "output_validation"
+    assert invalid.tool_results[0].error.stage == "output_validation"
+    assert invalid_outputs[-1].is_final_answer is False
+    assert "output does not satisfy" in invalid_outputs[-1].observation
+    assert valid.tool_results[0].status == "completed"
+    assert valid_outputs[-1].is_final_answer is True
+    assert valid_outputs[-1].output == {"findings": ["missing guard"]}
 
 
 def test_agent_resolves_native_state_references_before_gateway() -> None:

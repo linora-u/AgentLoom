@@ -25,15 +25,15 @@ workflow: Parse query as the actual change_planner result. Read CONTRACT.md and 
   changed_files, generated_tests (list of relative paths), test_report (the relative-path
   string from run_workspace_tests.report, never the whole report object), and summary.
   Keep it concise and preserve nonce.
-agent_function_schema:
-  description: repair implementer
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
-      description: JSON result from the previous stage, with absolute workspace and
-        unique case_nonce.
-      required: true
-  output:
-    description: Structured JSON stage evidence, preserving workspace and case_nonce.
+      type: string
+      description: JSON result from the previous stage, with absolute workspace and unique case_nonce.
+  required:
+  - query
+  additionalProperties: false
 tools:
 - name: read_workspace_file
   module: applications.architecture_contract_validation.agent_tools.workspace_tools

@@ -170,9 +170,7 @@ def _sourced(value, source):
 
 
 def _workflow_summary(value: Any) -> str:
-    if isinstance(value, list):
-        value = " ".join(str(item) for item in value)
-    text = " ".join(str(value or "").split())
+    text = " ".join(value.split()) if isinstance(value, str) else ""
     return text[:500]
 
 

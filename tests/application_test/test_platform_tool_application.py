@@ -184,9 +184,11 @@ def test_closing_one_worker_keeps_the_other_workers_lsp_alive(platform_project, 
         "name": "lsp_worker", "agent_runtime": "platform-fixture",
         "description": "Inspect a symbol.", "workflow": "Inspect the requested symbol.",
         "tools": [{"name": "lsp_hover"}], "toolsets": [],
-        "agent_function_schema": {
-            "description": "Inspect a symbol.", "inputs": {"query": {"description": "Requested symbol."}},
-            "output": {"description": "Symbol information."},
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Requested symbol."}},
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }))
     barrier = Barrier(2)
@@ -277,9 +279,11 @@ def test_parallel_worker_applications_own_mcp_connections_and_run_context(platfo
         "name": "probe", "agent_runtime": "platform-fixture",
         "description": "Look up one fact.", "workflow": "Use the fact service.",
         "tools": [], "toolsets": [], "mcp_servers": str(config),
-        "agent_function_schema": {
-            "description": "Look up a fact.", "inputs": {"query": {"description": "Requested fact."}},
-            "output": {"description": "The fact with its source identity."},
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Requested fact."}},
+            "required": ["query"],
+            "additionalProperties": False,
         },
     }))
     barrier = Barrier(2)
@@ -457,10 +461,16 @@ json.dump({"decision": "allow"}, sys.stdout)
                 "workflow": "List Application memory and return.",
                 "tools": [{"name": "memory"}],
                 "toolsets": [],
-                "agent_function_schema": {
-                    "description": "Verify Worker runtime storage.",
-                    "inputs": {"query": {"description": "Verification request."}},
-                    "output": {"description": "Verification result."},
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Verification request.",
+                        }
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
                 },
             }
         ),
@@ -610,10 +620,12 @@ def test_native_application_retrieves_original_mcp_content_with_context_ref(plat
         assert get_active_context_engine() is not None
         created = definition.tool_gateway.invoke(call_id="payload", tool_name="mcp__facts__context_payload", arguments={"query": "full artifact"})
         assert created.status == "completed", created.model_content()
-        match = re.search(r"\[ContextRef (ctx_[a-zA-Z0-9]+)", created.output)
-        assert match is not None, created.output[:300]
+        model_content = created.model_content()
+        match = re.search(r"\[ContextRef (ctx_[a-zA-Z0-9]+)", model_content)
+        assert match is not None, model_content[:300]
         ref = match.group(1)
-        assert "PLATFORM-CTX-8426" not in created.output
+        assert "PLATFORM-CTX-8426" not in model_content
+        assert "PLATFORM-CTX-8426" in created.output
         result = definition.tool_gateway.invoke(call_id="retrieve", tool_name="loom_retrieve_context", arguments={
             "ref": ref, "query": "TARGET_RECORD", "limit": 5,
         })

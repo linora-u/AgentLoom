@@ -27,7 +27,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
           } catch (error) {failRun(); throw error;}
           const record = completed.record;
           if (record.status !== "completed") throw new Error(record.error?.message || "AgentLoom tool failed");
-          return {content: [{type: "text" as const, text: typeof record.output === "string" ? record.output : JSON.stringify(record.output)}],
+          return {content: [{type: "text" as const, text: typeof completed.model_output === "string" ? completed.model_output : JSON.stringify(completed.model_output)}],
             details: {agentloom: record}};
         },
       };

@@ -29,7 +29,11 @@ from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
 
-from agentloom.execution.agent_runtime import RuntimeCheckpointEnvelope
+from agentloom.execution.agent_runtime import (
+    JSONValue,
+    RuntimeCheckpointEnvelope,
+    copy_json_value,
+)
 from agentloom.execution.context_engine import (
     ContextEngine,
     ContextEngineConfig,
@@ -226,7 +230,7 @@ class CheckpointCoordinator:
         checkpoint: RuntimeCheckpointEnvelope,
         status: str,
         *,
-        result: str | None = None,
+        result: JSONValue = None,
         error: str | None = None,
         require_durable: bool = False,
     ) -> None:
@@ -351,7 +355,7 @@ class CheckpointCoordinator:
         input_hash: str,
         task_input: str,
         run_id: str,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, JSONValue]:
         """Return one result proven complete in the specified original Run."""
         tree = self._cm.load_task_tree(self._task_id) or {}
         calls = (tree.get("workers") or {}).get(agent_name, [])
@@ -364,16 +368,15 @@ class CheckpointCoordinator:
             and call.get("attempt_run_id") == run_id
             and call.get("input_hash") == input_hash
             and call.get("task_input") == task_input
-            and (
-                call.get("result") is None
-                or isinstance(call.get("result"), str)
-            )
         ]
         if len(matches) > 1:
             raise ValueError("Worker recovery evidence is ambiguous")
         if not matches:
             return False, ""
-        return True, str(matches[0].get("result") or "")
+        return True, copy_json_value(
+            matches[0].get("result"),
+            field_name="recovered worker result",
+        )
 
     def load_worker_runtime_checkpoint(
         self,
@@ -428,21 +431,10 @@ class CheckpointCoordinator:
         call_index: int,
         input_hash: str,
         task_input: str,
-        result: Any,
+        result: JSONValue,
         runtime_checkpoint: RuntimeCheckpointEnvelope | None,
     ) -> None:
         """Record successful worker completion."""
-        full_result = None if result is None else str(result)
-        stored_result = full_result
-        if full_result and self._context_engine is not None:
-            stored_result = (
-                self._context_engine.compress_tool_result(
-                    full_result,
-                    tool_name=agent_name,
-                    source=f"worker_result:{agent_name}",
-                )
-                or full_result
-            )
         self._cm.record_worker_finished(
             self._task_id,
             agent_name,
@@ -450,7 +442,7 @@ class CheckpointCoordinator:
             input_hash=input_hash,
             task_input=str(task_input),
             status="completed",
-            result=stored_result,
+            result=result,
         )
         self._cm.save_worker_runtime_checkpoint(
             self._task_id,
@@ -464,7 +456,7 @@ class CheckpointCoordinator:
             ),
             task_input=str(task_input),
             status="completed",
-            result=stored_result,
+            result=result,
         )
         # ── Worker heartbeat: mark completed ──
         self._update_worker_heartbeat(agent_name, call_index, "completed")

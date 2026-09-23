@@ -6,8 +6,6 @@ before-run callbacks, and canonical Todo state hydration.
 
 import json
 
-from agentloom.runtimes.smolagents.context_compression import ConversationHistoryManager
-from agentloom.runtimes.smolagents.tool_protocol import action_step_to_protocol_messages
 from agentloom.execution.hooks import wrap_in_system_reminder
 from agentloom.execution.logging import get_logger
 from agentloom.execution.trace import (
@@ -15,6 +13,9 @@ from agentloom.execution.trace import (
     get_current_hook_run,
     get_current_runtime_agent_path,
 )
+from agentloom.runtimes.smolagents.context_compression import ConversationHistoryManager
+from agentloom.runtimes.smolagents.tool_protocol import action_step_to_protocol_messages
+
 from smolagents import LogLevel
 from smolagents.models import ChatMessage, MessageRole
 
@@ -88,6 +89,7 @@ class LoomAgentMixin:
         self._agent_loom_supports_reset_false_task_step_control = True
 
     def run(self, task: str, *args, **kwargs):
+        skip_task_step = kwargs.pop("_skip_task_step", False)
         skip_task_step_on_reset_false = kwargs.pop("_skip_task_step_on_reset_false", True)
         for callback in self._before_run_callbacks:
             task = callback(self, task, *args, **kwargs)
@@ -98,8 +100,22 @@ class LoomAgentMixin:
             reset = args[1] # stream is args[0], reset is args[1]
 
         if (
-            skip_task_step_on_reset_false
-            and not reset
+            skip_task_step
+            and reset
+            and hasattr(self, "memory")
+            and hasattr(self.memory, "reset")
+        ):
+            self.memory.reset()
+            if hasattr(self, "monitor") and hasattr(self.monitor, "reset"):
+                self.monitor.reset()
+            kwargs["reset"] = False
+            reset = False
+
+        if (
+            (
+                skip_task_step
+                or (skip_task_step_on_reset_false and not reset)
+            )
             and hasattr(self, "memory")
             and hasattr(self.memory, "steps")
         ):
@@ -120,11 +136,11 @@ class LoomAgentMixin:
 
             self.memory.steps = _InterceptTaskStepList(original_steps)
             try:
-                return super().run(task, *args, **kwargs)
+                return super().run(task, *args, **kwargs)  # type: ignore[misc]
             finally:
                 self.memory.steps = original_steps
 
-        return super().run(task, *args, **kwargs)
+        return super().run(task, *args, **kwargs)  # type: ignore[misc]
 
     def write_memory_to_messages(self, summary_mode: bool = False):
         """
@@ -135,7 +151,9 @@ class LoomAgentMixin:
             for memory_step in self.memory.steps:
                 messages.extend(action_step_to_protocol_messages(memory_step, summary_mode=summary_mode))
         else:
-            messages = super().write_memory_to_messages(summary_mode=summary_mode)
+            messages = super().write_memory_to_messages(  # type: ignore[misc]
+                summary_mode=summary_mode
+            )
 
         if summary_mode:
             return append_current_todo_state(
@@ -156,7 +174,7 @@ class LoomAgentMixin:
 
         self._history_manager.sync_from_messages(messages)
 
-        model_id = getattr(self.model, "model_id", None)
+        model_id = getattr(self.model, "model_id", None)  # type: ignore[attr-defined]
         compressed_messages = self._history_manager.get_compressed_messages(
             model_id=model_id,
             step=getattr(self, 'step_number', None),

@@ -12,7 +12,9 @@ workflow: |
   <完整执行协议>
 ```
 
-`description` 只写角色定位；详细流程写进 `workflow`。
+`description` 只写角色定位；`workflow` 必须是单个非空字符串，作为 Agent 的
+system instructions。每轮 task 通过独立 user message 传入；没有 task 时不使用
+`description` 伪造输入。
 
 Supervisor 和 Worker 的定义格式均支持 `.yaml`、`.yml`、`.md`。Markdown 使用
 `yaml` 围栏代码块；其余非空正文覆盖 `workflow`。Studio 目录/详情、公开预检、
@@ -50,9 +52,10 @@ goal:
   enabled: true
 ```
 
-只接受 `goal: true/false` 或显式包含 `enabled: bool` 的 mapping；旧 `token_budget` 静默忽略。Goal 模式推荐单个多行 workflow；list 会按顺序
-编号并合并为一个目标上下文。Goal 的完成、resume、checkpoint 和 schedule
-语义见项目 `docs/cn/goal_mode.md`。
+只接受 `goal: true/false` 或显式包含 `enabled: bool` 的 mapping；旧
+`token_budget` 静默忽略。`workflow` 在 Goal 模式下仍必须是单个非空字符串，
+list 会在预检阶段失败。Goal 的完成、resume、checkpoint 和 schedule 语义见项目
+`docs/cn/goal_mode.md`。
 
 ## Worker
 
@@ -64,14 +67,28 @@ model_type: "powerful"
 runtime_options:
   max_steps: 40
   todo_mode: "auto"
-agent_function_schema:
-  description: "<作为工具被 Supervisor 调用时的说明>"
-  inputs:
+input_schema:
+  type: object
+  properties:
     user_request:
+      type: string
       description: "用户需求"
-      required: true
-  output:
-    description: "Markdown 文本"
+    priority:
+      type: integer
+      minimum: 1
+  required: [user_request]
+  additionalProperties: false
+output_schema:
+  type: object
+  properties:
+    report:
+      type: string
+    risks:
+      type: array
+      items:
+        type: string
+  required: [report, risks]
+  additionalProperties: false
 workflow: |
   # <Worker Workflow>
   ...
@@ -79,11 +96,20 @@ workflow: |
 
 规则：
 
-- Worker 被 Supervisor 调用时必须有 `agent_function_schema`。
-- `inputs` 的 key 必须是合法 Python 标识符。
-- `inputs.<name>.required` 只能是布尔值；可选参数用 `required: false` 表达，不要在 type 里写 `Optional[...]`。
-- runtime 会把输入类型归一为 `string`；不要依赖复杂类型声明。
-- 输出应是可被下游 Worker 或 Supervisor 直接使用的文本。
+- Supervisor 只注册 `worker_agents` 显式引用的 Worker；Tool 名称和说明直接来自
+  Worker 的 `name` 与 `description`。
+- 未写 `input_schema` 时，Tool 默认只有必填的 `task: string` 参数；未写
+  `output_schema` 时，Worker 返回普通文本。简单 Worker 应优先使用默认值。
+- `input_schema` 使用 JSON Schema Draft 2020-12 且根必须是 object；参数类型不会
+  被强制转成字符串。`output_schema` 可描述任意合法 JSON 根值。
+- `properties`、`items`、`required`、`enum`、`additionalProperties` 和本地 `$ref`
+  可用；远程引用会在执行前被拒绝。
+- Tool 参数先经过严格解码与 schema 校验，再创建 Worker。单个字符串参数成为普通
+  user message；多字段参数保持 JSON 类型并作为一个 JSON user input 投影。
+- 配置 `output_schema` 后，Runtime 必须在 Agent 会话内执行原生结构化约束和本地
+  校验；不支持的 Runtime/Provider 组合在模型或 Tool 执行前失败，不退化为 prompt。
+- 成功的结构化结果以原始 JSON 值返回；校验失败在当前会话内纠正并消耗既有步骤
+  预算，预算耗尽则运行失败。
 - smol 使用 `runtime_options.todo_mode`，只接受字符串 `"auto"`、`"on"`、`"off"`；默认 `"auto"`。`on` / `off` 必须加引号。它与 `runtime_options.planning_interval` 独立，不要在 `tools` 中重复声明 `todo_write`。
 - Worker YAML 禁止配置 `goal`，包括 `goal: false`；Goal 工具与生命周期只属于根 Supervisor。
 

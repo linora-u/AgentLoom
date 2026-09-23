@@ -137,10 +137,16 @@ def configure_case(case: str, workspace: Path, workflow: Path, system: dict, def
             "description": "Look up one fact from the service.",
             "workflow": "Call mcp__facts__lookup with query equal to the supplied query input, then report its actual result using final_answer.",
             "tools": [], "toolsets": [], "mcp_servers": definition["mcp_servers"],
-            "agent_function_schema": {
-                "description": "Look up one requested fact in an isolated Worker.",
-                "inputs": {"query": {"description": "Query to send unchanged to the fact service.", "required": True}},
-                "output": {"description": "Actual service result."},
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query to send unchanged to the fact service.",
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": False,
             },
         }))
         definition.pop("mcp_servers")

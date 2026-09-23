@@ -75,12 +75,12 @@ tools:
     module: "applications.unit_test_studio.agent_tools.unit_test_tools"
     function: "plan_test_scenarios"
 
-agent_function_schema:
-  description: |
-    Build scenario plans for every normalized function target.
-  inputs:
+input_schema:
+  type: object
+  properties:
     query:
+      type: string
       description: JSON output from function_intake.
-      required: true
-  output:
-    description: JSON containing planned_items with scenario payloads.
+  required:
+  - query
+  additionalProperties: false

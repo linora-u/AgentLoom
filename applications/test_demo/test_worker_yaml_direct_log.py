@@ -30,8 +30,8 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
         raise FileNotFoundError(f"Worker yaml not found: {worker_yaml}")
 
     config = YamlAgentFactory._load_config_from_file(worker_yaml)
-    print("\n--- agent_function_schema ---")
-    print(config.get("agent_function_schema"))
+    print("\n--- input_schema ---")
+    print(config.get("input_schema"))
 
     tool_fn = YamlAgentFactory.create_agent_as_tool(config)
 
@@ -51,9 +51,6 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
         "Schema note: parameters.type represents the function argument container, "
         f"current value={parameters_schema.get('type')!r} (expected 'object')."
     )
-    return_schema = schema.get("return") or {}
-    print(f"Schema return: type={return_schema.get('type')!r}, description={return_schema.get('description')!r}")
-
     print("\n--- Direct Invocation (manual review target) ---")
     expected_keys = {
         "query",
@@ -73,32 +70,39 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
     if parameters_schema.get("type") != "object":
         raise ValueError(f"Expected parameters container type to be 'object', got: {parameters_schema.get('type')}")
     schema_properties = (schema.get("parameters") or {}).get("properties", {})
-    non_string_fields = [
-        key for key, value in schema_properties.items()
-        if not isinstance(value, dict) or value.get("type") != "string"
-    ]
-    if non_string_fields:
-        raise ValueError(f"Expected all schema parameter types to be string, got non-string fields: {non_string_fields}")
-    if return_schema.get("type") != "string":
-        raise ValueError(f"Expected return type to be string, got: {return_schema.get('type')}")
-    if not isinstance(return_schema.get("description"), str) or not return_schema.get("description", "").strip():
-        raise ValueError("Expected return.description to be a non-empty string")
-
+    expected_types = {
+        "query": "string",
+        "tag": "string",
+        "scene": "string",
+        "retry_count": "integer",
+        "dry_run": "boolean",
+        "threshold": "number",
+        "context": "object",
+        "checkpoints": "array",
+    }
+    actual_types = {
+        key: value.get("type")
+        for key, value in schema_properties.items()
+        if isinstance(value, dict)
+    }
+    if actual_types != expected_types:
+        raise ValueError(
+            f"Generated parameter types mismatch. expected={expected_types}, got={actual_types}"
+        )
     demo_inputs = {
         "query": "请把我传给你的所有参数完整输出出来（包含每个参数名和参数值）。",
         "tag": "demo-tag",
         "scene": "manual-review",
-        "retry_count": "1",
-        "dry_run": "true",
-        "threshold": "1.25",
-        "context": "{\"demo_key\": \"demo-context\"}",
-        "checkpoints": "[\"schema\", \"invoke\", \"output\"]",
+        "retry_count": 1,
+        "dry_run": True,
+        "threshold": 1.25,
+        "context": {"demo_key": "demo-context"},
+        "checkpoints": ["schema", "invoke", "output"],
     }
     print("\n--- Manual Runtime Log Checklist ---")
-    print("1) Prompt starts with 'Task specification (what you must follow in this task):'")
-    print("2) Prompt contains <task_spec>, <inputs>, and <output> sections in this order")
-    print("3) <workflow> appears only when workflow contains mermaid block(s)")
-    print("4) Final model output satisfies return.description contract")
+    print("1) workflow is delivered through Runtime instructions")
+    print("2) Invocation arguments are the Worker user input")
+    print("3) No AgentLoom XML prompt wrapper is generated")
     print(f"Invocation input kwargs: {demo_inputs}")
     result = tool_fn(**demo_inputs)
     if not isinstance(result, str):

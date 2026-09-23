@@ -26,8 +26,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_list", "goal_parallel")
-TIMEOUTS = {case: 900 for case in CASES} | {"goal_list": 1500, "goal_parallel": 1200}
+CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_contract", "goal_parallel")
+TIMEOUTS = {case: 900 for case in CASES} | {"goal_contract": 1500, "goal_parallel": 1200}
 WORKERS = ("function_intake", "scenario_planner", "pytest_generator", "test_refiner", "delivery_reporter")
 CONTEXT = {
     "text": [
@@ -296,7 +296,7 @@ def verify_repo(workspace: Path) -> dict:
     return {"directories": len(progress), "known_symbols": sorted(known), "skill": str(skills[0]), "routes": len(routes)}
 
 
-def validate_goal(workspace: Path, receipt: dict, *, workflow_list: bool) -> dict:
+def validate_goal(workspace: Path, receipt: dict, *, contract_case: bool) -> dict:
     goal = receipt.get("goal") or {}
     if receipt["status"] != "completed" or goal.get("status") != "complete" or not goal.get("evidence"):
         raise AssertionError(f"Goal did not explicitly complete with evidence: {goal}")
@@ -305,16 +305,16 @@ def validate_goal(workspace: Path, receipt: dict, *, workflow_list: bool) -> dic
     finished = [event for event in events(runtime) if event.get("type") == "worker_call_finished"]
     if len(finished) != len(starts) or any(event.get("status") != "completed" for event in finished):
         raise AssertionError("Required audit Workers did not all complete")
-    if len(starts) < (4 if workflow_list else 6):
+    if len(starts) < (4 if contract_case else 6):
         raise AssertionError(f"Missing real audit Workers: {len(starts)}")
-    name = "workflow_list" if workflow_list else "parallel"
+    name = "contract_validation" if contract_case else "parallel"
     report = workspace / "goal_reports" / f"{name}.md"
     content = report.read_text()
-    markers = ("# Goal Mode Validation", "## Configuration Contract", "## Verdict") if workflow_list else (
+    markers = ("# Goal Mode Validation", "## Configuration Contract", "## Verdict") if contract_case else (
         "# Parallel Goal Validation", "## Batch Results", "## Goal State", "## Resume Instructions", f"goal_id={goal['goal_id']}")
     if any(marker not in content for marker in markers):
         raise AssertionError("Persisted Goal evidence is incomplete")
-    assert_tools(runtime, {"run_goal_audit_batch", "update_goal"} if workflow_list else {"inspect_parallel_goal_report", "update_goal"})
+    assert_tools(runtime, {"run_goal_audit_batch", "update_goal"} if contract_case else {"inspect_parallel_goal_report", "update_goal"})
     return {"goal": goal, "worker_calls": len(starts), "report_sha256": hashlib.sha256(report.read_bytes()).hexdigest()}
 
 
@@ -361,12 +361,12 @@ def child(case: str, workspace: Path) -> dict:
         execute(ROOT / "applications/repo_map/workflows/repo_map_agent.yaml", workspace,
                 task=f"Complete all Repo Map architecture analysis and Skill steps. output_dir={workspace / 'repo_output'}")
         return verify_repo(workspace)
-    workflow_list = case == "goal_list"
-    workflow = copied_workflow("goal_mode_validation", "goal_workflow_list_agent.yaml" if workflow_list else "goal_parallel_agent.yaml", workspace, {})
+    contract_case = case == "goal_contract"
+    workflow = copied_workflow("goal_mode_validation", "goal_contract_agent.yaml" if contract_case else "goal_parallel_agent.yaml", workspace, {})
     first = execute(workflow, workspace)
-    if workflow_list:
-        return validate_goal(workspace, first, workflow_list=True)
-    return validate_goal(workspace, first, workflow_list=False)
+    if contract_case:
+        return validate_goal(workspace, first, contract_case=True)
+    return validate_goal(workspace, first, contract_case=False)
 
 
 def main() -> int:
@@ -389,7 +389,7 @@ def main() -> int:
                 value = verify_context(args.case.removeprefix("context_"), args.workspace)
             elif args.case.startswith("goal_"):
                 receipt = args.workspace / "run_receipt.json"
-                value = validate_goal(args.workspace, json.loads(receipt.read_text()), workflow_list=args.case == "goal_list")
+                value = validate_goal(args.workspace, json.loads(receipt.read_text()), contract_case=args.case == "goal_contract")
             else:
                 parser.error("Tool scenarios are checked by a new full run")
         except BaseException as exc:
