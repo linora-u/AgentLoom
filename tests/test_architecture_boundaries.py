@@ -89,6 +89,35 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
     """)
 
 
+def test_tracked_python_sources_do_not_import_retired_package_names() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.py"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.split(b"\0")
+    retired = ("agentloom.application", "agentloom.configuration")
+    offenders: list[str] = []
+
+    for raw_path in tracked:
+        if not raw_path:
+            continue
+        relative_path = raw_path.decode()
+        tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = (alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                modules = (node.module,)
+            else:
+                continue
+            for module in modules:
+                if any(module == prefix or module.startswith(f"{prefix}.") for prefix in retired):
+                    offenders.append(f"{relative_path}:{node.lineno}:{module}")
+
+    assert offenders == []
+
+
 def test_root_cli_is_only_a_command_composition_root() -> None:
     source_path = ROOT / "src" / "__main__.py"
     source = source_path.read_text(encoding="utf-8")
