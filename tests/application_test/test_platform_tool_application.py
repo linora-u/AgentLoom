@@ -620,10 +620,12 @@ def test_native_application_retrieves_original_mcp_content_with_context_ref(plat
         assert get_active_context_engine() is not None
         created = definition.tool_gateway.invoke(call_id="payload", tool_name="mcp__facts__context_payload", arguments={"query": "full artifact"})
         assert created.status == "completed", created.model_content()
-        match = re.search(r"\[ContextRef (ctx_[a-zA-Z0-9]+)", created.output)
-        assert match is not None, created.output[:300]
+        model_content = created.model_content()
+        match = re.search(r"\[ContextRef (ctx_[a-zA-Z0-9]+)", model_content)
+        assert match is not None, model_content[:300]
         ref = match.group(1)
-        assert "PLATFORM-CTX-8426" not in created.output
+        assert "PLATFORM-CTX-8426" not in model_content
+        assert "PLATFORM-CTX-8426" in created.output
         result = definition.tool_gateway.invoke(call_id="retrieve", tool_name="loom_retrieve_context", arguments={
             "ref": ref, "query": "TARGET_RECORD", "limit": 5,
         })
