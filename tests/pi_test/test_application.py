@@ -15,7 +15,7 @@ from agentloom.configuration.config import bind_config, load_project_config
 
 
 @contextmanager
-def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", finishes=None, stall_stream=False, turns=None, fail_requests=None, on_request=None, outputs=None):
+def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", finishes=None, stall_stream=False, turns=None, fail_requests=None, fail_messages=None, on_request=None, outputs=None):
     requests = []
     request_lock = Lock()
 
@@ -36,7 +36,13 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
                 self.send_response((fail_requests or {}).get(request_number, error_status))
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"error":{"message":"PRIVATE-PROVIDER-ECHO fixture-secret","type":"server_error"}}')
+                message = (fail_messages or {}).get(
+                    request_number,
+                    "PRIVATE-PROVIDER-ECHO fixture-secret",
+                )
+                self.wfile.write(json.dumps({
+                    "error": {"message": message, "type": "server_error"},
+                }).encode())
                 return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
