@@ -167,6 +167,31 @@ def test_agent_as_tool_accepts_json_property_names_that_are_not_python_identifie
     assert tool(**{"user-id": "alice"}) == "RUN::alice"
 
 
+def test_agent_as_tool_accepts_required_fields_defined_by_additional_properties():
+    worker = _make_worker(
+        {
+            "name": "required_open_worker",
+            "agent_runtime": "smolagents",
+            "description": "worker desc",
+            "tools": [],
+            "workflow": "demo workflow",
+            "input_schema": {
+                "type": "object",
+                "required": ["query"],
+                "additionalProperties": {"type": "string"},
+            },
+        }
+    )
+
+    worker._validate_config()
+    tool = worker.agent_as_tool()
+
+    assert bind_tool(tool).definition.parameters == worker._config["input_schema"]
+    assert tool(query="hello") == 'RUN::{"query":"hello"}'
+    with pytest.raises(Exception, match="string"):
+        tool(query=1)
+
+
 def test_agent_as_tool_supports_an_object_root_local_reference():
     input_schema = {
         "$defs": {
