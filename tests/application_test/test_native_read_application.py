@@ -43,7 +43,7 @@ def test_application_native_read_runs_production_hooks_and_durable_host(tmp_path
 
     class Model:
         def turn(self, *, items, **kwargs):
-            if len(items) == 1:
+            if not items:
                 return ModelTurnResult(
                     (FunctionCallItem("fixture-read", "native_read", json.dumps({"path": str(path)})),)
                 )

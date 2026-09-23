@@ -60,7 +60,11 @@ def external_read_runtime(model_factory, observations):
             scenario = definition.runtime_options["scenario"]
             cwd = definition.runtime_options["cwd"]
             model = model_factory(definition)
-            items = [MessageItem("user", request.task)]
+            items = (
+                []
+                if request.task is None
+                else [MessageItem("user", request.task)]
+            )
             calls, executions = [], 0
             with NativeReadToolHost(tools=(READ,), cwd=cwd) as host:
                 for _ in range(4):
