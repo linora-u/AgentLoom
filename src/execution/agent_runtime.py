@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.native_tools import ToolManifestEntry
+from agentloom.execution.schema_validation import reject_remote_schema_references
 from agentloom.execution.tool_gateway import ToolGateway, tool_manifest_snapshot
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -147,21 +148,6 @@ def _optional_non_empty_string(
     return value.strip()
 
 
-def _reject_remote_schema_refs(value: JSONValue, *, path: str = "$") -> None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            child_path = f"{path}.{key}"
-            if key in {"$ref", "$dynamicRef"}:
-                if not isinstance(child, str) or not child.startswith("#"):
-                    raise ValueError(
-                        f"output schema contains a remote reference at {child_path}"
-                    )
-            _reject_remote_schema_refs(child, path=child_path)
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            _reject_remote_schema_refs(child, path=f"{path}[{index}]")
-
-
 @dataclass(frozen=True, slots=True)
 class OutputContract:
     """One validated Draft 2020-12 contract for an Agent's final output."""
@@ -182,7 +168,10 @@ class OutputContract:
         )
         if not isinstance(normalized_schema, dict):
             raise TypeError("output contract schema must be a mapping")
-        _reject_remote_schema_refs(normalized_schema)
+        reject_remote_schema_references(
+            normalized_schema,
+            field_name="output schema",
+        )
         try:
             Draft202012Validator.check_schema(normalized_schema)
         except SchemaError as exc:

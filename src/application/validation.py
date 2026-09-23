@@ -14,6 +14,7 @@ from agentloom.execution.agent_runtime import (
     RuntimeRequirements,
 )
 from agentloom.execution.goal import GoalConfig, normalize_goal_config
+from agentloom.execution.schema_validation import reject_remote_schema_references
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from referencing import Registry, Resource
@@ -40,30 +41,6 @@ _DEFAULT_WORKER_INPUT_SCHEMA = {
     "required": ["task"],
     "additionalProperties": False,
 }
-
-
-def _reject_remote_schema_refs(value: object, *, field_name: str, path: str = "$") -> None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            child_path = f"{path}.{key}"
-            if key in {"$ref", "$dynamicRef"} and (
-                not isinstance(child, str) or not child.startswith("#")
-            ):
-                raise ValueError(
-                    f"{field_name} contains a remote reference at {child_path}"
-                )
-            _reject_remote_schema_refs(
-                child,
-                field_name=field_name,
-                path=child_path,
-            )
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            _reject_remote_schema_refs(
-                child,
-                field_name=field_name,
-                path=f"{path}[{index}]",
-            )
 
 
 def resolve_input_schema_object(schema: dict[str, Any]) -> dict[str, Any]:
@@ -102,7 +79,7 @@ def _compile_input_schema(
     if not isinstance(raw_schema, dict):
         raise ValueError("input_schema must be a JSON Schema mapping")
     schema = deepcopy(raw_schema)
-    _reject_remote_schema_refs(schema, field_name="input_schema")
+    reject_remote_schema_references(schema, field_name="input_schema")
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
