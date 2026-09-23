@@ -28,7 +28,6 @@ def run_case(case: str, workspace: Path) -> dict:
 
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
-    C.raw.setdefault("lsp_servers", {})["enabled"] = False
     filename, expected = CASES[case]
     receipt = execute(ROOT / "applications/test_demo/workflows" / filename, workspace)
     assert str(receipt["output"]).strip() == expected, "Final output oracle failed"

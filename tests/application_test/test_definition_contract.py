@@ -113,7 +113,7 @@ def test_effective_values_sources_and_secret_projection_are_independent(tmp_path
     app = tmp_path / "applications/group/demo"
     write(
         app / "config/system.yaml",
-        'runtime_options: {todo_mode: "on"}\ncontext_engine: {min_chars: 789}\ntoolsets: [markdown_report]\n',
+        'runtime_options: {todo_mode: "on"}\ncontext_engine: {min_chars: 789}\ntoolsets: [core_search]\n',
     )
     path = write(
         app / "workflows/root.yaml",

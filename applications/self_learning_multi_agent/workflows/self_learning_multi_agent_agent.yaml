@@ -12,7 +12,6 @@ toolsets: []
 tools:
   - name: "shell_tool"
   - name: "read_file"
-  - name: "write_markdown_file"
   - name: "edit_file"
   - name: "glob_search"
   - name: "grep_search"
@@ -39,7 +38,7 @@ workflow: |
   - The on-disk manifest and the final answer must describe the same final
     state. Do not write `/tmp/<marker>/final_manifest.json` before
     `manifest_path`, `manifest_written`, and final `ok` are set.
-  - Do not use `write_markdown_file`, `edit_file`, or `read_file` for the
+  - Do not use `edit_file` or `read_file` for the
     final manifest. Use `shell_tool` with the Python heredoc below.
 
   # Required Worker Flow

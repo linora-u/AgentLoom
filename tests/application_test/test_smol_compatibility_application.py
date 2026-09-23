@@ -106,7 +106,6 @@ def test_smol_runtime_options_execute_tools_todo_and_goal_through_application(
                 "checkpoint": {"enabled": True, "cleanup_on_success": False},
                 "logging": {"console_enabled": False, "file_enabled": False},
                 "self_learning": {"enabled": False},
-                "lsp_servers": {"enabled": False},
                 "default_toolsets": [],
                 "skills": {"paths": []},
             }

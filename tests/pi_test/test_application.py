@@ -114,7 +114,7 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
 def project(root: Path, url: str):
     import yaml
     (root / "config").mkdir(parents=True)
-    (root / "config/system.yaml").write_text("lsp_servers: {enabled: false}\ncheckpoint: {enabled: false}\nself_learning: {enabled: false}\ndefault_toolsets: [core_file, core_shell, core_search]\n")
+    (root / "config/system.yaml").write_text("checkpoint: {enabled: false}\nself_learning: {enabled: false}\ndefault_toolsets: [core_file, core_shell, core_search]\n")
     model = {"model": "openai/fixture-model", "adapter": "openai_chat", "base_url": url,
              "api_key": "fixture-secret", "temperature": 0.25, "context_window": 8192,
              "max_output_tokens": 100, "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000,

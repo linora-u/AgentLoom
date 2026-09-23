@@ -90,16 +90,10 @@ smol = [
 ]
 # Professional code tools are selected independently of the Agent runtime.
 code = [
-    "tree-sitter-c==0.23.1",
-    "libclang>=18.1.1",
-    "ast-grep-cli>=0.40.5",
     "ripgrep>=15.0.0",
     "networkx>=3.0,<4.0",
     "grep-ast>=0.3.0",
     "tree-sitter-language-pack>=0.13.0",
-    "serena-agent>=1.0.0",
-    "go-bin>=1.23",
-    "nodejs-bin[cmd]>=18.0",
 ]
 dev = [
     "pytest>=8.3.5",

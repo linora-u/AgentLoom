@@ -30,7 +30,7 @@ supported aliases.
 | `src.lib.smolagents.agent` runtime-specific mixin | `src/runtimes/smolagents/loom_mixin.py` | `agentloom.runtimes.smolagents`: smolagents-specific execution behavior |
 | Hook policy, Skills, prompts, checkpoint, Goal, ContextEngine, storage/context | `src/execution/` responsibility modules | `agentloom.execution`: invocation state, authorization, recovery, usage, context and persistence |
 | `src.lib.smolagents` upstream Agent subclasses, model adapters, patches and Tool conversion | `src/runtimes/smolagents/` | `agentloom.runtimes.smolagents`: actual coupling to fixed smolagents 1.26.0 |
-| `src.mcp`, `src.services.lsp` | `src/integrations/{mcp,lsp}/` | `agentloom.integrations.mcp`, `agentloom.integrations.lsp`: external protocol connections |
+| `src.mcp` | `src/integrations/mcp/` | `agentloom.integrations.mcp`: external protocol connections |
 | `src.tools` | `src/tools/` | `agentloom.tools`: lightweight catalog and selective implementation loading |
 | `src.extensions.self_learning` | `src/self_learning/` | `agentloom.self_learning`: existing persistence, recording and review responsibilities |
 | `src.__main__`, scaffold, Studio adapter, schedules | `src/__main__.py`, `src/app/scaffold.py`, `studio/python/agentloom_studio_adapter/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |

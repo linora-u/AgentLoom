@@ -26,7 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_contract", "goal_parallel")
+CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "goal_contract", "goal_parallel")
 TIMEOUTS = {case: 900 for case in CASES} | {"goal_contract": 1500, "goal_parallel": 1200}
 WORKERS = ("function_intake", "scenario_planner", "pytest_generator", "test_refiner", "delivery_reporter")
 CONTEXT = {
@@ -322,7 +322,6 @@ def child(case: str, workspace: Path) -> dict:
     from agentloom.config import C
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
-    C.raw.setdefault("lsp_servers", {})["enabled"] = False
     os.environ["AGENTLOOM_GOAL_VALIDATION_OUTPUT_ROOT"] = str(workspace / "goal_reports")
     if case == "unit":
         target = workspace / "fixture"
@@ -336,21 +335,19 @@ def child(case: str, workspace: Path) -> dict:
         name = f"context_engine_{'multi_worker' if kind == 'multi' else kind + '_retrieve'}_validation"
         execute(ROOT / f"applications/{name}/workflows/{name}_agent.yaml", workspace)
         return verify_context(kind, workspace)
-    if case in {"core", "markdown"}:
-        name = f"tool_registry_{case}_validation"
-        workflow = copied_workflow(name, "core_tools_agent.yaml" if case == "core" else "markdown_report_agent.yaml", workspace,
-                                   {f"/tmp/agentloom_{name}": str(workspace / "artifacts")})
+    if case == "core":
+        name = "tool_registry_core_validation"
+        workflow = copied_workflow(
+            name,
+            "core_tools_agent.yaml",
+            workspace,
+            {f"/tmp/agentloom_{name}": str(workspace / "artifacts")},
+        )
         execute(workflow, workspace)
-        if case == "core":
-            content = (workspace / "artifacts/result.txt").read_text()
-            if content.splitlines() != ["ALPHA one", "beta two", "GAMMA three"]:
-                raise AssertionError(f"Wrong real file result: {content!r}")
-            expected = {"shell_tool", "write_file", "edit_file", "read_file", "glob_search", "grep_search", "list_directory"}
-        else:
-            content = (workspace / "artifacts/report.md").read_text()
-            if not all(item in content for item in ("# Built-in Tool Catalog Markdown Validation", "## Summary", "## Result", "markdown_report toolset is explicitly enabled.")):
-                raise AssertionError("Markdown content oracle failed")
-            expected = {"write_markdown_file", "read_file"}
+        content = (workspace / "artifacts/result.txt").read_text()
+        if content.splitlines() != ["ALPHA one", "beta two", "GAMMA three"]:
+            raise AssertionError(f"Wrong real file result: {content!r}")
+        expected = {"shell_tool", "write_file", "edit_file", "read_file", "glob_search", "grep_search", "list_directory"}
         return {"tools": sorted(expected), "tool_records": len(assert_tools(workspace / "runtime", expected)), "artifact_oracle": True}
     if case == "repo":
         from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map

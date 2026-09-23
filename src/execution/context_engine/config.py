@@ -22,9 +22,6 @@ def _default_skip_tools() -> tuple[str, ...]:
     return (
         "edit_file",
         "write_file",
-        "write_markdown_file",
-        "write_markdown_file_raw",
-        "append_markdown_sections",
     )
 
 

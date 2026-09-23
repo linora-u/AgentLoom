@@ -70,8 +70,7 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
     assert "smolagents" not in names("pi")
     assert "openinference-instrumentation-smolagents" not in names("pi")
     assert {"smolagents", "openinference-instrumentation-smolagents"} <= names("smol")
-    professional = {"serena-agent", "ast-grep-cli", "grep-ast", "tree-sitter-language-pack",
-                    "go-bin", "nodejs-bin", "libclang", "tree-sitter-c", "networkx"}
+    professional = {"grep-ast", "tree-sitter-language-pack", "networkx"}
     assert not professional & names("pi")
     assert professional <= names("code")
     assert {"tree-sitter", "tree-sitter-bash"} <= names("pi")  # Shared Shell governance.

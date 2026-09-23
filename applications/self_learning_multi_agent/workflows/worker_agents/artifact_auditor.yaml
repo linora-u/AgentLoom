@@ -13,7 +13,6 @@ worker_agents: []
 tools:
   - name: "read_file"
   - name: "shell_tool"
-  - name: "write_markdown_file"
   - name: "edit_file"
   - name: "glob_search"
   - name: "grep_search"
