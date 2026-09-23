@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from agentloom.integrations.litellm import model_binding as litellm_binding
 from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import (
@@ -13,6 +12,7 @@ from agentloom.execution.model_protocol import (
     ModelTurnResult,
     ToolDefinition,
 )
+from agentloom.integrations.litellm import model_binding as litellm_binding
 
 
 class _RecordingAdapter:
@@ -152,11 +152,6 @@ def test_explicit_litellm_factory_preserves_resolved_profile(
     adapter_id: str,
     output_token_key: str,
 ) -> None:
-    monkeypatch.setattr(
-        litellm_binding,
-        "build_model_request_headers",
-        lambda headers: {"User-Agent": "system", **(headers or {})},
-    )
     created: list[tuple[str, dict[str, Any]]] = []
 
     def adapter_factory(selected: str, **kwargs: Any) -> _RecordingAdapter:
@@ -226,10 +221,7 @@ def test_explicit_litellm_factory_preserves_resolved_profile(
         "_agent_loom_model_type": "reasoner",
         "api_base": "https://models.example.invalid",
         "api_key": "secret",
-        "extra_headers": {
-            "User-Agent": "system",
-            "X-Model": "selected",
-        },
+        "extra_headers": {"X-Model": "selected"},
         "reasoning_effort": "high",
     }
 
@@ -244,6 +236,7 @@ def test_config_resolver_uses_existing_default_selection_and_content_cache(
                 "test": {
                     "model": "provider/model",
                     "adapter": "openai_chat",
+                    "extra_headers": {"X-Revision": "one"},
                 },
                 "summary": {
                     "model": "provider/summary",
@@ -253,12 +246,6 @@ def test_config_resolver_uses_existing_default_selection_and_content_cache(
         }
     )
     monkeypatch.setattr(litellm_binding, "C", SimpleNamespace(llm=config))
-    headers = {"X-Revision": "one"}
-    monkeypatch.setattr(
-        litellm_binding,
-        "build_model_request_headers",
-        lambda _headers: dict(headers),
-    )
     created: list[str] = []
 
     def adapter_factory(selected: str, **_kwargs: Any) -> _RecordingAdapter:
@@ -273,7 +260,7 @@ def test_config_resolver_uses_existing_default_selection_and_content_cache(
         "test",
         adapter_factory=adapter_factory,
     )
-    headers["X-Revision"] = "two"
+    config.models["test"].extra_headers["X-Revision"] = "two"
     refreshed = litellm_binding.resolve_litellm_model_turn_binding(
         "test",
         adapter_factory=adapter_factory,
@@ -309,11 +296,6 @@ def test_config_resolver_applies_runtime_neutral_profile_overlay(
         }
     )
     monkeypatch.setattr(litellm_binding, "C", SimpleNamespace(llm=config))
-    monkeypatch.setattr(
-        litellm_binding,
-        "build_model_request_headers",
-        lambda _headers: {"X-System": "kept"},
-    )
     limiter_calls: list[tuple[str, int]] = []
     monkeypatch.setattr(
         litellm_binding.GlobalRateLimiterRegistry,
@@ -344,7 +326,7 @@ def test_config_resolver_applies_runtime_neutral_profile_overlay(
     assert binding.options["num_retries"] == 0
     assert binding.options["retry_delay"] == 0.0
     assert binding.options["max_retry_delay"] == 0.0
-    assert binding.options["extra_headers"] == {"X-System": "kept"}
+    assert "extra_headers" not in binding.options
     assert limiter_calls == [("summary", 19)]
 
 
@@ -375,11 +357,6 @@ def test_config_resolver_propagates_unknown_model_type_without_fallback(
 def test_adapter_factory_failure_is_not_retried_with_another_protocol(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        litellm_binding,
-        "build_model_request_headers",
-        lambda _headers: {},
-    )
     calls: list[str] = []
 
     def failing_factory(selected: str, **_kwargs: Any) -> _RecordingAdapter:

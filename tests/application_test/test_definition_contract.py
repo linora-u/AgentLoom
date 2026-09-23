@@ -122,8 +122,6 @@ def test_effective_values_sources_and_secret_projection_are_independent(tmp_path
   todo_mode: "off"
   smart_summary: false
 toolsets: []
-model_request_headers:
-  headers: {Authorization: private-header-token}
 """,
     )
     parsed = load_agent_definition(path)
@@ -140,8 +138,7 @@ model_request_headers:
     assert public["sources"]["runtime_options.todo_mode"]["source"] == "agent"
     assert public["sources"]["context_engine.min_chars"]["source"] == "application"
     assert public["sources"]["context_engine.preview_max_chars"]["source"] == "global"
-    assert "private-header-token" not in str(detail) and "hidden-key" not in str(detail)
-    assert snapshot.values["model_request_headers"]["headers"]["Authorization"] == "private-header-token"
+    assert "hidden-key" not in str(detail)
     public["values"]["context_engine"]["min_chars"] = -1
     snapshot.values["context_engine"]["min_chars"] = -2
     assert base.raw["context_engine"]["min_chars"] == 123

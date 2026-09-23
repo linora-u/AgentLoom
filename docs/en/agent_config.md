@@ -1324,8 +1324,7 @@ The following top-level fields in Agent YAML can override system configuration (
 
 | Field | Type Constraint | Description |
 |------|----------|------|
-| `system` | `dict` | System metadata (name, version, user_agent) |
-| `model_request_headers` | `dict` | Model request header profiles |
+| `system` | `dict` | System metadata (name, version) |
 | `runtime_options` | `dict` | Options interpreted by the selected backend; rebuilt per Worker |
 | `context_engine` | `dict` | Reversible context compression limits |
 | `tool_access_control` | `dict` | Working directory and path filtering |
