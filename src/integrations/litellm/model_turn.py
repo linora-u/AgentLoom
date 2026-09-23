@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from agentloom.configuration.model_adapters import MODEL_ADAPTERS, AdapterKind
+from agentloom.config.model_adapters import MODEL_ADAPTERS, AdapterKind
 from agentloom.execution.model_protocol import (
     FunctionCallItem,
     FunctionCallOutputItem,

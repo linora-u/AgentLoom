@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from agentloom.application.factory import (
+from agentloom.app.factory import (
     YamlAgentFactory,
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,

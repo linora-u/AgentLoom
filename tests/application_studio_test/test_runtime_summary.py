@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import agentloom.application.studio.query_service as bridge_module
+import agentloom.app.studio.query_service as bridge_module
 import pytest
 import yaml
-from agentloom.application.studio.errors import StudioServiceError
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.errors import StudioServiceError
+from agentloom.app.studio.query_service import StudioQueryService
 from agentloom.execution.context import RuntimeRunLease
 
 SYSTEM_ID = "applications/demo/workflows/demo.yaml"

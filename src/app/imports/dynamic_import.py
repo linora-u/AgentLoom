@@ -23,7 +23,7 @@ def _load_application_module(module: str):
     same applications namespace, reject the collision instead of executing its
     cached code under the new project's configuration.
     """
-    from agentloom.configuration import C
+    from agentloom.config import C
 
     project_root = Path(C.agent_root).resolve()
     applications_root = project_root / "applications"

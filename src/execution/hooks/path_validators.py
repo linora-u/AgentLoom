@@ -16,7 +16,7 @@ from typing import Any
 
 from agentloom.execution.native_tools import ToolManifestEntry
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.logging import get_logger
 
 # Re-export from shared library for backward-compatibility with tests

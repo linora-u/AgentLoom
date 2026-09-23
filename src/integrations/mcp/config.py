@@ -246,7 +246,7 @@ def parse_mcp_yaml_value(
         return None
 
     if strict:
-        from agentloom.configuration.config_validation import BoolParser
+        from agentloom.config.config_validation import BoolParser
         if not isinstance(raw_value, (str, list, dict)):
             raise ValueError("mcp_servers must be a path, list of paths, or mapping")
         if isinstance(raw_value, list) and any(not isinstance(p, str) or not p.strip() for p in raw_value):

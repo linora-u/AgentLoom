@@ -68,7 +68,7 @@ def evidence(result, workspace: Path) -> dict:
 
 
 def run_memory(workspace: Path, profile: str, workflow: Path) -> list[dict]:
-    from agentloom.application.runner import execute_app
+    from agentloom.app.runner import execute_app
     from agentloom.self_learning.persistence.evidence_gate import SQLiteEvidenceGate
     from agentloom.self_learning.persistence.memory_store import MemoryStore
     from agentloom.self_learning.persistence.review_engine import ReviewEngine
@@ -120,7 +120,7 @@ def run_memory(workspace: Path, profile: str, workflow: Path) -> list[dict]:
 
 
 def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
-    from agentloom.application.runner import execute_app
+    from agentloom.app.runner import execute_app
     mode, direction = case.split('_', 1)
     workflow = workspace / f'applications/{APP}/workflows/{direction}.yaml'
     definition = yaml.safe_load(workflow.read_text())
@@ -194,7 +194,7 @@ def child(case: str, workspace: Path, profile: str) -> None:
         'self_learning': review_settings(profile), 'default_toolsets': [], 'checkpoint': {'enabled': False},
         'lsp_servers': {'enabled': False}, 'logging': {'console_enabled': False},
         'context_engine': {'min_chars': 1000, 'preview_max_chars': 300}})
-    from agentloom.configuration.config import bind_config, load_project_config
+    from agentloom.config.config import bind_config, load_project_config
     with bind_config(load_project_config(workspace)):
         proofs = (run_memory(workspace, profile, workspace / f'applications/{APP}/workflows/memory.yaml')
                   if case == 'memory_handoff' else run_mixed(case, workspace, profile))

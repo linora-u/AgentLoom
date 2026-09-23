@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from agentloom.application.studio.errors import StudioServiceError
+from agentloom.app.studio.errors import StudioServiceError
 from agentloom.execution.context import (
     RuntimeRunLease,
     resolve_runtime_home,
@@ -21,7 +21,7 @@ from agentloom.execution.context import (
 from agentloom.execution.storage import SecureDirectory
 
 if TYPE_CHECKING:
-    from agentloom.application.definition import AgentDefinitionCache
+    from agentloom.app.definition import AgentDefinitionCache
 
 # ``run.detail`` is refreshed while its panel is open.  These are response and
 # filesystem work budgets, not pagination defaults: one refresh must remain
@@ -109,7 +109,7 @@ class StudioQueryService:
             raise StudioServiceError("invalid_params", str(error)) from error
         if canonical != application_id:
             raise StudioServiceError("invalid_params", "application_id is not canonical")
-        from agentloom.application.studio.application_studio import application_detail
+        from agentloom.app.studio.application_studio import application_detail
 
         try:
             return application_detail(
@@ -135,7 +135,7 @@ class StudioQueryService:
             definition_cache=definition_cache,
             runtime_root=runtime_root,
         )
-        from agentloom.application.studio.catalog import project_catalog
+        from agentloom.app.studio.catalog import project_catalog
         from agentloom.schedules.presentation import resolve_schedule_runtime_root
 
         try:
@@ -301,7 +301,7 @@ class StudioQueryService:
         self,
         system_id: str,
     ) -> tuple[dict[str, Any], Path, dict[str, Any]]:
-        from agentloom.application.definition import model_types, validate_agent_definition
+        from agentloom.app.definition import model_types, validate_agent_definition
 
         relative = Path(system_id)
         candidate = self.project_root / relative
@@ -2275,7 +2275,7 @@ class StudioQueryService:
         *,
         definition_cache: AgentDefinitionCache | None = None,
     ) -> list[dict[str, Any]]:
-        from agentloom.application.definition import model_types, validate_agent_definition
+        from agentloom.app.definition import model_types, validate_agent_definition
 
         applications_root = self.project_root / "applications"
         if applications_root.is_symlink() or not applications_root.is_dir():
@@ -2339,7 +2339,7 @@ class StudioQueryService:
             raw_path = item.get("path") if isinstance(item, dict) else None
             if not isinstance(raw_path, str) or not raw_path.strip():
                 continue
-            from agentloom.application.definition import resolve_worker_path
+            from agentloom.app.definition import resolve_worker_path
 
             try:
                 candidate = resolve_worker_path(self.project_root, supervisor_path, raw_path)
@@ -2370,7 +2370,7 @@ class StudioQueryService:
         *,
         definition_cache: AgentDefinitionCache | None = None,
     ) -> tuple[dict[str, Any], list[str]]:
-        from agentloom.application.definition import read_agent_definition
+        from agentloom.app.definition import read_agent_definition
 
         result = read_agent_definition(path, cache=definition_cache)
         if result.error is not None or result.definition is None:

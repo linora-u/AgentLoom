@@ -8,8 +8,8 @@ from pathlib import Path
 
 import httpx
 import pytest
-from agentloom.application.studio.builder import BuilderService
-from agentloom.application.studio.chat_agent import ChatAgentError, ChatModelProfile
+from agentloom.app.studio.builder import BuilderService
+from agentloom.app.studio.chat_agent import ChatAgentError, ChatModelProfile
 from openai import OpenAI
 
 
@@ -637,8 +637,8 @@ def test_default_openai_endpoint_rejects_non_openai_litellm_model_prefix(tmp_pat
 def test_importing_tui_chat_does_not_import_litellm_or_smolagents() -> None:
     script = """
 import sys
-import agentloom.application.studio.builder
-import agentloom.application.studio.chat_agent
+import agentloom.app.studio.builder
+import agentloom.app.studio.chat_agent
 loaded = sorted(name for name in sys.modules if name == 'litellm' or name.startswith('smolagents'))
 if loaded:
     raise SystemExit(','.join(loaded))

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agentloom.application.definition import (
+from agentloom.app.definition import (
     definition_error,
     inspect_application_definition,
     load_agent_definition,
@@ -18,10 +18,10 @@ from agentloom.application.definition import (
     resolve_worker_path,
     selected_model_type,
 )
-from agentloom.application.presentation import configuration_projection, display_path, public_value
-from agentloom.application.revision import application_revision
-from agentloom.configuration.config import load_project_config
-from agentloom.configuration.yaml_loader import load_unique_yaml
+from agentloom.app.presentation import configuration_projection, display_path, public_value
+from agentloom.app.revision import application_revision
+from agentloom.config.config import load_project_config
+from agentloom.config.yaml_loader import load_unique_yaml
 from agentloom.execution.context import resolve_runtime_home
 
 _MAX_REVISION_FILES = 4096

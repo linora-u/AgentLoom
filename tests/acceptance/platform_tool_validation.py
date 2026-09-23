@@ -266,8 +266,8 @@ def run_case(case: str, workspace: Path, *, model_type: str | None = None) -> di
     (config / "system.yaml").write_text(yaml.safe_dump(system))
     workflow.write_text(yaml.safe_dump(definition))
 
-    from agentloom.application.runner import execute_app
-    from agentloom.configuration.config import bind_config, load_project_config
+    from agentloom.app.runner import execute_app
+    from agentloom.config.config import bind_config, load_project_config
 
     started_at = datetime.now(UTC).isoformat()
     with bind_config(load_project_config(workspace)):

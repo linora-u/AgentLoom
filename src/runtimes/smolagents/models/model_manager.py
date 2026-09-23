@@ -10,8 +10,8 @@ import json
 from dataclasses import asdict, dataclass, replace
 
 import litellm
-from agentloom.configuration.http_headers import normalize_http_headers
-from agentloom.configuration.llm_config import LlmModelTypeSettings
+from agentloom.config.http_headers import normalize_http_headers
+from agentloom.config.llm_config import LlmModelTypeSettings
 from agentloom.execution.logging import get_logger
 from agentloom.integrations.litellm.litellm_retry import patch_litellm_completion
 from agentloom.integrations.litellm.model_binding import (
