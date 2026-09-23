@@ -15,7 +15,7 @@ from agentloom.configuration.config import bind_config, load_project_config
 
 
 @contextmanager
-def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", stall_stream=False, turns=None, fail_requests=None, on_request=None, outputs=None):
+def model_service(*, responses=False, fail_count=0, error_status=500, stall=None, finish="stop", finishes=None, stall_stream=False, turns=None, fail_requests=None, on_request=None, outputs=None):
     requests = []
     request_lock = Lock()
 
@@ -49,9 +49,14 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
                 if outputs is not None and request_number <= len(outputs)
                 else "Pi answer"
             )
+            finish_reason = (
+                finishes[request_number - 1]
+                if finishes is not None and request_number <= len(finishes)
+                else finish
+            )
             chunks = [
                 {"choices": [{"index": 0, "delta": {"role": "assistant", "content": output_text}, "finish_reason": None}]},
-                {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}},
             ]
             if turns is not None and request_number <= len(turns) and turns[request_number - 1] is not None:
                 calls = turns[request_number - 1]
@@ -285,6 +290,41 @@ def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
     assert captured.value.original_error.kind == "output_validation"
     assert captured.value.original_error.stage == "output_validation"
     assert len(requests) == 1
+
+
+def test_invalid_structured_output_consumes_the_existing_delivery_budget(
+    tmp_path,
+):
+    from agentloom.application.run import ApplicationRunError
+
+    with model_service(
+        outputs=["not-json", "still-not-json", "not-json-again"],
+        finishes=["stop", "stop", "length"],
+    ) as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["runtime_options"] = {"max_stop_attempts": 2}
+        config["output_schema"] = {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        }
+        app.write_text(yaml.safe_dump(config))
+
+        with (
+            bind_config(load_project_config(tmp_path)),
+            pytest.raises(ApplicationRunError) as captured,
+        ):
+            execute_app(app, file_logging=False)
+
+    assert captured.value.original_error.category == "output_validation"
+    assert len(requests) == 2
 
 
 @pytest.mark.parametrize("status,retries,expected", [(500, 2, 2), (429, 1, 2), (401, 3, 1), (400, 3, 1), (500, 0, 1)])
