@@ -5,14 +5,14 @@ completion, and checkpoint resume. Goal has no cost or token budget.
 
 | Workflow | Coverage |
 |---|---|
-| `goal_workflow_list_agent.yaml` | Numbered workflow list, four Workers, report verification, explicit completion |
+| `goal_contract_agent.yaml` | Native string workflow, four Workers, report verification, explicit completion |
 | `goal_parallel_agent.yaml` | Six parallel Workers, Goal-bound report reuse, explicit completion |
 | `goal_unlimited_endurance_agent.yaml` | Sixteen specialist audits and synthesis across continuation segments |
 
 Run through the public Application entrypoint:
 
 ```bash
-uv run loom run applications/goal_mode_validation/workflows/goal_workflow_list_agent.yaml
+uv run loom run applications/goal_mode_validation/workflows/goal_contract_agent.yaml
 uv run loom run applications/goal_mode_validation/workflows/goal_parallel_agent.yaml
 ```
 
