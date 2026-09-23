@@ -29,7 +29,7 @@ The implementation was exercised against real configured models on 2026-08-05:
 
 | Scenario | Task / run evidence | Observed result |
 |---|---|---|
-| Bounded workflow list | `task_20260804T170322505383Z_ce6d1069128f` / `run_20260804T170322505417Z_2cf0cabe1e45` | `complete`; numbered workflow merged into one objective; 427317 whole-tree tokens used from a 600000 budget |
+| Pre-migration Goal fixture | `task_20260804T170322505383Z_ce6d1069128f` / `run_20260804T170322505417Z_2cf0cabe1e45` | `complete`; the fixture later moved to the native string workflow contract; 427317 whole-tree tokens used from a 600000 budget |
 | Parallel soft budget | `task_20260804T160413595075Z_01366ffd580c` / `run_20260804T160413595101Z_a7fadf21dc1f` | six concurrent Workers crossed 50000 tokens and produced `budget_limited` with 79190 tokens used |
 | Parallel resume | same task / `run_20260804T160808447806Z_d3e1886fb5e8` | removing the cap resumed the same Goal and completed without rerunning the durable batch |
 | Unlimited endurance | `task_20260804T171358741591Z_4e38fa57de4b` / `run_20260804T172155752890Z_cec594f24de9` | `complete` after about 29 minutes; an interrupted first attempt resumed under the same Goal; 2584069 tokens used with `token_budget: null` |
