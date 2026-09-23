@@ -8,6 +8,7 @@ import pytest
 from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeRequest,
+    OutputContract,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeEvent,
@@ -479,6 +480,50 @@ def test_adapter_preserves_max_steps_for_goal_owner_to_settle() -> None:
     result = runtime.run(AgentRuntimeRequest(task="inspect"))
 
     assert result.state == "max_steps_error"
+
+
+def test_adapter_classifies_exhausted_structured_output_correction() -> None:
+    native = _NativeRuntime(_NativeResult(output=None, state="max_steps_error"))
+    invalid = ActionStep(
+        step_number=1,
+        timing=Timing(start_time=0.0),
+    )
+    invalid.tool_results = [
+        ToolCallRecord.blocked(
+            call_id="invalid-final",
+            tool_name="final_answer",
+            input={"answer": {"findings": [3]}},
+            message="output does not satisfy schema: 3 is not of type 'string'",
+            stage="final_decode",
+            kind="input_validation",
+        )
+    ]
+    native.memory.steps = [invalid]
+    runtime = _runtime(
+        native,
+        output_contract=OutputContract(
+            name="findings",
+            schema={
+                "type": "object",
+                "properties": {
+                    "findings": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    }
+                },
+                "required": ["findings"],
+                "additionalProperties": False,
+            },
+        ),
+    )
+
+    with pytest.raises(AgentRuntimeError) as captured:
+        runtime.run(AgentRuntimeRequest(task="inspect"))
+
+    assert captured.value.category == "output_validation"
+    assert captured.value.kind == "output_validation"
+    assert captured.value.stage == "output_validation"
+    assert captured.value.retryable is True
 
 
 def test_adapter_closes_native_runtime_when_supported() -> None:
