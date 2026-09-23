@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 TOOL_CALL_RAW_KEY = "agentloom_tool_call"
 TOOL_RESULT_RAW_KEY = "agentloom_tool_result"
+MODEL_OUTPUT_METADATA_KEY = "agentloom_model_output"
 
 ToolCallStatus = Literal[
     "completed",
@@ -79,6 +80,7 @@ class ToolCallRecord:
         tool_name: str,
         input: Any,
         output: Any,
+        metadata: dict[str, Any] | None = None,
         started_at: float | None = None,
         ended_at: float | None = None,
     ) -> ToolCallRecord:
@@ -88,6 +90,7 @@ class ToolCallRecord:
             input=input,
             status="completed",
             output=output,
+            metadata=metadata or {},
             started_at=started_at,
             ended_at=ended_at,
         )
@@ -251,6 +254,8 @@ class ToolCallRecord:
     def with_output(self, output: Any) -> ToolCallRecord:
         if self.status != "completed":
             raise ValueError("Only a completed Tool record has model-visible output")
+        metadata = deepcopy(self.metadata)
+        metadata.pop(MODEL_OUTPUT_METADATA_KEY, None)
         return ToolCallRecord(
             call_id=self.call_id,
             tool_name=self.tool_name,
@@ -258,7 +263,7 @@ class ToolCallRecord:
             status=self.status,
             output=output,
             error=self.error,
-            metadata=self.metadata,
+            metadata=metadata,
             started_at=self.started_at,
             ended_at=self.ended_at,
             exception=self.exception,
@@ -275,9 +280,16 @@ class ToolCallRecord:
             raise self.exception
         raise RuntimeError(self.reason or "Tool execution failed")
 
+    def model_output(self) -> Any:
+        """Return the model-visible projection without changing canonical output."""
+
+        if self.status != "completed":
+            return None
+        return self.metadata.get(MODEL_OUTPUT_METADATA_KEY, self.output)
+
     def model_content(self) -> str:
         if self.status == "completed":
-            payload = {"ok": True, "status": self.status, "output": self.output}
+            payload = {"ok": True, "status": self.status, "output": self.model_output()}
         else:
             error = self.error or ToolErrorRecord(
                 kind="interrupted",
