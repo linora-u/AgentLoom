@@ -28,13 +28,10 @@ def validate_required_yaml_fields(config: dict, yaml_path: Path | str) -> None:
             invalid.append(f"{field} must be a non-empty string")
 
     workflow = config.get("workflow")
-    workflow_valid = False
-    if isinstance(workflow, str):
-        workflow_valid = bool(workflow.strip())
-    elif isinstance(workflow, list):
-        workflow_valid = bool(workflow) and all(isinstance(item, str) and item.strip() for item in workflow)
-    if not workflow_valid:
+    if workflow is None:
         missing.append("workflow")
+    else:
+        AgentConfigNormalizer.validate_workflow_config(config)
 
     if invalid:
         problems: list[str] = []
