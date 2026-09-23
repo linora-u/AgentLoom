@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 
 import click
-from agentloom.application.cli import create, run
-from agentloom.application.composition import build_schedule_mutations
+from agentloom.app.cli import create, run
+from agentloom.app.composition import build_schedule_mutations
 from agentloom.execution.cli import (
     clean_runtime_command,
     clean_tasks,
@@ -57,7 +57,7 @@ def main(context: click.Context) -> None:
         ),
     )
     try:
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         agent_root = Path(C.agent_root).resolve()
         if Path.cwd().resolve() != agent_root:

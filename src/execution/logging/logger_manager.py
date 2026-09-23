@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
-from agentloom.configuration.config_validation import BoolParser
+from agentloom.config.config_validation import BoolParser
 from agentloom.execution import RuntimeContext, get_current_run_context
 from agentloom.execution.logging.levels import AgentLoomLogLevel
 from agentloom.execution.logging.rich_backend import RichLoggerBackend
@@ -97,7 +97,7 @@ def _memory_campaign_safe_artifacts_enabled() -> bool:
 
 def _get_config_value(*keys: str, default: Any = None) -> Any:
     try:
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         return C.get_nested(*keys, default=default)
     except Exception:

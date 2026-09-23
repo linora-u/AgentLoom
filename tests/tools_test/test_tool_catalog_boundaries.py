@@ -191,7 +191,7 @@ def test_tui_definition_validation_does_not_load_implementations() -> None:
         import json
         import sys
         from pathlib import Path
-        from agentloom.application.definition import validate_agent_definition
+        from agentloom.app.definition import validate_agent_definition
 
         valid_errors = validate_agent_definition(
             Path("."),

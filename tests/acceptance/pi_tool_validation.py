@@ -74,8 +74,8 @@ def child(case: str, workspace: Path, profile: str):
             worker.write_text(yaml.safe_dump(worker_config))
     (config / 'system.yaml').write_text(yaml.safe_dump(system))
     workflow.write_text(yaml.safe_dump(definition))
-    from agentloom.application.runner import execute_app
-    from agentloom.configuration.config import bind_config, load_project_config
+    from agentloom.app.runner import execute_app
+    from agentloom.config.config import bind_config, load_project_config
     with bind_config(load_project_config(workspace)):
         result = execute_app(workflow, file_logging=True)
     records = tool_records(result.run.run_dir)

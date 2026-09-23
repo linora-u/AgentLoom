@@ -24,18 +24,18 @@ supported aliases.
 
 | Baseline owner at ca27966d | Physical source owner | Canonical Python owner and responsibility |
 | --- | --- | --- |
-| `src.runner`, `src.application_run*`, `src.application_revision`, scattered definition interpretation | `src/application/` | `agentloom.application`: shared definition, paths, validation, presentation, Run identity, revision, lifecycle and execution |
-| `src.lib.config` | `src/configuration/` | `agentloom.configuration`: project/model configuration, normalization, provenance and invocation binding |
-| `src.lib.smolagents.agent` orchestration and assembly | `src/application/{agent,factory,invocation}.py` | `agentloom.application`: Supervisor/Worker construction, delegation and runtime selection |
+| `src.runner`, `src.application_run*`, `src.application_revision`, scattered definition interpretation | `src/app/` | `agentloom.app`: shared definition, paths, validation, presentation, Run identity, revision, lifecycle and execution |
+| `src.lib.config` | `src/config/` | `agentloom.config`: project/model configuration, normalization, provenance and invocation binding |
+| `src.lib.smolagents.agent` orchestration and assembly | `src/app/{agent,factory,invocation}.py` | `agentloom.app`: Supervisor/Worker construction, delegation and runtime selection |
 | `src.lib.smolagents.agent` runtime-specific mixin | `src/runtimes/smolagents/loom_mixin.py` | `agentloom.runtimes.smolagents`: smolagents-specific execution behavior |
 | Hook policy, Skills, prompts, checkpoint, Goal, ContextEngine, storage/context | `src/execution/` responsibility modules | `agentloom.execution`: invocation state, authorization, recovery, usage, context and persistence |
 | `src.lib.smolagents` upstream Agent subclasses, model adapters, patches and Tool conversion | `src/runtimes/smolagents/` | `agentloom.runtimes.smolagents`: actual coupling to fixed smolagents 1.26.0 |
 | `src.mcp`, `src.services.lsp` | `src/integrations/{mcp,lsp}/` | `agentloom.integrations.mcp`, `agentloom.integrations.lsp`: external protocol connections |
 | `src.tools` | `src/tools/` | `agentloom.tools`: lightweight catalog and selective implementation loading |
 | `src.extensions.self_learning` | `src/self_learning/` | `agentloom.self_learning`: existing persistence, recording and review responsibilities |
-| `src.__main__`, scaffold, Studio adapter, schedules | `src/__main__.py`, `src/application/scaffold.py`, `studio/python/agentloom_studio_adapter/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
+| `src.__main__`, scaffold, Studio adapter, schedules | `src/__main__.py`, `src/app/scaffold.py`, `studio/python/agentloom_studio_adapter/`, `src/schedules/` | Canonical CLI, Studio and scheduling adapters consume Application and Run owners |
 
-`agentloom.application.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
+`agentloom.app.agent` owns orchestration; upstream CodeAgent/ToolCallingAgent
 subclasses live in `agentloom.runtimes.smolagents.agents`.
 `agentloom.execution.tool_protocol` owns terminal ToolCallRecord values without
 importing smolagents. Tool execution and provider-message conversion stay in the

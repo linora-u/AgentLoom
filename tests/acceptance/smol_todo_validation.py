@@ -24,7 +24,7 @@ CASES = {
 
 
 def run_case(case: str, workspace: Path) -> dict:
-    from agentloom.configuration import C
+    from agentloom.config import C
 
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False

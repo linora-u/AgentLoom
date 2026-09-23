@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_tools_application import select
 from tests.pi_test.test_process_lifecycle import node_launcher, start_cli, until, assert_gone

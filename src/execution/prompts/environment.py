@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.logging import get_logger
 from agentloom.execution.permissions.policy_summary import build_security_behavior_section
 from agentloom.execution.trace.task_context import get_current_agent_config

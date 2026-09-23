@@ -121,7 +121,7 @@ def resolve_legacy_application_id(
 
 def _agent_root() -> Path:
     try:
-        from agentloom.configuration import C
+        from agentloom.config import C
 
         return Path(C.agent_root).resolve()
     except Exception:

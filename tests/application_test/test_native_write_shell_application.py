@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 import pytest
 import yaml
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.model_protocol import FunctionCallItem, MessageItem, ModelTurnResult
 from tests.application_test.native_write_shell_support import SCENARIOS, external_write_runtime, planned_calls, verify_native, write_application
 

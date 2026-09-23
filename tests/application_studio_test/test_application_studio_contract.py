@@ -5,8 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentloom.application.studio.application_studio import application_detail
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.application_studio import application_detail
+from agentloom.app.studio.query_service import StudioQueryService
 
 
 def _write(path: Path, content: str) -> None:

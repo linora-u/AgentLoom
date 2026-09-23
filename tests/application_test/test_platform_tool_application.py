@@ -13,9 +13,9 @@ from threading import Barrier, Event
 import psutil
 import pytest
 import yaml
-from agentloom.application.run import ApplicationRunInterrupted
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.run import ApplicationRunInterrupted
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, RuntimeCheckpointEnvelope
 
 
@@ -65,11 +65,11 @@ def platform_project(tmp_path, monkeypatch):
         def close(self):
             self.definition.tool_gateway.close()
 
-    from agentloom.application.composition import build_builtin_runtime_registry
+    from agentloom.app.composition import build_builtin_runtime_registry
     registry = build_builtin_runtime_registry()
     registry.register("platform-fixture", capabilities=PlatformRuntime.capabilities, factory=PlatformRuntime)
-    monkeypatch.setattr("agentloom.application.validation.build_builtin_runtime_registry", lambda: registry)
-    monkeypatch.setattr("agentloom.application.agent.build_builtin_runtime_registry", lambda: registry)
+    monkeypatch.setattr("agentloom.app.validation.build_builtin_runtime_registry", lambda: registry)
+    monkeypatch.setattr("agentloom.app.agent.build_builtin_runtime_registry", lambda: registry)
 
     def run(*, resume_task_id=None, **updates):
         workflow.write_text(yaml.safe_dump({**definition, **updates}))

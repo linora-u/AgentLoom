@@ -16,7 +16,7 @@ from datetime import datetime
 from threading import RLock
 from typing import Any, Literal
 
-from agentloom.application.run import RunPhase
+from agentloom.app.run import RunPhase
 from agentloom.execution.agent_runtime import (
     AgentRuntimeResult,
     JSONValue,

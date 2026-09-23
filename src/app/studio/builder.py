@@ -20,10 +20,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
-from agentloom.configuration.yaml_loader import load_unique_yaml
-from agentloom.application.definition import definition_error
+from agentloom.config.yaml_loader import load_unique_yaml
+from agentloom.app.definition import definition_error
 
-from agentloom.application.definition import validate_agent_definition
+from agentloom.app.definition import validate_agent_definition
 
 _MAX_TRANSCRIPT_MESSAGES = 16
 _MAX_BUILDER_MESSAGE_CHARS = 32_000
@@ -664,7 +664,7 @@ class BuilderService:
         tools = self._tools(working_draft)
 
         if self._chat_agent is None:
-            from agentloom.application.studio.chat_agent import StudioChatAgent
+            from agentloom.app.studio.chat_agent import StudioChatAgent
 
             kwargs: dict[str, object] = {}
             if self._chat_client_factory is not None:

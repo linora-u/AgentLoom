@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import agentloom.application.agent as base_agent_module
-import agentloom.application.invocation as invocation_module
+import agentloom.app.agent as base_agent_module
+import agentloom.app.invocation as invocation_module
 import pytest
 import yaml
 from agentloom.execution import RuntimeHome, bind_run_context
@@ -1168,7 +1168,7 @@ def test_real_config_builder_compiles_global_application_and_agent_hook_layers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import agentloom.configuration.config as config_module
+    import agentloom.config.config as config_module
 
     agent_root = tmp_path / "AgentLoom"
     config_dir = agent_root / "config"

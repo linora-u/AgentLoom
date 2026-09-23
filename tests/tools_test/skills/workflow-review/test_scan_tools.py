@@ -1427,7 +1427,7 @@ class TestSkillContractText:
     "name: first\nworkflow: [\nsecret-sentinel-must-not-echo\n",
 ])
 def test_scanner_parse_errors_match_canonical_without_raw_input(tmp_path, suffix, content):
-    from agentloom.application.definition import definition_error, load_agent_definition
+    from agentloom.app.definition import definition_error, load_agent_definition
 
     app = tmp_path / "app"
     path = app / "workflows" / f"supervisor{suffix}"
@@ -1448,7 +1448,7 @@ def test_scanner_parse_errors_match_canonical_without_raw_input(tmp_path, suffix
     ("", ""),
 ])
 def test_scanner_markdown_workflow_is_exact_canonical_parse(tmp_path, yaml_workflow, body):
-    from agentloom.application.definition import load_agent_definition
+    from agentloom.app.definition import load_agent_definition
 
     path = tmp_path / "supervisor.md"
     path.write_text(f"```yaml\nname: demo\ndescription: Demo\n{yaml_workflow}```\n\n{body}\n")
