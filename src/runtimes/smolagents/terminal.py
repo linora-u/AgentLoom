@@ -1,12 +1,12 @@
 """smolagents-owned terminal Tool contract."""
 
-from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
 from agentloom.execution.agent_runtime import OutputContract, copy_json_value
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.native_tools import ToolManifestEntry
+from agentloom.execution.schema_validation import rebase_local_schema_references
 from agentloom.execution.tool_gateway import ToolBinding
 
 
@@ -17,99 +17,8 @@ class _OutputValidationError(ValueError):
     stage = "output_validation"
 
 
-_SCHEMA_MAP_KEYWORDS = frozenset({
-    "$defs",
-    "definitions",
-    "dependentSchemas",
-    "patternProperties",
-    "properties",
-})
-_SCHEMA_LIST_KEYWORDS = frozenset({
-    "allOf",
-    "anyOf",
-    "oneOf",
-    "prefixItems",
-})
-_SCHEMA_SINGLE_KEYWORDS = frozenset({
-    "additionalItems",
-    "additionalProperties",
-    "contains",
-    "contentSchema",
-    "else",
-    "if",
-    "items",
-    "not",
-    "propertyNames",
-    "then",
-    "unevaluatedItems",
-    "unevaluatedProperties",
-})
-
-
 def _return_final_answer(answer: Any) -> Any:
     return answer
-
-
-def _embed_output_schema(
-    value: Any,
-    *,
-    pointer: str = "#/properties/answer",
-    rebase_local_pointers: bool = True,
-) -> Any:
-    """Embed one self-contained schema without changing local pointer meaning."""
-
-    if not isinstance(value, dict):
-        return deepcopy(value)
-
-    rebase_here = rebase_local_pointers and "$id" not in value
-    embedded: dict[str, Any] = {}
-    for key, child in value.items():
-        if (
-            rebase_here
-            and key in {"$ref", "$dynamicRef"}
-            and isinstance(child, str)
-            and child.startswith("#/")
-        ):
-            embedded[key] = pointer + child[1:]
-        elif rebase_here and key in {"$ref", "$dynamicRef"} and child == "#":
-            embedded[key] = pointer
-        elif key in _SCHEMA_MAP_KEYWORDS and isinstance(child, dict):
-            embedded[key] = {
-                name: _embed_output_schema(
-                    schema,
-                    pointer=pointer,
-                    rebase_local_pointers=rebase_here,
-                )
-                for name, schema in child.items()
-            }
-        elif key in _SCHEMA_LIST_KEYWORDS and isinstance(child, list):
-            embedded[key] = [
-                _embed_output_schema(
-                    schema,
-                    pointer=pointer,
-                    rebase_local_pointers=rebase_here,
-                )
-                for schema in child
-            ]
-        elif key in _SCHEMA_SINGLE_KEYWORDS:
-            if key == "items" and isinstance(child, list):
-                embedded[key] = [
-                    _embed_output_schema(
-                        schema,
-                        pointer=pointer,
-                        rebase_local_pointers=rebase_here,
-                    )
-                    for schema in child
-                ]
-            else:
-                embedded[key] = _embed_output_schema(
-                    child,
-                    pointer=pointer,
-                    rebase_local_pointers=rebase_here,
-                )
-        else:
-            embedded[key] = deepcopy(child)
-    return embedded
 
 
 def final_answer_binding(
@@ -117,19 +26,21 @@ def final_answer_binding(
 ) -> ToolBinding:
     """Return smolagents' explicit terminal Tool binding."""
 
-    answer_schema = (
-        _embed_output_schema(
-            copy_json_value(
-                output_contract.schema,
-                field_name="output contract schema",
-            )
+    if output_contract is not None:
+        output_schema = copy_json_value(
+            output_contract.schema,
+            field_name="output contract schema",
         )
-        if output_contract is not None
-        else {
+        assert isinstance(output_schema, dict)
+        answer_schema = rebase_local_schema_references(
+            output_schema,
+            pointer="#/properties/answer",
+        )
+    else:
+        answer_schema = {
             "type": "string",
             "description": "The final answer to the problem",
         }
-    )
     inputs_schema = {
         "answer": {
             **answer_schema,
