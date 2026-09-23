@@ -63,6 +63,8 @@ def test_active_agent_docs_only_teach_native_prompt_and_schema_contracts():
         assert "str`/`list[str]" not in content, file_path
         assert "workflow lists" not in content.lower(), file_path
         assert "workflow 列表" not in content, file_path
+        assert "objective combines `description`" not in content.lower(), file_path
+        assert "目标由 `description`" not in content, file_path
 
     combined = "\n".join(
         file_path.read_text(encoding="utf-8") for file_path in ACTIVE_AGENT_DOCS

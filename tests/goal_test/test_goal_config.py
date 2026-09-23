@@ -6,7 +6,11 @@ from agentloom.application.readiness import (
     validate_runtime_agent_config,
     validate_runtime_worker_config,
 )
-from agentloom.execution.goal import GoalConfig, normalize_goal_config
+from agentloom.execution.goal import (
+    GoalConfig,
+    build_goal_objective,
+    normalize_goal_config,
+)
 
 
 def _config(**overrides):
@@ -22,6 +26,16 @@ def _config(**overrides):
 
 def test_goal_contract_has_no_list_workflow_normalizer():
     assert not hasattr(goal_contract, "normalize_workflow_for_goal")
+
+
+def test_goal_objective_excludes_agent_description_metadata():
+    assert build_goal_objective(
+        workflow="Inspect, implement, and verify.",
+        task="Repair the release.",
+    ) == (
+        "Workflow:\nInspect, implement, and verify.\n\n"
+        "Runtime request:\nRepair the release."
+    )
 
 
 @pytest.mark.parametrize(
