@@ -15,6 +15,7 @@ from agentloom.execution.agent_runtime import (
     RuntimeDefinition,
     RuntimeEvent,
     RuntimeUsage,
+    copy_json_value,
 )
 from agentloom.execution.goal import (
     get_current_goal_provider,
@@ -99,6 +100,17 @@ class PiRuntime:
         definition = self.definition
         selection = definition.model_selection
         assert selection is not None
+        wire_output_contract = None
+        if definition.output_contract is not None:
+            output_schema = copy_json_value(
+                definition.output_contract.schema,
+                field_name="output contract schema",
+            )
+            assert isinstance(output_schema, dict)
+            wire_output_contract = OutputContract(
+                name=definition.output_contract.name,
+                schema=output_schema,
+            )
 
         def emit(kind, details):
             event = RuntimeEvent(kind=kind, application_id=request.application_id, task_id=request.task_id,
@@ -190,9 +202,7 @@ class PiRuntime:
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
                         model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
                         request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=runtime_options,
-                    output_contract=(OutputContract(name=definition.output_contract.name,
-                        schema=dict(definition.output_contract.schema))
-                        if definition.output_contract is not None else None),
+                    output_contract=wire_output_contract,
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
                     additional_args=dict(request.additional_args), checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)

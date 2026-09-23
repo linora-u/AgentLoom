@@ -4,7 +4,7 @@ from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
-from agentloom.execution.agent_runtime import OutputContract
+from agentloom.execution.agent_runtime import OutputContract, copy_json_value
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.native_tools import ToolManifestEntry
 from agentloom.execution.tool_gateway import ToolBinding
@@ -118,7 +118,12 @@ def final_answer_binding(
     """Return smolagents' explicit terminal Tool binding."""
 
     answer_schema = (
-        _embed_output_schema(dict(output_contract.schema))
+        _embed_output_schema(
+            copy_json_value(
+                output_contract.schema,
+                field_name="output contract schema",
+            )
+        )
         if output_contract is not None
         else {
             "type": "string",
