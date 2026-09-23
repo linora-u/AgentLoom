@@ -11,6 +11,8 @@ ACTIVE_AGENT_DOCS = (
     REPOSITORY_ROOT / "docs/cn/README.md",
     REPOSITORY_ROOT / "docs/en/agent_config.md",
     REPOSITORY_ROOT / "docs/cn/agent_config.md",
+    REPOSITORY_ROOT / "docs/en/goal_mode.md",
+    REPOSITORY_ROOT / "docs/cn/goal_mode.md",
 )
 
 
@@ -59,6 +61,8 @@ def test_active_agent_docs_only_teach_native_prompt_and_schema_contracts():
         assert "<task_spec>" not in content, file_path
         assert "<task_request>" not in content, file_path
         assert "str`/`list[str]" not in content, file_path
+        assert "workflow lists" not in content.lower(), file_path
+        assert "workflow 列表" not in content, file_path
 
     combined = "\n".join(
         file_path.read_text(encoding="utf-8") for file_path in ACTIVE_AGENT_DOCS
