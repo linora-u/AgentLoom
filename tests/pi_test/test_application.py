@@ -255,6 +255,40 @@ def test_invalid_structured_output_is_corrected_in_same_session_without_tools(
     assert "not valid JSON" in json.dumps(requests[1][1])
 
 
+def test_provider_failure_during_structured_correction_stays_provider_error(
+    tmp_path,
+):
+    from agentloom.application.run import ApplicationRunError
+
+    with model_service(
+        outputs=["not-json"],
+        fail_requests={2: 500},
+    ) as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["output_schema"] = {
+            "type": "object",
+            "properties": {
+                "findings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["findings"],
+            "additionalProperties": False,
+        }
+        app.write_text(yaml.safe_dump(config))
+
+        with (
+            bind_config(load_project_config(tmp_path)),
+            pytest.raises(ApplicationRunError) as captured,
+        ):
+            execute_app(app, file_logging=False)
+
+    assert captured.value.original_error.category == "provider"
+    assert len(requests) == 2
+
+
 def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
     tmp_path,
 ):

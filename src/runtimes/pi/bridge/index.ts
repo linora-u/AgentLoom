@@ -251,8 +251,8 @@ async function run(frame: Frame, abort: AbortController) {
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: outputCorrection && state !== "success" ? {category: "output_validation", message: "Agent exhausted its execution budget with an invalid structured output", retryable: true} :
-        state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} : null});
+      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
+        outputBudgetExhausted ? {category: "output_validation", message: "Agent exhausted its execution budget with an invalid structured output", retryable: true} : null});
   } catch {
     const interrupted = abort.signal.aborted;
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
