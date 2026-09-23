@@ -106,7 +106,6 @@ class AgentInvocation:
                 task=self.task,
             )
             goal_fingerprint = goal_objective_fingerprint(
-                description=str(owner._config.get("description", "")),
                 workflow=owner._config["workflow"],
                 task=self.task,
             )
