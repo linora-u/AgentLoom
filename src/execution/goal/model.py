@@ -44,12 +44,10 @@ def normalize_goal_config(config: dict[str, Any], *, source: str) -> GoalConfig:
 
 def build_goal_objective(
     *,
-    description: str,
     workflow: str,
     task: str | None,
 ) -> str:
-    parts = [f"Description:\n{description.strip()}"]
-    parts.append(f"Workflow:\n{workflow.strip()}")
+    parts = [f"Workflow:\n{workflow.strip()}"]
     if task is not None and task.strip():
         parts.append(f"Runtime request:\n{task.strip()}")
     return "\n\n".join(parts)

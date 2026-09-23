@@ -102,7 +102,6 @@ class AgentInvocation:
             if not self.owns_root_run:
                 raise ValueError("Goal mode can only be configured by the root Supervisor Agent")
             goal_objective = build_goal_objective(
-                description=str(owner._config.get("description", "")),
                 workflow=owner._config["workflow"],
                 task=self.task,
             )
