@@ -110,7 +110,8 @@ in public errors because they may echo credentials or prompts.
   user settings, saved sessions or environment credentials are discovered.
 - Stop uses the invocation's AgentLoom Hook Run. A block continues the same native
   in-memory session with the reason/context. `runtime_options.max_stop_attempts`
-  bounds attempts (default 3); persistent rejection fails the Application.
+  bounds terminal-delivery attempts (default 3), including structured-output
+  corrections; persistent rejection fails the Application.
 - Sequential workflow tasks may continue the current in-memory session.
   Persisted resume restores an SDK 0.79.4 session only for the same Application,
   task, selected definition, bridge/state version and workspace. A resumed
