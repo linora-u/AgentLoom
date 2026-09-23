@@ -13,6 +13,7 @@ from agentloom.execution.agent_runtime import (
     AgentRuntimeRequest,
     AgentRuntimeResult,
     JSONValue,
+    OutputContract,
     RuntimeCapabilities,
     RuntimeCheckpointEnvelope,
     RuntimeEvent,
@@ -132,6 +133,25 @@ def _runtime_error(error: Exception) -> AgentRuntimeError:
     )
 
 
+def _exhausted_output_correction(native_runtime: Any) -> bool:
+    """Return whether max steps followed a rejected structured final answer."""
+
+    steps = getattr(getattr(native_runtime, "memory", None), "steps", ())
+    for step in reversed(steps):
+        records = getattr(step, "tool_results", None) or ()
+        for record in reversed(records):
+            if not isinstance(record, ToolCallRecord):
+                continue
+            if record.tool_name != "final_answer" or record.status == "completed":
+                continue
+            return (
+                record.stage == "output_validation"
+                or "output does not satisfy" in record.reason
+                or "final_answer requires exactly" in record.reason
+            )
+    return False
+
+
 class SmolagentsRuntimeAdapter:
     """Hide smolagents run arguments and result types behind AgentLoom contracts."""
 
@@ -148,6 +168,7 @@ class SmolagentsRuntimeAdapter:
         model_binding: ModelTurnBinding,
         checkpoint_sink: Any | None = None,
         tool_gateway: ToolGateway | None = None,
+        output_contract: OutputContract | None = None,
     ) -> None:
         if not isinstance(model_binding, ModelTurnBinding):
             raise TypeError("model_binding must be a ModelTurnBinding")
@@ -157,6 +178,7 @@ class SmolagentsRuntimeAdapter:
         self._native_runtime = native_runtime
         self._model_binding = model_binding
         self._tool_gateway = tool_gateway
+        self._output_contract = output_contract
         self._default_checkpoint_sink = checkpoint_sink
         self._checkpoint_sink_context: ContextVar[Any | None] = ContextVar(
             f"agentloom_smolagents_checkpoint_sink_{id(self)}",
@@ -458,6 +480,16 @@ class SmolagentsRuntimeAdapter:
                     native_result = self._native_runtime.run(**run_kwargs)
             finally:
                 self._checkpoint_sink_context.reset(checkpoint_token)
+            if (
+                self._output_contract is not None
+                and getattr(native_result, "state", None) == "max_steps_error"
+                and _exhausted_output_correction(native)
+            ):
+                raise AgentRuntimeError(
+                    "Agent exhausted its execution budget with an invalid structured output",
+                    category="output_validation",
+                    retryable=True,
+                )
             require_runtime_state(
                 native_result,
                 allowed_states={"success", "max_steps_error"},
