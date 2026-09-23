@@ -38,12 +38,14 @@ print(scan_app_structure('applications/<app_name>'))
 
 - 是否有 Supervisor。
 - Worker 数量是否符合设计。
-- 每个 Worker 是否有 `agent_function_schema`。
+- Worker 是否正确依赖默认 `task: string`/文本契约，或声明有效的
+  `input_schema` / `output_schema`。
 - `tools` 是否与 workflow 动作匹配。
 - `agent_runtime`、`model_type`、所选基座的 `runtime_options` 是否合理。
 - Agent YAML 是否误写 LLM 参数、无效 `runtime_options.planning_interval` / `runtime_options.todo_mode` / `concurrency`、非字符串 `runtime_options.prompt_template_path`、错误 `fixed_args` 或 `mcp_servers`。
 - 生成器不得输出旧顶层 smol 参数：运行时会静默忽略，不会替作者转换或拒绝。`todo_mode` 的 `"on"` / `"off"` 必须加引号。
-- Goal mapping 是否显式配置 `enabled`、Worker 是否错误配置 Goal；Goal workflow list 是否按一个编号上下文运行。
+- Goal mapping 是否显式配置 `enabled`、Worker 是否错误配置 Goal；所有
+  `workflow` 是否都是单个非空字符串。
 
 ```bash
 .venv/bin/python -m py_compile applications/<app_name>/<app_name>_app.py
@@ -227,7 +229,8 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 
 - `workflows/<app>_agent.yaml` 有 `worker_agents`，数量 >= 2。
 - `workflows/worker_agents/*.yaml` 文件存在。
-- 每个 Worker 有合法 `agent_function_schema`。
+- Worker 使用默认 `task: string`/文本契约，或有合法的 `input_schema` /
+  `output_schema`；结构化输出所选 Runtime/Provider 必须支持。
 - 结构扫描能列出 Worker Agents。
 - README 写清 Supervisor/Worker 分工。
 
@@ -236,7 +239,8 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 - `agentloom-framework-skill/scripts/*.py` 可 `py_compile`。
 - `applications/feature_planner_demo` 是按本 Skill 创建的多 Agent 示例应用。
 - `validate_application_yaml.py --app-root applications/feature_planner_demo` 通过：`valid=true`，`files_checked=3`，`error_count=0`。
-- `scan_app_structure('applications/feature_planner_demo')` 证明它包含 1 个 Supervisor 和 2 个 Worker，两个 Worker 都有 `agent_function_schema`。
+- `scan_app_structure('applications/feature_planner_demo')` 证明它包含 1 个 Supervisor
+  和 2 个显式引用的 Worker，并列出它们的原生输入/输出契约。
 - `.venv/bin/loom create applications/feature_planner_demo/workflows/feature_planner_demo_agent.yaml -o /tmp/feature_planner_demo_generated_app.py` 通过，生成脚本可 `py_compile`。
 - 真实运行验证在 120 秒上限内完成 Supervisor 启动和 `requirement_router` 调用，并进入 `implementation_blueprint`；未得到最终回答，记录为“运行路径部分通过，端到端输出未完成”。
 - 运行时发现：如果纯规划 demo 不需要内置工具，应显式设置 Agent 级 `toolsets: []`；这也会隐藏 `skill` 工具与 catalogue。

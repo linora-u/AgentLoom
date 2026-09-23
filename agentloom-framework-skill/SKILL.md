@@ -21,7 +21,7 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 - 用户说“帮我实现一个功能 / 用框架做一个功能 / 创建一个应用 / 扩展框架能力”：先读 [`references/function-routing.md`](references/function-routing.md)，判断是新建 Application、扩展现有 Application、加 Worker、加 Tool、加私有 Skill、加 Hook，还是只改文档。
 - 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、llm.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
-- 需要写 Agent YAML / Worker YAML / `agent_function_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
+- 需要写 Agent YAML / Worker YAML / `input_schema` / `output_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
 - 需要配置或实现 Goal Mode、长期 continuation 或 checkpoint resume：读 [`references/yaml-contract.md`](references/yaml-contract.md)
   的 Goal 契约和 [`references/validation-and-review.md`](references/validation-and-review.md)
   的真实 Goal 验证矩阵；用户语义以 `docs/en/goal_mode.md` 为准。
