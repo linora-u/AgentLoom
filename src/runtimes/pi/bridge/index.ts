@@ -8,10 +8,11 @@ import { configureModel } from "./model.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
 import { restoreSession, SessionPersistence } from "./checkpoint.js";
+import { enableInstructionOnlyTurns, runInstructionOnlyTurn } from "./session.js";
 import { randomUUID } from "node:crypto";
 import {
   AuthStorage, ModelRegistry, SettingsManager, SessionManager, DefaultResourceLoader,
-  createAgentSession, shouldCompact, type AgentSession,
+  createAgentSession, type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 
 type Obj = Record<string, any>;
@@ -88,6 +89,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
     model: registry.find("agentloom", modelId), thinkingLevel: "off", tools: selected.tools.map(tool => tool.name),
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
+  enableInstructionOnlyTurns(created);
   await created.bindExtensions({onError: () => created.agent.abort()});
   modelFailure = configureModel(created, s, p.model.request_headers, async () => {
     await persistence!.save();
@@ -195,13 +197,7 @@ async function run(frame: Frame, abort: AbortController) {
           content: content || "",
         }, {triggerTurn: true});
       } else if (content === null) {
-        await session!.agent.prompt([]);
-        const context = session!.getContextUsage();
-        const settings = session!.settingsManager.getCompactionSettings();
-        if (context?.tokens !== null && context?.tokens !== undefined &&
-            shouldCompact(context.tokens, context.contextWindow, settings)) {
-          try {await session!.compact();} catch { /* SDK compaction fails open. */ }
-        }
+        await runInstructionOnlyTurn(session!);
       } else {
         await session!.prompt(content, {expandPromptTemplates: false});
       }
