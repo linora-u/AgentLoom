@@ -37,8 +37,8 @@ instruction；提供 task 时，它作为独立 user message，省略时不会�
 ## 恢复与可观测性
 
 启用 checkpoint 后，`<application_id>/<task_id>/goal.json` 保存身份、目标指纹、状态、
-`goal_started`、证据与时间戳。恢复保留 Goal，并校验 description、workflow 和 runtime
-任务一致。损坏状态或禁用活动 Goal 仍沿用原有错误语义。
+`goal_started`、证据与时间戳。恢复保留 Goal，并校验 workflow 和 runtime task 一致。
+损坏状态或禁用活动 Goal 仍沿用原有错误语义。
 
 旧 checkpoint 的预算和 Goal 用量字段静默忽略；旧 `budget_limited` Goal 按 `active`
 恢复，已完成 Goal 仍保持完成。无需提高预算或迁移配置。

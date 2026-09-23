@@ -2169,7 +2169,10 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
     assert persisted["evidence"] == "delivered; tests passed"
 
     resumed_agent = DummyGoalAgent(
-        config=config,
+        config={
+            **config,
+            "description": "Updated display metadata only.",
+        },
         model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
