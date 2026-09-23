@@ -11,6 +11,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def imported_module_names(source: str) -> set[str]:
+    modules: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            modules.add(node.module)
+            modules.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return modules
+
+
 def run_fresh(source: str) -> None:
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(source)],
@@ -103,19 +114,30 @@ def test_tracked_python_sources_do_not_import_retired_package_names() -> None:
         if not raw_path:
             continue
         relative_path = raw_path.decode()
-        tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                modules = (alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                modules = (node.module,)
-            else:
-                continue
-            for module in modules:
-                if any(module == prefix or module.startswith(f"{prefix}.") for prefix in retired):
-                    offenders.append(f"{relative_path}:{node.lineno}:{module}")
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        for module in imported_module_names(source):
+            if any(module == prefix or module.startswith(f"{prefix}.") for prefix in retired):
+                offenders.append(f"{relative_path}:{module}")
 
     assert offenders == []
+
+
+def test_import_scanner_expands_from_import_members() -> None:
+    assert imported_module_names(
+        textwrap.dedent(
+            """
+            import agentloom.application.runner
+            from agentloom import configuration
+            from agentloom.app import runner
+            """
+        )
+    ) == {
+        "agentloom.application.runner",
+        "agentloom",
+        "agentloom.configuration",
+        "agentloom.app",
+        "agentloom.app.runner",
+    }
 
 
 def test_root_cli_is_only_a_command_composition_root() -> None:
