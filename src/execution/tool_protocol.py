@@ -289,19 +289,25 @@ class ToolCallRecord:
 
     def model_content(self) -> str:
         if self.status == "completed":
-            payload = {"ok": True, "status": self.status, "output": self.model_output()}
-        else:
-            error = self.error or ToolErrorRecord(
-                kind="interrupted",
-                message="Tool execution did not reach a terminal result.",
-                retryable=True,
-                stage="tool_execution",
+            output = json.dumps(
+                self.model_output(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                default=str,
             )
-            payload = {
-                "ok": False,
-                "status": self.status,
-                "error": asdict(error),
-            }
+            return f'{{"ok":true,"status":"completed","output":{output}}}'
+        error = self.error or ToolErrorRecord(
+            kind="interrupted",
+            message="Tool execution did not reach a terminal result.",
+            retryable=True,
+            stage="tool_execution",
+        )
+        payload = {
+            "ok": False,
+            "status": self.status,
+            "error": asdict(error),
+        }
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 
 

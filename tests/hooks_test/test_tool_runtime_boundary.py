@@ -167,6 +167,51 @@ def test_gateway_compresses_only_model_projection_for_retriever() -> None:
     engine.compress_tool_result.assert_called_once()
 
 
+def test_gateway_serializes_structured_model_projection_deterministically() -> None:
+    run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    engine = MagicMock()
+    engine.compress_tool_result.return_value = "[ContextRef ctx_json] preview"
+    raw = {"z": ["payload" * 100], "a": 1}
+    gateway = AgentLoomToolGateway.from_tools(
+        [
+            _tool("structured_tool", raw),
+            _tool("loom_retrieve_context", "retrieved"),
+        ]
+    )
+
+    with (
+        patch(
+            "agentloom.execution.context_engine.runtime.get_active_context_engine",
+            return_value=engine,
+        ),
+        _bind(run),
+    ):
+        record = gateway.invoke(
+            call_id="structured-call",
+            tool_name="structured_tool",
+            arguments={},
+        )
+
+    assert record.output == raw
+    assert record.model_output() == "[ContextRef ctx_json] preview"
+    assert engine.compress_tool_result.call_args.args[0] == (
+        '{"a":1,"z":["' + ("payload" * 100) + '"]}'
+    )
+
+
+def test_structured_model_content_has_stable_key_order() -> None:
+    record = ToolCallRecord.completed(
+        call_id="structured-call",
+        tool_name="structured_tool",
+        input={},
+        output={"z": 2, "a": 1},
+    )
+
+    assert record.model_content() == (
+        '{"ok":true,"status":"completed","output":{"a":1,"z":2}}'
+    )
+
+
 def test_trusted_evidence_is_captured_before_result_compression() -> None:
     fact = "Stable page size is 250."
     seen_response = {}
