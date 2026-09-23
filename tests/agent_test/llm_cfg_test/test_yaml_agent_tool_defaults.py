@@ -225,6 +225,35 @@ def test_agent_as_tool_supports_an_object_root_local_reference():
     assert tool(query="hello", count=2) == 'RUN::{"count":2,"query":"hello"}'
 
 
+def test_agent_as_tool_allows_reference_shaped_instance_data_in_schema():
+    worker = _make_worker(
+        {
+            "name": "reference_data_worker",
+            "agent_runtime": "smolagents",
+            "description": "worker desc",
+            "tools": [],
+            "workflow": "demo workflow",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "payload": {
+                        "const": {"$ref": "literal-not-a-schema-reference"},
+                    },
+                },
+                "required": ["payload"],
+                "additionalProperties": False,
+            },
+        }
+    )
+
+    worker._validate_config()
+    tool = worker.agent_as_tool()
+
+    assert tool(payload={"$ref": "literal-not-a-schema-reference"}) == (
+        'RUN::{"payload":{"$ref":"literal-not-a-schema-reference"}}'
+    )
+
+
 def test_agent_as_tool_preserves_structured_result():
     worker = _make_worker(
         {

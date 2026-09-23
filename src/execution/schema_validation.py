@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from referencing.jsonschema import DRAFT202012
+
 
 def reject_remote_schema_references(
     value: object,
@@ -13,24 +15,23 @@ def reject_remote_schema_references(
 ) -> None:
     """Reject references that cannot be resolved within one schema document."""
 
-    if isinstance(value, Mapping):
-        for key, child in value.items():
-            child_path = f"{path}.{key}"
-            if key in {"$ref", "$dynamicRef"} and (
-                not isinstance(child, str) or not child.startswith("#")
-            ):
-                raise ValueError(
-                    f"{field_name} contains a remote reference at {child_path}"
-                )
-            reject_remote_schema_references(
-                child,
-                field_name=field_name,
-                path=child_path,
+    if isinstance(value, bool) or not isinstance(value, Mapping):
+        return
+
+    for keyword in ("$ref", "$dynamicRef"):
+        if keyword not in value:
+            continue
+        reference = value[keyword]
+        if not isinstance(reference, str) or (
+            reference != "" and not reference.startswith("#")
+        ):
+            raise ValueError(
+                f"{field_name} contains a remote reference at {path}.{keyword}"
             )
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            reject_remote_schema_references(
-                child,
-                field_name=field_name,
-                path=f"{path}[{index}]",
-            )
+
+    for index, child in enumerate(DRAFT202012.subresources_of(value)):
+        reject_remote_schema_references(
+            child,
+            field_name=field_name,
+            path=f"{path}.<subschema>[{index}]",
+        )
