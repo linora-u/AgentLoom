@@ -135,7 +135,6 @@ workflow: |
 tools:
   - name: "read_file"
   - name: "write_file"
-  - name: "get_file_outline"
   - name: "get_module_context"
     module: "applications.my_app.agent_tools.module_context"
     function: "get_module_context"
@@ -700,19 +699,9 @@ tools:
 | `read_file` | 读取文件内容（支持 offset/limit 分段读取） |
 | `write_file` | 创建新文件或覆盖已有文件 |
 | `edit_file` | 应用一个或多个唯一文本编辑 |
-| `write_markdown_file` | 写入 Markdown 文件 |
-| `write_markdown_file_raw` | 写入原始 Markdown 文件 |
-| `append_markdown_sections` | 追加 Markdown 章节内容 |
-| `get_file_outline` | 获取代码大纲（函数/类/结构体） |
 | `list_directory` | 列出目录结构 |
 | `grep_search` | 正则搜索文件内容（基于 ripgrep） |
 | `glob_search` | Glob 模式搜索文件 |
-| `ast_grep_search_file` | AST 模式搜索 |
-| `lsp_find_definition` | 查找符号定义 |
-| `lsp_find_references` | 查找符号引用 |
-| `lsp_get_document_symbols` | 列出文档符号 |
-| `lsp_hover` | 查看 hover/type 信息 |
-| `lsp_get_workspace_symbols` | 搜索工作区符号 |
 | `loom_retrieve_context` | 读取压缩上下文引用 |
 | `shell_tool` | 执行 shell 命令（受白名单限制） |
 | `check_background_task` | 读取后台任务状态与输出 |

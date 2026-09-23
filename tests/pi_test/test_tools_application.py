@@ -52,6 +52,12 @@ def wait_for_cleanup(marker: str) -> str:
     return 'closed'
 
 
+def file_probe(file_path: str) -> str:
+    """Read one fixture file for Hook input-repair coverage."""
+    from pathlib import Path
+    return Path(file_path).read_text()
+
+
 def select(app, **values):
     config = yaml.safe_load(app.read_text())
     config.update(values)
@@ -78,22 +84,24 @@ def test_selected_official_read_commits_before_model_continues(tmp_path):
     assert receipts[0]['request']['identity']['call_id'] == 'read-1'
 
 
-def test_platform_outline_repairs_raw_input_and_returns_to_same_pi_application(tmp_path):
+def test_platform_tool_repairs_raw_input_and_returns_to_same_pi_application(tmp_path):
     source = tmp_path / 'source.py'
     source.write_text('def saffron_entrypoint(value):\n    return value + 19\n')
     hook = tmp_path / 'repair.py'
     hook.write_text('import json, sys, time\np = json.load(sys.stdin)\ntime.sleep(0.02)\n'
                     'assert p["tool_input"]["file_path"] == 19\n'
                     f'print(json.dumps({{"decision":"modify", "modified_input":{{"file_path":{str(source)!r}}}}}))\n')
-    with model_service(turns=[[('outline-1', 'get_file_outline', {'file_path': 19})]]) as (url, requests):
+    with model_service(turns=[[('probe-1', 'file_probe', {'file_path': 19})]]) as (url, requests):
         app = project(tmp_path, url)
-        select(app, tools=[{'name': 'get_file_outline'}], hooks={'PreToolUse': [
-            {'id': 'repair', 'matcher': 'get_file_outline', 'command': f'{sys.executable} {hook}'}]})
+        select(app, tools=[{'name': 'file_probe', 'module': __name__, 'function': 'file_probe'}],
+               hooks={'PreToolUse': [
+                   {'id': 'repair', 'matcher': 'file_probe',
+                    'command': f'{sys.executable} {hook}'}]})
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert result.output == 'Pi answer'
     assert len(requests) == 2
-    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['get_file_outline']
+    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['file_probe']
     messages = requests[1][1]['messages']
     assert 'saffron_entrypoint' in next(message['content'] for message in messages if message['role'] == 'tool')
     call = next(message['tool_calls'][0] for message in messages if message.get('tool_calls'))
@@ -101,7 +109,7 @@ def test_platform_outline_repairs_raw_input_and_returns_to_same_pi_application(t
     events = [json.loads(line) for line in (result.run.run_dir / 'audit/runtime_events.jsonl').read_text().splitlines()]
     records = [event['details']['record'] for event in events if event['kind'] == 'tool']
     assert len(records) == 1
-    assert records[0]['call_id'] == 'outline-1'
+    assert records[0]['call_id'] == 'probe-1'
     assert records[0]['input'] == {'file_path': str(source)}
     assert records[0]['status'] == 'completed'
     assert 'saffron_entrypoint' in records[0]['output']

@@ -65,7 +65,6 @@ def _run_code(resume_task_id: str | None = None) -> str:
         from agentloom.config import C
         C.raw.setdefault("runtime", {{}})["root_dir"] = {str(RUNTIME_ROOT)!r}
         C.raw.setdefault("checkpoint", {{}})["cleanup_on_success"] = False
-        C.raw.setdefault("lsp_servers", {{}})["enabled"] = False
         C.raw["skills"] = {{"paths": []}}
         from agentloom.app.runner import execute_app
         result = execute_app({YAML_PATH!r}{resume_arg}, file_logging=True)

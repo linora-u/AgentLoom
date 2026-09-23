@@ -531,10 +531,9 @@ def test_native_definition_has_four_real_typed_workers():
     assert (APP_ROOT / "workflows/worker_agents/change_planner.md").is_file()
 
 
-def test_application_config_retains_run_evidence_and_disables_unused_connections():
+def test_application_config_retains_run_evidence_and_disables_unused_mcp():
     config = yaml.safe_load((APP_ROOT / "config/system.yaml").read_text())
     assert config["checkpoint"]["cleanup_on_success"] is False
-    assert config["lsp_servers"]["enabled"] is False
     assert config["mcp_servers"] is None
 
 

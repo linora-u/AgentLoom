@@ -23,7 +23,6 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 - [3. Historical Execution Fields](#3-historical-execution-fields)
 - [4. skills — Global Skills Configuration](#4-skills--global-skills-configuration)
 - [4.5 hooks — Independent Hook Runtime](#45-hooks--independent-hook-runtime)
-- [5. lsp_servers — LSP Language Server Configuration](#5-lsp_servers--lsp-language-server-configuration)
 - [6. shell_tool — Shell Execution Model](#6-shell_tool--shell-execution-model)
 - [7. runtime and logging — Runtime Storage and Logging](#7-runtime-and-logging--runtime-storage-and-logging)
 - [8. tools — Tool System Configuration](#8-tools--tool-system-configuration)
@@ -207,36 +206,6 @@ layer replacement, tombstones, event semantics, and the Shell protocol.
 
 ---
 
-## 5. lsp_servers — LSP Language Server Configuration
-
-Configures LSP language servers that are pre-warmed at agent startup and remain alive for the session. Provides code intelligence features (go-to-definition, find references, document symbols, hover type info).
-
-After `uv sync`, all required binaries are automatically available:
-- **Python**: `jedi-language-server` (pip dependency, in `.venv/bin/`)
-- **Go**: `go` binary (via `go-bin` PyPI package), `gopls` via `go install`
-- **TypeScript**: `node` + `npm` (via `nodejs-bin` PyPI package), `typescript-language-server` auto-installed
-- **Rust/Java/C#/Kotlin**: auto-downloaded by the LSP backend
-
-```yaml
-lsp_servers:
-  enabled: true
-  max_restarts: 3
-  servers:
-    - python
-    - go
-    - typescript
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `bool` | `true` | Enable/disable LSP services |
-| `max_restarts` | `int` | `3` | Max crash recovery attempts per server |
-| `servers` | `list` | `[python]` | Languages to start (40+ supported) |
-
-> Servers are managed by `agentloom.integrations.lsp.lsp_server_manager.LSPServerManager`. Unsupported languages automatically fall back to tree-sitter AST analysis (46+ languages).
-
----
-
 ## 6. shell_tool — Shell Execution Model
 
 Agents execute shell commands only through structured `shell_tool` calls. Commands run in controlled local subprocesses; permissions, path rules, and command allow-lists are governed by `tool_access_control` and `shell_settings`. The framework has no separate mode for model-generated Python execution.
@@ -376,8 +345,6 @@ Agent YAML `toolsets:` replaces this global list entirely. `toolsets: []` means 
 | `skills` | `skill` |
 | `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
 | `planning` | `todo_write` |
-| `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
-| `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
 
 Complete predefined tool list:
 
@@ -386,16 +353,9 @@ Complete predefined tool list:
 | `write_file` | Create new file or overwrite existing |
 | `read_file` | Read file content (supports offset/limit for ranges) |
 | `edit_file` | Apply one or more unique text edits |
-| `get_file_outline` | Get code outline (functions/classes/structs) |
 | `list_directory` | List directory structure |
 | `grep_search` | Regex search file contents |
 | `glob_search` | Find files by glob pattern |
-| `ast_grep_search_file` | AST pattern search |
-| `lsp_find_definition` | Find symbol definition |
-| `lsp_find_references` | Find symbol references |
-| `lsp_get_document_symbols` | List document symbols |
-| `lsp_hover` | Show hover/type information |
-| `lsp_get_workspace_symbols` | Search workspace symbols |
 | `loom_retrieve_context` | Retrieve compressed context refs |
 | `skill` | Load one selected Skill into the conversation |
 | `session_search` | Search redacted records from prior Runs |
@@ -407,9 +367,6 @@ Complete predefined tool list:
 | `check_background_task` | Check background task status and recent output |
 | `kill_background_task` | Terminate a running background task |
 | `list_background_tasks` | List all background tasks |
-| `write_markdown_file` | Write Markdown file |
-| `write_markdown_file_raw` | Write raw Markdown content |
-| `append_markdown_sections` | Append Markdown sections |
 
 **Example**:
 

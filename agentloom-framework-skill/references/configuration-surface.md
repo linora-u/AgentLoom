@@ -150,7 +150,6 @@ skills, tool_metadata, tool_output_limits
 | `context_engine` | 可逆上下文压缩：工具原文进本地 store，模型可见压缩预览和 `ContextRef` |
 | `skills` | `{paths: [...]}` 额外 Skill 发现目录 |
 | `hooks` | 独立直接 Shell Hook 与显式 `HOOK.yaml` Bundle |
-| `lsp_servers` | LSP 服务开关、重启次数、语言列表 |
 | `runtime` | 唯一 `.agentloom` root、run/artifact 保留天数和自动清理间隔；只允许全局配置 |
 | `logging` | `level/console_enabled/file_enabled/max_file_bytes/backup_count`；run-scoped 且只允许全局配置 |
 | `default_toolsets` | 默认加载 toolset 名列表 |
@@ -257,18 +256,14 @@ tool_access_control:
 `default_toolsets` 与 Agent 级 `toolsets` 必须写 catalog toolset 名，不是工具名。可用 toolsets：
 
 ```text
-core_shell, core_file, core_search, context, skills, self_learning, planning,
-markdown_report, code_nav
+core_shell, core_file, core_search, context, skills, self_learning, planning
 ```
 
 常见工具包括：
 
 ```text
 read_file, write_file, edit_file, list_directory,
-write_markdown_file, write_markdown_file_raw, append_markdown_sections,
-get_file_outline, lsp_find_definition, lsp_find_references,
-lsp_get_document_symbols, lsp_hover, lsp_get_workspace_symbols,
-grep_search, glob_search, ast_grep_search_file, loom_retrieve_context,
+grep_search, glob_search, loom_retrieve_context,
 shell_tool, check_background_task, kill_background_task, list_background_tasks,
 skill, session_search, session_scroll, memory, skill_manage,
 todo_write

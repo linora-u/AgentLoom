@@ -94,8 +94,8 @@ def write_yaml(path: Path, value: dict) -> None:
 def project(root: Path, url: str, *, supervisor: str, worker: str) -> Path:
     write_yaml(root / 'config/system.yaml', {
         'runtime': {'root_dir': str(root / 'runtime')},
-        'lsp_servers': {'enabled': False}, 'checkpoint': {'enabled': False},
-        'self_learning': {'enabled': False}, 'default_toolsets': [],
+        'checkpoint': {'enabled': False}, 'self_learning': {'enabled': False},
+        'default_toolsets': [],
         'logging': {'console_enabled': False},
     })
     model = {'adapter': 'openai_chat', 'base_url': url, 'api_key': 'fixture-key',
@@ -157,3 +157,8 @@ def inspect_invocation(label: str, synchronize: bool = False) -> str:
         'application_id': context.application_id, 'instance_id': execution.agent_id,
         'root_run_id': execution.root_run_id, 'local_run_id': execution.local_run_id,
         'hook_run_id': execution.hook_run.local_run_id})
+
+
+def read_context_fixture(file_path: str) -> str:
+    """Read one text fixture for runtime-neutral ContextRef validation."""
+    return Path(file_path).read_text()

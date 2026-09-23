@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tarfile
 from zipfile import ZipFile
 
@@ -67,7 +66,7 @@ def validate(output, profiles, node):
         sources = [path.name for path in (ROOT / "src/runtimes/pi/bridge").glob("*.ts")]
         for name in ("package.json", "package-lock.json", "tsconfig.json", *sources):
             assert "agentloom/runtimes/pi/bridge/" + name in names, name
-        assert len([name for name in names if "/tools/queries/" in name and name.endswith(".scm")]) == 56
+        assert not any("/tools/queries/" in name for name in names)
         assert not any("/node_modules/" in name or "/dist/" in name or ".agentloom-install." in name for name in names)
         assert "agentloom/runtimes/smolagents/prompts/toolcalling_agent.example.yaml" in names
     with tarfile.open(sdist) as archive:
@@ -107,11 +106,11 @@ def validate(output, profiles, node):
             command(profile + "-sdk-install", [python, "-I", "-m", "agentloom", "runtime", "install", "pi"])
             command(profile + "-sdk-idempotent", [python, "-I", "-m", "agentloom", "runtime", "install", "pi"])
             results.extend(run_case(case) for case in ("stale_bridge", "missing_asset"))
-            cases = (("no_tools", "read", "outline_python", "outline_typescript", "ast", "lsp")
+            cases = (("no_tools", "read", "mcp", "memory", "goal")
                      if code_tools else ("help", "missing_yaml", "missing_smol", "no_tools", "read",
                                          "mcp", "memory", "goal", "provider_failure", "child_failure"))
         else:
-            cases = ("help", "missing_yaml", "smol_read", "shipped_yaml", "outline_python", "mcp", "memory")
+            cases = ("help", "missing_yaml", "smol_read", "shipped_yaml", "mcp", "memory", "goal")
         with ThreadPoolExecutor(max_workers=3) as pool:
             results.extend(pool.map(run_case, cases))
         report["profiles"][profile] = {"requirements_sha256": digest(requirements), "cases": results}

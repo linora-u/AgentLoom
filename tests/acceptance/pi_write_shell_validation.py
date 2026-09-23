@@ -158,7 +158,7 @@ def child(case, workspace, profile):
     config = workspace / 'config'; config.mkdir(mode=0o700)
     shutil.copyfile(ROOT / 'config/llm.yaml', config / 'llm.yaml'); (config / 'llm.yaml').chmod(0o600)
     system = {'runtime': {'root_dir': str(workspace / 'runtime')}, 'checkpoint': {'enabled': False},
-              'logging': {'console_enabled': False}, 'self_learning': {'enabled': False}, 'default_toolsets': [], 'lsp_servers': {'enabled': False}}
+              'logging': {'console_enabled': False}, 'self_learning': {'enabled': False}, 'default_toolsets': []}
     definition = {'name': f'pi_{case}', 'agent_runtime': 'pi', 'model_type': profile, 'toolsets': []}
     target, original = configure(case, workspace, definition)
     (config / 'system.yaml').write_text(yaml.safe_dump(system))
