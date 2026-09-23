@@ -6,6 +6,45 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 type Obj = Record<string, any>;
 let nextRequestAt = 0;
 
+const EMPTY_IMAGE_PLACEHOLDER = "(see attached image)";
+
+function emptyToolCallIds(messages: readonly Obj[]) {
+  const callIds = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
+    const parts = message.content as Obj[];
+    if (!parts.length || parts.some(part => part.type !== "text" || typeof part.text !== "string") ||
+        parts.map(part => part.text).join("\n") !== "") continue;
+    const callId = message.toolCallId;
+    if (typeof callId !== "string") continue;
+    callIds.add(callId);
+    callIds.add(callId.split("|", 1)[0]);
+  }
+  return callIds;
+}
+
+function restoreEmptyToolResults(payload: unknown, messages: readonly Obj[]) {
+  if (!payload || typeof payload !== "object") return payload;
+  const callIds = emptyToolCallIds(messages);
+  if (!callIds.size) return payload;
+  const request = payload as Obj;
+  let changed = false;
+  const result = {...request};
+  if (Array.isArray(request.messages)) result.messages = request.messages.map((message: Obj) => {
+    if (message.role !== "tool" || !callIds.has(message.tool_call_id) ||
+        message.content !== EMPTY_IMAGE_PLACEHOLDER) return message;
+    changed = true;
+    return {...message, content: ""};
+  });
+  if (Array.isArray(request.input)) result.input = request.input.map((item: Obj) => {
+    if (item.type !== "function_call_output" || !callIds.has(item.call_id) ||
+        item.output !== EMPTY_IMAGE_PLACEHOLDER) return item;
+    changed = true;
+    return {...item, output: ""};
+  });
+  return changed ? result : payload;
+}
+
 function failedStream(model: Model<Api>, interrupted: boolean) {
   const stream = createAssistantMessageEventStream();
   const message: AssistantMessage = {role: "assistant", content: [], api: model.api, provider: model.provider,
@@ -46,7 +85,10 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
               await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: options?.signal});
               nextRequestAt = performance.now() + 60000 / settings.requests_per_minute;
               timeout = setTimeout(() => {failure.timedOut = true; timeoutAbort.abort();}, settings.timeout * 1000);
-              return projected;
+              return restoreEmptyToolResults(
+                projected === undefined ? payload : projected,
+                selectedContext.messages as Obj[],
+              );
             },
             onResponse: async (response, selectedModel) => {
               failure.status = response.status;
