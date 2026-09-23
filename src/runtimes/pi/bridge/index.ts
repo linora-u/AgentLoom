@@ -11,7 +11,7 @@ import { restoreSession, SessionPersistence } from "./checkpoint.js";
 import { randomUUID } from "node:crypto";
 import {
   AuthStorage, ModelRegistry, SettingsManager, SessionManager, DefaultResourceLoader,
-  createAgentSession, type AgentSession,
+  createAgentSession, shouldCompact, type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 
 type Obj = Record<string, any>;
@@ -196,6 +196,12 @@ async function run(frame: Frame, abort: AbortController) {
         }, {triggerTurn: true});
       } else if (content === null) {
         await session!.agent.prompt([]);
+        const context = session!.getContextUsage();
+        const settings = session!.settingsManager.getCompactionSettings();
+        if (context?.tokens !== null && context?.tokens !== undefined &&
+            shouldCompact(context.tokens, context.contextWindow, settings)) {
+          try {await session!.compact();} catch { /* SDK compaction fails open. */ }
+        }
       } else {
         await session!.prompt(content, {expandPromptTemplates: false});
       }
