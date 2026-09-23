@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import agentloom.execution.goal as goal_contract
 import pytest
 from agentloom.application.readiness import (
     validate_runtime_agent_config,
@@ -17,6 +18,10 @@ def _config(**overrides):
         "tools": [],
         **overrides,
     }
+
+
+def test_goal_contract_has_no_list_workflow_normalizer():
+    assert not hasattr(goal_contract, "normalize_workflow_for_goal")
 
 
 @pytest.mark.parametrize(
