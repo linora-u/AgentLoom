@@ -50,27 +50,30 @@ input_schema:
 
         '
     retry_count:
-      type: string
+      type: integer
       description: '重试次数示例参数，用于验证 integer 类型透传。
 
         '
     dry_run:
-      type: string
+      type: boolean
       description: '是否仅做演练，用于验证 boolean 类型透传。
 
         '
     threshold:
-      type: string
+      type: number
       description: '阈值示例参数，用于验证 number 类型透传。
 
         '
     context:
-      type: string
+      type: object
+      additionalProperties: true
       description: '上下文对象示例参数，用于验证 object 类型透传。
 
         '
     checkpoints:
-      type: string
+      type: array
+      items:
+        type: string
       description: '检查点数组示例参数，用于验证 array 类型透传。
 
         '

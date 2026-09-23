@@ -70,21 +70,34 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
     if parameters_schema.get("type") != "object":
         raise ValueError(f"Expected parameters container type to be 'object', got: {parameters_schema.get('type')}")
     schema_properties = (schema.get("parameters") or {}).get("properties", {})
-    non_string_fields = [
-        key for key, value in schema_properties.items()
-        if not isinstance(value, dict) or value.get("type") != "string"
-    ]
-    if non_string_fields:
-        raise ValueError(f"Expected all schema parameter types to be string, got non-string fields: {non_string_fields}")
+    expected_types = {
+        "query": "string",
+        "tag": "string",
+        "scene": "string",
+        "retry_count": "integer",
+        "dry_run": "boolean",
+        "threshold": "number",
+        "context": "object",
+        "checkpoints": "array",
+    }
+    actual_types = {
+        key: value.get("type")
+        for key, value in schema_properties.items()
+        if isinstance(value, dict)
+    }
+    if actual_types != expected_types:
+        raise ValueError(
+            f"Generated parameter types mismatch. expected={expected_types}, got={actual_types}"
+        )
     demo_inputs = {
         "query": "请把我传给你的所有参数完整输出出来（包含每个参数名和参数值）。",
         "tag": "demo-tag",
         "scene": "manual-review",
-        "retry_count": "1",
-        "dry_run": "true",
-        "threshold": "1.25",
-        "context": "{\"demo_key\": \"demo-context\"}",
-        "checkpoints": "[\"schema\", \"invoke\", \"output\"]",
+        "retry_count": 1,
+        "dry_run": True,
+        "threshold": 1.25,
+        "context": {"demo_key": "demo-context"},
+        "checkpoints": ["schema", "invoke", "output"],
     }
     print("\n--- Manual Runtime Log Checklist ---")
     print("1) workflow is delivered through Runtime instructions")
