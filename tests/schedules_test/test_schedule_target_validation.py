@@ -53,10 +53,6 @@ def _supervisor_with_worker(root: Path) -> tuple[Path, Path]:
             "agent_runtime: smolagents\n"
             "description: Demo worker.\n"
             "workflow: Complete the delegated task.\n"
-            "agent_function_schema:\n"
-            "  description: Work.\n"
-            "  inputs: {task: {description: Task, required: true}}\n"
-            "  output: {description: Result}\n"
         ),
         encoding="utf-8",
     )

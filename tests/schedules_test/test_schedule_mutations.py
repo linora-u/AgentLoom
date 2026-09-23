@@ -216,10 +216,7 @@ def test_application_composition_rejects_invalid_targets_before_storage(
                 "name: worker\n"
                 "agent_runtime: smolagents\n"
                 "description: Worker.\n"
-                "agent_function_schema:\n"
-                "  description: Work.\n"
-                "  inputs: {task: {description: Task, required: true}}\n"
-                "  output: {description: Result}\n"
+                "workflow: Complete the delegated task.\n"
             ),
             encoding="utf-8",
         )
