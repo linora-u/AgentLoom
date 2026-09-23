@@ -10,6 +10,13 @@ from agentloom.execution.native_tools import ToolManifestEntry
 from agentloom.execution.tool_gateway import ToolBinding
 
 
+class _OutputValidationError(ValueError):
+    """A final_answer call that does not satisfy the Agent output contract."""
+
+    kind = "output_validation"
+    stage = "output_validation"
+
+
 def _return_final_answer(answer: Any) -> Any:
     return answer
 
@@ -69,11 +76,14 @@ def final_answer_binding(
     if output_contract is not None:
 
         def validate_terminal(arguments: dict[str, Any]) -> None:
-            if set(arguments) != {"answer"}:
-                raise ValueError(
-                    "final_answer requires exactly one 'answer' field"
-                )
-            output_contract.validate(arguments["answer"])
+            try:
+                if set(arguments) != {"answer"}:
+                    raise ValueError(
+                        "final_answer requires exactly one 'answer' field"
+                    )
+                output_contract.validate(arguments["answer"])
+            except ValueError as exc:
+                raise _OutputValidationError(str(exc)) from exc
 
         input_validator = validate_terminal
 
