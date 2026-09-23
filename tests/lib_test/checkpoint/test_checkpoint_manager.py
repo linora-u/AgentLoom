@@ -125,6 +125,42 @@ class TestTaskEvents:
             assert "result" in tree
             assert tree["result"] == result
 
+    def test_completed_worker_event_persists_explicit_null_result(
+        self,
+        cm: CheckpointManager,
+    ) -> None:
+        task_id = "task_null_worker_result"
+        cm.record_task_created(
+            task_id,
+            yaml_path="applications/demo/workflows/agent.yaml",
+            agent_name="test_supervisor",
+            task_text="do work",
+            created_at="2026-06-15T12:00:00+08:00",
+        )
+        call_index = cm.record_worker_started(
+            task_id,
+            "worker_a",
+            input_hash="hash-a",
+            task_input="return null",
+        )
+
+        cm.record_worker_finished(
+            task_id,
+            "worker_a",
+            call_index=call_index,
+            status="completed",
+            result=None,
+        )
+
+        events = [
+            json.loads(line)
+            for line in cm._task_events_path(task_id).read_text().splitlines()
+        ]
+        finished = events[-1]
+        assert finished["type"] == "worker_call_finished"
+        assert "result" in finished
+        assert finished["result"] is None
+
     def test_task_tree_without_canonical_event_log_is_rejected(self, cm: CheckpointManager):
         task_id = "task_legacy_only"
         path = cm._task_tree_path(task_id)
