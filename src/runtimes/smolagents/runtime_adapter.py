@@ -144,10 +144,10 @@ def _exhausted_output_correction(native_runtime: Any) -> bool:
                 continue
             if record.tool_name != "final_answer" or record.status == "completed":
                 continue
-            return (
-                record.stage == "output_validation"
-                or "output does not satisfy" in record.reason
-                or "final_answer requires exactly" in record.reason
+            return bool(
+                record.error is not None
+                and record.error.kind == "output_validation"
+                and record.error.stage == "output_validation"
             )
     return False
 
