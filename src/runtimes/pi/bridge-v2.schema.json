@@ -1485,6 +1485,10 @@
           "$ref": "#/$defs/JsonValue",
           "default": null
         },
+        "model_output": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
         "error": {
           "anyOf": [
             {
