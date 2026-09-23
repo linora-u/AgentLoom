@@ -778,13 +778,6 @@ def _model_projection_text(result: Any) -> str | None:
         return None
 
 
-def _canonical_tool_output(tool_name: str, result: Any) -> Any:
-    """Apply the stable empty-result projection shared by execution and recovery."""
-    if result is None or (isinstance(result, str) and not result.strip()):
-        return f"({tool_name} completed with no output)"
-    return result
-
-
 @dataclass(frozen=True, slots=True, eq=False)
 class PreparedToolCall:
     """An opaque, one-use gateway handle with a detached input snapshot.
@@ -1409,7 +1402,7 @@ class AgentLoomToolGateway:
                 )
                 return failed
 
-        result = _canonical_tool_output(tool_name, raw_result)
+        result = raw_result
         metadata: dict[str, Any] = {}
         projection_text = (
             _model_projection_text(result)
@@ -1507,7 +1500,7 @@ class AgentLoomToolGateway:
             call_id=call_id,
             tool_name=tool_name,
             input=dict(arguments),
-            output=_canonical_tool_output(tool_name, result),
+            output=result,
             ended_at=time.time(),
         )
 
