@@ -141,13 +141,6 @@ worker_agents:
 name: shared
 description: shared worker
 workflow: do shared work
-agent_function_schema:
-  description: Handle one task.
-  inputs:
-    task:
-      description: Task to handle.
-  output:
-    description: Worker result.
 """,
     }
     for relative, payload in definitions.items():
