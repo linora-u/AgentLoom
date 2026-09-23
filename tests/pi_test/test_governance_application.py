@@ -5,8 +5,8 @@ import sys
 import pytest
 import yaml
 
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_tools_application import select
 
@@ -15,20 +15,29 @@ def audit(result):
     return [json.loads(line) for line in (result.run.run_dir / 'audit/runtime_events.jsonl').read_text().splitlines()]
 
 
-def test_one_application_uses_official_read_and_selected_platform_extension(tmp_path):
+def file_probe(file_path: str) -> str:
+    """Read one fixture file through a dynamically selected Python tool."""
+    from pathlib import Path
+    return Path(file_path).read_text()
+
+
+def test_one_application_uses_official_read_and_selected_python_extension(tmp_path):
     source = tmp_path / 'facts.py'
     source.write_text('def verified_invoice_total():\n    return 6941\n')
     with model_service(turns=[[('native', 'read', {'path': str(source)}),
-                               ('optional', 'get_file_outline', {'file_path': str(source)})]]) as (url, requests):
+                               ('python', 'file_probe', {'file_path': str(source)})]]) as (url, requests):
         app = project(tmp_path, url)
-        select(app, tools=[{'name': 'read'}, {'name': 'get_file_outline'}])
+        select(app, tools=[
+            {'name': 'read'},
+            {'name': 'file_probe', 'module': __name__, 'function': 'file_probe'},
+        ])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     records = [event['details'] for event in audit(result) if event['kind'] == 'tool']
     assert {(item['record']['tool_name'], item['owner'], item['provider']) for item in records} == {
-        ('read', 'runtime', 'pi'), ('get_file_outline', 'optional', 'agentloom')}
+        ('read', 'runtime', 'pi'), ('file_probe', 'external', 'python')}
     assert all(item['record']['status'] == 'completed' for item in records)
-    assert {tool['function']['name'] for tool in requests[0][1]['tools']} == {'read', 'get_file_outline'}
+    assert {tool['function']['name'] for tool in requests[0][1]['tools']} == {'read', 'file_probe'}
     assert all('verified_invoice_total' in str(item['record']['output']) for item in records)
 
 
@@ -57,7 +66,7 @@ def test_native_read_preserves_policy_block_and_execution_error(tmp_path, scenar
 
 
 @pytest.mark.parametrize('name', ['read_file', 'grep_search', 'glob_search', 'shell_tool', 'todo_write',
-                                 'write_markdown_file', 'grep', 'find'])
+                                 'grep', 'find'])
 def test_unmapped_basics_and_specialist_writes_are_rejected_before_application_execution(tmp_path, name):
     with model_service() as (url, requests):
         app = project(tmp_path, url)
@@ -189,20 +198,22 @@ def test_context_refs_remain_retrievable_with_pi_checkpoint_disabled(tmp_path):
 
 def test_invalid_final_platform_arguments_are_rejected_without_execution(tmp_path):
     source = tmp_path / 'facts.py'
-    source.write_text('def forbidden_outline_5729():\n    return 1\n')
+    source.write_text('def forbidden_probe_5729():\n    return 1\n')
     hook = tmp_path / 'invalid_hook.py'
     hook.write_text('import json\nprint(json.dumps({"decision":"modify", "modified_input":{"file_path":False}}))\n')
-    with model_service(turns=[[('invalid-final', 'get_file_outline', {'file_path': str(source)})]]) as (url, requests):
+    with model_service(turns=[[('invalid-final', 'file_probe', {'file_path': str(source)})]]) as (url, requests):
         app = project(tmp_path, url)
-        select(app, tools=[{'name': 'get_file_outline'}], hooks={'PreToolUse': [
-            {'id': 'invalid-final', 'matcher': 'get_file_outline', 'command': f'{sys.executable} {hook}'}]})
+        select(app, tools=[{'name': 'file_probe', 'module': __name__, 'function': 'file_probe'}],
+               hooks={'PreToolUse': [
+                   {'id': 'invalid-final', 'matcher': 'file_probe',
+                    'command': f'{sys.executable} {hook}'}]})
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     records = [event['details']['record'] for event in audit(result) if event['kind'] == 'tool']
     assert len(records) == 1
     assert records[0]['status'] == 'blocked'
     assert records[0]['input'] == {'file_path': False}
-    assert 'forbidden_outline_5729' not in json.dumps(requests)
+    assert 'forbidden_probe_5729' not in json.dumps(requests)
 
 
 def test_pi_native_fixed_arguments_are_explicitly_unsupported(tmp_path):

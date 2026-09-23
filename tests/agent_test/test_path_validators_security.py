@@ -4,7 +4,7 @@ detection, symlink chain resolution, and integration with validate_workspace_pat
 import os
 from pathlib import Path
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 from agentloom.execution.hooks.path_validators import (
     has_suspicious_windows_pattern,
     is_vulnerable_unc_path,
@@ -186,7 +186,7 @@ class TestHasSuspiciousWindowsPattern:
         assert has_suspicious_windows_pattern("/home/user/project/src/main.py") is False
 
     def test_normal_relative_path(self):
-        assert has_suspicious_windows_pattern("src/application/imports/helpers.py") is False
+        assert has_suspicious_windows_pattern("src/app/imports/helpers.py") is False
 
     def test_empty_string(self):
         assert has_suspicious_windows_pattern("") is False

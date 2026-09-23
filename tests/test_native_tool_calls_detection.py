@@ -3,7 +3,7 @@
 import pytest
 from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
 from agentloom.runtimes.smolagents.models.model_types import ModelConfig
-from agentloom.configuration.llm_config import LLMConfig, LlmModelTypeSettings
+from agentloom.config.llm_config import LLMConfig, LlmModelTypeSettings
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnRequest, ModelTurnResult
 

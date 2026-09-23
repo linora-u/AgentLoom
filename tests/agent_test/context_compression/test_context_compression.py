@@ -301,34 +301,6 @@ def test_tool_deduplication_native_read_file_different_range_not_deduped():
     assert saved_ratio == 0
 
 
-def test_tool_deduplication_native_get_file_outline_same_shape():
-    arguments = {
-        "file_path": "/tmp/demo.py",
-        "detail_level": "full",
-        "include_line_numbers": False,
-    }
-    messages = [
-        create_native_tool_call(
-            "get_file_outline",
-            arguments,
-            call_id="outline-1",
-        ),
-        create_mock_message(MessageRole.TOOL_RESPONSE, "outline-1" * 120),
-        create_native_tool_call(
-            "get_file_outline",
-            arguments,
-            call_id="outline-2",
-        ),
-        create_mock_message(MessageRole.TOOL_RESPONSE, "outline-2" * 120),
-    ]
-
-    new_messages, saved_ratio = _apply_tool_dedup(messages, "dummy_model", logger=None)
-
-    assert new_messages[1].message.content[0]["text"] == FILE_DEDUP_PLACEHOLDER
-    assert new_messages[3].message.content[0]["text"] == "outline-2" * 120
-    assert saved_ratio > 0
-
-
 def test_tool_deduplication_preserves_latest_identical_response():
     arguments = {"file_path": "/tmp/same-output.txt"}
     messages = [
@@ -385,24 +357,6 @@ def test_native_file_reads_are_exempt_from_layer2_truncation():
             "file_path": "/tmp/big.txt",
             "start_line": 1,
             "end_line": 300,
-            "include_line_numbers": True,
-        },
-    )
-    msg2 = create_mock_message(MessageRole.TOOL_RESPONSE, long_content)
-
-    new_messages, saved_chars = _apply_tool_output_truncation([msg1, msg2], logger=None)
-
-    assert saved_chars == 0
-    assert new_messages[1].message.content[0]["text"] == long_content
-
-
-def test_native_outline_reads_are_exempt_from_layer2_truncation():
-    long_content = "B" * 4500
-    msg1 = create_native_tool_call(
-        "get_file_outline",
-        {
-            "file_path": "/tmp/huge.c",
-            "detail_level": "full",
             "include_line_numbers": True,
         },
     )

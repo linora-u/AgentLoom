@@ -12,7 +12,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
-from agentloom.application.composition import build_schedule_mutations
+from agentloom.app.composition import build_schedule_mutations
 
 from agentloom_studio_adapter.dispatcher import StudioAdapterError, StudioDispatcher
 

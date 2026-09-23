@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import pytest
-from agentloom.application.definition import load_agent_definition, validate_agent_definition
-from agentloom.application.validation import AgentConfigNormalizer
+from agentloom.app.definition import load_agent_definition, validate_agent_definition
+from agentloom.app.validation import AgentConfigNormalizer
 
 
 def write(path: Path, content: str) -> Path:
@@ -92,7 +92,7 @@ def test_recursive_worker_topology_is_rejected(tmp_path):
 
 
 def project_config(root):
-    from agentloom.configuration.config import load_project_config
+    from agentloom.config.config import load_project_config
 
     write(
         root / "config/system.yaml",
@@ -106,14 +106,14 @@ def project_config(root):
 
 
 def test_effective_values_sources_and_secret_projection_are_independent(tmp_path):
-    from agentloom.application.studio.application_studio import application_detail
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.app.studio.application_studio import application_detail
+    from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/group/demo"
     write(
         app / "config/system.yaml",
-        'runtime_options: {todo_mode: "on"}\ncontext_engine: {min_chars: 789}\ntoolsets: [markdown_report]\n',
+        'runtime_options: {todo_mode: "on"}\ncontext_engine: {min_chars: 789}\ntoolsets: [core_search]\n',
     )
     path = write(
         app / "workflows/root.yaml",
@@ -155,7 +155,7 @@ toolsets: []
     ],
 )
 def test_invalid_overrides_are_never_dropped(tmp_path, field, value):
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + f"{field}: {value}\n")
@@ -171,7 +171,7 @@ def test_invalid_overrides_are_never_dropped(tmp_path, field, value):
     ["[]", "wrong", "{todo_mode: unsupported}", "{todo_mode: off}", "{smart_summary: wrong}"],
 )
 def test_invalid_runtime_options_are_preserved_for_backend_validation(tmp_path, value):
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + f"runtime_options: {value}\n")
@@ -189,8 +189,8 @@ def test_invalid_runtime_options_are_preserved_for_backend_validation(tmp_path, 
 
 @pytest.mark.parametrize("field,value", [("todo", "[]"), ("smart_summary", "wrong")])
 def test_historical_smol_fields_are_ignored_without_conversion_or_rejection(tmp_path, field, value):
-    from agentloom.application.runtime_options import normalize_runtime_options
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.app.runtime_options import normalize_runtime_options
+    from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     path = write(
@@ -209,7 +209,7 @@ def test_historical_smol_fields_are_ignored_without_conversion_or_rejection(tmp_
 
 
 def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
-    from agentloom.application.definition import selected_model_type
+    from agentloom.app.definition import selected_model_type
 
     project_config(tmp_path)
     catalog = (
@@ -227,7 +227,7 @@ def test_model_catalog_selection_preserves_case_and_empty_fallback(tmp_path):
 
 
 def test_summary_profile_requirement_matches_runtime_catalog(tmp_path):
-    from agentloom.configuration.config import load_project_config
+    from agentloom.config.config import load_project_config
 
     write(
         tmp_path / "config/llm.yaml",
@@ -241,7 +241,7 @@ def test_summary_profile_requirement_matches_runtime_catalog(tmp_path):
 
 
 def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(tmp_path):
-    from agentloom.application.definition import prepare_application_definition
+    from agentloom.app.definition import prepare_application_definition
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/nested/demo"
@@ -263,7 +263,7 @@ def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(t
 def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    import agentloom.application.runner as runner
+    import agentloom.app.runner as runner
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
@@ -306,8 +306,8 @@ def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(
 ):
     from types import SimpleNamespace
 
-    import agentloom.application.runner as runner
-    from agentloom.application.studio.application_studio import application_detail
+    import agentloom.app.runner as runner
+    from agentloom.app.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/demo"
@@ -347,9 +347,9 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
     import json
     import logging
 
-    from agentloom.application.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-    from agentloom.application.definition import prepare_application_definition
-    from agentloom.application.presentation import configuration_projection
+    from agentloom.app.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
+    from agentloom.app.definition import prepare_application_definition
+    from agentloom.app.presentation import configuration_projection
     from agentloom.execution.skills.catalog import SkillCatalog
 
     class SnapshotAgent(RoleDrivenAgent):
@@ -391,7 +391,7 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
 def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(tmp_path, monkeypatch):
     import json
 
-    from agentloom.application.studio.application_studio import application_detail
+    from agentloom.app.studio.application_studio import application_detail
     from agentloom.execution.skills.catalog import SkillCatalog
 
     project_config(tmp_path)
@@ -422,7 +422,7 @@ def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(
 
 
 def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
-    from agentloom.application.factory import YamlAgentFactory
+    from agentloom.app.factory import YamlAgentFactory
 
     class DefinitionTool:
         def __init__(self, config, **kwargs):
@@ -444,7 +444,7 @@ def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
 
 
 def test_worker_resolution_rejects_symlink_escape_and_allows_absolute_file(tmp_path):
-    from agentloom.application.definition import resolve_worker_path
+    from agentloom.app.definition import resolve_worker_path
 
     source = write(tmp_path / "project/applications/demo/workflows/root.yaml", BASE)
     external = write(tmp_path / "outside/worker.yaml", BASE + SCHEMA)
@@ -456,7 +456,7 @@ def test_worker_resolution_rejects_symlink_escape_and_allows_absolute_file(tmp_p
 
 
 def test_worker_agents_prefix_is_relative_to_supervisor_source(tmp_path):
-    from agentloom.application.definition import resolve_worker_path
+    from agentloom.app.definition import resolve_worker_path
 
     source = tmp_path / "applications/nested/demo/workflows/root.yaml"
     assert resolve_worker_path(tmp_path, source, "worker_agents/worker.md") == source.parent / "worker_agents/worker.md"
@@ -487,18 +487,18 @@ mcp_servers: config/test.mcp.json
     program = """
 import json, sys
 from pathlib import Path
-from agentloom.application.studio.query_service import StudioQueryService
+from agentloom.app.studio.query_service import StudioQueryService
 root = Path(sys.argv[1])
 detail = StudioQueryService(root).application_detail('demo')
 assert detail['agents'][0]['validation']['valid'], detail
 assert detail['agents'][0]['skills'][0]['name'] == 'review'
 assert 'Private review instructions.' not in json.dumps(detail)
-from agentloom.application.definition import load_agent_definition, prepare_application_definition
-from agentloom.configuration.config import load_project_config
+from agentloom.app.definition import load_agent_definition, prepare_application_definition
+from agentloom.config.config import load_project_config
 path = root / 'applications/demo/workflows/root.yaml'
 prepared = prepare_application_definition(root, path, load_agent_definition(path), base_config=load_project_config(root))
 assert prepared['_skill_catalog_snapshot'].activate('review').instructions == 'Private review instructions.\\n'
-for prefix in ('litellm', 'agentloom.application.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
+for prefix in ('litellm', 'agentloom.app.agent', 'agentloom.runtimes.smolagents.tools.file_ops', 'agentloom.runtimes.smolagents.tools.shell', 'agentloom.runtimes.smolagents.tools.search'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules), prefix
 assert not (root / '.agentloom').exists()
 assert not (root / 'must-not-exist').exists()
@@ -520,7 +520,7 @@ def test_mcp_static_errors_reject_before_runtime(tmp_path, value):
 
 
 def test_mcp_snapshot_preserves_credentials_and_normalizes_options(tmp_path):
-    from agentloom.application.definition import prepare_application_definition
+    from agentloom.app.definition import prepare_application_definition
 
     base = project_config(tmp_path)
     path = write(
@@ -538,8 +538,8 @@ def test_mcp_snapshot_preserves_credentials_and_normalizes_options(tmp_path):
 
 
 def test_hook_projection_uses_complete_id_replacement_and_disabling(tmp_path):
-    from agentloom.application.presentation import configuration_projection
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.app.presentation import configuration_projection
+    from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     base.raw["hooks"] = {
@@ -576,7 +576,7 @@ def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeyp
     from unittest.mock import MagicMock
 
     import agentloom.integrations.mcp.manager as manager_module
-    from agentloom.application.factory import YamlAgentFactory
+    from agentloom.app.factory import YamlAgentFactory
     from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
 
     manager = MagicMock()
@@ -601,8 +601,8 @@ def test_mcp_connection_failure_is_reported_in_execution_stage(tmp_path, monkeyp
 def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    import agentloom.application.runner as runner
-    import agentloom.configuration.config as config_module
+    import agentloom.app.runner as runner
+    import agentloom.config.config as config_module
 
     base = project_config(tmp_path)
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE)
@@ -636,7 +636,7 @@ def test_execute_app_refreshes_global_config_between_calls_but_pins_running_read
 
 
 def test_programmatic_config_override_remains_authoritative(tmp_path):
-    from agentloom.configuration.config import fresh_invocation_config
+    from agentloom.config.config import fresh_invocation_config
 
     base = project_config(tmp_path)
     base.raw["runtime_options"]["todo_mode"] = "off"
@@ -647,7 +647,7 @@ def test_programmatic_config_override_remains_authoritative(tmp_path):
 
 
 def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
-    from agentloom.configuration.config import bind_config, fresh_invocation_config
+    from agentloom.config.config import bind_config, fresh_invocation_config
     from agentloom.runtimes.smolagents.models.model_manager import ModelManager
     from agentloom.runtimes.smolagents.models.model_types import ModelType
 
@@ -671,8 +671,8 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
 def test_public_connection_urls_never_expose_authentication(tmp_path):
     import json
 
-    from agentloom.application.studio.application_studio import application_detail
-    from agentloom.configuration.config import build_effective_agent_config_snapshot
+    from agentloom.app.studio.application_studio import application_detail
+    from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
     url = "https://synthetic-user:synthetic-password@example.invalid/mcp?access_token=synthetic-token"
@@ -699,12 +699,12 @@ def test_public_connection_urls_never_expose_authentication(tmp_path):
 def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monkeypatch, target, suffix):
     from types import SimpleNamespace
 
-    import agentloom.application.runner as runner
-    from agentloom.application.definition import prepare_application_definition
-    from agentloom.application.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
-    from agentloom.application.readiness import validate_runtime_agent_config, validate_runtime_worker_config
-    from agentloom.application.studio.domain_actions import execute_domain_action
-    from agentloom.application.studio.query_service import StudioQueryService
+    import agentloom.app.runner as runner
+    from agentloom.app.definition import prepare_application_definition
+    from agentloom.app.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
+    from agentloom.app.readiness import validate_runtime_agent_config, validate_runtime_worker_config
+    from agentloom.app.studio.domain_actions import execute_domain_action
+    from agentloom.app.studio.query_service import StudioQueryService
 
     base = project_config(tmp_path)
     path = tmp_path / f"applications/demo/workflows/root{suffix}"
@@ -767,8 +767,8 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
 def test_removed_fields_in_markdown_supervisor_reject_before_run(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    import agentloom.application.runner as runner
-    from agentloom.application.definition import prepare_application_definition
+    import agentloom.app.runner as runner
+    from agentloom.app.definition import prepare_application_definition
 
     base = project_config(tmp_path)
     path = write(
@@ -798,7 +798,7 @@ def test_scheduled_supervisor_target_is_revalidated_before_run_allocation(
 ):
     from types import SimpleNamespace
 
-    import agentloom.application.runner as runner
+    import agentloom.app.runner as runner
 
     base = project_config(tmp_path)
     path = write(

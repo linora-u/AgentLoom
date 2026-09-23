@@ -136,7 +136,6 @@ workflow: |
 tools:
   - name: "read_file"
   - name: "write_file"
-  - name: "get_file_outline"
   - name: "get_module_context"
     module: "applications.my_app.agent_tools.module_context"
     function: "get_module_context"
@@ -610,7 +609,7 @@ tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
 # Build task list
 tasks = [
     {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/application/imports", "index_content": "..."},
+    {"dir_path": "src/app/imports", "index_content": "..."},
     {"dir_path": "src/core", "index_content": "..."},
 ]
 
@@ -689,19 +688,9 @@ tools:
 | `read_file` | Read file content (supports offset/limit for ranges) |
 | `write_file` | Create new file or overwrite existing |
 | `edit_file` | Apply one or more unique text edits |
-| `write_markdown_file` | Write Markdown file |
-| `write_markdown_file_raw` | Write raw Markdown file |
-| `append_markdown_sections` | Append Markdown sections |
-| `get_file_outline` | Get code outline (functions/classes/structs) |
 | `list_directory` | List directory structure |
 | `grep_search` | Regex search file contents (powered by ripgrep) |
 | `glob_search` | Glob pattern file search |
-| `ast_grep_search_file` | AST pattern search |
-| `lsp_find_definition` | Find symbol definition |
-| `lsp_find_references` | Find symbol references |
-| `lsp_get_document_symbols` | List document symbols |
-| `lsp_hover` | Show hover/type information |
-| `lsp_get_workspace_symbols` | Search workspace symbols |
 | `loom_retrieve_context` | Retrieve compressed context refs |
 | `shell_tool` | Execute shell commands (whitelist-restricted) |
 | `check_background_task` | Read background task status and output |
@@ -760,7 +749,7 @@ The core idea of this pattern is: **Python control flow + Agent intelligence** â
 #### 4.4.3 Core API: `YamlAgentFactory.create_agent_as_tool()`
 
 ```python
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 tools = YamlAgentFactory.create_agent_as_tool(
     config_path,        # str | Path | dict â€” Worker YAML path (relative to AGENT_ROOT) or config dict
@@ -799,7 +788,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -857,7 +846,7 @@ import traceback
 from pathlib import Path
 
 from agentloom.execution.logging import get_logger
-from agentloom.application.factory import YamlAgentFactory
+from agentloom.app.factory import YamlAgentFactory
 
 _AGENT_YAML = "applications/<app>/workflows/worker_agents/<worker>.yaml"
 
@@ -1250,7 +1239,7 @@ input_schema:
   properties:
     dir_path:
       type: string
-      description: "Relative directory path to analyze, e.g. src/application/imports"
+      description: "Relative directory path to analyze, e.g. src/app/imports"
     index_content:
       type: string
       description: "Complete text content of the directory's index.md"

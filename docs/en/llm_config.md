@@ -533,7 +533,7 @@ AgentLoom never reads that prefix to select an adapter.
 
 ## 8. Default Value Constants Reference Table
 
-The following constants are defined in `src/configuration/defaults.py` and serve as the ultimate fallback values for all model parameters:
+The following constants are defined in `src/config/defaults.py` and serve as the ultimate fallback values for all model parameters:
 
 | Constant Name | Value | Corresponding Parameter |
 |--------|-----|---------|
@@ -597,7 +597,7 @@ class LLMConfig(BaseModel):
 **Runtime access**:
 
 ```python
-from agentloom.configuration.config import C
+from agentloom.config.config import C
 
 # Get the LLMConfig object
 llm = C.llm

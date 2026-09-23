@@ -1,9 +1,9 @@
-import agentloom.application.agent as base_agent_module
+import agentloom.app.agent as base_agent_module
 from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
 import pytest
 from agentloom.runtimes.smolagents.options import normalize_runtime_options
-from agentloom.application.factory import (
+from agentloom.app.factory import (
     YamlConfiguredAgent,
     YamlConfiguredSupervisorAgent,
 )
@@ -27,7 +27,7 @@ from smolagents.models import ChatMessage, MessageRole
 
 @pytest.fixture(autouse=True)
 def isolated_project_config(tmp_path):
-    from agentloom.configuration.config import LLMConfig, UnifiedConfig, bind_config
+    from agentloom.config.config import LLMConfig, UnifiedConfig, bind_config
 
     with bind_config(UnifiedConfig({}, agent_root=tmp_path, llm_config=LLMConfig())):
         yield
@@ -154,7 +154,7 @@ def _build_definition(agent, monkeypatch, root):
         "get_agent_environment_prompt",
         lambda: "",
     )
-    from agentloom.configuration.config import EffectiveAgentConfigSnapshot, ConfigLayerSnapshot
+    from agentloom.config.config import EffectiveAgentConfigSnapshot, ConfigLayerSnapshot
     from agentloom.execution.hooks import HookPlan
     agent._effective_agent_config_snapshot = EffectiveAgentConfigSnapshot(
         values=agent._effective_agent_config,

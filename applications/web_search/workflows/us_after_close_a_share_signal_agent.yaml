@@ -13,7 +13,7 @@ mcp_servers:
   tool_name_prefix: true
 
 toolsets:
-  - "markdown_report"
+  - "core_file"
 
 tools:
   - name: "get_market_time_context"
@@ -48,11 +48,11 @@ workflow: |
   - 显式维护 `extra_search_round`：最低搜索矩阵完成后，每追加一次 `batch_search` 就 `extra_search_round += 1`；`extra_search_round == 2` 后禁止再 `batch_search`。
   - 追加搜索每轮最多 5 个 query、每个 `max_results:8`；不要为了省调用牺牲准确性，也不要在证据闭环后继续追边际信息。
   - 搜索可以多，`extract` 要少：extract 是高成本全文阅读，不是搜索；搜索摘要能证明 URL/时间/行情时不要 extract。
-  - 显式维护 `extract_count`：每调用一次 `extract` 就 `extract_count += 1`，成功/403/429/超时都计数；`extract_count == 5` 后下一步必须 `write_markdown_file_raw`。
-  - `extract_count >= 5` 后禁止再调用 `batch_search` 或 `extract`；下一次工具调用只能是 `write_markdown_file_raw`。
+  - 显式维护 `extract_count`：每调用一次 `extract` 就 `extract_count += 1`，成功/403/429/超时都计数；`extract_count == 5` 后下一步必须 `write_file`。
+  - `extract_count >= 5` 后禁止再调用 `batch_search` 或 `extract`；下一次工具调用只能是 `write_file`。
   - `extract` 只抽会改变结论的新闻/原始来源/反向证据；禁止 extract 新闻聚合长文、SPY/QQQ/SOXX/SMH、ETF、指数、个股 quote 页，MarketConfirmation 用 MarketDiscovery 摘要即可。
   - 停止条件：已经能填写涨1-涨3、跌1-跌3 六行，以及领涨板块1/2、领跌板块1/2 四行，且每行都有涨跌表现、A 股行业板块、影响判断、时间和 URL 后，必须写报告；不要继续抽行情确认页。
-  - 每步只输出结构化工具调用；除 `batch_search` 外每步只调一个工具。禁止 `loom_retrieve_context`、`read_file`、`write_markdown_file`；最终只用 `write_markdown_file_raw`。
+  - 每步只输出结构化工具调用；除 `batch_search` 外每步只调一个工具。禁止 `loom_retrieve_context`。最终先用 `write_file(file_path=..., content=...)` 一次写入完整报告；如果且仅当目标报告已存在并收到“需要先读取”的保护提示，调用一次 `read_file` 读取该目标报告，再用相同完整内容重试一次 `write_file`。
   - 不得凭记忆生成新闻、ticker、A股公司/代码或供应链关系；无 AnySearch 证据时只写行业/环节。
 
   ## 1. 最低搜索矩阵

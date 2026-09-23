@@ -1,7 +1,7 @@
 import copy
 from pathlib import Path
 
-import agentloom.configuration.config as config_module
+import agentloom.config.config as config_module
 from agentloom.runtimes.smolagents.models import model_manager as model_manager_module
 from agentloom.runtimes.smolagents.models import model_types
 

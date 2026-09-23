@@ -61,9 +61,7 @@ class TestFileReadToolNames:
         assert isinstance(FILE_READ_TOOL_NAMES, frozenset)
 
     def test_contains_only_canonical_read_tools(self):
-        assert FILE_READ_TOOL_NAMES == frozenset(
-            {"read_file", "get_file_outline"}
-        )
+        assert FILE_READ_TOOL_NAMES == frozenset({"read_file"})
 
     def test_contains_read_file(self):
         assert "read_file" in FILE_READ_TOOL_NAMES

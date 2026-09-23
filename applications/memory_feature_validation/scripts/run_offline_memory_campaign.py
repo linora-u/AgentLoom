@@ -166,7 +166,7 @@ def _source_paths_for_tree(paths: set[str]) -> tuple[str, ...]:
     owner_moves = (
         ("src/extensions/self_learning/", "src/self_learning/"),
         ("src/lib/runtime/", f"src/{execution_owner}/"),
-        ("src/lib/config/", "src/configuration/"),
+        ("src/lib/config/", "src/config/"),
         ("src/lib/logging/", f"src/{execution_owner}/logging/"),
         (
             "src/lib/trusted_memory_evidence.py",

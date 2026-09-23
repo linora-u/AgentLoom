@@ -119,8 +119,8 @@ PydanticAI 从函数签名提取参数 JSON Schema，从 docstring 提取工具�
 
 当前实现并非只“读取了一个 prompts 文件”，而是把这个文件实现成运行时协议：
 
-- `src/application/prompts/agent_tool_behavior_spec.yaml` 定义全部标签、标题、guidance、output rules 和 bridge instruction。
-- `src/application/factory.py` 在模块导入时加载并校验整套 YAML。
+- `src/app/prompts/agent_tool_behavior_spec.yaml` 定义全部标签、标题、guidance、output rules 和 bridge instruction。
+- `src/app/factory.py` 在模块导入时加载并校验整套 YAML。
 - Worker agent-as-tool 把 workflow、参数 description/value、output description 和固定规则重新拼成一个 `formatted_query`。
 - Supervisor 也把 description、workflow 和本轮 task 包成 `<task_spec>` / `<task_request>`。
 - `workflow: list[str]` 还被解释为多次顺序 run，并把原 task 以 `<inputs>` 附到第一段。
@@ -133,7 +133,7 @@ PydanticAI 从函数签名提取参数 JSON Schema，从 docstring 提取工具�
 
 ### 应删除
 
-- `src/application/prompts/agent_tool_behavior_spec.yaml`。
+- `src/app/prompts/agent_tool_behavior_spec.yaml`。
 - `factory.py` 内 Prompt Protocol 路径、加载、变量展开、required keys 和全部协议常量。
 - task-spec / Mermaid workflow 渲染与 warning 注入中只为 Prompt Protocol 服务的逻辑。
 - Worker 的 inputs/output/task-spec 格式化器。

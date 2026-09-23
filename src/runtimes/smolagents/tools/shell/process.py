@@ -35,7 +35,7 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
-from agentloom.configuration import C
+from agentloom.config import C
 from agentloom.execution.logging import get_logger
 from agentloom.execution import get_current_run_context
 from agentloom.runtimes.smolagents.tools.shell.ansi_stripper import strip_ansi

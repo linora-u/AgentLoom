@@ -1,5 +1,5 @@
 """
-Tests for agentloom.application.runner and agentloom.application.scaffold.
+Tests for agentloom.app.runner and agentloom.app.scaffold.
 
 These tests validate the one-liner application launcher without
 instantiating real LLM-backed agents.
@@ -85,8 +85,8 @@ def fake_yaml(tmp_path: Path, monkeypatch) -> Path:
 
     # Patch the C object in the modules that import it.
     fake = _fake_c(tmp_path)
-    monkeypatch.setattr("agentloom.application.runner.C", fake)
-    monkeypatch.setattr("agentloom.application.scaffold.C", fake)
+    monkeypatch.setattr("agentloom.app.runner.C", fake)
+    monkeypatch.setattr("agentloom.app.scaffold.C", fake)
     return yaml_file
 
 
@@ -99,8 +99,8 @@ def fake_yaml_no_desc(tmp_path: Path, monkeypatch) -> Path:
     yaml_file.write_text(_SAMPLE_YAML_NO_DESC, encoding="utf-8")
 
     fake = _fake_c(tmp_path)
-    monkeypatch.setattr("agentloom.application.runner.C", fake)
-    monkeypatch.setattr("agentloom.application.scaffold.C", fake)
+    monkeypatch.setattr("agentloom.app.runner.C", fake)
+    monkeypatch.setattr("agentloom.app.scaffold.C", fake)
     return yaml_file
 
 
@@ -113,7 +113,7 @@ def fake_yaml_no_name(tmp_path: Path, monkeypatch) -> Path:
     yaml_file.write_text(_SAMPLE_YAML_NO_NAME, encoding="utf-8")
 
     fake = _fake_c(tmp_path)
-    monkeypatch.setattr("agentloom.application.runner.C", fake)
+    monkeypatch.setattr("agentloom.app.runner.C", fake)
     return yaml_file
 
 
@@ -126,7 +126,7 @@ def fake_yaml_no_workflow(tmp_path: Path, monkeypatch) -> Path:
     yaml_file.write_text(_SAMPLE_YAML_NO_WORKFLOW, encoding="utf-8")
 
     fake = _fake_c(tmp_path)
-    monkeypatch.setattr("agentloom.application.runner.C", fake)
+    monkeypatch.setattr("agentloom.app.runner.C", fake)
     return yaml_file
 
 
@@ -136,7 +136,7 @@ def fake_yaml_no_workflow(tmp_path: Path, monkeypatch) -> Path:
 
 
 def test_per_run_event_projection_never_inherits_legacy_preamble_on_resume() -> None:
-    from agentloom.application.runner import _events_for_run
+    from agentloom.app.runner import _events_for_run
 
     old_events = [
         {"type": "worker_call_finished", "agent_name": "old", "call_index": 0},
@@ -151,7 +151,7 @@ def test_per_run_event_projection_never_inherits_legacy_preamble_on_resume() -> 
 
 
 def test_streamed_run_event_count_ignores_a_legacy_boundary_newline(tmp_path: Path) -> None:
-    from agentloom.application.runner import _run_event_chunks
+    from agentloom.app.runner import _run_event_chunks
     from agentloom.execution.storage import SecureDirectory
 
     task_dir = tmp_path / "task"
@@ -183,22 +183,22 @@ class TestResolveYamlPath:
     """Tests for _resolve_yaml_path."""
 
     def test_absolute_path(self, fake_yaml: Path):
-        from agentloom.application.runner import _resolve_yaml_path
+        from agentloom.app.runner import _resolve_yaml_path
 
         result = _resolve_yaml_path(fake_yaml)
         assert result == fake_yaml.resolve()
 
     def test_relative_path(self, fake_yaml: Path, monkeypatch):
-        from agentloom.application.runner import _resolve_yaml_path
+        from agentloom.app.runner import _resolve_yaml_path
 
         rel = "applications/test_app/workflows/test_app_agent.yaml"
         result = _resolve_yaml_path(rel)
         assert result == fake_yaml.resolve()
 
     def test_nonexistent_raises(self, monkeypatch, tmp_path: Path):
-        from agentloom.application.runner import _resolve_yaml_path
+        from agentloom.app.runner import _resolve_yaml_path
 
-        monkeypatch.setattr("agentloom.application.runner.C", _fake_c(tmp_path))
+        monkeypatch.setattr("agentloom.app.runner.C", _fake_c(tmp_path))
         with pytest.raises(FileNotFoundError, match="YAML configuration file not found"):
             _resolve_yaml_path("applications/nope/workflows/nope.yaml")
 
@@ -206,9 +206,9 @@ class TestResolveYamlPath:
 class TestRunApp:
     """Tests for run_app (agent execution is mocked)."""
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_omits_task_when_no_override_is_supplied(self, mock_cls, fake_yaml: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         mock_agent = MagicMock()
         mock_agent.run.return_value = "ok"
@@ -220,9 +220,9 @@ class TestRunApp:
         assert called_task is None
         assert result == "ok"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_binds_canonical_run_context_before_agent_execution(self, mock_cls, fake_yaml: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
 
         observed = {}
@@ -252,14 +252,14 @@ class TestRunApp:
         assert not context.task_tree_path.exists()
         assert not (fake_yaml.parents[3] / ".logs").exists()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_manifest_declares_when_task_tree_observation_is_disabled(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
 
         observed: dict[str, object] = {}
@@ -273,7 +273,7 @@ class TestRunApp:
             }
 
         monkeypatch.setattr(
-            "agentloom.application.runner.build_effective_agent_config",
+            "agentloom.app.runner.build_effective_agent_config",
             effective_config,
         )
 
@@ -294,14 +294,14 @@ class TestRunApp:
         }
         assert "task_tree_artifact" not in manifest
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_completed_run_keeps_result_and_observability_after_checkpoint_cleanup(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.checkpoint import CheckpointManager
 
@@ -355,13 +355,13 @@ class TestRunApp:
         assert manifest["task_events_complete"] is True
         assert not context.checkpoint_dir.exists()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_completed_run_persists_ordered_runtime_events_as_audit_evidence(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.agent_runtime import RuntimeEvent
 
@@ -426,14 +426,14 @@ class TestRunApp:
         assert manifest["runtime_events_count"] == 2
         assert manifest["runtime_events_size"] == artifact_path.stat().st_size
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_completed_run_commits_manifest_before_checkpoint_cleanup(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.checkpoint import CheckpointManager
 
@@ -468,14 +468,14 @@ class TestRunApp:
         assert manifest["task_tree_artifact"] == "audit/task_tree.json"
         assert manifest["task_events_artifact"] == "audit/task_events.jsonl"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_completed_run_keeps_checkpoint_when_tree_exceeds_cleanup_budget(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
 
         observed = {}
@@ -496,7 +496,7 @@ class TestRunApp:
             return "final answer"
 
         mock_cls.return_value.run.side_effect = _run
-        monkeypatch.setattr("agentloom.application.runner._TASK_TREE_CLEANUP_MAX_BYTES", 128)
+        monkeypatch.setattr("agentloom.app.runner._TASK_TREE_CLEANUP_MAX_BYTES", 128)
 
         assert run_app(str(fake_yaml), file_logging=False) == "final answer"
 
@@ -506,14 +506,14 @@ class TestRunApp:
         assert (context.run_dir / manifest["task_tree_artifact"]).stat().st_size > 128
         assert context.checkpoint_dir.exists()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_finalization_failure_marks_run_failed_and_keeps_checkpoint(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import RuntimeContext, get_current_run_context
         from agentloom.execution.checkpoint.checkpoint_manager import CheckpointTaskLease
 
@@ -562,14 +562,14 @@ class TestRunApp:
         with CheckpointTaskLease(context.checkpoint_dir, require_exists=True):
             pass
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_completed_run_keeps_checkpoint_when_manifest_commit_fails(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import RuntimeContext, get_current_run_context
         from agentloom.execution.checkpoint.checkpoint_manager import CheckpointTaskLease
 
@@ -605,15 +605,15 @@ class TestRunApp:
         with CheckpointTaskLease(context.checkpoint_dir, require_exists=True):
             pass
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_transient_manifest_failure_keeps_written_artifact_references(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunError
+        from agentloom.app.runner import execute_app
         from agentloom.execution import RuntimeContext, get_current_run_context
 
         observed: dict[str, object] = {"failed_once": False}
@@ -660,7 +660,7 @@ class TestRunApp:
         assert (context.run_dir / manifest["task_events_artifact"]).is_file()
         assert context.checkpoint_dir.is_dir()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_run_finally_releases_shell_sessions_and_background_tasks(
         self,
         mock_cls,
@@ -669,7 +669,7 @@ class TestRunApp:
         import os
         import subprocess
 
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import bind_run_context, get_current_run_context
         from agentloom.execution.trace import clear_current_agent_id, set_current_agent_id
         from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
@@ -724,14 +724,14 @@ class TestRunApp:
                 process.wait(timeout=2)
             BackgroundTaskRegistry._reset_instance()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_automatic_run_cleanup_never_traverses_checkpoints(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         mock_cls.return_value.run.return_value = "ok"
         monkeypatch.setattr(
@@ -745,14 +745,14 @@ class TestRunApp:
 
         assert run_app(str(fake_yaml), file_logging=False) == "ok"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_run_lease_covers_manifest_and_logging_configuration(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution.logging import LoggingConfigBuilder
         from agentloom.execution.retention import RetentionPolicy, clean_runtime
 
@@ -784,7 +784,7 @@ class TestRunApp:
         tmp_path: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.logging import get_logger
 
@@ -799,7 +799,7 @@ class TestRunApp:
             )
             workflows.extend([workflow, workflow])
 
-        monkeypatch.setattr("agentloom.application.runner.C", _fake_c(tmp_path))
+        monkeypatch.setattr("agentloom.app.runner.C", _fake_c(tmp_path))
         barrier = threading.Barrier(len(workflows))
         contexts = []
         contexts_lock = threading.Lock()
@@ -818,7 +818,7 @@ class TestRunApp:
                     contexts.append((context, marker))
                 return marker
 
-        monkeypatch.setattr("agentloom.application.runner.YamlConfiguredSupervisorAgent", FakeSupervisor)
+        monkeypatch.setattr("agentloom.app.runner.YamlConfiguredSupervisorAgent", FakeSupervisor)
         with ThreadPoolExecutor(max_workers=len(workflows)) as executor:
             results = list(executor.map(lambda path: run_app(path), workflows))
 
@@ -833,14 +833,14 @@ class TestRunApp:
                 other_marker not in log_text for _other_context, other_marker in contexts if other_marker != marker
             )
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_resume_creates_new_run_but_reuses_task_checkpoint(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.checkpoint import CheckpointManager
 
@@ -900,7 +900,7 @@ class TestRunApp:
             ),
         ],
     )
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_resume_rejects_invalid_or_timezone_naive_created_at(
         self,
         mock_cls,
@@ -908,7 +908,7 @@ class TestRunApp:
         created_at: str,
         error: str,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import RuntimeHome
         from agentloom.execution.checkpoint import CheckpointManager
 
@@ -942,13 +942,13 @@ class TestRunApp:
 
         mock_cls.assert_not_called()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_resume_rejects_completed_checkpoint(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import RuntimeHome
         from agentloom.execution.checkpoint import CheckpointManager
 
@@ -982,13 +982,13 @@ class TestRunApp:
 
         mock_cls.assert_not_called()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_concurrent_resume_of_same_task_is_rejected(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("preserve for concurrent resume")
@@ -1026,13 +1026,13 @@ class TestRunApp:
                 release.set()
             assert first_resume.result(timeout=10) == "resumed"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_automatic_run_cleanup_preserves_expired_checkpoints(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution import RuntimeHome
         from agentloom.execution.checkpoint import CheckpointManager
 
@@ -1063,13 +1063,13 @@ class TestRunApp:
 
         assert first_expired.checkpoint_dir.exists()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_resume_rejects_symlinked_application_checkpoint_directory(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution.checkpoint import CheckpointManager
 
         runtime_root = fake_yaml.parents[3] / ".agentloom"
@@ -1105,9 +1105,9 @@ class TestRunApp:
         assert (external_app / "outside_task" / "task_tree.json").exists()
         mock_cls.assert_not_called()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_relative_path(self, mock_cls, fake_yaml: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         mock_agent = MagicMock()
         mock_agent.run.return_value = "done"
@@ -1117,30 +1117,30 @@ class TestRunApp:
         assert result == "done"
 
     def test_missing_description_raises(self, fake_yaml_no_desc: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         with pytest.raises(ValueError, match="缺少必填字段.*description"):
             run_app(str(fake_yaml_no_desc))
 
     def test_missing_name_raises(self, fake_yaml_no_name: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         with pytest.raises(ValueError, match="缺少必填字段.*name"):
             run_app(str(fake_yaml_no_name))
 
     def test_empty_workflow_raises(self, fake_yaml_no_workflow: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
             run_app(str(fake_yaml_no_workflow))
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_numeric_description_is_rejected_before_agent_construction(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         fake_yaml.write_text(
             "name: test_agent\n"
@@ -1169,7 +1169,7 @@ class TestRunApp:
             ("runtime_options: {max_steps: true}\n", "max_steps must be a positive integer"),
         ],
     )
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_runtime_preflight_rejects_unresolvable_tools_and_invalid_step_budget(
         self,
         mock_cls,
@@ -1177,7 +1177,7 @@ class TestRunApp:
         error_pattern: str,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         fake_yaml.write_text(
             "name: test_agent\n"
@@ -1193,13 +1193,13 @@ class TestRunApp:
 
         mock_cls.assert_not_called()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_runtime_preflight_only_structurally_validates_dynamic_tools(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         fake_yaml.write_text(
             """\
@@ -1221,9 +1221,9 @@ tools:
         assert run_app(str(fake_yaml), file_logging=False) == "done"
         mock_cls.assert_called_once()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_agent_exception_raises_runtime_error(self, mock_cls, fake_yaml: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         mock_agent = MagicMock()
         mock_agent.run.side_effect = RuntimeError("boom")
@@ -1232,9 +1232,9 @@ tools:
         with pytest.raises(RuntimeError, match="Agent execution failed"):
             run_app(str(fake_yaml))
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_none_result_remains_native_null(self, mock_cls, fake_yaml: Path):
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
 
         mock_agent = MagicMock()
         mock_agent.run.return_value = None
@@ -1253,7 +1253,7 @@ class TestCreateDemoScript:
     """Tests for create_demo_script."""
 
     def test_generates_demo(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.application.scaffold import create_demo_script
+        from agentloom.app.scaffold import create_demo_script
 
         generated = create_demo_script(str(fake_yaml))
         assert generated.exists()
@@ -1261,12 +1261,12 @@ class TestCreateDemoScript:
         assert generated.name == "test_agent_app.py"
 
         content = generated.read_text(encoding="utf-8")
-        assert "from agentloom.application.runner import run_app" in content
+        assert "from agentloom.app.runner import run_app" in content
         assert "run_app(" in content
         assert "test_app_agent.yaml" in content
 
     def test_custom_output_path(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.application.scaffold import create_demo_script
+        from agentloom.app.scaffold import create_demo_script
 
         custom_out = tmp_path / "my_demo.py"
         generated = create_demo_script(str(fake_yaml), output_path=str(custom_out))
@@ -1274,7 +1274,7 @@ class TestCreateDemoScript:
         assert custom_out.exists()
 
     def test_no_overwrite_raises_by_default(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.application.scaffold import create_demo_script
+        from agentloom.app.scaffold import create_demo_script
 
         # First call succeeds.
         create_demo_script(str(fake_yaml))
@@ -1283,9 +1283,9 @@ class TestCreateDemoScript:
         with pytest.raises(FileExistsError, match="already exists"):
             create_demo_script(str(fake_yaml))
 
-    @patch("agentloom.application.scaffold.click")
+    @patch("agentloom.app.scaffold.click")
     def test_interactive_overwrite_confirmed(self, mock_click, fake_yaml: Path, tmp_path: Path):
-        from agentloom.application.scaffold import create_demo_script
+        from agentloom.app.scaffold import create_demo_script
 
         mock_click.echo = MagicMock()
         mock_click.confirm = MagicMock(return_value=True)
@@ -1296,9 +1296,9 @@ class TestCreateDemoScript:
         assert generated.exists()
         mock_click.confirm.assert_called_once()
 
-    @patch("agentloom.application.scaffold.click")
+    @patch("agentloom.app.scaffold.click")
     def test_interactive_overwrite_declined(self, mock_click, fake_yaml: Path, tmp_path: Path):
-        from agentloom.application.scaffold import create_demo_script
+        from agentloom.app.scaffold import create_demo_script
 
         mock_click.echo = MagicMock()
         mock_click.confirm = MagicMock(return_value=False)
@@ -1309,7 +1309,7 @@ class TestCreateDemoScript:
             create_demo_script(str(fake_yaml), interactive=True)
 
     def test_infers_category(self, fake_yaml: Path, tmp_path: Path):
-        from agentloom.application.scaffold import create_demo_script
+        from agentloom.app.scaffold import create_demo_script
 
         generated = create_demo_script(str(fake_yaml))
         # Output is placed inside applications/test_app/.
@@ -1317,7 +1317,7 @@ class TestCreateDemoScript:
         assert "test_app" in str(generated)
 
     def test_generated_script_contains_agent_name(self, fake_yaml: Path):
-        from agentloom.application.scaffold import create_demo_script
+        from agentloom.app.scaffold import create_demo_script
 
         generated = create_demo_script(str(fake_yaml))
         content = generated.read_text(encoding="utf-8")
@@ -1364,7 +1364,7 @@ def test_structured_run_api_is_publicly_exported():
 
 
 class TestExecuteApp:
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_application_run_owns_successful_checkpoint_terminal_state(
         self,
         mock_cls,
@@ -1372,7 +1372,7 @@ class TestExecuteApp:
     ) -> None:
         """A Supervisor reports output; the Application Run commits success."""
 
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
 
         mock_cls.return_value.run.return_value = "owner-settled-output"
 
@@ -1392,7 +1392,7 @@ class TestExecuteApp:
             result.run.task_id,
         ).exists()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_application_run_owns_failed_checkpoint_terminal_state(
         self,
         mock_cls,
@@ -1400,8 +1400,8 @@ class TestExecuteApp:
     ) -> None:
         """A Supervisor reports failure; the Application Run commits failure."""
 
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunError
+        from agentloom.app.runner import execute_app
 
         mock_cls.return_value.run.side_effect = RuntimeError("owner-settled-failure")
 
@@ -1424,17 +1424,17 @@ class TestExecuteApp:
             caught.value.run.task_id,
         ).is_dir()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_resume_rejects_disabling_a_persisted_active_goal(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.run import (
+        from agentloom.app.run import (
             ApplicationRunError,
             ApplicationRunInterrupted,
         )
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
         from agentloom.execution.goal import GoalState
 
         fake_yaml.write_text(_SAMPLE_YAML + "\ngoal:\n  enabled: true\n  token_budget: 100\n")
@@ -1465,13 +1465,13 @@ class TestExecuteApp:
         assert "Goal mode is disabled" in str(rejected.value.original_error)
 
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_completed_goal_is_copied_before_checkpoint_cleanup(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
         from agentloom.execution.goal import GoalState
 
         state = GoalState.create(
@@ -1504,7 +1504,7 @@ class TestExecuteApp:
             )
         )["status"] == "complete"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_returns_canonical_receipt_after_durable_finalization(
         self,
         mock_cls,
@@ -1512,7 +1512,7 @@ class TestExecuteApp:
     ) -> None:
         import json
 
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
 
         mock_cls.return_value.run.return_value = "structured-output"
 
@@ -1539,13 +1539,13 @@ class TestExecuteApp:
             encoding="utf-8"
         ) == "structured-output"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_structured_output_survives_public_result_event_and_checkpoint(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
 
         output = {
             "findings": [
@@ -1580,13 +1580,13 @@ class TestExecuteApp:
             indent=2,
         )
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_emits_started_then_completed_and_ignores_sink_errors(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
 
         mock_cls.return_value.run.return_value = "ok"
         observed = []
@@ -1609,7 +1609,7 @@ class TestExecuteApp:
         assert observed[0].run == observed[1].run == result.run
         assert observed[1].output == "ok"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_failure_carries_run_info_and_terminal_event(
         self,
         mock_cls,
@@ -1617,8 +1617,8 @@ class TestExecuteApp:
     ) -> None:
         import json
 
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunError
+        from agentloom.app.runner import execute_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.agent_runtime import RuntimeEvent
         from agentloom.execution.goal import GoalState
@@ -1683,7 +1683,7 @@ class TestExecuteApp:
             }
         ]
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_interruption_carries_run_info(
         self,
         mock_cls,
@@ -1691,8 +1691,8 @@ class TestExecuteApp:
     ) -> None:
         import json
 
-        from agentloom.application.run import ApplicationRunInterrupted
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunInterrupted
+        from agentloom.app.runner import execute_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.agent_runtime import RuntimeEvent
         from agentloom.execution.goal import GoalState
@@ -1763,8 +1763,8 @@ class TestExecuteApp:
         self,
         fake_yaml_no_desc: Path,
     ) -> None:
-        from agentloom.application.run import RunRejectedEvent
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import RunRejectedEvent
+        from agentloom.app.runner import execute_app
 
         events = []
         with pytest.raises(ValueError, match="缺少必填字段.*description"):
@@ -1779,7 +1779,7 @@ class TestExecuteApp:
         assert events[0].error.retryable is False
         assert not (fake_yaml_no_desc.parents[3] / ".agentloom").exists()
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_manifest_cleanup_failure_still_persists_terminal_status(
         self,
         mock_cls,
@@ -1788,8 +1788,8 @@ class TestExecuteApp:
     ) -> None:
         import json
 
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunError
+        from agentloom.app.runner import execute_app
         from agentloom.execution.context import RuntimeContext
 
         mock_cls.return_value.run.return_value = "ok"
@@ -1821,13 +1821,13 @@ class TestExecuteApp:
         assert manifest["status"] == "failed"
         assert [event.event for event in events] == ["run.started", "run.failed"]
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_file_logging_receipt_points_to_closed_canonical_log(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.runner import execute_app
+        from agentloom.app.runner import execute_app
 
         mock_cls.return_value.run.return_value = "ok"
 
@@ -1839,15 +1839,15 @@ class TestExecuteApp:
             encoding="utf-8"
         )
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_task_lease_release_failure_is_typed_cleanup_failure(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunError
+        from agentloom.app.runner import execute_app
         from agentloom.execution.checkpoint import CheckpointManager
         from agentloom.execution.checkpoint.checkpoint_manager import CheckpointTaskLease
 
@@ -1887,14 +1887,14 @@ class TestExecuteApp:
         assert len(closed_managers) == 1
         assert closed_managers[0]._task_storages == {}
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_run_app_preserves_run_lease_release_error(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.runner import run_app
+        from agentloom.app.runner import run_app
         from agentloom.execution.context import RuntimeRunLease
 
         mock_cls.return_value.run.return_value = "ok"
@@ -1912,7 +1912,7 @@ class TestExecuteApp:
 
         assert caught.value is marker
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_finalization_interrupt_reopens_checkpoint_for_resume(
         self,
         mock_cls,
@@ -1921,8 +1921,8 @@ class TestExecuteApp:
     ) -> None:
         import json
 
-        from agentloom.application.run import ApplicationRunInterrupted
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunInterrupted
+        from agentloom.app.runner import execute_app
         from agentloom.execution.context import RuntimeContext
 
         mock_cls.return_value.run.return_value = "ok"
@@ -1954,15 +1954,15 @@ class TestExecuteApp:
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         assert checkpoint["status"] == "interrupted"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_interrupt_after_checkpoint_deletion_is_not_resumable(
         self,
         mock_cls,
         fake_yaml: Path,
         monkeypatch,
     ) -> None:
-        from agentloom.application.run import ApplicationRunInterrupted
-        from agentloom.application.runner import execute_app
+        from agentloom.app.run import ApplicationRunInterrupted
+        from agentloom.app.runner import execute_app
         from agentloom.execution import get_current_run_context
         from agentloom.execution.checkpoint import CheckpointManager
 
@@ -2003,14 +2003,14 @@ class TestExecuteApp:
         assert manifest["result_artifact"] == "artifacts/result.txt"
         assert (context.run_dir / manifest["result_artifact"]).read_text(encoding="utf-8") == "final answer"
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_execute_app_wraps_system_exit_and_run_app_preserves_compatibility(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app, run_app
+        from agentloom.app.run import ApplicationRunError
+        from agentloom.app.runner import execute_app, run_app
 
         mock_cls.return_value.run.side_effect = SystemExit(7)
         events = []
@@ -2032,14 +2032,14 @@ class TestExecuteApp:
 
         assert compatibility.value.code == 7
 
-    @patch("agentloom.application.runner.YamlConfiguredSupervisorAgent")
+    @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
     def test_execute_app_wraps_generator_exit_and_run_app_preserves_compatibility(
         self,
         mock_cls,
         fake_yaml: Path,
     ) -> None:
-        from agentloom.application.run import ApplicationRunError
-        from agentloom.application.runner import execute_app, run_app
+        from agentloom.app.run import ApplicationRunError
+        from agentloom.app.runner import execute_app, run_app
 
         mock_cls.return_value.run.side_effect = GeneratorExit()
 

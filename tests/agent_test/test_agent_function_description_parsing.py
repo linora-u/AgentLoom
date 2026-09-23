@@ -1,4 +1,4 @@
-from agentloom.application.factory import YamlConfiguredAgent
+from agentloom.app.factory import YamlConfiguredAgent
 
 
 def test_native_input_schema_docstring_uses_agent_metadata():

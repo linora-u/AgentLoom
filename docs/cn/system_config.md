@@ -23,8 +23,7 @@
 - [3. 旧执行字段](#3-旧执行字段)
 - [4. skills — 全局 Skills 配置](#4-skills--全局-skills-配置)
 - [4.5 hooks — 独立 Hook Runtime](#45-hooks--独立-hook-runtime)
-- [5. lsp_servers — LSP 语言服务器配置](#5-lsp_servers--lsp-语言服务器配置)
-- [5.5 mcp_servers — MCP 外部工具集成](#55-mcp_servers--mcp-外部工具集成)
+- [5. mcp_servers — MCP 外部工具集成](#5-mcp_servers--mcp-外部工具集成)
 - [6. shell_tool — Shell 执行模型](#6-shell_tool--shell-执行模型)
 - [7. runtime 与 logging — 运行时存储与日志](#7-runtime-与-logging--运行时存储与日志)
 - [8. tools — 工具系统配置](#8-tools--工具系统配置)
@@ -204,38 +203,7 @@ hooks:
 
 ---
 
-## 5. lsp_servers — LSP 语言服务器配置
-
-配置 Agent 启动时预热的 LSP 语言服务器。服务器在 Agent 整个生命周期内长期驻留，提供代码智能功能（跳转定义、找引用、符号大纲、悬停类型信息等）。
-
-`uv sync` 后所有必需二进制自动就绪：
-- **Python**: `jedi-language-server`（pip 依赖，在 `.venv/bin/`）
-- **Go**: `go` 二进制（通过 `go-bin` PyPI 包），`gopls` 通过 `go install` 自动安装
-- **TypeScript**: `node` + `npm`（通过 `nodejs-bin` PyPI 包），`typescript-language-server` 通过 npm 自动安装
-- **Rust/Java/C#/Kotlin**: 底层库自动下载
-
-```yaml
-lsp_servers:
-  enabled: true                    # false 可关闭所有 LSP 服务
-  max_restarts: 3                  # 崩溃自动重启上限（全局默认）
-  servers:                         # 要启动的语言服务器列表
-    - python                       # jedi-language-server
-    - go                           # gopls
-    - typescript                   # typescript-language-server
-```
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `enabled` | `bool` | `true` | 是否启用 LSP 服务 |
-| `max_restarts` | `int` | `3` | 服务器崩溃后自动重启的最大次数 |
-| `servers` | `list` | `[python]` | 语言列表，支持 40+ 种语言 |
-
-> 服务器由 `agentloom.integrations.lsp.lsp_server_manager.LSPServerManager` 统一管理，采用三层架构（Manager → Instance → solidlsp）。
-> 不支持的语言自动回退到 tree-sitter AST 分析（46+ 语言）。
-
----
-
-## 5.5 mcp_servers — MCP 外部工具集成
+## 5. mcp_servers — MCP 外部工具集成
 
 配置全局 MCP (Model Context Protocol) Client，连接外部 MCP Server 动态加载工具。详见 [MCP 配置文档](mcp_config.md)。
 
@@ -400,8 +368,6 @@ Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表�
 | `skills` | `skill` |
 | `self_learning` | `session_search`, `session_scroll`, `memory`, `skill_manage` |
 | `planning` | `todo_write` |
-| `markdown_report` | `write_markdown_file`, `write_markdown_file_raw`, `append_markdown_sections` |
-| `code_nav` | `get_file_outline`, `ast_grep_search_file`, `lsp_find_definition`, `lsp_find_references`, `lsp_get_document_symbols`, `lsp_hover`, `lsp_get_workspace_symbols` |
 
 完整预定义工具列表：
 
@@ -410,16 +376,9 @@ Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表�
 | `write_file` | 创建新文件或覆盖已有文件 |
 | `read_file` | 读取文件内容（支持 offset/limit 分段读取） |
 | `edit_file` | 应用一个或多个唯一文本编辑 |
-| `get_file_outline` | 获取代码大纲（函数/类/结构体） |
 | `list_directory` | 列出目录结构 |
 | `grep_search` | 正则搜索文件内容 |
 | `glob_search` | 按 glob 查找文件 |
-| `ast_grep_search_file` | AST 模式搜索 |
-| `lsp_find_definition` | 查找符号定义 |
-| `lsp_find_references` | 查找符号引用 |
-| `lsp_get_document_symbols` | 列出文档符号 |
-| `lsp_hover` | 查看 hover/type 信息 |
-| `lsp_get_workspace_symbols` | 搜索工作区符号 |
 | `loom_retrieve_context` | 读取压缩上下文引用 |
 | `skill` | 将一个选定的 Skill 加入对话 |
 | `session_search` | 搜索历史 Run 的脱敏记录 |
@@ -431,9 +390,6 @@ Agent YAML 中的 `toolsets:` 会整体替换全局默认；`toolsets: []` 表�
 | `check_background_task` | 检查后台任务状态和最近输出 |
 | `kill_background_task` | 终止运行中的后台任务 |
 | `list_background_tasks` | 列出所有后台任务 |
-| `write_markdown_file` | 写入 Markdown 文件 |
-| `write_markdown_file_raw` | 原样写入 Markdown 内容 |
-| `append_markdown_sections` | 追加 Markdown 章节 |
 
 **示例**：
 
@@ -878,12 +834,12 @@ checkpoint:
 
 | 配置段 | Pydantic 模型 | 源文件 |
 |--------|--------------|--------|
-| 根配置 | `RootSettings` | `src/configuration/config_validation.py` |
-| `system.*` | `SystemSettings` | `src/configuration/config_validation.py` |
-| `tool_access_control.*` | `ToolAccessControlSettings` | `src/configuration/config_validation.py` |
-| `runtime.*` | `RuntimeSettings` | `src/configuration/config_validation.py` |
-| `logging.*` | `LoggingSettings` | `src/configuration/config_validation.py` |
-| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/configuration/config_validation.py` |
+| 根配置 | `RootSettings` | `src/config/config_validation.py` |
+| `system.*` | `SystemSettings` | `src/config/config_validation.py` |
+| `tool_access_control.*` | `ToolAccessControlSettings` | `src/config/config_validation.py` |
+| `runtime.*` | `RuntimeSettings` | `src/config/config_validation.py` |
+| `logging.*` | `LoggingSettings` | `src/config/config_validation.py` |
+| `self_learning.*` | `SelfLearningSettings` / `SelfLearningReviewSettings` | `src/config/config_validation.py` |
 
 **`RootSettings` 完整字段定义**：
 
@@ -910,9 +866,9 @@ checkpoint:
 
 | 解析器 | 用途 | 位于 |
 |--------|------|------|
-| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/execution/logging/logger_manager.py` / `src/configuration/llm_config.py` |
-| `IntParser` | 宽容整数解析；旧配置 `max_tokens: "max"` 现在会解析为有限的模型默认值 | `config_validation.py` / `src/configuration/llm_config.py` |
-| `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/configuration/llm_config.py` |
+| `BoolParser` | 兼容布尔输入归一化，用于日志与部分 LLM 配置开关 | `config_validation.py` / `src/execution/logging/logger_manager.py` / `src/config/llm_config.py` |
+| `IntParser` | 宽容整数解析；旧配置 `max_tokens: "max"` 现在会解析为有限的模型默认值 | `config_validation.py` / `src/config/llm_config.py` |
+| `FloatParser` | 兼容浮点与整数字符串输入，实际用于模型配置里的 `temperature`、`retry_delay`、`max_retry_delay` | `config_validation.py` / `src/config/llm_config.py` |
 | `EnumParser` | 通用枚举归一化辅助函数，当前未在 system.yaml 主链路中直接消费 | `config_validation.py` |
 | `LogLevelParser` | 解析 `logging.level`，支持标准 `logging` 级别与 `OFF` | `config_validation.py` / `src/execution/logging/logger_manager.py` |
 

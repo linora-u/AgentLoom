@@ -9,9 +9,9 @@ from uuid import uuid4
 
 import psutil
 import pytest
-from agentloom.application.run import ApplicationRunError
-from agentloom.application.runner import execute_app
-from agentloom.configuration.config import bind_config, load_project_config
+from agentloom.app.run import ApplicationRunError
+from agentloom.app.runner import execute_app
+from agentloom.config.config import bind_config, load_project_config
 from agentloom.runtimes.pi.metadata import BRIDGE_VERSION
 from agentloom.runtimes.pi.protocol import (
     PI_BRIDGE_PROTOCOL_VERSION,

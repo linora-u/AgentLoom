@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from agentloom.configuration.yaml_loader import UniqueKeySafeLoader
+from agentloom.config.yaml_loader import UniqueKeySafeLoader
 
 from .runtime import HookPlan
 from .types import HOOK_EVENT_NAMES, HookEvent, HookHandler
