@@ -71,10 +71,11 @@ def test_runtime_supervisor_validation_accepts_goal(tmp_path: Path):
 def test_runtime_worker_validation_rejects_any_goal_key(tmp_path: Path, goal):
     config = _config(
         goal=goal,
-        agent_function_schema={
-            "description": "worker",
-            "inputs": {"task": {"description": "task"}},
-            "output": {"description": "result"},
+        input_schema={
+            "type": "object",
+            "properties": {"task": {"type": "string"}},
+            "required": ["task"],
+            "additionalProperties": False,
         },
     )
     with pytest.raises(ValueError, match="Worker Agent.*goal"):
