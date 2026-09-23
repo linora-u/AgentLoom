@@ -77,23 +77,31 @@ def fake_app(tmp_path):
             {"name": "read_file"},
             {"name": "list_directory"},
         ],
-        "agent_function_schema": {
-            "description": "对模块进行静态分析",
-            "inputs": {
+        "input_schema": {
+            "type": "object",
+            "properties": {
                 "module_path": {
                     "description": "模块路径",
-                    "required": True,
                     "type": "string",
                 },
                 "context": {
                     "description": "上下文信息",
-                    "required": False,
                     "type": "string",
                 },
             },
-            "output": {
-                "description": "Markdown 格式的分析报告",
+            "required": ["module_path"],
+            "additionalProperties": False,
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "report": {
+                    "type": "string",
+                    "description": "Markdown 格式的分析报告",
+                },
             },
+            "required": ["report"],
+            "additionalProperties": False,
         },
     }
     with open(worker_dir / "step0_analysis.yaml", "w", encoding="utf-8") as f:
@@ -151,11 +159,13 @@ class TestScanAppStructure:
         assert "step0_analysis.yaml" in result
 
     def test_full_app_returns_worker_info(self, fake_app):
-        """验证能正确提取 Worker 的 name、agent_function_schema inputs/output。"""
+        """验证能正确提取 Worker 的 name、input_schema 和 output_schema。"""
         result = scan_app_structure(str(fake_app))
         assert "step0_analysis" in result
+        assert "input_schema" in result
         assert "module_path" in result
         assert "context" in result
+        assert "output_schema" in result
         assert "Markdown" in result  # output description
 
     def test_full_app_returns_tools_info(self, fake_app):
@@ -275,7 +285,7 @@ class TestEdgeCases:
         assert "⚠️" in result or "未找到" in result
 
     def test_worker_without_schema(self, tmp_path):
-        """Worker 没有 agent_function_schema 也不应崩溃。"""
+        """Worker 使用默认 task/text 契约时不应崩溃。"""
         app_dir = tmp_path / "app_no_schema"
         worker_dir = app_dir / "workflows" / "worker_agents"
         worker_dir.mkdir(parents=True)
@@ -446,7 +456,7 @@ class TestExtractionAccuracy:
                 assert stripped in result, f"缺失行: {stripped!r}"
 
     def test_schema_inputs_order_preserved(self, tmp_path):
-        """agent_function_schema 的 inputs 名称应完整列出。"""
+        """input_schema 的 properties 名称应完整列出。"""
         app_dir = tmp_path / "schema_app"
         worker_dir = app_dir / "workflows" / "worker_agents"
         worker_dir.mkdir(parents=True)
@@ -459,14 +469,19 @@ class TestExtractionAccuracy:
             "name": "schema_worker",
             "description": "test",
             "workflow": "x",
-            "agent_function_schema": {
-                "description": "测试 schema",
-                "inputs": {
-                    "param_a": {"description": "参数A", "required": True, "type": "string"},
-                    "param_b": {"description": "参数B", "required": True, "type": "string"},
-                    "param_c": {"description": "参数C", "required": False, "type": "string"},
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "param_a": {"description": "参数A", "type": "string"},
+                    "param_b": {"description": "参数B", "type": "string"},
+                    "param_c": {"description": "参数C", "type": "string"},
                 },
-                "output": {"description": "JSON 格式的结果"},
+                "required": ["param_a", "param_b"],
+                "additionalProperties": False,
+            },
+            "output_schema": {
+                "type": "string",
+                "description": "JSON 格式的结果",
             },
         }
         with open(worker_dir / "step0.yaml", "w", encoding="utf-8") as f:
@@ -515,7 +530,7 @@ class TestRobustness:
         assert "bad_wa" in result
 
     def test_schema_inputs_is_not_dict(self, tmp_path):
-        """agent_function_schema.inputs 不是 dict 时不应崩溃。"""
+        """input_schema.properties 不是 dict 时不应崩溃。"""
         app_dir = tmp_path / "bad_schema_app"
         worker_dir = app_dir / "workflows" / "worker_agents"
         worker_dir.mkdir(parents=True)
@@ -526,11 +541,11 @@ class TestRobustness:
             "name": "bad_schema_worker",
             "description": "x",
             "workflow": "x",
-            "agent_function_schema": {
-                "description": "broken",
-                "inputs": "this_should_be_a_dict",
-                "output": "also_not_a_dict",
+            "input_schema": {
+                "type": "object",
+                "properties": "this_should_be_a_dict",
             },
+            "output_schema": "also_not_a_dict",
         }
         with open(worker_dir / "step0.yaml", "w", encoding="utf-8") as f:
             yaml.dump(bad_worker, f, allow_unicode=True)
@@ -540,7 +555,7 @@ class TestRobustness:
         assert "bad_schema_worker" in result
 
     def test_workflow_field_is_list(self, tmp_path):
-        """workflow 字段是 list[str] 时，应按顺序渲染为可读文本。"""
+        """扫描器不为非法 list workflow 发明顺序执行语义。"""
         yaml_path = tmp_path / "list_workflow.yaml"
         weird_yaml = {
             "name": "list_wf",
@@ -556,9 +571,11 @@ class TestRobustness:
         result = extract_workflow_text(str(yaml_path))
         assert isinstance(result, str)
         assert "list_wf" in result
-        assert "## Workflow 1" in result
-        assert "## Workflow 2" in result
-        assert "## Workflow 3" in result
+        assert "Run step one" in result
+        assert "Run step two" in result
+        assert "Run step three" in result
+        assert "## Workflow 1" not in result
+        assert "## Workflow 3" not in result
         assert result.index("Run step one.") < result.index("Run step two.") < result.index("Run step three.")
 
     def test_workflow_field_is_dict(self, tmp_path):
@@ -1324,14 +1341,17 @@ class TestRemovedExecutionConfigAndMarkdownSupport:
                 ```yaml
                 name: md_worker
                 description: markdown worker
-                agent_function_schema:
-                  description: worker schema
-                  inputs:
+                input_schema:
+                  type: object
+                  properties:
                     query:
+                      type: string
                       description: 查询
-                      required: true
-                  output:
-                    description: 输出
+                  required: [query]
+                  additionalProperties: false
+                output_schema:
+                  type: string
+                  description: 输出
                 ```
 
                 ## Worker Workflow
@@ -1388,6 +1408,16 @@ class TestSkillContractText:
         assert 'pyproject.toml` 中 `[project].name == "AgentLoom"' in content
         assert "config/llm.yaml" in content
         assert "不要只用 `config/system.yaml` 判定环境可用" in content
+
+    def test_skill_documents_only_native_agent_schema_contract(self):
+        skill_root = _AGENT_LOOM_ROOT / "agentloom-framework-skill"
+        content = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(skill_root.rglob("*.md"))
+        )
+        assert "agent_function_schema" not in content
+        assert "input_schema" in content
+        assert "output_schema" in content
 
 
 @pytest.mark.parametrize("suffix", [".yaml", ".md"])
