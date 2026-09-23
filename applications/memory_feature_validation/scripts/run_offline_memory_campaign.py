@@ -142,7 +142,6 @@ _SOURCE_FILES = (
     "src/lib/config/__init__.py",
     "src/lib/config/config_validation.py",
     "src/lib/config/layered_builder.py",
-    "src/lib/config/model_request_header_profiles.py",
     "src/lib/config/system_loader.py",
     "src/lib/config/yaml_loader.py",
     "src/lib/logging/__init__.py",

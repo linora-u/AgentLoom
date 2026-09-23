@@ -1340,8 +1340,7 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 
 | 字段 | 类型约束 | 说明 |
 |------|----------|------|
-| `system` | `dict` | 系统元数据（name, version, user_agent） |
-| `model_request_headers` | `dict` | 模型请求头 profile |
+| `system` | `dict` | 系统元数据（name, version） |
 | `runtime_options` | `dict` | 由选中基座解释的参数，Worker 独立构建 |
 | `context_engine` | `dict` | 可逆上下文压缩限制 |
 | `tool_access_control` | `dict` | 工作目录和路径过滤 |

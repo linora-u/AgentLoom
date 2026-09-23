@@ -145,7 +145,7 @@ runtime_options:
 Agent YAML 当前可覆盖的系统配置白名单：
 
 ```text
-system, model_request_headers, runtime_options, context_engine,
+system, runtime_options, context_engine,
 tool_access_control, tools, shell_settings,
 default_toolsets, toolsets, mcp_servers, self_learning, hooks
 ```

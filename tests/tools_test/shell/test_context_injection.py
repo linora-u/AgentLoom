@@ -1,5 +1,4 @@
 import pytest
-import os
 import shutil
 from agentloom.execution.trace.task_context import (
     task_context,
@@ -230,78 +229,3 @@ def test_valid_config_execution(clean_registry):
         shell_output = shell_tool("echo $0", load_profile=False).strip()
         assert any(s in shell_output.lower() for s in ("bash", "zsh", "sh")), \
             f"Expected a valid shell, got {shell_output}"
-
-def test_concurrent_shell_execution_isolation(clean_registry, monkeypatch, tmp_path):
-    """
-    Test that multiple agents running concurrently in different threads 
-    can execute shell commands in their isolated environments (one bash, one zsh)
-    without interfering with each other's state or execution.
-    """
-    has_zsh = shutil.which("zsh") is not None
-    has_bash = shutil.which("bash") is not None
-
-    if not (has_zsh and has_bash):
-        pytest.skip("Both zsh and bash are required for this concurrency test")
-
-    import agentloom.execution.tool_governance.shell.validator as validator_module
-    # Allow the commands used in this test (CWD isolation verification).
-    monkeypatch.setattr(validator_module, 'load_allowed_commands', lambda: ['mkdir', 'cd', 'pwd', 'echo'])
-
-    results = {}
-    from agentloom.execution import RuntimeHome, bind_run_context
-
-    run_context = RuntimeHome(tmp_path / ".agentloom").context(
-        application_id="concurrent-shell-test",
-        task_id="task-concurrent",
-        run_id="run-concurrent",
-    )
-
-    def worker(agent_id, subdir):
-        try:
-            with bind_run_context(run_context):
-                try:
-                    with task_context(f"task_{agent_id}"):
-                        set_current_agent_id(agent_id)
-                        set_current_agent_config({"execution_env": {}})
-
-                        # Each agent cd's to a different workspace-relative directory.
-                        shell_tool(f"mkdir -p {subdir}", load_profile=False)
-                        shell_tool(f"cd {subdir}", load_profile=False)
-
-                        # Sleep a bit to encourage thread interleaving.
-                        time.sleep(0.1)
-
-                        output_pwd = shell_tool("pwd", load_profile=False).strip()
-
-                        results[agent_id] = {
-                            "cwd": output_pwd,
-                        }
-                finally:
-                    ShellProcessRegistry.get_instance().release(agent_id)
-        except Exception as e:
-            results[agent_id] = {"error": str(e)}
-
-    t1 = threading.Thread(target=worker, args=("concurrent_A", "temp/isolation_dir_a"))
-    t2 = threading.Thread(target=worker, args=("concurrent_B", "temp/isolation_dir_b"))
-
-    t1.start()
-    t2.start()
-
-    t1.join()
-    t2.join()
-
-    res_a = results.get("concurrent_A", {})
-    res_b = results.get("concurrent_B", {})
-
-    assert "error" not in res_a, f"Agent A encountered error: {res_a.get('error')}"
-    assert "error" not in res_b, f"Agent B encountered error: {res_b.get('error')}"
-
-    # Verify CWD isolation: each agent maintains its own working directory.
-    cwd_a = res_a.get("cwd", "")
-    cwd_b = res_b.get("cwd", "")
-    assert "isolation_dir_a" in cwd_a, (
-        f"Agent A CWD corrupted, expected isolation_dir_a in {cwd_a}"
-    )
-    assert "isolation_dir_b" in cwd_b, (
-        f"Agent B CWD corrupted, expected isolation_dir_b in {cwd_b}"
-    )

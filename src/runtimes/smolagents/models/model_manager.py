@@ -10,20 +10,18 @@ import json
 from dataclasses import asdict, dataclass, replace
 
 import litellm
+from agentloom.configuration.http_headers import normalize_http_headers
+from agentloom.configuration.llm_config import LlmModelTypeSettings
+from agentloom.execution.logging import get_logger
 from agentloom.integrations.litellm.litellm_retry import patch_litellm_completion
 from agentloom.integrations.litellm.model_binding import (
     build_litellm_model_turn_binding,
-)
-from agentloom.configuration.model_request_headers import (
-    build_model_request_headers,
-    get_system_model_request_headers,
 )
 from agentloom.integrations.litellm.tool_error_projection import (
     patch_litellm_tool_error_projection,
 )
 from agentloom.runtimes.smolagents.model_turn_bridge import SmolagentsModelTurnBridge
-from agentloom.configuration.llm_config import LlmModelTypeSettings
-from agentloom.execution.logging import get_logger
+
 from smolagents import AgentLogger
 
 from .model_types import ModelConfig, ModelType, ModelTypeManager
@@ -124,17 +122,7 @@ class ModelManager:
         patch_litellm_completion(litellm)
         patch_litellm_tool_error_projection()
 
-        # Configure global headers from config for litellm versions that expose
-        # a module-level default. Per-call extra_headers is the authoritative path.
-        system_headers = get_system_model_request_headers()
-        if hasattr(litellm, 'default_headers'):
-            litellm.default_headers = system_headers
-
-        logger.debug(
-            "Configured litellm retry: exponential backoff via tenacity, "
-            "model request headers: %s",
-            sorted(system_headers),
-        )
+        logger.debug("Configured litellm retry: exponential backoff via tenacity")
 
     def get_model_config(
         self,
@@ -214,8 +202,8 @@ class ModelManager:
             "timeout": model_config.timeout,
         }
 
-        # Add system-level privacy headers plus model-specific overrides.
-        request_headers = build_model_request_headers(model_config.extra_headers)
+        # Send only headers configured for this model.
+        request_headers = normalize_http_headers(model_config.extra_headers)
         if request_headers:
             litellm_params["extra_headers"] = request_headers
 

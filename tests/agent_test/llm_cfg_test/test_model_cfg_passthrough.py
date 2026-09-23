@@ -19,7 +19,6 @@ def _patch_yaml_config(monkeypatch, config: dict) -> dict:
 
 def _base_model_config() -> dict:
     return {
-        "model_request_headers": {"profile": "none"},
         "langfuse": {
             "enabled": True,
             "host": "https://langfuse.example",
@@ -110,6 +109,27 @@ def test_model_manager_litellm_config_contains_passthrough_fields(monkeypatch):
     assert params["extra_headers"] == {"X-Model": "powerful"}
     assert params["api_base"] == "https://example.test/v1"
     assert params["api_key"] == "key-powerful"
+
+
+def test_model_manager_leaves_sdk_default_headers_untouched(monkeypatch):
+    config = _base_model_config()
+    config["model"]["powerful"].pop("extra_headers")
+    _patch_yaml_config(monkeypatch, config)
+    monkeypatch.setattr(
+        model_manager_module.litellm,
+        "default_headers",
+        {"X-SDK": "kept"},
+        raising=False,
+    )
+
+    manager = model_manager_module.ModelManager()
+    params = manager.get_litellm_config(
+        model_type=model_types.ModelType("powerful"),
+        model_cache=False,
+    )
+
+    assert "extra_headers" not in params
+    assert model_manager_module.litellm.default_headers == {"X-SDK": "kept"}
 
 
 def test_legacy_max_tokens_remains_usable_by_model_manager(monkeypatch):
