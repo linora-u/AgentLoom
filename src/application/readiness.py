@@ -31,7 +31,10 @@ def validate_required_yaml_fields(config: dict, yaml_path: Path | str) -> None:
     if workflow is None:
         missing.append("workflow")
     else:
-        AgentConfigNormalizer.validate_workflow_config(config)
+        try:
+            AgentConfigNormalizer.validate_workflow_config(config)
+        except ValueError as error:
+            invalid.append(str(error))
 
     if invalid:
         problems: list[str] = []
