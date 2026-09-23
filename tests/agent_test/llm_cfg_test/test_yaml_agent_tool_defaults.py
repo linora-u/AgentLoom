@@ -143,6 +143,30 @@ def test_agent_as_tool_allows_schema_valid_additional_properties():
         tool(query="hello", priority="high")
 
 
+def test_agent_as_tool_accepts_json_property_names_that_are_not_python_identifiers():
+    worker = _make_worker(
+        {
+            "name": "external_id_worker",
+            "agent_runtime": "smolagents",
+            "description": "worker desc",
+            "tools": [],
+            "workflow": "demo workflow",
+            "input_schema": {
+                "type": "object",
+                "properties": {"user-id": {"type": "string"}},
+                "required": ["user-id"],
+                "additionalProperties": False,
+            },
+        }
+    )
+
+    worker._validate_config()
+    tool = worker.agent_as_tool()
+
+    assert bind_tool(tool).definition.parameters == worker._config["input_schema"]
+    assert tool(**{"user-id": "alice"}) == "RUN::alice"
+
+
 def test_agent_as_tool_supports_an_object_root_local_reference():
     input_schema = {
         "$defs": {

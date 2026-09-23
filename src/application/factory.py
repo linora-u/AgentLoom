@@ -275,41 +275,10 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         dynamic_agent_tool.__name__ = function_name
         dynamic_agent_tool.__doc__ = generated_docstring
 
-        annotations: dict[str, Any] = {"return": Any}
-        signature_params = []
-        for name in ordered_input_names:
-            annotations[name] = Any
-            default = (
-                inspect.Parameter.empty
-                if name in required_names
-                else None
-            )
-            signature_params.append(
-                inspect.Parameter(
-                    name=name,
-                    kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    default=default,
-                    annotation=Any,
-                )
-            )
-        if accepts_additional_properties:
-            extra_name = "additional_properties"
-            while extra_name in properties:
-                extra_name = f"_{extra_name}"
-            annotations[extra_name] = Any
-            signature_params.append(
-                inspect.Parameter(
-                    name=extra_name,
-                    kind=inspect.Parameter.VAR_KEYWORD,
-                    annotation=Any,
-                )
-            )
-
-        dynamic_agent_tool.__annotations__ = annotations
-        dynamic_agent_tool.__signature__ = inspect.Signature(
-            parameters=signature_params,
-            return_annotation=Any,
-        )
+        # JSON object property names are not constrained to Python identifiers.
+        # Keep the callable's native ``*args, **kwargs`` boundary and publish the
+        # exact JSON Schema through the canonical Tool definition below.
+        dynamic_agent_tool.__annotations__ = {"return": Any}
         dynamic_agent_tool._agentloom_tool_definition = ToolDefinition(  # type: ignore[attr-defined]
             name=function_name,
             description=self.description.strip(),
