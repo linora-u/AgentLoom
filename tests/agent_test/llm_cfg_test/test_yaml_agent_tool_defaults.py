@@ -192,7 +192,10 @@ def test_agent_as_tool_accepts_required_fields_defined_by_additional_properties(
         tool(query=1)
 
 
-def test_agent_as_tool_supports_an_object_root_local_reference():
+@pytest.mark.parametrize("reference_keyword", ["$ref", "$dynamicRef"])
+def test_agent_as_tool_supports_an_object_root_local_reference(
+    reference_keyword,
+):
     input_schema = {
         "$defs": {
             "request": {
@@ -205,7 +208,7 @@ def test_agent_as_tool_supports_an_object_root_local_reference():
                 "additionalProperties": False,
             },
         },
-        "$ref": "#/$defs/request",
+        reference_keyword: "#/$defs/request",
     }
     worker = _make_worker(
         {
