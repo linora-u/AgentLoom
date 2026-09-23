@@ -15,6 +15,32 @@ def test_published_bridge_schema_matches_the_python_codec():
     assert published == protocol_schema()
 
 
+def test_platform_projection_stays_out_of_the_canonical_terminal_record():
+    from agentloom.execution.tool_protocol import (
+        MODEL_OUTPUT_METADATA_KEY,
+        ToolCallRecord,
+    )
+    from agentloom.runtimes.pi.protocol import PlatformResult
+    from agentloom.runtimes.pi.protocol_handlers import terminal
+
+    record = ToolCallRecord.completed(
+        call_id="platform-call",
+        tool_name="worker",
+        input={"task": "inspect"},
+        output={"full": "canonical"},
+        metadata={MODEL_OUTPUT_METADATA_KEY: "[ContextRef ctx_test] preview"},
+    )
+    canonical = terminal(record)
+
+    assert canonical.model_dump() == record.to_dict()
+    projected = PlatformResult(
+        method="platform_invoke",
+        record=canonical,
+        model_output=record.model_output(),
+    )
+    assert projected.model_output == "[ContextRef ctx_test] preview"
+
+
 def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():
     from agentloom.runtimes.pi.protocol import decode_message, encode_message
 
