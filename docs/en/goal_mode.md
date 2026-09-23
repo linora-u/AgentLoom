@@ -42,8 +42,8 @@ completed Goal returns its stored evidence without rerunning work.
 
 With checkpoints enabled, `<application_id>/<task_id>/goal.json` stores identity,
 objective fingerprint, state, `goal_started`, evidence, and timestamps. Resume
-preserves the Goal and checks that description, workflow, and runtime task still
-match. Corrupt Goal state or disabling an active Goal remains an error.
+preserves the Goal and checks that workflow and runtime task still match. Corrupt
+Goal state or disabling an active Goal remains an error.
 
 Old budget and usage fields in Goal checkpoints are silently ignored. A legacy
 `budget_limited` Goal resumes as `active`; an already completed Goal stays complete.

@@ -55,12 +55,10 @@ def build_goal_objective(
 
 def goal_objective_fingerprint(
     *,
-    description: str,
     workflow: str,
     task: str | None,
 ) -> str:
     payload = {
-        "description": description.strip(),
         "workflow": workflow.strip(),
         "task": task.strip() if task is not None else "",
     }
