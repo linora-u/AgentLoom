@@ -9,7 +9,6 @@ from .model import (
     goal_continuation_prompt,
     goal_objective_fingerprint,
     normalize_goal_config,
-    normalize_workflow_for_goal,
     validate_goal_state,
 )
 from .provider import (
@@ -28,7 +27,6 @@ __all__ = [
     "goal_continuation_prompt",
     "goal_objective_fingerprint",
     "normalize_goal_config",
-    "normalize_workflow_for_goal",
     "validate_goal_state",
     "GoalCompleteError",
     "GoalStateProvider",
