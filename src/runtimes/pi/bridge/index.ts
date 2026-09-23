@@ -214,6 +214,7 @@ async function run(frame: Frame, abort: AbortController) {
         parsed = JSON.parse(text);
       } catch {
         outputCorrection = true;
+        if (last.stopReason === "length") break;
         await trigger("Your previous final output was not valid JSON. Return a corrected value matching the required JSON Schema.", true);
         last = session.messages.at(-1);
         continue;
@@ -221,6 +222,7 @@ async function run(frame: Frame, abort: AbortController) {
       if (!outputValidator(parsed)) {
         const detail = outputValidator.errors?.[0]?.message || "schema validation failed";
         outputCorrection = true;
+        if (last.stopReason === "length") break;
         await trigger(`Your previous final output did not match the required JSON Schema: ${detail}. Return a corrected value.`, true);
         last = session.messages.at(-1);
         continue;
@@ -237,7 +239,8 @@ async function run(frame: Frame, abort: AbortController) {
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} : null});
+      error: outputCorrection && state !== "success" ? {category: "output_validation", message: "Agent exhausted its execution budget with an invalid structured output", retryable: true} :
+        state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} : null});
   } catch {
     const interrupted = abort.signal.aborted;
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
