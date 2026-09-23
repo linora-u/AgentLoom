@@ -116,6 +116,66 @@ def test_agent_as_tool_preserves_typed_multi_field_input_as_bare_json():
         tool(query="hello", count="two")
 
 
+def test_agent_as_tool_allows_schema_valid_additional_properties():
+    worker = _make_worker(
+        {
+            "name": "open_worker",
+            "agent_runtime": "smolagents",
+            "description": "worker desc",
+            "tools": [],
+            "workflow": "demo workflow",
+            "input_schema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+                "additionalProperties": {"type": "integer"},
+            },
+        }
+    )
+
+    worker._validate_config()
+    tool = worker.agent_as_tool()
+
+    assert tool(query="hello", priority=2) == (
+        'RUN::{"priority":2,"query":"hello"}'
+    )
+    with pytest.raises(Exception, match="integer"):
+        tool(query="hello", priority="high")
+
+
+def test_agent_as_tool_supports_an_object_root_local_reference():
+    input_schema = {
+        "$defs": {
+            "request": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "count": {"type": "integer"},
+                },
+                "required": ["query", "count"],
+                "additionalProperties": False,
+            },
+        },
+        "$ref": "#/$defs/request",
+    }
+    worker = _make_worker(
+        {
+            "name": "referenced_worker",
+            "agent_runtime": "smolagents",
+            "description": "worker desc",
+            "tools": [],
+            "workflow": "demo workflow",
+            "input_schema": input_schema,
+        }
+    )
+
+    worker._validate_config()
+    tool = worker.agent_as_tool()
+
+    assert bind_tool(tool).definition.parameters == input_schema
+    assert tool(query="hello", count=2) == 'RUN::{"count":2,"query":"hello"}'
+
+
 def test_agent_as_tool_preserves_structured_result():
     worker = _make_worker(
         {

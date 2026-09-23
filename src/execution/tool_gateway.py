@@ -349,10 +349,24 @@ def bind_tool(
         parameters = dict(definition.parameters)
         properties = parameters.get("properties")
         if not isinstance(properties, Mapping):
+            object_schema = getattr(tool, "_agentloom_input_object_schema", None)
+            properties = (
+                object_schema.get("properties", {})
+                if isinstance(object_schema, Mapping)
+                else None
+            )
+        if not isinstance(properties, Mapping):
             raise ValueError(
                 f"Tool {definition.name!r} parameters must contain object properties"
             )
         required = parameters.get("required")
+        if not isinstance(required, list):
+            object_schema = getattr(tool, "_agentloom_input_object_schema", None)
+            required = (
+                object_schema.get("required")
+                if isinstance(object_schema, Mapping)
+                else None
+            )
         required_names = (
             tuple(str(name) for name in required)
             if isinstance(required, list)
