@@ -70,6 +70,8 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
         assert len(model_requests) == len(model_responses) == len(sent)
         for event, actual in zip(model_requests, sent, strict=True):
             saved = json.loads(trace.read_text(event['request_ref']))
+            assert event['boundary'] == 'litellm_input'
+            assert event['provider_request_complete'] is False
             assert saved['model'] == f"openai/{actual['model']}"
             assert saved['tools'] == actual['tools']
             assert [{key: value for key, value in message.items() if value is not None}
@@ -77,6 +79,7 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
         assert {event['model_turn_id'] for event in model_requests} == {
             event['model_turn_id'] for event in model_responses}
         all_requests = [event for event in trace.events() if event['kind'] == 'model_request']
+        assert all(event['provider_request_complete'] is False for event in all_requests)
         assert [event['run_step_number'] for event in all_requests] == list(range(1, len(all_requests) + 1))
         worker_request = next(event for event in all_requests
                               if event['kind'] == 'model_request' and event['runtime'] == worker)
