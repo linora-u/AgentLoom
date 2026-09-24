@@ -113,6 +113,17 @@ def _provider_cause(error: Exception) -> Exception | None:
 def _runtime_error(error: Exception) -> AgentRuntimeError:
     if isinstance(error, AgentRuntimeError):
         return error
+    from agentloom.execution.observability import TraceStorageError
+
+    trace_cause = next(
+        (item for item in _exception_chain(error) if isinstance(item, TraceStorageError)),
+        None,
+    )
+    if trace_cause is not None:
+        return AgentRuntimeError(
+            f"Agent runtime trace failure: {trace_cause}",
+            category="internal", cause=trace_cause, retryable=False,
+        )
     provider_cause = _provider_cause(error)
     if provider_cause is not None:
         from agentloom.integrations.litellm.litellm_retry import (

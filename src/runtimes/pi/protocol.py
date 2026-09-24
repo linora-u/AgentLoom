@@ -118,6 +118,7 @@ class ModelTrace(WireValue):
     identity: NativeCallIdentity
     attempt: Annotated[int, Field(ge=0)]
     phase: Literal["request", "response"]
+    boundary: Literal["pi_payload", "openai_http_request"] | None = None
     capture_id: Annotated[str, Field(pattern="^[0-9a-f]{32}$")]
     sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
 

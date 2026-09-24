@@ -61,6 +61,8 @@ class StepPresenter:
                 level=AgentLoomLogLevel.INFO,
             )
         elif kind == "model_request" and agent_id in self._agents:
+            if event.get("boundary") == "openai_http_request":
+                return
             number = event.get("run_step_number")
             if isinstance(number, int):
                 attempt = event.get("attempt")
