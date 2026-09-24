@@ -1,12 +1,13 @@
 """Pi selection and governance acceptance at the public Application boundary."""
 import json
+import re
 import sys
 
 import pytest
 import yaml
-
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
+
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_tools_application import select
 
@@ -111,6 +112,55 @@ def test_native_trace_write_failure_fails_application(tmp_path, monkeypatch):
             execute_app(app, file_logging=False)
 
 
+@pytest.mark.parametrize('damage', [False, True])
+def test_resume_verifies_native_journal_reference_when_tool_trace_was_not_written(tmp_path, monkeypatch, damage):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder, TraceStorageError, inspect_run
+
+    source = tmp_path / 'large.txt'
+    source.write_text('FIRST-LARGE-8426\n' + 'z' * 40000 + '\nLAST-LARGE-8426')
+    original_append = TraceRecorder._append
+
+    def fail_tool_trace(recorder, event):
+        if event['kind'] == 'tool':
+            raise OSError('fixture trace write failed')
+        return original_append(recorder, event)
+
+    with model_service(turns=[[('native', 'read', {'path': str(source)})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'read'}])
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['checkpoint'] = {'enabled': True, 'cleanup_on_success': False}
+        system_path.write_text(yaml.safe_dump(system))
+        monkeypatch.setattr(TraceRecorder, '_append', fail_tool_trace)
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failed:
+            execute_app(app, file_logging=False)
+        monkeypatch.setattr(TraceRecorder, '_append', original_append)
+
+        journal = next((failed.value.run.run_dir / 'native-tools').glob('*.json'))
+        reference = re.search(r'ctx_[0-9a-f]{32}', journal.read_text()).group()
+        with inspect_run(failed.value.run) as trace:
+            assert not any(event['kind'] == 'tool' for event in trace.events())
+            digest = trace.reference_metadata(reference)['sha256']
+            if damage:
+                payload = trace.storage.path / 'payloads' / f'{digest}.blob'
+                with payload.open('r+b') as stream:
+                    stream.seek(payload.stat().st_size - 1)
+                    stream.write(b'X')
+
+        if damage:
+            with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as resumed:
+                execute_app(app, file_logging=False, resume_task_id=failed.value.run.task_id)
+            assert isinstance(resumed.value.original_error.__cause__, TraceStorageError)
+            assert len(requests) == 1
+        else:
+            with bind_config(load_project_config(tmp_path)):
+                result = execute_app(app, file_logging=False, resume_task_id=failed.value.run.task_id)
+            assert result.output == 'Pi answer'
+            assert len(requests) == 2
+
+
 @pytest.mark.parametrize('name', ['read_file', 'grep_search', 'glob_search', 'shell_tool', 'todo_write',
                                  'grep', 'find'])
 def test_unmapped_basics_and_specialist_writes_are_rejected_before_application_execution(tmp_path, name):
@@ -175,10 +225,12 @@ def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_p
 
 def test_cancellation_releases_real_mcp_callback_and_server(tmp_path):
     import os
-    from pathlib import Path
     import signal
+    from pathlib import Path
+
     import psutil
-    from tests.pi_test.test_process_lifecycle import node_launcher, start_cli, until, assert_gone
+
+    from tests.pi_test.test_process_lifecycle import assert_gone, node_launcher, start_cli, until
     mcp_events = tmp_path / 'mcp-events.jsonl'
     with model_service(turns=[[('pending-mcp', 'mcp__facts__slow_lookup', {'query': 'cancel this request'})]]) as (url, requests):
         app = project(tmp_path, url)
@@ -216,8 +268,8 @@ def test_cancellation_releases_real_mcp_callback_and_server(tmp_path):
 
 
 def test_context_refs_remain_retrievable_with_pi_checkpoint_disabled(tmp_path):
-    from pathlib import Path
     import re
+    from pathlib import Path
 
     def retrieve(request):
         result = next(message['content'] for message in request['messages'] if message['role'] == 'tool')

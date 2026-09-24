@@ -1,6 +1,7 @@
 """Model request evidence from the real Pi Application bridge."""
 
 import json
+import subprocess
 
 import pytest
 import yaml
@@ -8,7 +9,9 @@ from agentloom.app.run import ApplicationRunError
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.observability import inspect_run
+from agentloom.execution.subprocess_env import build_subprocess_env
 from agentloom.runtimes.pi.capture import read_model_capture
+from agentloom.runtimes.pi.install import find_node, installed_pi_entry
 
 from tests.pi_test.test_application import change_model, model_service, project
 
@@ -103,3 +106,42 @@ def test_pi_abort_before_next_provider_request_has_no_unpaired_response(tmp_path
     responses = [event for event in events if event["kind"] == "model_response"]
     assert len(requests_in_trace) == len(responses) == 1
     assert requests_in_trace[0]["model_turn_id"] == responses[0]["model_turn_id"]
+
+
+def test_pi_bridge_pairs_post_request_transport_exception(tmp_path):
+    script = """
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const {configureModel} = await import(pathToFileURL(process.argv[1]).href);
+const directory = process.argv[2];
+const calls = [];
+const model = {api: 'openai-completions', provider: 'agentloom', id: 'fixture-model'};
+const session = {agent: {streamFn: async (_model, _context, options) => {
+  await options.onPayload({model: 'fixture-model', messages: [], tools: []}, model);
+  throw new Error('fixture post-request transport exception');
+}}};
+configureModel(session,
+  {timeout: 5, requests_per_minute: 2000000, num_retries: 0, retry_delay: 0.01, max_retry_delay: 0.01},
+  {}, async () => ({state: 'work', agent_context: [], identity: {call_id: 'model:fixture'}}),
+  () => {}, directory,
+  async payload => {
+    calls.push(payload);
+    return {method: 'model_trace', phase: payload.phase, attempt: payload.attempt, accepted: true};
+  });
+const stream = await session.agent.streamFn(model, {messages: [], tools: []}, {});
+const result = await stream.result();
+const captured = JSON.parse(await readFile(join(directory, `model-${calls.at(-1).capture_id}.json`), 'utf8'));
+console.log(JSON.stringify({phases: calls.map(call => call.phase),
+  stopReason: result.stopReason, error: captured.errorMessage}));
+"""
+    entry = installed_pi_entry().with_name("model.js")
+    completed = subprocess.run(
+        [find_node(build_subprocess_env()), "--input-type=module", "-e", script, str(entry), str(tmp_path)],
+        capture_output=True, text=True, check=True, timeout=15,
+    )
+    observed = json.loads(completed.stdout)
+    assert observed == {
+        "phases": ["request", "response"], "stopReason": "error",
+        "error": "fixture post-request transport exception",
+    }
