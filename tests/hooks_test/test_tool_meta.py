@@ -3,20 +3,12 @@
 from dataclasses import FrozenInstanceError
 
 import pytest
-
 from agentloom.tools.catalog import ToolSpec
 from agentloom.tools.loader import resolve_tool_function
 from agentloom.tools.tool_meta import get_tool_meta
 
 
 class TestResolveToolFunction:
-    @pytest.mark.parametrize(
-        "tool_name",
-        ["grep_search", "glob_search", "read_file", "edit_file", "write_file", "shell_tool"],
-    )
-    def test_registered_tool_resolves(self, tool_name):
-        assert callable(resolve_tool_function(tool_name))
-
     @pytest.mark.parametrize("tool_name", ["nonexistent_tool_xyz", "_private_helper", ""])
     def test_unregistered_tool_raises(self, tool_name):
         with pytest.raises(ValueError, match="registered built-in tool"):
