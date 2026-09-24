@@ -503,6 +503,29 @@ def test_application_tool_outcome_has_durable_inspectable_payload(platform_proje
         assert b"".join(pages).decode() == model_visible
 
 
+def test_multimegabyte_single_line_tool_result_remains_pageable(platform_project):
+    from agentloom.execution.observability import inspect_run
+
+    _, _, programs, _, run = platform_project
+    payload = "A" * 4_000_000 + "终"
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="long-line", tool_name="trace_payload", arguments={"value": payload},
+        )
+        assert "[ContextRef " in record.model_content()
+        return "retained"
+
+    programs["platform"] = execute
+    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event["kind"] == "tool")
+        ref = re.search(r"ctx_[0-9a-f]{32}", trace.read_text(tool["model_ref"])).group()
+        size = trace.reference_metadata(ref)["size"]
+        assert size == len(payload.encode("utf-8"))
+        assert trace.read_page(ref, offset=size - len("终".encode()), limit=16).data.decode() == "终"
+
+
 def test_application_model_sees_the_same_redacted_small_tool_result_as_trace(platform_project):
     from agentloom.execution.observability import inspect_run
 
