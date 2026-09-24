@@ -514,3 +514,75 @@ def test_application_fails_when_required_tool_trace_cannot_be_written(platform_p
     monkeypatch.setattr(TraceRecorder, "_append", fail_write)
     with pytest.raises(ApplicationRunError, match="Could not persist Tool trace"):
         run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+
+
+def test_large_tool_reference_survives_context_cache_eviction(platform_project):
+    _, _, programs, _, run = platform_project
+
+    def execute(definition, _request):
+        first = definition.tool_gateway.invoke(
+            call_id="first-large", tool_name="trace_payload",
+            arguments={"value": "FIRST-RECORD-8426\n" + "a" * 5000},
+        )
+        second = definition.tool_gateway.invoke(
+            call_id="second-large", tool_name="trace_payload",
+            arguments={"value": "SECOND-RECORD-8426\n" + "b" * 5000},
+        )
+        assert second.status == "completed"
+        match = re.search(r"\[ContextRef (ctx_[0-9a-f]+)", first.model_content())
+        assert match is not None
+        retrieved = definition.tool_gateway.invoke(
+            call_id="fetch-first", tool_name="loom_retrieve_context",
+            arguments={"ref": match.group(1), "offset": 0, "limit": 4096},
+        )
+        assert retrieved.status == "completed"
+        return retrieved.model_content()
+
+    programs["platform"] = execute
+    result = run(
+        tools=[
+            {"name": "trace_payload", "module": __name__, "function": "trace_payload"},
+            {"name": "loom_retrieve_context"},
+        ],
+        context_engine={"min_chars": 1000, "preview_max_chars": 100,
+                        "store": {"max_entries": 1}},
+    )
+    assert "FIRST-RECORD-8426" in result.output
+
+
+def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project):
+    _, _, programs, _, run = platform_project
+    payload = "汉字🙂" * 450
+
+    def execute(definition, _request):
+        created = definition.tool_gateway.invoke(
+            call_id="utf8-large", tool_name="trace_payload", arguments={"value": payload},
+        )
+        match = re.search(r"\[ContextRef (ctx_[0-9a-f]{32})", created.model_content())
+        assert match is not None
+        offset = 0
+        pieces = []
+        while True:
+            retrieved = definition.tool_gateway.invoke(
+                call_id=f"page-{offset}", tool_name="loom_retrieve_context",
+                arguments={"ref": match.group(1), "offset": offset, "limit": 127},
+            )
+            assert retrieved.status == "completed"
+            header, body = retrieved.output.split("\n", 1)
+            pieces.append(body)
+            next_match = re.search(r"next_offset=(\d+|none)", header)
+            assert next_match is not None
+            if next_match.group(1) == "none":
+                break
+            offset = int(next_match.group(1))
+        return "".join(pieces)
+
+    programs["platform"] = execute
+    result = run(
+        tools=[
+            {"name": "trace_payload", "module": __name__, "function": "trace_payload"},
+            {"name": "loom_retrieve_context"},
+        ],
+        context_engine={"min_chars": 1000, "preview_max_chars": 100},
+    )
+    assert result.output == payload
