@@ -166,6 +166,14 @@ def get_current_trace_recorder() -> TraceRecorder | None:
 
 
 @dataclass(slots=True)
+class TracePage:
+    data: bytes
+    next_offset: int | None
+    total_bytes: int
+    content_type: str
+
+
+@dataclass(slots=True)
 class RunTrace:
     """Read one Run's metadata and integrity-checked retained content."""
 
@@ -190,17 +198,47 @@ class RunTrace:
             for path in sorted(directory.glob("*.json"))
         ]
 
-    def read_text(self, reference: str) -> str:
+    def _metadata(self, reference: str) -> dict[str, Any]:
         if not reference.startswith("payload_") or len(reference) != 40:
             raise ValueError("Invalid trace payload reference")
         metadata = json.loads(self.storage.read_bytes(f"refs/{reference}.json"))
         digest = metadata["sha256"]
         if not isinstance(digest, str) or len(digest) != 64:
             raise TraceStorageError("Invalid trace payload digest")
+        return metadata
+
+    def read_text(self, reference: str) -> str:
+        metadata = self._metadata(reference)
+        digest = metadata["sha256"]
         data = self.storage.read_bytes(f"payloads/{digest}.blob")
         if len(data) != metadata["size"] or hashlib.sha256(data).hexdigest() != digest:
             raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
         return data.decode("utf-8")
+
+    def read_page(self, reference: str, *, offset: int = 0, limit: int = 8192) -> TracePage:
+        """Read at most 64 KiB by byte offset, verifying the whole payload."""
+
+        if offset < 0 or not 1 <= limit <= 65536:
+            raise ValueError("Trace page requires offset >= 0 and 1 <= limit <= 65536")
+        metadata = self._metadata(reference)
+        digest = metadata["sha256"]
+        with self.storage.open_binary_reader(f"payloads/{digest}.blob") as stream:
+            checksum = hashlib.sha256()
+            total = 0
+            while chunk := stream.read(1024 * 1024):
+                checksum.update(chunk)
+                total += len(chunk)
+            if total != metadata["size"] or checksum.hexdigest() != digest:
+                raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+            stream.seek(offset)
+            data = stream.read(limit)
+        next_offset = offset + len(data)
+        return TracePage(
+            data=data,
+            next_offset=next_offset if next_offset < total else None,
+            total_bytes=total,
+            content_type=str(metadata["content_type"]),
+        )
 
 
 def inspect_run(run: RunWithTrace) -> RunTrace:
