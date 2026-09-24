@@ -436,6 +436,14 @@
           "title": "Phase",
           "type": "string"
         },
+        "boundary": {
+          "enum": [
+            "pi_payload",
+            "openai_http_request"
+          ],
+          "title": "Boundary",
+          "type": "string"
+        },
         "capture_id": {
           "pattern": "^[0-9a-f]{32}$",
           "title": "Capture Id",

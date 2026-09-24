@@ -76,10 +76,29 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
             assert saved['tools'] == actual['tools']
             assert [{key: value for key, value in message.items() if value is not None}
                     for message in saved['messages']] == actual['messages']
+        wire_requests = [event for event in trace.events() if event['kind'] == 'model_request'
+                         and event['runtime'] == 'smolagents' and event['boundary'] == 'openai_http_request']
+        assert len(wire_requests) == len(sent)
+        for event, actual in zip(wire_requests, sent, strict=True):
+            captured = json.loads(trace.read_text(event['request_ref']))
+            assert event['provider_request_complete'] is True
+            assert captured['method'] == 'POST'
+            assert captured['body'] == actual
+            assert 'fixture-key' not in trace.read_text(event['request_ref'])
+        pi_sent = [request for request in requests if request['model'] != smol_model]
+        pi_wire = [event for event in trace.events() if event['kind'] == 'model_request'
+                   and event['runtime'] == 'pi' and event['boundary'] == 'openai_http_request']
+        assert len(pi_wire) == len(pi_sent)
+        for event, actual in zip(pi_wire, pi_sent, strict=True):
+            captured = json.loads(trace.read_text(event['request_ref']))
+            assert event['provider_request_complete'] is True
+            assert captured['method'] == 'POST'
+            assert captured['body'] == actual
+            assert 'fixture-key' not in trace.read_text(event['request_ref'])
         assert {event['model_turn_id'] for event in model_requests} == {
             event['model_turn_id'] for event in model_responses}
         all_requests = [event for event in trace.events() if event['kind'] == 'model_request'
-                        and event['boundary'] != 'litellm_provider_call_input']
+                        and event['boundary'] in {'litellm_input', 'pi_payload'}]
         assert all(event['provider_request_complete'] is False for event in all_requests)
         assert [event['run_step_number'] for event in all_requests] == list(range(1, len(all_requests) + 1))
         worker_request = next(event for event in all_requests
@@ -87,7 +106,8 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
         step = trace.inspect_step(worker_request['run_step_number'])
         assert step['agent_id'] == worker_request['agent_id']
         turn_events = [event['kind'] for event in step['events']
-                       if event.get('runtime') != 'smolagents' or event.get('attempt') is None]
+                       if event.get('boundary') != 'openai_http_request'
+                       and (event.get('runtime') != 'smolagents' or event.get('attempt') is None)]
         assert turn_events.count('model_request') == 1
         assert turn_events.count('model_response') == 1
         tool = next(event for event in step['events'] if event['kind'] == 'tool')
@@ -135,6 +155,55 @@ def test_smol_provider_retries_share_one_step_and_record_attempts(tmp_path):
     log = result.run.log_path.read_text()
     assert 'Model attempt 1' in log and 'Model attempt 2' in log
     assert log.count('Input tokens:') == 1
+
+
+@pytest.mark.parametrize('runtime', ['smolagents', 'pi'])
+def test_provider_request_trace_failure_prevents_sending_to_model(tmp_path, monkeypatch, runtime):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder, TraceStorageError
+
+    original = TraceRecorder.record_model_request
+
+    def fail_http_record(self, request, **kwargs):
+        if kwargs['boundary'] == 'openai_http_request':
+            raise TraceStorageError('fixture provider request trace failed')
+        return original(self, request, **kwargs)
+
+    monkeypatch.setattr(TraceRecorder, 'record_model_request', fail_http_record)
+    with model_service(lambda request: finish(request, 'unexpected')) as (url, requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            with pytest.raises(ApplicationRunError, match='fixture provider request trace failed') as failed:
+                execute_app(workflow, file_logging=False)
+    assert requests == []
+    assert json.loads(failed.value.run.manifest_path.read_text())['status'] == 'failed'
+
+
+def test_smol_responses_request_matches_provider_http_body(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    with model_service(lambda request: [('finish', 'final_answer', {'answer': 'transport-recorded'})]) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='smolagents', worker='pi')
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        write_yaml(workflow, definition)
+        profile_path = tmp_path / 'config/llm.yaml'
+        profiles = yaml.safe_load(profile_path.read_text())
+        profiles['model']['supervisor']['adapter'] = 'openai_responses'
+        write_yaml(profile_path, profiles)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == 'transport-recorded'
+    assert len(requests) == 1
+    with inspect_run(result.run) as trace:
+        events = [event for event in trace.events() if event['kind'] == 'model_request'
+                  and event['boundary'] == 'openai_http_request']
+        assert len(events) == 1
+        assert events[0]['provider_request_complete'] is True
+        assert json.loads(trace.read_text(events[0]['request_ref']))['body'] == requests[0]
 
 
 @pytest.mark.parametrize('worker', ['pi', 'smolagents'])
