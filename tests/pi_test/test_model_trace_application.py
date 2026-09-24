@@ -108,18 +108,22 @@ def test_pi_abort_before_next_provider_request_has_no_unpaired_response(tmp_path
     assert requests_in_trace[0]["model_turn_id"] == responses[0]["model_turn_id"]
 
 
-def test_pi_bridge_pairs_post_request_transport_exception(tmp_path):
+@pytest.mark.parametrize("scenario", ["transport_exception", "response_trace_rejected"])
+def test_pi_bridge_fails_or_pairs_post_request_errors(tmp_path, scenario):
     script = """
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 const {configureModel} = await import(pathToFileURL(process.argv[1]).href);
 const directory = process.argv[2];
+const scenario = process.argv[3];
 const calls = [];
 const model = {api: 'openai-completions', provider: 'agentloom', id: 'fixture-model'};
 const session = {agent: {streamFn: async (_model, _context, options) => {
   await options.onPayload({model: 'fixture-model', messages: [], tools: []}, model);
-  throw new Error('fixture post-request transport exception');
+  if (scenario === 'transport_exception') throw new Error('fixture post-request transport exception');
+  return {result: async () => ({role: 'assistant', content: [{type: 'text', text: 'provider success'}],
+    stopReason: 'stop'})};
 }}};
 configureModel(session,
   {timeout: 5, requests_per_minute: 2000000, num_retries: 0, retry_delay: 0.01, max_retry_delay: 0.01},
@@ -127,21 +131,27 @@ configureModel(session,
   () => {}, directory,
   async payload => {
     calls.push(payload);
+    if (scenario === 'response_trace_rejected' && payload.phase === 'response')
+      throw new Error('fixture required response trace failed');
     return {method: 'model_trace', phase: payload.phase, attempt: payload.attempt, accepted: true};
   });
 const stream = await session.agent.streamFn(model, {messages: [], tools: []}, {});
 const result = await stream.result();
 const captured = JSON.parse(await readFile(join(directory, `model-${calls.at(-1).capture_id}.json`), 'utf8'));
 console.log(JSON.stringify({phases: calls.map(call => call.phase),
-  stopReason: result.stopReason, error: captured.errorMessage}));
+  stopReason: result.stopReason, capturedStopReason: captured.stopReason,
+  error: captured.errorMessage || null}));
 """
     entry = installed_pi_entry().with_name("model.js")
     completed = subprocess.run(
-        [find_node(build_subprocess_env()), "--input-type=module", "-e", script, str(entry), str(tmp_path)],
+        [find_node(build_subprocess_env()), "--input-type=module", "-e", script, str(entry), str(tmp_path), scenario],
         capture_output=True, text=True, check=True, timeout=15,
     )
     observed = json.loads(completed.stdout)
-    assert observed == {
-        "phases": ["request", "response"], "stopReason": "error",
-        "error": "fixture post-request transport exception",
-    }
+    assert observed["phases"] == ["request", "response"]
+    assert observed["stopReason"] == "error"
+    if scenario == "transport_exception":
+        assert observed["capturedStopReason"] == "error"
+        assert observed["error"] == "fixture post-request transport exception"
+    else:
+        assert observed["capturedStopReason"] == "stop"

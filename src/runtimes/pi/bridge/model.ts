@@ -166,6 +166,9 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           if (!failure.timedOut && message.stopReason !== "error") return stream;
           errorText = message.errorMessage || "";
         } catch (error) {
+          // A response capture failure cannot turn a successful provider
+          // stream into an unrecorded successful Agent turn.
+          if (responseAttempted) throw error;
           errorText = error instanceof Error ? error.message : "";
           if (requestCaptured && !responseAttempted) {
             responseAttempted = true;
