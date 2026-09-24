@@ -548,6 +548,28 @@ def test_application_fails_when_required_tool_trace_cannot_be_written(platform_p
         run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
 
 
+def test_final_answer_trace_failure_preserves_failed_checkpoint(platform_project, monkeypatch):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder, TraceStorageError
+
+    root, _, programs, _, run = platform_project
+    programs["platform"] = lambda _definition, _request: "accepted answer"
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": True}
+    system_path.write_text(yaml.safe_dump(system))
+
+    def fail_final_answer(_recorder, _output):
+        raise TraceStorageError("fixture final answer write failed")
+
+    monkeypatch.setattr(TraceRecorder, "record_final_answer", fail_final_answer)
+    with pytest.raises(ApplicationRunError, match="fixture final answer write failed") as failed:
+        run()
+    checkpoint = root / "state/runtime/checkpoints/platform" / failed.value.run.task_id
+    assert checkpoint.is_dir()
+    assert json.loads((checkpoint / "task_tree.json").read_text())["status"] == "failed"
+
+
 def test_application_trace_records_effective_pre_tool_decision(platform_project):
     from agentloom.execution.observability import inspect_run
 

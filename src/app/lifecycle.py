@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from agentloom.app.run import RunPhase
 from agentloom.execution.agent_runtime import (
@@ -54,6 +54,7 @@ class ApplicationRunFinalization:
     cleanup_on_success: bool
     log: Any
     task_tree_cleanup_max_bytes: int = 1024 * 1024
+    record_final_answer: Callable[[JSONValue], None] | None = None
 
 
 @dataclass(slots=True)
@@ -269,6 +270,8 @@ class ApplicationRunLifecycle:
             goal_snapshot = self.goal
             if goal_snapshot is not None:
                 finalization.manifest_updates["goal"] = goal_snapshot
+            if self.outcome == "completed" and finalization.record_final_answer is not None:
+                finalization.record_final_answer(self.result)
             self.commit_checkpoint(
                 checkpoint_manager=finalization.checkpoint_manager,
                 task_id=finalization.task_id,
