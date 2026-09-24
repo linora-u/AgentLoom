@@ -47,6 +47,26 @@ def model_service(
                 finish_override = None
                 if isinstance(answer, ModelReply):
                     answer, finish_override = answer
+                if self.path.endswith('/responses'):
+                    output = ([
+                        {'type': 'function_call', 'id': f'fc_{index}', 'call_id': call_id,
+                         'name': name, 'arguments': json.dumps(arguments), 'status': 'completed'}
+                        for index, (call_id, name, arguments) in enumerate(answer)
+                    ] if isinstance(answer, list) else [
+                        {'type': 'message', 'id': 'msg_1', 'role': 'assistant',
+                         'status': 'completed', 'content': [
+                             {'type': 'output_text', 'text': answer, 'annotations': []},
+                         ]},
+                    ])
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'id': 'resp_fixture', 'object': 'response', 'created_at': 1,
+                        'model': request['model'], 'status': 'completed', 'output': output,
+                        'usage': {'input_tokens': 50, 'output_tokens': 20, 'total_tokens': 70},
+                    }).encode())
+                    return
                 message: dict[str, Any] = {'role': 'assistant', 'content': answer if isinstance(answer, str) else None}
                 if isinstance(answer, list):
                     message['tool_calls'] = [

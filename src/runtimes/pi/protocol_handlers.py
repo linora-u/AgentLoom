@@ -166,12 +166,22 @@ class PiModelHandler:
         if recorder is not None:
             if payload.phase == "request":
                 with self._lock:
-                    if key in self._trace_turns:
-                        raise AgentRuntimeError("Duplicate Pi Model request trace", category="internal")
+                    if payload.boundary == "openai_http_request":
+                        try:
+                            turn_id = self._trace_turns[key]
+                        except KeyError as exc:
+                            raise AgentRuntimeError("Pi HTTP trace has no payload trace", category="internal") from exc
+                    else:
+                        if key in self._trace_turns:
+                            raise AgentRuntimeError("Duplicate Pi Model request trace", category="internal")
+                        turn_id = None
                     turn_id = recorder.record_model_request(
-                        captured, runtime="pi", boundary="pi_payload", attempt=payload.attempt
+                        captured, runtime="pi", boundary=payload.boundary or "pi_payload",
+                        provider_request_complete=payload.boundary == "openai_http_request",
+                        attempt=payload.attempt, turn_id=turn_id,
                     )
-                    self._trace_turns[key] = turn_id
+                    if payload.boundary != "openai_http_request":
+                        self._trace_turns[key] = turn_id
             else:
                 with self._lock:
                     try:

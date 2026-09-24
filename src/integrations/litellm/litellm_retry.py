@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Callable, Iterator
@@ -107,8 +108,10 @@ def _call_provider(
         budget.calls += 1
     turn = _MODEL_TRACE_TURN.get()
     recorder = None
+    observed_client: Any = None
+    capture_error = None
     if turn is not None:
-        from agentloom.execution.observability import get_current_trace_recorder
+        from agentloom.execution.observability import TraceStorageError, get_current_trace_recorder
 
         recorder = get_current_trace_recorder()
         turn.attempt += 1
@@ -118,6 +121,50 @@ def _call_provider(
                 request, runtime="smolagents", boundary="litellm_provider_call_input",
                 attempt=turn.attempt, turn_id=turn.turn_id,
             )
+            if (
+                not args and ("messages" in kwargs or "input" in kwargs)
+                and str(kwargs.get("model", "")).startswith("openai/")
+                and "client" not in kwargs and kwargs.get("api_key")
+            ):
+                import httpx
+                import litellm
+                from litellm.llms.custom_httpx.http_handler import get_ssl_configuration
+
+                def capture_http_request(request: httpx.Request) -> None:
+                    nonlocal capture_error
+                    try:
+                        body = json.loads(request.read())
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        body = request.read().decode("utf-8", errors="replace")
+                    try:
+                        recorder.record_model_request(
+                            {"method": request.method, "url": str(request.url),
+                             "headers": dict(request.headers), "body": body},
+                            runtime="smolagents", boundary="openai_http_request",
+                            provider_request_complete=True, attempt=turn.attempt,
+                            turn_id=turn.turn_id,
+                        )
+                    except TraceStorageError as exc:
+                        capture_error = exc
+                        raise
+
+                if litellm.client_session is None:
+                    http_client = httpx.Client(
+                        verify=get_ssl_configuration(), follow_redirects=True,
+                        event_hooks={"request": [capture_http_request]},
+                    )
+                    if "messages" in kwargs:
+                        from openai import OpenAI
+
+                        observed_client = OpenAI(
+                            api_key=kwargs["api_key"], base_url=kwargs.get("api_base"),
+                            http_client=http_client, max_retries=0,
+                        )
+                    else:
+                        from litellm.llms.custom_httpx.http_handler import HTTPHandler
+
+                        observed_client = HTTPHandler(client=http_client)
+                    kwargs = {**kwargs, "client": observed_client}
     try:
         response = original_func(*args, **kwargs)
     except Exception as error:
@@ -125,7 +172,12 @@ def _call_provider(
             recorder.record_model_response(
                 turn.turn_id, runtime="smolagents", error=error, attempt=turn.attempt,
             )
+        if capture_error is not None:
+            raise capture_error from error
         raise
+    finally:
+        if observed_client is not None:
+            observed_client.close()
     if recorder is not None and turn is not None:
         model_dump = getattr(response, "model_dump", None)
         captured = model_dump() if callable(model_dump) else response

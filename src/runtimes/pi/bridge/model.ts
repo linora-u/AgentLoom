@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createAssistantMessageEventStream, type AssistantMessage, type Model, type Api } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
@@ -10,6 +11,12 @@ type Obj = Record<string, any>;
 let nextRequestAt = 0;
 
 const EMPTY_IMAGE_PLACEHOLDER = "(see attached image)";
+const httpCapture = new AsyncLocalStorage<(input: RequestInfo | URL, init?: RequestInit) => Promise<void>>();
+const nativeFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (input, init) => {
+  const capture = httpCapture.getStore();
+  return capture ? capture(input, init).then(() => nativeFetch(input, init)) : nativeFetch(input, init);
+};
 
 function emptyToolCallIds(messages: readonly Obj[]) {
   const callIds = new Set<string>();
@@ -65,11 +72,12 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
     retry: (attempt: number) => void, agentDir: string, invoke: (payload: Obj) => Promise<Obj>) {
   const nativeStream = session.agent.streamFn;
   const failure = {timedOut: false, status: 0};
-  const capture = async (identity: Obj, attempt: number, phase: "request" | "response", value: unknown) => {
+  const capture = async (identity: Obj, attempt: number, phase: "request" | "response", value: unknown,
+      boundary?: "openai_http_request") => {
     const captureId = randomUUID().replaceAll("-", "");
     const bytes = Buffer.from(JSON.stringify(value));
     await writeFile(resolve(agentDir, `model-${captureId}.json`), bytes, {mode: 0o600, flag: "wx"});
-    const receipt = await invoke({method: "model_trace", identity, attempt, phase,
+    const receipt = await invoke({method: "model_trace", identity, attempt, phase, ...(boundary ? {boundary} : {}),
       capture_id: captureId, sha256: createHash("sha256").update(bytes).digest("hex")});
     if (receipt.method !== "model_trace" || !receipt.accepted || receipt.phase !== phase || receipt.attempt !== attempt)
       throw new Error("Invalid Pi Model trace acknowledgement");
@@ -89,8 +97,18 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         const signal = options?.signal ? AbortSignal.any([options.signal, timeoutAbort.signal]) : timeoutAbort.signal;
         let stream;
         let errorText = "";
+        const captureHttp = async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          const baseUrl = settings.base_url || "https://api.openai.com/v1";
+          if (!request.url.startsWith(baseUrl.replace(/\/$/, "") + "/") ||
+              !/\/(?:chat\/completions|responses)$/.test(new URL(request.url).pathname)) return;
+          const body = JSON.parse(await request.clone().text());
+          await capture(permit.identity, attempt, "request",
+            {method: request.method, url: request.url, headers: Object.fromEntries(request.headers), body},
+            "openai_http_request");
+        };
         try {
-          stream = await nativeStream(model, selectedContext, {...options, signal,
+          stream = await httpCapture.run(captureHttp, () => nativeStream(model, selectedContext, {...options, signal,
             temperature: settings.temperature, maxTokens: settings.max_output_tokens, headers,
             cacheRetention: settings.context_cache ? "short" : "none", transport: "sse",
             onPayload: async (payload, selectedModel) => {
@@ -108,7 +126,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
             onResponse: async (response, selectedModel) => {
               failure.status = response.status;
               await options?.onResponse?.(response, selectedModel);
-            }});
+            }}));
           // Pi's public stream.result() resolves without iteration. Hold this one
           // response until retry selection finishes; never rewind Agent messages or tools.
           const message = await stream.result();
