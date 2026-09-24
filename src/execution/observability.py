@@ -126,6 +126,7 @@ class TraceRecorder:
                     sequence = 1
                 self.storage.atomic_write_json("sequence.json", {"last": sequence})
                 event["sequence"] = sequence
+                event["event_id"] = f"{self.context.run_id}:{sequence}"
                 event["schema_version"] = 1
                 event["recorded_at"] = datetime.now(UTC).isoformat()
                 event["run_id"] = self.context.run_id
