@@ -206,6 +206,8 @@ def test_platform_preparation_runs_once_and_survives_recovery(tmp_path, decision
 
 
 def test_structured_platform_result_is_identical_after_resume(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
     _platform_calls.clear()
     with model_service(
         turns=[[('structured-call', 'structured_receipt_probe', {'label': 'once'})]],
@@ -218,10 +220,16 @@ def test_structured_platform_result_is_identical_after_resume(tmp_path):
         }])
         with bind_config(load_project_config(tmp_path)):
             with pytest.raises(ApplicationRunError) as interrupted:
-                execute_app(app, file_logging=False)
+                execute_app(app, file_logging=True)
             first_content = next(message['content'] for message in requests[1][1]['messages']
                                  if message['role'] == 'tool')
             assert json.loads(first_content) == {'api_key': '[REDACTED]', 'label': 'once'}
+            with inspect_run(interrupted.value.run) as trace:
+                tool = next(event for event in trace.events() if event['kind'] == 'tool'
+                            and event['tool_name'] == 'structured_receipt_probe')
+                assert trace.read_text(tool['model_ref']) == first_content
+            assert interrupted.value.run.log_path is not None
+            assert f'Observations: {first_content}' in interrupted.value.run.log_path.read_text()
             resumed = execute_app(app, resume_task_id=interrupted.value.run.task_id, file_logging=False)
     assert resumed.output == 'Pi answer'
     assert _platform_calls == ['once']
