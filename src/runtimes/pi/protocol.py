@@ -157,6 +157,7 @@ class TerminalRecord(WireValue):
     status: Literal["completed", "error", "blocked"]
     output: JsonValue = Field(default=None, repr=False)
     error: ToolErrorRecord | None = None
+    model_content: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     started_at: float | None = None
     ended_at: float | None = None
@@ -383,6 +384,7 @@ def encode_message(message: Request | Response | Event) -> str:
                     getattr(value, name)
                 )
                 for name, field in type(value).model_fields.items()
+                if field.exclude_if is None or not field.exclude_if(getattr(value, name))
             }
         if is_dataclass(value) and not isinstance(value, type):
             return {item.name: wire(getattr(value, item.name)) for item in fields(value)}

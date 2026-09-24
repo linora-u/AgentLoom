@@ -1,19 +1,19 @@
 """Reject inconsistent recovery evidence through the real Application and Pi SDK."""
 from __future__ import annotations
 
-from contextlib import contextmanager
 import hashlib
 import json
 import sys
+from contextlib import contextmanager
 
 import pytest
-
 from agentloom.app.run import ApplicationRunError
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
+from agentloom.execution.tool_protocol import ToolCallRecord
+
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_recovery_application import audit, checkpoints, enable
-
 
 _platform_calls = []
 
@@ -273,7 +273,7 @@ def test_invalid_arguments_reuse_the_durable_rejection_across_resume(
                 else receipt["rejection"]
             )
             assert record["status"] == "blocked"
-            expected_text = record["error"]["message"]
+            expected_text = ToolCallRecord.from_dict(record).model_content()
             [(checkpoint_path, checkpoint)] = checkpoints(tmp_path)
             envelope = checkpoint["runtime_checkpoint"]
             artifact = checkpoint_path.parent / "pi/sessions" / (
