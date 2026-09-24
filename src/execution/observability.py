@@ -472,7 +472,7 @@ class RunTrace:
                     if reference in verified:
                         continue
                     try:
-                        self.read_page(reference, limit=1)
+                        self._verify_full(reference)
                     except (OSError, ValueError, KeyError) as exc:
                         raise TraceStorageError(f"Committed Tool reference is unavailable: {reference}") from exc
                     verified.add(reference)
@@ -526,6 +526,19 @@ class RunTrace:
         """Return validated metadata for an opaque retained payload reference."""
 
         return dict(self._metadata(reference))
+
+    def _verify_full(self, reference: str) -> None:
+        """Verify every byte of a committed reference before resuming execution."""
+
+        metadata = self._metadata(reference)
+        checksum = hashlib.sha256()
+        size = 0
+        with self.storage.open_binary_reader(f"payloads/{metadata['sha256']}.blob") as stream:
+            while chunk := stream.read(_VERIFY_CHUNK_BYTES):
+                checksum.update(chunk)
+                size += len(chunk)
+        if size != metadata["size"] or checksum.hexdigest() != metadata["sha256"]:
+            raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
 
     @staticmethod
     def _verify_window(stream: Any, metadata: dict[str, Any], start: int, end: int,
