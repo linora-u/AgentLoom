@@ -1,5 +1,8 @@
 /** Profile policy around one public SDK model request; the SDK still owns its Agent loop. */
 import { setTimeout as delay } from "node:timers/promises";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { createAssistantMessageEventStream, type AssistantMessage, type Model, type Api } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
@@ -58,9 +61,19 @@ function failedStream(model: Model<Api>, interrupted: boolean) {
 }
 
 export function configureModel(session: AgentSession, settings: Obj, headers: Obj,
-    prepare: () => Promise<{state: "work" | "final" | "denied"; agent_context: string[]}>, retry: (attempt: number) => void) {
+    prepare: () => Promise<{state: "work" | "final" | "denied"; agent_context: string[]; identity: Obj}>,
+    retry: (attempt: number) => void, agentDir: string, invoke: (payload: Obj) => Promise<Obj>) {
   const nativeStream = session.agent.streamFn;
   const failure = {timedOut: false, status: 0};
+  const capture = async (identity: Obj, attempt: number, phase: "request" | "response", value: unknown) => {
+    const captureId = randomUUID().replaceAll("-", "");
+    const bytes = Buffer.from(JSON.stringify(value));
+    await writeFile(resolve(agentDir, `model-${captureId}.json`), bytes, {mode: 0o600, flag: "wx"});
+    const receipt = await invoke({method: "model_trace", identity, attempt, phase,
+      capture_id: captureId, sha256: createHash("sha256").update(bytes).digest("hex")});
+    if (receipt.method !== "model_trace" || !receipt.accepted || receipt.phase !== phase || receipt.attempt !== attempt)
+      throw new Error("Invalid Pi Model trace acknowledgement");
+  };
   session.agent.streamFn = async (model, context, options) => {
     try {
       const permit = await prepare();
@@ -85,10 +98,12 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
               await delay(Math.max(0, nextRequestAt - performance.now()), undefined, {signal: options?.signal});
               nextRequestAt = performance.now() + 60000 / settings.requests_per_minute;
               timeout = setTimeout(() => {failure.timedOut = true; timeoutAbort.abort();}, settings.timeout * 1000);
-              return restoreEmptyToolResults(
+              const outgoing = restoreEmptyToolResults(
                 projected === undefined ? payload : projected,
                 selectedContext.messages as Obj[],
               );
+              await capture(permit.identity, attempt, "request", outgoing);
+              return outgoing;
             },
             onResponse: async (response, selectedModel) => {
               failure.status = response.status;
@@ -97,6 +112,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           // Pi's public stream.result() resolves without iteration. Hold this one
           // response until retry selection finishes; never rewind Agent messages or tools.
           const message = await stream.result();
+          await capture(permit.identity, attempt, "response", message);
           if (!failure.timedOut && message.stopReason !== "error") return stream;
           errorText = message.errorMessage || "";
         } catch (error) {

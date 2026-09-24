@@ -33,3 +33,22 @@ def read_capture(directory: Path, authorization_id: str, digest: str, *, complet
         from dataclasses import replace
         capture = replace(capture, complete=False)
     return value["result"] if completed else None, capture
+
+
+def read_model_capture(directory: Path, capture_id: str, digest: str) -> dict[str, Any]:
+    """Read one bridge-private Model body without sending it through JSONL."""
+
+    if len(capture_id) != 32 or any(char not in "0123456789abcdef" for char in capture_id):
+        raise ValueError("Invalid Pi Model capture ID")
+    path = directory / f"model-{capture_id}.json"
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("Pi Model capture must be a regular file")
+        data = stream.read()
+    if hashlib.sha256(data).hexdigest() != digest:
+        raise ValueError("Pi Model capture digest mismatch")
+    value = json.loads(data)
+    if not isinstance(value, dict):
+        raise ValueError("Pi Model capture must contain an object")
+    return value
