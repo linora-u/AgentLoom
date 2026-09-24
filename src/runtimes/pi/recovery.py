@@ -4,13 +4,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 from agentloom.execution.agent_runtime import AgentRuntimeError
 from agentloom.execution.native_journal import snapshot
 from agentloom.execution.native_tools import NativeCallIdentity
+from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 
 
 def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, Any]:
+    content: list[dict[str, Any]]
+    details: Any
     if record is None:
         # Only an authoritative prepared/authorized/cancelled state permits
         # this result. A missing journal or executing call is never sufficient.
@@ -18,7 +21,7 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
         details = {"agentloom_recovery": {"state": "not_executed"}}
         error = True
     elif record["status"] != "completed":
-        content = [{"type": "text", "text": (record.get("error") or {}).get("message", "AgentLoom tool did not complete")}]
+        content = [{"type": "text", "text": ToolCallRecord.from_dict(record).model_content()}]
         # The SDK projects both blocked calls and thrown execution errors with
         # empty details, unlike successful platform results.
         details = {}
@@ -76,10 +79,10 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
                 assistants[key] = entry
         elif message.get("role") == "toolResult":
             call_id = message["toolCallId"]
-            key = active.pop(call_id, None)
-            if key is None or key in results:
+            result_key = active.pop(call_id) if call_id in active else None
+            if result_key is None or result_key in results:
                 raise ValueError("Pi session has an unmatched or duplicate tool result")
-            results[key] = message
+            results[result_key] = message
     if set(calls) != observed:
         raise ValueError("Pi checkpoint contains calls outside its native session")
 

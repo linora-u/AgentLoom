@@ -42,14 +42,17 @@ from agentloom.runtimes.pi.protocol import (
     SettleResult,
     TerminalRecord,
 )
+from agentloom.self_learning.redaction import redact_value
 
 
 def terminal(record: ToolCallRecord) -> TerminalRecord:
     values = record.to_dict()
     values["error"] = (
-        replace(record.error, message=record.model_content())
+        replace(record.error, message=str(redact_value(record.error.message)))
         if record.error is not None else None
     )
+    if record.status != "completed":
+        values["model_content"] = record.model_content()
     return TerminalRecord(**values)
 
 
