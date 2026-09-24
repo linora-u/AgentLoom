@@ -417,7 +417,7 @@ class RunTrace:
             if key.endswith("_ref") and isinstance(value, str)
         }
         sizes = sorted(
-            ((self._metadata(reference)["size"], reference) for reference in references)
+            (self._metadata(reference)["size"], reference) for reference in references
         )
         remaining = max_inline_bytes
         payloads: dict[str, str] = {}

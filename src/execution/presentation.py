@@ -6,12 +6,11 @@ import json
 import time
 from typing import Any
 
+from agentloom.execution.logging.levels import AgentLoomLogLevel
+from agentloom.execution.observability import RunTrace
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
-
-from agentloom.execution.logging.levels import AgentLoomLogLevel
-from agentloom.execution.observability import RunTrace
 
 
 class StepPresenter:
