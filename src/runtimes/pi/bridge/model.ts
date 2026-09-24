@@ -107,6 +107,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         const signal = options?.signal ? AbortSignal.any([options.signal, timeoutAbort.signal]) : timeoutAbort.signal;
         let stream;
         let errorText = "";
+        let requestCaptured = false;
         const captureHttp = async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = new Request(input, init);
           const baseUrl = settings.base_url || "https://api.openai.com/v1";
@@ -145,6 +146,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
                 selectedContext.messages as Obj[],
               );
               await capture(permit.identity, attempt, "request", outgoing);
+              requestCaptured = true;
               return outgoing;
             },
             onResponse: async (response, selectedModel) => {
@@ -154,7 +156,9 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           // Pi's public stream.result() resolves without iteration. Hold this one
           // response until retry selection finishes; never rewind Agent messages or tools.
           const message = await stream.result();
-          await capture(permit.identity, attempt, "response", message);
+          // An already-aborted turn can produce an SDK error stream without
+          // reaching onPayload. There is no provider request to pair it with.
+          if (requestCaptured) await capture(permit.identity, attempt, "response", message);
           if (!failure.timedOut && message.stopReason !== "error") return stream;
           errorText = message.errorMessage || "";
         } catch (error) {
