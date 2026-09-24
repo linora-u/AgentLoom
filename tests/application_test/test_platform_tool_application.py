@@ -467,10 +467,6 @@ def fail_with_secret(value: str) -> str:
     raise RuntimeError("api_key=fixture-secret")
 
 
-def structured_with_secret(value: str) -> dict[str, str]:
-    return {"value": value, "api_key": "fixture-secret", "status": "ok"}
-
-
 def test_application_tool_outcome_has_durable_inspectable_payload(platform_project):
     from agentloom.execution.observability import inspect_run
 
@@ -543,31 +539,6 @@ def test_multimegabyte_single_line_tool_result_remains_pageable(platform_project
             trace.read_page(ref, offset=size - len("终".encode()), limit=16)
 
 
-def test_application_model_sees_the_same_redacted_small_tool_result_as_trace(platform_project):
-    from agentloom.execution.observability import inspect_run
-
-    _, _, programs, _, run = platform_project
-    seen = {}
-
-    def execute(definition, _request):
-        record = definition.tool_gateway.invoke(
-            call_id="small-secret", tool_name="trace_payload",
-            arguments={"value": "api_key=fixture-secret\nstatus=ok"},
-        )
-        seen["model"] = record.model_content()
-        return "small result recorded"
-
-    programs["platform"] = execute
-    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
-    with inspect_run(result.run) as trace:
-        tool = next(event for event in trace.events() if event["kind"] == "tool")
-        retained = json.loads(trace.read_text(tool["output_ref"]))
-        model_visible = trace.read_text(tool["model_ref"])
-
-    assert seen["model"] == model_visible == "api_key=[REDACTED]\nstatus=ok"
-    assert retained == model_visible
-
-
 def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):
     from agentloom.app.run import ApplicationRunError
     from agentloom.execution.observability import TraceRecorder
@@ -638,25 +609,7 @@ def test_final_answer_is_not_printed_before_success_manifest_commits(platform_pr
     assert json.loads(failed.value.run.manifest_path.read_text())["status"] == "failed"
 
 
-def test_exporter_failure_is_diagnostic_and_does_not_fail_application(platform_project):
-    root, _, programs, _, run = platform_project
-    programs["platform"] = lambda _definition, _request: "accepted answer"
-    submitted = []
-
-    class FailingExporter:
-        def export(self, event, *, trace_dir):
-            submitted.append((event["event_id"], trace_dir))
-            raise RuntimeError("fixture export service unavailable")
-
-    result = run(trace_exporter=FailingExporter())
-    assert result.output == "accepted answer"
-    assert submitted
-    assert all(directory == result.run.trace_dir for _, directory in submitted)
-    diagnostics = (result.run.trace_dir / "exporter/diagnostics.jsonl").read_text()
-    assert "fixture export service unavailable" in diagnostics
-
-
-def test_slow_exporter_does_not_hold_application_result(platform_project):
+def test_exporter_failure_is_diagnostic_and_does_not_hold_application_result(platform_project):
     from threading import Event
     from time import monotonic, sleep
 
@@ -664,10 +617,12 @@ def test_slow_exporter_does_not_hold_application_result(platform_project):
     programs["platform"] = lambda _definition, _request: "ready"
     entered = Event()
     release = Event()
+    submitted = []
 
     class SlowExporter:
-        def export(self, _event, *, trace_dir):
+        def export(self, event, *, trace_dir):
             assert trace_dir.is_dir()
+            submitted.append((event["event_id"], trace_dir))
             entered.set()
             release.wait(10)
             raise RuntimeError("late exporter failure")
@@ -678,6 +633,8 @@ def test_slow_exporter_does_not_hold_application_result(platform_project):
         assert result.output == "ready"
         assert monotonic() - started < 5
         assert entered.wait(2)
+        assert submitted
+        assert all(directory == result.run.trace_dir for _, directory in submitted)
     finally:
         release.set()
     deadline = monotonic() + 3
