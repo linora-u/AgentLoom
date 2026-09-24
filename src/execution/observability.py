@@ -43,6 +43,9 @@ class TraceRecorder:
         self.context = context
         self.storage = SecureDirectory(context.prepare_trace())
         self._lock = threading.RLock()
+        self._run_steps: dict[tuple[str, int], int] = {}
+        self._model_steps: dict[str, int | None] = {}
+        self._next_run_step = 1
 
     def close(self) -> None:
         self.storage.close()
@@ -117,8 +120,21 @@ class TraceRecorder:
                 f"events/{self.context.run_id}/{sequence:012d}.json", event
             )
 
+    def _run_step_number(
+        self, agent_id: str | None, agent_step_number: int | None, *, create: bool = False,
+    ) -> int | None:
+        if not agent_id or not isinstance(agent_step_number, int) or agent_step_number < 1:
+            return None
+        key = (agent_id, agent_step_number)
+        with self._lock:
+            if key not in self._run_steps and create:
+                self._run_steps[key] = self._next_run_step
+                self._next_run_step += 1
+            return self._run_steps.get(key)
+
     def record_tool(self, record: ToolCallRecord, *, original_output: Any = _UNSET) -> None:
         execution = capture_explicit_execution_context()
+        agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
         try:
             input_ref = self._payload(record.input, content_type="application/json")
             output_ref = (
@@ -137,8 +153,8 @@ class TraceRecorder:
                 "agent_id": execution.local_run_id,
                 "parent_agent_id": execution.hook_run.parent.local_run_id
                 if execution.hook_run is not None and execution.hook_run.parent is not None else None,
-                "step_number": execution.hook_run.step_number
-                if execution.hook_run is not None else None,
+                "step_number": agent_step,
+                "run_step_number": self._run_step_number(execution.local_run_id, agent_step),
                 "started_at": record.started_at,
                 "ended_at": record.ended_at,
                 "error": redact_value(asdict(record.error)) if record.error is not None else None,
@@ -156,6 +172,7 @@ class TraceRecorder:
         decision: Any, call_id: str | None = None,
     ) -> None:
         execution = capture_explicit_execution_context()
+        agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
         try:
             decision_ref = self._payload(
                 {"input": input_value, "result": asdict(decision)},
@@ -169,8 +186,8 @@ class TraceRecorder:
                 "agent_id": execution.local_run_id,
                 "parent_agent_id": execution.hook_run.parent.local_run_id
                 if execution.hook_run is not None and execution.hook_run.parent is not None else None,
-                "step_number": execution.hook_run.step_number
-                if execution.hook_run is not None else None,
+                "step_number": agent_step,
+                "run_step_number": self._run_step_number(execution.local_run_id, agent_step),
                 "decision_ref": decision_ref,
             })
         except Exception as exc:
@@ -178,8 +195,12 @@ class TraceRecorder:
 
     def record_model_request(self, request: Any, *, runtime: str, boundary: str) -> str:
         execution = capture_explicit_execution_context()
+        agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
         turn_id = f"model_{uuid4().hex}"
         try:
+            run_step = self._run_step_number(execution.local_run_id, agent_step, create=True)
+            with self._lock:
+                self._model_steps[turn_id] = run_step
             request_ref = self._payload(request, content_type="application/json")
             self._append({
                 "kind": "model_request",
@@ -189,8 +210,8 @@ class TraceRecorder:
                 "agent_id": execution.local_run_id,
                 "parent_agent_id": execution.hook_run.parent.local_run_id
                 if execution.hook_run is not None and execution.hook_run.parent is not None else None,
-                "step_number": execution.hook_run.step_number
-                if execution.hook_run is not None else None,
+                "step_number": agent_step,
+                "run_step_number": run_step,
                 "request_ref": request_ref,
             })
         except Exception as exc:
@@ -200,12 +221,17 @@ class TraceRecorder:
     def record_model_response(
         self, turn_id: str, response: Any = _UNSET, *, runtime: str, error: BaseException | None = None
     ) -> None:
+        execution = capture_explicit_execution_context()
+        agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
         try:
             response_ref = self._payload(response, content_type="application/json") if response is not _UNSET else None
             self._append({
                 "kind": "model_response",
                 "runtime": runtime,
                 "model_turn_id": turn_id,
+                "agent_id": execution.local_run_id,
+                "step_number": agent_step,
+                "run_step_number": self._model_steps.get(turn_id),
                 "status": "error" if error is not None else "completed",
                 "response_ref": response_ref,
                 "error": str(redact_value(str(error))) if error is not None else None,
@@ -261,6 +287,37 @@ class RunTrace:
             json.loads(self.storage.read_bytes(f"events/{self.run_id}/{path.name}"))
             for path in sorted(directory.glob("*.json"))
         ]
+
+    def inspect_step(
+        self, run_step_number: int, *, max_inline_bytes: int = 65536,
+    ) -> dict[str, Any]:
+        """Expand one Run Step, leaving large bodies available through read_page."""
+
+        if run_step_number < 1 or max_inline_bytes < 0:
+            raise ValueError("Step inspection requires a positive Run Step and byte limit")
+        selected = [
+            event for event in self.events()
+            if event.get("run_step_number") == run_step_number
+        ]
+        if not selected:
+            raise KeyError(f"No retained Run Step {run_step_number}")
+        agent_id = next((event["agent_id"] for event in selected if event.get("agent_id")), None)
+        references = {
+            value for event in selected for key, value in event.items()
+            if key.endswith("_ref") and isinstance(value, str)
+        }
+        payloads = {
+            reference: self.read_text(reference)
+            for reference in references
+            if self._metadata(reference)["size"] <= max_inline_bytes
+        }
+        return {
+            "agent_id": agent_id,
+            "run_step_number": run_step_number,
+            "events": selected,
+            "payload_refs": sorted(references),
+            "payloads": payloads,
+        }
 
     def _metadata(self, reference: str) -> dict[str, Any]:
         if not _TRACE_REF_RE.fullmatch(reference):
