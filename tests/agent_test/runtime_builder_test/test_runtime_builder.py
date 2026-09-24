@@ -529,6 +529,7 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     assert definition.metadata == {}
     assert tuple(item.name for item in definition.tool_gateway.definitions) == (
         "proof",
+        "loom_retrieve_context",
     )
 
 
@@ -2229,7 +2230,7 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
     gateway = agent._build_tool_gateway()
     names = {tool.name for tool in gateway.definitions}
 
-    assert names == {"get_goal", "update_goal"}
+    assert names == {"get_goal", "update_goal", "loom_retrieve_context"}
     assert {entry.owner for entry in gateway.manifest} == {"platform"}
 
 
