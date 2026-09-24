@@ -292,6 +292,8 @@ def test_failed_bash_retains_partial_artifact_without_success_evidence(tmp_path)
 def test_native_capture_larger_than_wire_limit_is_retained_without_reexecution(tmp_path):
     import shlex
     import sys
+
+    from agentloom.execution.observability import inspect_run
     producer = tmp_path / 'large_producer.py'
     producer.write_text("print('a'* (9 * 1024 * 1024))\nprint('FINAL_RECORD: first-result-1031')\n")
     with model_service(turns=[[('large', 'bash', {'command': f'{shlex.quote(sys.executable)} {shlex.quote(str(producer))}'})]]) as (url, requests):
@@ -308,6 +310,10 @@ def test_native_capture_larger_than_wire_limit_is_retained_without_reexecution(t
     assert entry['raw_output'] == 'a' * (9 * 1024 * 1024) + '\nFINAL_RECORD: first-result-1031\n'
     assert '[ContextRef ' in json.dumps(entry['record']['output'])
     assert len(requests) == 2
+    with inspect_run(result.run) as trace:
+        call = next(event for event in trace.events() if event['kind'] == 'tool' and event['call_id'] == 'large')
+        assert json.loads(trace.read_text(call['output_ref'])) == entry['raw_output']
+        assert '[ContextRef ' in trace.read_text(call['model_ref'])
 
 
 def test_large_edit_result_is_durable_and_retrievable_without_reexecution(tmp_path):

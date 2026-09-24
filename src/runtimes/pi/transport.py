@@ -161,10 +161,15 @@ class PiTransport:
                     run_id=message.run_id, request_id=message.request_id, payload=result)
                 pending.queue.put((message, response))
             except BaseException as error:
-                category = "protocol" if isinstance(error, AgentRuntimeError) and error.category == "internal" else "tool"
+                from agentloom.execution.observability import TraceStorageError
+
+                trace_failure = isinstance(error, TraceStorageError)
+                category = "internal" if trace_failure else (
+                    "protocol" if isinstance(error, AgentRuntimeError) and error.category == "internal" else "tool"
+                )
                 pending.queue.put((message, Response(version=2, kind="response", instance_id=self.instance_id,
                     run_id=message.run_id, request_id=message.request_id,
-                    error=BridgeError(category=category, message="Pi tool callback failed"))))
+                    error=BridgeError(category=category, message=str(error) if trace_failure else "Pi tool callback failed"))))
 
         try:
             while True:
@@ -175,7 +180,11 @@ class PiTransport:
                 if isinstance(message, tuple):
                     self._write(message[1])
                     if message[1].error:
-                        self._fail("Pi bridge protocol failure" if message[1].error.category == "protocol" else "Pi tool callback failed")
+                        self._fail(
+                            message[1].error.message if message[1].error.category == "internal" else
+                            "Pi bridge protocol failure" if message[1].error.category == "protocol" else
+                            "Pi tool callback failed"
+                        )
                         self._terminate()
                     continue
                 if isinstance(message, Request):

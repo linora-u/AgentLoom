@@ -22,6 +22,8 @@ def file_probe(file_path: str) -> str:
 
 
 def test_one_application_uses_official_read_and_selected_python_extension(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
     source = tmp_path / 'facts.py'
     source.write_text('def verified_invoice_total():\n    return 6941\n')
     with model_service(turns=[[('native', 'read', {'path': str(source)}),
@@ -39,10 +41,17 @@ def test_one_application_uses_official_read_and_selected_python_extension(tmp_pa
     assert all(item['record']['status'] == 'completed' for item in records)
     assert {tool['function']['name'] for tool in requests[0][1]['tools']} == {'read', 'file_probe'}
     assert all('verified_invoice_total' in str(item['record']['output']) for item in records)
+    with inspect_run(result.run) as trace:
+        calls = {item['tool_name']: item for item in trace.events() if item['kind'] == 'tool'}
+        assert set(calls) == {'read', 'file_probe'}
+        assert 'verified_invoice_total' in trace.read_text(calls['read']['output_ref'])
+        assert 'verified_invoice_total' in trace.read_text(calls['file_probe']['output_ref'])
 
 
 @pytest.mark.parametrize('scenario', ['excluded', 'missing'])
 def test_native_read_preserves_policy_block_and_execution_error(tmp_path, scenario):
+    from agentloom.execution.observability import inspect_run
+
     excluded = tmp_path / 'private.txt'
     excluded.write_text('DENIED-NATIVE-CONTENT-6941')
     path = excluded if scenario == 'excluded' else tmp_path / 'missing.txt'
@@ -55,6 +64,10 @@ def test_native_read_preserves_policy_block_and_execution_error(tmp_path, scenar
     records = [event['details']['record'] for event in audit(result) if event['kind'] == 'tool']
     assert len(records) == 1
     assert records[0]['status'] == ('blocked' if scenario == 'excluded' else 'error')
+    with inspect_run(result.run) as trace:
+        calls = [event for event in trace.events() if event['kind'] == 'tool']
+        assert len(calls) == 1
+        assert calls[0]['status'] == records[0]['status']
     assert 'DENIED-NATIVE-CONTENT-6941' not in json.dumps(requests)
     entries = [json.loads(path.read_text()) for path in (result.run.run_dir / 'native-tools').rglob('*.json')]
     assert len(entries) == 1
@@ -63,6 +76,24 @@ def test_native_read_preserves_policy_block_and_execution_error(tmp_path, scenar
     else:
         assert entries[0]['state'] == 'committed'
         assert entries[0]['record']['status'] == 'error'
+
+
+def test_native_trace_write_failure_fails_application(tmp_path, monkeypatch):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder
+
+    source = tmp_path / 'fact.txt'
+    source.write_text('COMMITTED-NATIVE-8426')
+
+    def fail_write(_recorder, _event):
+        raise OSError('fixture disk full')
+
+    monkeypatch.setattr(TraceRecorder, '_append', fail_write)
+    with model_service(turns=[[('native', 'read', {'path': str(source)})]]) as (url, _requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'read'}])
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match='Could not persist Tool trace'):
+            execute_app(app, file_logging=False)
 
 
 @pytest.mark.parametrize('name', ['read_file', 'grep_search', 'glob_search', 'shell_tool', 'todo_write',
