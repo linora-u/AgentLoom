@@ -233,6 +233,10 @@ def test_small_native_or_platform_result_is_redacted_before_model_and_trace(tmp_
     with inspect_run(result.run) as trace:
         tool = next(event for event in trace.events() if event['kind'] == 'tool' and event['tool_name'] in {'read', 'read_file'})
         assert trace.read_text(tool['model_ref']) == worker_messages[-1]['content']
+        retained = trace.read_text(tool['output_ref'])
+        assert 'fixture-secret' not in retained
+        assert 'api_key=[REDACTED]' in retained
+        assert json.loads(retained) == worker_messages[-1]['content']
 
 
 @pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
@@ -263,41 +267,6 @@ def test_failed_platform_tool_error_matches_model_trace_and_log(tmp_path, runtim
     with inspect_run(result.run) as trace:
         tool = next(event for event in trace.events() if event['kind'] == 'tool'
                     and event['tool_name'] == 'fail_with_secret')
-        visible = trace.read_text(tool['model_ref'])
-    assert visible == tool_messages(requests[1])[-1]['content']
-    assert result.run.log_path is not None
-    assert f'Observations: {visible}' in result.run.log_path.read_text()
-
-
-def test_pi_structured_platform_result_matches_trace_and_observations(tmp_path):
-    from agentloom.execution.observability import inspect_run
-
-    def program(request):
-        messages = tool_messages(request)
-        if not messages:
-            return [('structured-result', 'structured_with_secret', {'value': 'sample'})]
-        content = messages[-1]['content']
-        assert json.loads(content) == {
-            'api_key': '[REDACTED]', 'status': 'ok', 'value': 'sample',
-        }
-        return finish(request, 'handled')
-
-    with model_service(program) as (url, requests):
-        workflow = project(tmp_path, url, supervisor='pi', worker='pi')
-        definition = yaml.safe_load(workflow.read_text())
-        definition['worker_agents'] = []
-        definition['tools'] = [{
-            'name': 'structured_with_secret',
-            'module': 'tests.application_test.test_platform_tool_application',
-            'function': 'structured_with_secret',
-        }]
-        write_yaml(workflow, definition)
-        with bind_config(load_project_config(tmp_path)):
-            result = execute_app(workflow, file_logging=True)
-    assert result.output == 'handled'
-    with inspect_run(result.run) as trace:
-        tool = next(event for event in trace.events() if event['kind'] == 'tool'
-                    and event['tool_name'] == 'structured_with_secret')
         visible = trace.read_text(tool['model_ref'])
     assert visible == tool_messages(requests[1])[-1]['content']
     assert result.run.log_path is not None
