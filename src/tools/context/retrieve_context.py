@@ -21,7 +21,12 @@ def _retrieve_durable(ref: str, query: str, offset: int, limit: int) -> str:
     try:
         with RunTrace(SecureDirectory(context.trace_dir, create=False), context.run_id) as trace:
             metadata = trace.reference_metadata(ref)
-            if metadata.get("agent_path") != capture_explicit_execution_context().runtime_agent_path:
+            producer = metadata.get("agent_path")
+            reader = capture_explicit_execution_context().runtime_agent_path
+            if producer != reader and not (
+                isinstance(producer, str) and isinstance(reader, str)
+                and producer.startswith(reader + "/")
+            ):
                 return f"ContextRef not found or unavailable: {ref}"
             if query:
                 needle = query.encode("utf-8")

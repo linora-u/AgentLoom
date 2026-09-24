@@ -151,6 +151,31 @@ class TraceRecorder:
                 f"Could not persist Tool trace for call {record.call_id}: {exc}"
             ) from exc
 
+    def record_hook_decision(
+        self, *, event: str, subject: str, input_value: Any,
+        decision: Any, call_id: str | None = None,
+    ) -> None:
+        execution = capture_explicit_execution_context()
+        try:
+            decision_ref = self._payload(
+                {"input": input_value, "result": asdict(decision)},
+                content_type="application/json",
+            )
+            self._append({
+                "kind": "hook_decision",
+                "event": event,
+                "subject": subject,
+                "call_id": call_id,
+                "agent_id": execution.local_run_id,
+                "parent_agent_id": execution.hook_run.parent.local_run_id
+                if execution.hook_run is not None and execution.hook_run.parent is not None else None,
+                "step_number": execution.hook_run.step_number
+                if execution.hook_run is not None else None,
+                "decision_ref": decision_ref,
+            })
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist {event} Hook decision: {exc}") from exc
+
     def record_model_request(self, request: Any, *, runtime: str, boundary: str) -> str:
         execution = capture_explicit_execution_context()
         turn_id = f"model_{uuid4().hex}"
