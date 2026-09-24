@@ -22,7 +22,7 @@ def test_official_write_creates_selected_file_and_durable_receipt(tmp_path):
     assert (records[0]["owner"], records[0]["provider"], record["status"]) == ("runtime", "pi", "completed")
     assert record["metadata"]["native"]["logical_name"] == "write_file"
     assert record["input"] == {"path": "new/note.txt", "content": "saffron-write-1031\n"}
-    assert [t["function"]["name"] for t in requests[0][1]["tools"]] == ["write"]
+    assert [t["function"]["name"] for t in requests[0][1]["tools"]] == ["write", "loom_retrieve_context"]
     assert "Successfully wrote" in json.dumps(requests[1][1])
 
 
@@ -314,6 +314,43 @@ def test_native_capture_larger_than_wire_limit_is_retained_without_reexecution(t
         call = next(event for event in trace.events() if event['kind'] == 'tool' and event['call_id'] == 'large')
         assert json.loads(trace.read_text(call['output_ref'])) == entry['raw_output']
         assert '[ContextRef ' in trace.read_text(call['model_ref'])
+
+
+def test_native_large_reference_survives_cache_eviction_without_manual_retrieval_tool(tmp_path):
+    import re
+    import shlex
+    import sys
+
+    first_command = f'{shlex.quote(sys.executable)} -c "print(\'a\'*5000); print(\'FIRST-NATIVE-1031\')"'
+    second_command = f'{shlex.quote(sys.executable)} -c "print(\'b\'*5000); print(\'SECOND-NATIVE-1031\')"'
+    first_ref = {}
+
+    def second(request):
+        content = next(message['content'] for message in request['messages'] if message['role'] == 'tool')
+        match = re.search(r'\[ContextRef (ctx_[0-9a-f]+)', content)
+        assert match is not None
+        first_ref['value'] = match.group(1)
+        return [('second', 'bash', {'command': second_command})]
+
+    def retrieve(_request):
+        return [('retrieve-first', 'loom_retrieve_context', {
+            'ref': first_ref['value'], 'query': 'FIRST-NATIVE-1031', 'limit': 5,
+        })]
+
+    with model_service(turns=[[('first', 'bash', {'command': first_command})], second, retrieve]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'bash'}],
+               shell_settings={'allowed_commands': ['*'], 'sandbox': {'enabled': False}},
+               context_engine={'min_chars': 1000, 'preview_max_chars': 100,
+                               'store': {'max_entries': 1}})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    records = {e['details']['record']['call_id']: e['details']['record']
+               for e in audit(result) if e['kind'] == 'tool'}
+    assert 'FIRST-NATIVE-1031' in records['retrieve-first']['output']
+    assert records['retrieve-first']['status'] == 'completed'
+    assert any(tool['function']['name'] == 'loom_retrieve_context'
+               for tool in requests[0][1]['tools'])
 
 
 def test_large_edit_result_is_durable_and_retrievable_without_reexecution(tmp_path):
