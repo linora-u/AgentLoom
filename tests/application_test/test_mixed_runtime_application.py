@@ -21,6 +21,8 @@ from tests.application_test.mixed_runtime_support import (
 
 @pytest.mark.parametrize("supervisor,worker", [("smolagents", "pi"), ("pi", "smolagents")])
 def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supervisor, worker):
+    from agentloom.execution.observability import inspect_run
+
     (tmp_path / 'note.txt').write_text('Repository verification token: SAFFRON-7419\n')
 
     def program(request):
@@ -57,6 +59,22 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
     worker_requests = [r for r in requests if r['model'] == 'worker']
     names = {t['function']['name'] for t in worker_requests[0]['tools']}
     assert ('read' in names, 'read_file' in names) == (worker == 'pi', worker == 'smolagents')
+    smol_model = 'supervisor' if supervisor == 'smolagents' else 'worker'
+    with inspect_run(result.run) as trace:
+        model_requests = [event for event in trace.events() if event['kind'] == 'model_request'
+                          and event['runtime'] == 'smolagents']
+        model_responses = [event for event in trace.events() if event['kind'] == 'model_response'
+                           and event['runtime'] == 'smolagents']
+        sent = [request for request in requests if request['model'] == smol_model]
+        assert len(model_requests) == len(model_responses) == len(sent)
+        for event, actual in zip(model_requests, sent, strict=True):
+            saved = json.loads(trace.read_text(event['request_ref']))
+            assert saved['model'] == f"openai/{actual['model']}"
+            assert saved['tools'] == actual['tools']
+            assert [{key: value for key, value in message.items() if value is not None}
+                    for message in saved['messages']] == actual['messages']
+        assert {event['model_turn_id'] for event in model_requests} == {
+            event['model_turn_id'] for event in model_responses}
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])

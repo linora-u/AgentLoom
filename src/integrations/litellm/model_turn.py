@@ -101,6 +101,28 @@ def _as_dict(value: Any, *, context: str) -> dict[str, Any]:
     raise ModelProtocolError(f"{context} must be an object")
 
 
+def _traced_transport(
+    transport: Transport, request: dict[str, Any], *, response_context: str
+) -> dict[str, Any]:
+    """Record the final AgentLoom-to-LiteLLM request and its actual response."""
+
+    from agentloom.execution.observability import get_current_trace_recorder
+
+    recorder = get_current_trace_recorder()
+    turn_id = recorder.record_model_request(
+        request, runtime="smolagents", boundary="litellm_input"
+    ) if recorder else None
+    try:
+        response = _as_dict(transport(**request), context=response_context)
+    except Exception as error:
+        if recorder is not None and turn_id is not None:
+            recorder.record_model_response(turn_id, runtime="smolagents", error=error)
+        raise
+    if recorder is not None and turn_id is not None:
+        recorder.record_model_response(turn_id, response, runtime="smolagents")
+    return response
+
+
 def _validated_options(
     adapter_id: AdapterKind,
     options: Mapping[str, Any],
@@ -464,8 +486,7 @@ class OpenAIChatModelTurnAdapter:
                 _tool_definition_for_chat(tool) for tool in request.tools
             ]
         wire_request.update(_validated_options(self.adapter_id, request.options))
-        raw_response = self._transport(**wire_request)
-        response = _as_dict(raw_response, context="chat response")
+        response = _traced_transport(self._transport, wire_request, response_context="chat response")
         choices = response.get("choices")
         if not isinstance(choices, list) or len(choices) != 1:
             raise ModelProtocolError("chat response must contain exactly one choice")
@@ -554,8 +575,7 @@ class OpenAIResponsesModelTurnAdapter:
                 _tool_definition_for_responses(tool) for tool in request.tools
             ]
         wire_request.update(_validated_options(self.adapter_id, request.options))
-        raw_response = self._transport(**wire_request)
-        response = _as_dict(raw_response, context="responses response")
+        response = _traced_transport(self._transport, wire_request, response_context="responses response")
         return ModelTurnResult(
             items=_items_from_responses(response.get("output")),
             response_id=(
@@ -760,8 +780,7 @@ class AnthropicMessagesModelTurnAdapter:
                 _tool_definition_for_chat(tool) for tool in request.tools
             ]
         wire_request.update(_validated_options(self.adapter_id, request.options))
-        raw_response = self._transport(**wire_request)
-        response = _as_dict(raw_response, context="anthropic response")
+        response = _traced_transport(self._transport, wire_request, response_context="anthropic response")
         choices = response.get("choices")
         if not isinstance(choices, list) or len(choices) != 1:
             raise ModelProtocolError(
