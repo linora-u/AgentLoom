@@ -1,13 +1,12 @@
 """Validate Pi/host alignment before the SDK appends any recovered result."""
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from agentloom.execution.agent_runtime import AgentRuntimeError
 from agentloom.execution.native_journal import snapshot
 from agentloom.execution.native_tools import NativeCallIdentity
-from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 
 
@@ -32,10 +31,13 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
             raise ValueError("Committed Pi output is not an SDK tool result")
         content, details, error = output["content"], output.get("details"), False
     else:
-        output = record["output"]
-        content = [{"type": "text", "text": output if isinstance(output, str)
-                    else json.dumps(output, ensure_ascii=False, separators=(",", ":"))}]
-        details, error = {"agentloom": record}, False
+        projection = ToolCallRecord.from_dict(record).model_content()
+        content = [{"type": "text", "text": projection}]
+        wire_record = (
+            {**record, "output": None}
+            if MODEL_OUTPUT_METADATA_KEY in record.get("metadata", {}) else record
+        )
+        details, error = {"agentloom": wire_record}, False
     result = {"role": "toolResult", "toolCallId": call["identity"]["call_id"],
               "toolName": call["tool_name"], "content": content, "isError": error}
     if details is not None:

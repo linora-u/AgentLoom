@@ -28,6 +28,11 @@ def receipt_probe(label: str) -> str:
     return "platform-receipt-proof:" + label
 
 
+def structured_receipt_probe(label: str) -> dict[str, str]:
+    _platform_calls.append(label)
+    return {"label": label, "api_key": "fixture-secret"}
+
+
 @contextmanager
 def _interrupted_after_tool(root, kind):
     (root / "proof.txt").write_text("native-receipt-proof")
@@ -198,6 +203,31 @@ def test_platform_preparation_runs_once_and_survives_recovery(tmp_path, decision
                 request = captured[1]
                 assistant = next(message for message in request['messages'] if message.get('tool_calls'))
                 assert json.loads(assistant['tool_calls'][0]['function']['arguments']) == {'label': 'observed-once'}
+
+
+def test_structured_platform_result_is_identical_after_resume(tmp_path):
+    _platform_calls.clear()
+    with model_service(
+        turns=[[('structured-call', 'structured_receipt_probe', {'label': 'once'})]],
+        fail_requests={2: 500},
+    ) as (url, requests):
+        app = project(tmp_path, url)
+        enable(app, tools=[{
+            'name': 'structured_receipt_probe', 'module': __name__,
+            'function': 'structured_receipt_probe',
+        }])
+        with bind_config(load_project_config(tmp_path)):
+            with pytest.raises(ApplicationRunError) as interrupted:
+                execute_app(app, file_logging=False)
+            first_content = next(message['content'] for message in requests[1][1]['messages']
+                                 if message['role'] == 'tool')
+            assert json.loads(first_content) == {'api_key': '[REDACTED]', 'label': 'once'}
+            resumed = execute_app(app, resume_task_id=interrupted.value.run.task_id, file_logging=False)
+    assert resumed.output == 'Pi answer'
+    assert _platform_calls == ['once']
+    resumed_content = next(message['content'] for message in requests[2][1]['messages']
+                           if message['role'] == 'tool')
+    assert resumed_content == first_content
 
 
 def test_platform_call_id_can_be_reused_at_a_later_native_position(tmp_path):
