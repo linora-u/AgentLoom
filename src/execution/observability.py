@@ -471,11 +471,24 @@ class RunTrace:
                 for reference in _CONTEXT_REF_RE.findall(self.read_text(model_ref)):
                     if reference in verified:
                         continue
-                    try:
-                        self._verify_full(reference)
-                    except (OSError, ValueError, KeyError) as exc:
-                        raise TraceStorageError(f"Committed Tool reference is unavailable: {reference}") from exc
+                    self.verify_context_reference(reference)
                     verified.add(reference)
+
+    def verify_context_reference(self, reference: str) -> None:
+        """Verify a committed Model-visible Tool reference before recovery."""
+
+        if not reference.startswith("ctx_"):
+            raise ValueError("Expected a Tool context reference")
+        try:
+            self._verify_full(reference)
+        except (OSError, ValueError, KeyError) as exc:
+            raise TraceStorageError(f"Committed Tool reference is unavailable: {reference}") from exc
+
+    def verify_model_content_refs(self, content: str) -> None:
+        """Verify all durable Tool references found in one recovered result."""
+
+        for reference in set(_CONTEXT_REF_RE.findall(content)):
+            self.verify_context_reference(reference)
 
     def inspect_step(
         self, run_step_number: int, *, max_inline_bytes: int = 65536,

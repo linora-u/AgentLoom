@@ -614,6 +614,30 @@ def test_final_answer_trace_failure_preserves_failed_checkpoint(platform_project
     assert json.loads((checkpoint / "task_tree.json").read_text())["status"] == "failed"
 
 
+def test_final_answer_is_not_printed_before_success_manifest_commits(platform_project, monkeypatch, capsys):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.context import RuntimeContext
+
+    root, _, programs, _, run = platform_project
+    programs["platform"] = lambda _definition, _request: "accepted answer"
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["logging"]["console_enabled"] = True
+    system_path.write_text(yaml.safe_dump(system))
+    original_update = RuntimeContext.update_manifest
+
+    def fail_success_manifest(context, **updates):
+        if updates.get("status") == "completed":
+            raise OSError("fixture success manifest write failed")
+        return original_update(context, **updates)
+
+    monkeypatch.setattr(RuntimeContext, "update_manifest", fail_success_manifest)
+    with pytest.raises(ApplicationRunError, match="fixture success manifest write failed") as failed:
+        run()
+    assert "Final answer: accepted answer" not in capsys.readouterr().out
+    assert json.loads(failed.value.run.manifest_path.read_text())["status"] == "failed"
+
+
 def test_exporter_failure_is_diagnostic_and_does_not_fail_application(platform_project):
     root, _, programs, _, run = platform_project
     programs["platform"] = lambda _definition, _request: "accepted answer"
