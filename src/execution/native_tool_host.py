@@ -323,8 +323,13 @@ class NativeToolHost:
             else:
                 data["state"] = "executing"
         if data.get("dispatch_rejection"):
+            from agentloom.execution.observability import get_current_trace_recorder
             from agentloom.execution.tool_protocol import ToolPolicyBlockedError
+
             rejection = ToolCallRecord.from_dict(data["dispatch_rejection"])
+            recorder = get_current_trace_recorder()
+            if recorder is not None:
+                recorder.record_tool(rejection)
             self._hook.record_tool_outcome(rejection)
             raise ToolPolicyBlockedError(rejection.reason)
         # The fsync barrier above completes before the adapter can execute.
@@ -474,12 +479,13 @@ class NativeToolHost:
             assert ack is not None
         # Observer failure is deliberately outside the atomic commit. Replays do
         # not emit evidence twice, and observers never supply a commit barrier.
-        self._observe(ack, grant, evidence)
+        self._observe(ack, grant, evidence, raw_output)
         return ack
 
-    def _observe(self, ack: NativeCommitAck, grant: NativeAuthorization, evidence: tuple[dict[str, str], ...]) -> None:
+    def _observe(self, ack: NativeCommitAck, grant: NativeAuthorization, evidence: tuple[dict[str, str], ...], raw_output: Any) -> None:
         from agentloom.execution.hooks.types import HookEvent
         from agentloom.execution.logging import get_logger
+        from agentloom.execution.observability import get_current_trace_recorder
         from agentloom.execution.trusted_memory_evidence import (
             TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY,
             TrustedMemoryEvidenceEnvelope,
@@ -487,6 +493,9 @@ class NativeToolHost:
 
         run = self._hook
         record = ack.record
+        recorder = get_current_trace_recorder()
+        if recorder is not None:
+            recorder.record_tool(record, original_output=raw_output)
         response: dict[str, Any] = {"result": record.output} if record.status == "completed" else {"error": record.reason}
         if evidence:
             response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = TrustedMemoryEvidenceEnvelope(evidence)

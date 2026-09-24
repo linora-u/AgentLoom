@@ -22,6 +22,7 @@ from agentloom.self_learning.redaction import redact_value
 _CURRENT_RECORDER: ContextVar[TraceRecorder | None] = ContextVar(
     "agentloom_trace_recorder", default=None
 )
+_UNSET = object()
 
 
 class TraceStorageError(RuntimeError):
@@ -77,13 +78,16 @@ class TraceRecorder:
                 f"events/{self.context.run_id}/{sequence:012d}.json", event
             )
 
-    def record_tool(self, record: ToolCallRecord) -> None:
+    def record_tool(self, record: ToolCallRecord, *, original_output: Any = _UNSET) -> None:
         execution = capture_explicit_execution_context()
         try:
             input_ref = self._payload(record.input, content_type="application/json")
             output_ref = (
-                self._payload(record.output, content_type="application/json")
-                if record.status == "completed" else None
+                self._payload(
+                    record.output if original_output is _UNSET else original_output,
+                    content_type="application/json",
+                )
+                if record.status == "completed" or original_output is not _UNSET else None
             )
             model_ref = self._payload(record.model_content(), content_type="text/plain")
             self._append({
