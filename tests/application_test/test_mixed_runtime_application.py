@@ -87,6 +87,11 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
         tool = next(event for event in step['events'] if event['kind'] == 'tool')
         assert tool['tool_name'] == ('read' if worker == 'pi' else 'read_file')
         assert 'SAFFRON-7419' in step['payloads'][tool['model_ref']]
+        sizes = sorted(trace.reference_metadata(ref)['size'] for ref in step['payload_refs'])
+        assert len(sizes) >= 2 and sizes[0] > 0
+        inline_budget = sizes[1]
+        bounded = trace.inspect_step(worker_request['run_step_number'], max_inline_bytes=inline_budget)
+        assert sum(len(value.encode('utf-8')) for value in bounded['payloads'].values()) <= inline_budget
 
 
 @pytest.mark.parametrize('worker', ['pi', 'smolagents'])
