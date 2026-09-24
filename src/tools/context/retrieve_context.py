@@ -32,29 +32,12 @@ def _retrieve_durable(ref: str, query: str, offset: int, limit: int) -> str:
                 needle = query.encode("utf-8")
                 if len(needle) > 256:
                     return "ContextRef search query must be at most 256 bytes."
-                content = trace.read_text(ref).encode("utf-8")
-                matches: list[str] = []
-                cursor = offset
                 max_matches = min(limit or 5, 100)
-                while len(matches) < max_matches:
-                    found = content.find(needle, cursor)
-                    if found < 0:
-                        break
-                    start = max(0, found - 128)
-                    line_start = content.rfind(b"\n", start, found)
-                    if line_start >= 0:
-                        start = line_start + 1
-                    end = min(len(content), found + len(needle) + 256)
-                    line_end = content.find(b"\n", found, end)
-                    if line_end >= 0:
-                        end = line_end
-                    excerpt = content[start:end].decode("utf-8", errors="replace")
-                    matches.append(f"byte_offset={found} {excerpt}")
-                    cursor = found + max(1, len(needle))
+                page = trace.search_page(ref, query, offset=offset, limit=max_matches)
                 return (
                     f"[ContextRef {ref} search query={query!r} offset={offset} "
-                    f"total_bytes={len(content)} next_offset={cursor if len(matches) == max_matches else 'none'}]\n"
-                    + "\n".join(matches)
+                    f"total_bytes={page.total_bytes} next_offset={page.next_offset if page.next_offset is not None else 'none'}]\n"
+                    + "\n".join(f"byte_offset={position} {excerpt}" for position, excerpt in page.matches)
                 )
             page_limit = min(limit or 8192, _MAX_PAGE_BYTES)
             page = trace.read_page(ref, offset=offset, limit=page_limit)
@@ -85,16 +68,19 @@ def loom_retrieve_context(
     offset: int = 0,
     limit: int = 200,
 ) -> str:
-    """Retrieve original content behind a ContextRef.
+    """Retrieve retained content behind a ContextRef.
 
     Args:
         ref: Context reference, for example ``ctx_0123abcd4567ef89``.
-        query: Optional search query. When provided, only matching lines are returned.
-        offset: Line offset for pagination.
-        limit: Maximum lines to return. Use ``0`` to return all remaining lines.
+        query: Optional search query. A durable ref scans at most one page per call;
+            follow ``next_offset`` until a match is found or it says ``none``.
+        offset: Byte offset for durable refs; line offset for older ContextEngine refs.
+        limit: For durable refs, maximum bytes or search matches per call, with a
+            hard cap; ``0`` selects a bounded default. For older refs, maximum
+            lines, where ``0`` returns all remaining lines.
 
     Returns:
-        Original content or matching lines from the local ContextEngine store.
+        Retained content or search excerpts with a continuation offset.
     """
     if not ref or not str(ref).strip():
         raise ValueError("ref is required")

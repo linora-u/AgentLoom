@@ -264,6 +264,13 @@ class TracePage:
 
 
 @dataclass(slots=True)
+class TraceSearchPage:
+    matches: list[tuple[int, str]]
+    next_offset: int | None
+    total_bytes: int
+
+
+@dataclass(slots=True)
 class RunTrace:
     """Read one Run's metadata and integrity-checked retained content."""
 
@@ -365,6 +372,57 @@ class RunTrace:
             total_bytes=total,
             content_type=str(metadata["content_type"]),
         )
+
+    def search_page(
+        self, reference: str, query: str, *, offset: int = 0, limit: int = 5,
+    ) -> TraceSearchPage:
+        """Search at most 1 MiB of one retained payload, using byte offsets."""
+
+        needle = query.encode("utf-8")
+        if not 1 <= len(needle) <= 256 or offset < 0 or not 1 <= limit <= 100:
+            raise ValueError("Trace search requires a short query, byte offset and 1..100 matches")
+        metadata = self._metadata(reference)
+        digest = metadata["sha256"]
+        with self.storage.open_binary_reader(f"payloads/{digest}.blob") as stream:
+            checksum = hashlib.sha256()
+            total = 0
+            while chunk := stream.read(1024 * 1024):
+                checksum.update(chunk)
+                total += len(chunk)
+            if total != metadata["size"] or checksum.hexdigest() != digest:
+                raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+            if offset >= total:
+                return TraceSearchPage([], None, total)
+
+            scan_end = min(total, offset + 1024 * 1024)
+            stream.seek(offset)
+            window = stream.read(scan_end - offset + len(needle) - 1)
+            matches: list[tuple[int, str]] = []
+            cursor = 0
+            while len(matches) < limit:
+                found = window.find(needle, cursor)
+                if found < 0 or offset + found >= scan_end:
+                    break
+                position = offset + found
+                start = max(0, position - 128)
+                end = min(total, position + len(needle) + 256)
+                stream.seek(start)
+                excerpt = stream.read(end - start)
+                before = excerpt.rfind(b"\n", 0, position - start)
+                if before >= 0:
+                    excerpt = excerpt[before + 1:]
+                    start += before + 1
+                after = excerpt.find(b"\n", position - start + len(needle))
+                if after >= 0:
+                    excerpt = excerpt[:after]
+                matches.append((position, excerpt.decode("utf-8", errors="replace")))
+                cursor = found + len(needle)
+            next_offset = offset + cursor if len(matches) == limit else scan_end
+            return TraceSearchPage(
+                matches,
+                next_offset if next_offset < total else None,
+                total,
+            )
 
 
 def inspect_run(run: RunWithTrace) -> RunTrace:
