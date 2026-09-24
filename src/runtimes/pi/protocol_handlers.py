@@ -163,7 +163,7 @@ class PiModelHandler:
                     if key in self._trace_turns:
                         raise AgentRuntimeError("Duplicate Pi Model request trace", category="internal")
                     turn_id = recorder.record_model_request(
-                        captured, runtime="pi", boundary="pi_payload"
+                        captured, runtime="pi", boundary="pi_payload", attempt=payload.attempt
                     )
                     self._trace_turns[key] = turn_id
             else:
@@ -172,7 +172,7 @@ class PiModelHandler:
                         turn_id = self._trace_turns.pop(key)
                     except KeyError as exc:
                         raise AgentRuntimeError("Pi Model response has no request trace", category="internal") from exc
-                recorder.record_model_response(turn_id, captured, runtime="pi")
+                recorder.record_model_response(turn_id, captured, runtime="pi", attempt=payload.attempt)
         return ModelTraceResult(
             method="model_trace", identity=identity, attempt=payload.attempt,
             phase=payload.phase, accepted=True,
