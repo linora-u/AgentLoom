@@ -652,6 +652,10 @@ class RoleDrivenAgent(BaseAgent):
         profile = self._role_profile()
         tools = self._resolve_unique_tools(self._build_runtime_tools(profile))
         bindings: list[ToolBinding] = [bind_tool(tool) for tool in tools]
+        if not any(binding.definition.name == "loom_retrieve_context" for binding in bindings):
+            from agentloom.tools.loader import resolve_tool_function
+
+            bindings.append(bind_tool(resolve_tool_function("loom_retrieve_context")))
         mcp_manager = getattr(self, "_mcp_manager", None)
         resource_closers = (
             (mcp_manager.disconnect_all,)
