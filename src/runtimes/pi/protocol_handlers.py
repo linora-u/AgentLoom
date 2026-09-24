@@ -18,12 +18,14 @@ from agentloom.execution.native_tool_host import NativeToolHost
 from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, ToolManifestEntry
 from agentloom.execution.tool_gateway import PreparedToolCall, PreparedToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
-from agentloom.runtimes.pi.capture import read_capture
+from agentloom.runtimes.pi.capture import read_capture, read_model_capture
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 from agentloom.runtimes.pi.protocol import (
     Dispatch,
     ModelPermit,
     ModelPrepare,
+    ModelTrace,
+    ModelTraceResult,
     PlatformInvoke,
     PlatformPrepare,
     PlatformPrepared,
@@ -75,6 +77,7 @@ class PiModelHandler:
         request: AgentRuntimeRequest,
         run_id: str,
         instance_id: str,
+        private_directory: Path,
         execution: Any,
         hook: Any,
         shared_goal: Any,
@@ -82,10 +85,13 @@ class PiModelHandler:
         self._request = request
         self._run_id = run_id
         self._instance_id = instance_id
+        self._private_directory = private_directory
         self._execution = execution
         self._hook = hook
         self._shared_goal = shared_goal
         self._model_calls: set[str] = set()
+        self._trace_turns: dict[tuple[str, int], str] = {}
+        self._step_number = 0
         self._lock = Lock()
 
     def handle(self, payload: ModelPrepare) -> ModelPermit:
@@ -114,6 +120,11 @@ class PiModelHandler:
                 state = "final" if final else "work"
             except GoalCompleteError:
                 state = "denied"
+        if state != "denied":
+            with self._lock:
+                self._step_number += 1
+                if self._hook is not None:
+                    self._hook.step_number = self._step_number
         return ModelPermit(
             method="model_prepare",
             identity=identity,
@@ -121,6 +132,46 @@ class PiModelHandler:
             agent_context=self._hook.consume_pending_agent_context()
             if self._hook is not None and state != "denied"
             else [],
+        )
+
+    def trace(self, payload: ModelTrace) -> ModelTraceResult:
+        from agentloom.execution.observability import get_current_trace_recorder
+
+        identity = payload.identity
+        if (
+            identity.application_id, identity.task_id, identity.run_id, identity.instance_id
+        ) != (
+            self._request.application_id or "standalone",
+            self._request.task_id or "standalone",
+            self._run_id,
+            self._instance_id,
+        ):
+            raise AgentRuntimeError("Invalid Pi Model trace identity", category="internal")
+        with self._lock:
+            if identity.call_id not in self._model_calls:
+                raise AgentRuntimeError("Pi Model trace has no prepared turn", category="internal")
+        captured = read_model_capture(self._private_directory, payload.capture_id, payload.sha256)
+        recorder = get_current_trace_recorder()
+        key = (identity.call_id, payload.attempt)
+        if recorder is not None:
+            if payload.phase == "request":
+                with self._lock:
+                    if key in self._trace_turns:
+                        raise AgentRuntimeError("Duplicate Pi Model request trace", category="internal")
+                    turn_id = recorder.record_model_request(
+                        captured, runtime="pi", boundary="pi_payload"
+                    )
+                    self._trace_turns[key] = turn_id
+            else:
+                with self._lock:
+                    try:
+                        turn_id = self._trace_turns.pop(key)
+                    except KeyError as exc:
+                        raise AgentRuntimeError("Pi Model response has no request trace", category="internal") from exc
+                recorder.record_model_response(turn_id, captured, runtime="pi")
+        return ModelTraceResult(
+            method="model_trace", identity=identity, attempt=payload.attempt,
+            phase=payload.phase, accepted=True,
         )
 
 
@@ -297,6 +348,7 @@ class PiProtocolCoordinator:
             request=request,
             run_id=run_id,
             instance_id=instance_id,
+            private_directory=private_directory,
             execution=execution,
             hook=hook,
             shared_goal=shared_goal,
@@ -336,6 +388,8 @@ class PiProtocolCoordinator:
             return self.checkpoint.handle(payload)
         if isinstance(payload, ModelPrepare):
             return self.model.handle(payload)
+        if isinstance(payload, ModelTrace):
+            return self.model.trace(payload)
         self.gate.require_allowed(payload)
         if isinstance(payload, PlatformPrepare):
             return self.platform.prepare(payload)

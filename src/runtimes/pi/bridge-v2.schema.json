@@ -412,6 +412,91 @@
       "title": "ModelSelection",
       "type": "object"
     },
+    "ModelTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "model_trace",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "attempt": {
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "phase": {
+          "enum": [
+            "request",
+            "response"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "capture_id": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Capture Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "attempt",
+        "phase",
+        "capture_id",
+        "sha256"
+      ],
+      "title": "ModelTrace",
+      "type": "object"
+    },
+    "ModelTraceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "model_trace",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "phase": {
+          "enum": [
+            "request",
+            "response"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "accepted": {
+          "const": true,
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "attempt",
+        "phase",
+        "accepted"
+      ],
+      "title": "ModelTraceResult",
+      "type": "object"
+    },
     "NativeAuthorization": {
       "properties": {
         "authorization_id": {
@@ -818,6 +903,7 @@
               "close": "#/$defs/Close",
               "handshake": "#/$defs/Handshake",
               "model_prepare": "#/$defs/ModelPrepare",
+              "model_trace": "#/$defs/ModelTrace",
               "platform_invoke": "#/$defs/PlatformInvoke",
               "platform_prepare": "#/$defs/PlatformPrepare",
               "run": "#/$defs/Run",
@@ -862,6 +948,9 @@
             },
             {
               "$ref": "#/$defs/ModelPrepare"
+            },
+            {
+              "$ref": "#/$defs/ModelTrace"
             },
             {
               "$ref": "#/$defs/SessionCheckpoint"
@@ -925,6 +1014,7 @@
                   "close": "#/$defs/ControlResult",
                   "handshake": "#/$defs/HandshakeResult",
                   "model_prepare": "#/$defs/ModelPermit",
+                  "model_trace": "#/$defs/ModelTraceResult",
                   "platform_invoke": "#/$defs/PlatformResult",
                   "platform_prepare": "#/$defs/PlatformPrepared",
                   "run": "#/$defs/RunResult",
@@ -963,6 +1053,9 @@
                 },
                 {
                   "$ref": "#/$defs/ModelPermit"
+                },
+                {
+                  "$ref": "#/$defs/ModelTraceResult"
                 },
                 {
                   "$ref": "#/$defs/SessionCheckpointResult"
