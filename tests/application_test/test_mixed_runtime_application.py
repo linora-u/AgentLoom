@@ -1,6 +1,7 @@
 """Ticket 11: mixed execution and curated memory at the Application boundary."""
 import json
 import re
+import sys
 from threading import Barrier
 
 import pytest
@@ -77,6 +78,39 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
             event['model_turn_id'] for event in model_responses}
 
 
+def test_smol_supervisor_trace_records_stop_rejection_and_acceptance(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    marker = tmp_path / 'stop-count'
+    hook = tmp_path / 'stop_once.py'
+    hook.write_text(
+        'import json\nfrom pathlib import Path\n'
+        f'p=Path({str(marker)!r})\n'
+        'count=int(p.read_text()) if p.exists() else 0\n'
+        'p.write_text(str(count+1))\n'
+        'print(json.dumps({"decision":"block","reason":"continue once"}'
+        ' if count==0 else {"decision":"allow"}))\n'
+    )
+
+    def program(request):
+        return finish(request, 'accepted-answer-8426')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='smolagents', worker='pi')
+        definition = yaml.safe_load(workflow.read_text())
+        definition['hooks'] = {'Stop': [{'id': 'stop-once', 'command': f'{sys.executable} {hook}'}]}
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == 'accepted-answer-8426'
+    assert len(requests) >= 2
+    with inspect_run(result.run) as trace:
+        decisions = [event for event in trace.events()
+                     if event['kind'] == 'hook_decision' and event['event'] == 'Stop']
+        assert [json.loads(trace.read_text(event['decision_ref']))['result']['decision']
+                for event in decisions] == ['block', 'allow']
+
+
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])
 def test_parallel_and_repeated_workers_have_separate_sessions_and_hook_owners(tmp_path, supervisor, worker):
     support.parallel_gate = Barrier(2)
@@ -149,7 +183,7 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         if request['model'] == 'worker':
             if not messages:
                 return [('large-read', 'read_context_fixture', {'file_path': str(source)})]
-            match = re.search(r'ctx_[0-9a-f]{16}', messages[-1]['content'])
+            match = re.search(r'ctx_[0-9a-f]{32}', messages[-1]['content'])
             assert match is not None
             ref = match.group()
             refs.append(ref)
@@ -158,7 +192,7 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         if not messages:
             return [('delegate', 'inspect_note', {'query': 'large-note.py'})]
         if len(messages) == 1:
-            match = re.search(r'ctx_[0-9a-f]{16}', messages[0]['content'])
+            match = re.search(r'ctx_[0-9a-f]{32}', messages[0]['content'])
             assert match is not None
             ref = match.group()
             return [('retrieve', 'loom_retrieve_context', {'ref': ref, 'query': 'TARGET_RECORD', 'limit': 3})]
@@ -177,10 +211,9 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
                 'module': 'tests.application_test.mixed_runtime_support',
                 'function': 'read_context_fixture',
             },
-            {'name': 'loom_retrieve_context'},
         ]
         write_yaml(worker_path, worker_definition)
-        definition['tools'] = [{'name': 'loom_retrieve_context'}]
+        definition['tools'] = []
         write_yaml(workflow, definition)
         system_path = tmp_path / 'config/system.yaml'
         system = yaml.safe_load(system_path.read_text())
@@ -190,12 +223,15 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
             result = execute_app(workflow, file_logging=True)
     assert result.output == 'CORIANDER_5287'
     assert len(refs) == 1
-    entries = [json.loads(p.read_text()) for p in (tmp_path / 'runtime').rglob(f'{refs[0]}.json')]
-    assert len(entries) == 1
-    assert entries[0]['tool_name'] == 'read_context_fixture'
-    assert 'TARGET_RECORD_CORIANDER_5287' in entries[0]['original']
-    assert all(f'release_item_{i}' in entries[0]['original'] for i in range(180))
-    assert 'WRONG-NEW-CONTENT' not in entries[0]['original']
+    from agentloom.execution.observability import inspect_run
+
+    with inspect_run(result.run) as trace:
+        metadata = trace.reference_metadata(refs[0])
+        original = trace.read_text(refs[0])
+        assert metadata['tool_name'] == 'read_context_fixture'
+        assert 'TARGET_RECORD_CORIANDER_5287' in original
+        assert all(f'release_item_{i}' in original for i in range(180))
+        assert 'WRONG-NEW-CONTENT' not in original
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])

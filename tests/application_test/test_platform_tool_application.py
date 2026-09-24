@@ -484,7 +484,10 @@ def test_application_tool_outcome_has_durable_inspectable_payload(platform_proje
         assert calls[0]["status"] == "completed"
         assert json.loads(trace.read_text(calls[0]["input_ref"])) == {"value": payload}
         assert json.loads(trace.read_text(calls[0]["output_ref"])) == payload
-        assert trace.read_text(calls[0]["model_ref"]) == payload
+        model_visible = trace.read_text(calls[0]["model_ref"])
+        match = re.search(r"\[ContextRef (ctx_[0-9a-f]{32})", model_visible)
+        assert match is not None
+        assert trace.read_text(match.group(1)) == payload
         pages = []
         offset = 0
         while True:
@@ -493,7 +496,7 @@ def test_application_tool_outcome_has_durable_inspectable_payload(platform_proje
             if page.next_offset is None:
                 break
             offset = page.next_offset
-        assert b"".join(pages).decode() == payload
+        assert b"".join(pages).decode() == model_visible
 
 
 def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):
@@ -507,13 +510,48 @@ def test_application_fails_when_required_tool_trace_cannot_be_written(platform_p
         )
         return "must not succeed"
 
-    def fail_write(_recorder, _event):
-        raise OSError("fixture disk full")
+    original_append = TraceRecorder._append
+
+    def fail_write(recorder, event):
+        if event["kind"] == "tool":
+            raise OSError("fixture disk full")
+        return original_append(recorder, event)
 
     programs["platform"] = execute
     monkeypatch.setattr(TraceRecorder, "_append", fail_write)
     with pytest.raises(ApplicationRunError, match="Could not persist Tool trace"):
         run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+
+
+def test_application_trace_records_effective_pre_tool_decision(platform_project):
+    from agentloom.execution.observability import inspect_run
+
+    root, _, programs, _, run = platform_project
+    hook = root / "modify_tool.py"
+    hook.write_text('import json\nprint(json.dumps({"decision":"modify","modified_input":{"value":"after"}}))\n')
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="modified-call", tool_name="trace_payload", arguments={"value": "before"},
+        )
+        assert record.status == "completed"
+        return record.output
+
+    programs["platform"] = execute
+    result = run(
+        tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}],
+        hooks={"PreToolUse": [{"id": "modify", "matcher": "trace_payload",
+                               "command": shlex.join([sys.executable, str(hook)])}]},
+    )
+    assert result.output == "after"
+    with inspect_run(result.run) as trace:
+        decisions = [event for event in trace.events() if event["kind"] == "hook_decision"]
+        assert len(decisions) == 1
+        assert decisions[0]["event"] == "PreToolUse"
+        assert decisions[0]["call_id"] == "modified-call"
+        detail = json.loads(trace.read_text(decisions[0]["decision_ref"]))
+        assert detail["result"]["decision"] == "modify"
+        assert detail["result"]["modified_input"] == {"value": "after"}
 
 
 def test_large_tool_reference_survives_context_cache_eviction(platform_project):

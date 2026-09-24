@@ -232,6 +232,14 @@ class PiRuntime:
                     break
                 decision = hook.dispatch(HookEvent.STOP, "final_answer", {"final_answer": result.output})
                 hook.flush_user_messages()
+                from agentloom.execution.observability import get_current_trace_recorder
+
+                recorder = get_current_trace_recorder()
+                if recorder is not None:
+                    recorder.record_hook_decision(
+                        event="Stop", subject="final_answer",
+                        input_value={"final_answer": result.output}, decision=decision,
+                    )
                 goal_state = goal.snapshot() if goal is not None else None
                 if not decision.should_block() and (goal_state is None or goal_state.status == "complete"):
                     break
