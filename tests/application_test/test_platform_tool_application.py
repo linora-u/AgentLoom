@@ -454,3 +454,54 @@ def test_native_application_retrieves_original_mcp_content_with_context_ref(plat
         tools=[{"name": "loom_retrieve_context"}], mcp_servers=str(config),
         context_engine={"min_chars": 1000, "preview_max_chars": 300},
     ).output == "original artifact retrieved"
+
+
+def trace_payload(value: str) -> str:
+    """Return the exact text supplied by an Application Tool call."""
+    return value
+
+
+def test_application_tool_outcome_has_durable_inspectable_payload(platform_project):
+    from agentloom.execution.observability import inspect_run
+
+    _, _, programs, _, run = platform_project
+    payload = "application-trace-8426\n" * 1000
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="trace-call", tool_name="trace_payload", arguments={"value": payload},
+        )
+        assert record.status == "completed"
+        return "trace complete"
+
+    programs["platform"] = execute
+    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+
+    with inspect_run(result.run) as trace:
+        calls = [event for event in trace.events() if event["kind"] == "tool"]
+        assert len(calls) == 1
+        assert calls[0]["call_id"] == "trace-call"
+        assert calls[0]["status"] == "completed"
+        assert json.loads(trace.read_text(calls[0]["input_ref"])) == {"value": payload}
+        assert json.loads(trace.read_text(calls[0]["output_ref"])) == payload
+        assert trace.read_text(calls[0]["model_ref"]) == payload
+
+
+def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder
+
+    _, _, programs, _, run = platform_project
+    def execute(definition, _request):
+        definition.tool_gateway.invoke(
+            call_id="trace-failure", tool_name="trace_payload", arguments={"value": "committed"},
+        )
+        return "must not succeed"
+
+    def fail_write(_recorder, _event):
+        raise OSError("fixture disk full")
+
+    programs["platform"] = execute
+    monkeypatch.setattr(TraceRecorder, "_append", fail_write)
+    with pytest.raises(ApplicationRunError, match="Could not persist Tool trace"):
+        run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
