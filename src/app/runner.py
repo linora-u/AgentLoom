@@ -614,10 +614,9 @@ def _execute_app(
                                 cleanup_on_success=cleanup_on_success,
                                 log=log,
                                 task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
+                                record_final_answer=recorder.record_final_answer,
                             )
                         )
-                        if lifecycle.outcome == "completed":
-                            recorder.record_final_answer(lifecycle.result)
                     finally:
                         lifecycle.close_resources(
                             ApplicationRunResources(
