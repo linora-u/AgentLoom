@@ -19,6 +19,11 @@ from agentloom.execution.context import RuntimeContext
 from agentloom.execution.storage import SecureDirectory
 from agentloom.execution.tool_protocol import ToolCallRecord
 from agentloom.execution.trace import capture_explicit_execution_context
+from agentloom.execution.trace_export import (
+    AsyncTraceExport,
+    TraceExporter,
+    record_export_diagnostic,
+)
 from agentloom.self_learning.redaction import redact_value
 
 _CURRENT_RECORDER: ContextVar[TraceRecorder | None] = ContextVar(
@@ -42,7 +47,7 @@ class RunWithTrace(Protocol):
 class TraceRecorder:
     """Persist one Run's facts in its logical Task's immutable content store."""
 
-    def __init__(self, context: RuntimeContext) -> None:
+    def __init__(self, context: RuntimeContext, *, exporter: TraceExporter | None = None) -> None:
         self.context = context
         self.storage = SecureDirectory(context.prepare_trace())
         self._lock = threading.RLock()
@@ -50,6 +55,12 @@ class TraceRecorder:
         self._model_steps: dict[str, int | None] = {}
         self._next_run_step = 1
         self._presenter: Any | None = None
+        self._export: AsyncTraceExport | None = None
+        if exporter is not None:
+            try:
+                self._export = AsyncTraceExport(exporter, self.storage)
+            except Exception as exc:
+                record_export_diagnostic(self.storage, "start_failed", None, str(exc))
 
     def attach_presenter(self, presenter: Any) -> None:
         """Attach the run's human-readable projection after its logger exists."""
@@ -61,6 +72,8 @@ class TraceRecorder:
         return self._presenter is not None
 
     def close(self) -> None:
+        if self._export is not None:
+            self._export.close()
         self.storage.close()
 
     def _payload(
@@ -137,6 +150,11 @@ class TraceRecorder:
                 )
             if self._presenter is not None:
                 self._presenter.consume(event)
+            if self._export is not None:
+                try:
+                    self._export.enqueue(event)
+                except Exception as exc:
+                    record_export_diagnostic(self.storage, "enqueue_failed", event.get("event_id"), str(exc))
 
     def _run_step_number(
         self, agent_id: str | None, agent_step_number: int | None, *, create: bool = False,
@@ -318,8 +336,10 @@ class TraceRecorder:
 
 
 @contextmanager
-def bind_trace_recorder(context: RuntimeContext) -> Iterator[TraceRecorder]:
-    recorder = TraceRecorder(context)
+def bind_trace_recorder(
+    context: RuntimeContext, *, exporter: TraceExporter | None = None,
+) -> Iterator[TraceRecorder]:
+    recorder = TraceRecorder(context, exporter=exporter)
     token = _CURRENT_RECORDER.set(recorder)
     try:
         yield recorder

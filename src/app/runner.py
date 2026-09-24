@@ -72,6 +72,7 @@ from agentloom.execution.logging import (
     get_logger,
     initialize_run_logger,
 )
+from agentloom.execution.trace_export import TraceExporter
 
 _TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
 
@@ -219,6 +220,7 @@ def execute_app(
     file_logging: bool | None = None,
     *,
     event_sink: RunEventSink | None = None,
+    trace_exporter: TraceExporter | None = None,
     require_valid_supervisor_target: bool = False,
 ) -> ApplicationRunResult:
     """Execute against current configuration, pinned for the lifetime of the Run."""
@@ -234,6 +236,7 @@ def execute_app(
             task_override,
             file_logging,
             event_sink=event_sink,
+            trace_exporter=trace_exporter,
             require_valid_supervisor_target=require_valid_supervisor_target,
         )
 
@@ -245,6 +248,7 @@ def _execute_app(
     file_logging: bool | None = None,
     *,
     event_sink: RunEventSink | None = None,
+    trace_exporter: TraceExporter | None = None,
     require_valid_supervisor_target: bool = False,
 ) -> ApplicationRunResult:
     """Execute one Application and return its output plus canonical run receipt.
@@ -380,7 +384,7 @@ def _execute_app(
 
         from agentloom.execution.observability import bind_trace_recorder
 
-        with bind_run_context(runtime_context), bind_trace_recorder(runtime_context) as recorder:
+        with bind_run_context(runtime_context), bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder:
             logger_backend = initialize_run_logger(
                 runtime_context,
                 logging_builder=logging_builder,
