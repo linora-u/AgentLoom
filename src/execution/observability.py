@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -33,6 +33,14 @@ _UNSET = object()
 _TRACE_REF_RE = re.compile(r"^(?:payload_[0-9a-f]{32}|ctx_[0-9a-f]{32})$")
 _CONTEXT_REF_RE = re.compile(r"\[ContextRef (ctx_[0-9a-f]{32})\b")
 _RUN_DIR_RE = re.compile(r"^run_[A-Za-z0-9_-]+$")
+
+
+def _utf8_chunks(pieces: Iterable[str]) -> Iterator[bytes]:
+    """Bound the temporary encoded buffer even for one huge JSON string."""
+
+    for piece in pieces:
+        for start in range(0, len(piece), 65536):
+            yield piece[start:start + 65536].encode("utf-8")
 
 
 class TraceStorageError(RuntimeError):
@@ -79,19 +87,22 @@ class TraceRecorder:
     def _payload(
         self, value: Any, *, content_type: str, prefix: str = "payload",
         metadata: dict[str, Any] | None = None,
+        redacted: bool = False,
     ) -> str:
+        safe = value if redacted else redact_value(value)
         if content_type == "application/json":
-            data = json.dumps(
-                redact_value(value), ensure_ascii=False, separators=(",", ":"), default=str
-            ).encode("utf-8")
+            pieces = json.JSONEncoder(
+                ensure_ascii=False, separators=(",", ":"), default=str
+            ).iterencode(safe)
         else:
-            data = str(redact_value(value)).encode("utf-8")
-        digest = hashlib.sha256(data).hexdigest()
+            pieces = iter((str(safe),))
+        digest, size = self.storage.write_content_addressed(
+            "payloads", _utf8_chunks(pieces)
+        )
         reference = f"{prefix}_{uuid4().hex}"
-        self.storage.atomic_write(f"payloads/{digest}.blob", data)
         self.storage.atomic_write_json(
             f"refs/{reference}.json",
-            {"sha256": digest, "size": len(data), "content_type": content_type,
+            {"sha256": digest, "size": size, "content_type": content_type,
              **(metadata or {})},
         )
         return reference
@@ -107,12 +118,13 @@ class TraceRecorder:
         engine = get_active_context_engine()
         threshold = min(engine.config.min_chars if engine is not None else 32768, 131072)
         preview_limit = min(engine.config.preview_max_chars if engine is not None else 2048, 16384)
-        if len(safe_text.encode("utf-8")) < threshold:
+        size = sum(len(chunk) for chunk in _utf8_chunks(iter((safe_text,))))
+        if size < threshold:
             return safe_text
         execution = capture_explicit_execution_context()
         try:
             reference = self._payload(
-                safe_text, content_type="text/plain", prefix="ctx",
+                safe_text, content_type="text/plain", prefix="ctx", redacted=True,
                 metadata={
                     "tool_name": tool_name, "source": source, "call_id": call_id,
                     "agent_path": execution.runtime_agent_path,
@@ -122,7 +134,6 @@ class TraceRecorder:
         except Exception as exc:
             raise TraceStorageError(f"Could not persist large Tool result for {call_id}: {exc}") from exc
         preview = safe_text[:max(1, preview_limit)]
-        size = len(safe_text.encode("utf-8"))
         return (
             f"[ContextRef {reference} source={tool_name} size_bytes={size}]\n"
             f'Use loom_retrieve_context(ref="{reference}", offset=0, limit=8192) '
