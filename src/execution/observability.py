@@ -26,6 +26,8 @@ _CURRENT_RECORDER: ContextVar[TraceRecorder | None] = ContextVar(
 )
 _UNSET = object()
 _TRACE_REF_RE = re.compile(r"^(?:payload_[0-9a-f]{32}|ctx_[0-9a-f]{32})$")
+_CONTEXT_REF_RE = re.compile(r"\[ContextRef (ctx_[0-9a-f]{32})\b")
+_RUN_DIR_RE = re.compile(r"^run_[A-Za-z0-9_-]+$")
 
 
 class TraceStorageError(RuntimeError):
@@ -368,6 +370,32 @@ class RunTrace:
             json.loads(self.storage.read_bytes(f"events/{self.run_id}/{path.name}"))
             for path in sorted(directory.glob("*.json"))
         ]
+
+    def verify_committed_context_refs(self) -> None:
+        """Reject a resume if a previously committed Tool reference is broken."""
+
+        events_dir = self.storage.path / "events"
+        if not events_dir.is_dir():
+            return
+        verified: set[str] = set()
+        for run_dir in sorted(events_dir.iterdir()):
+            if not run_dir.is_dir() or not _RUN_DIR_RE.fullmatch(run_dir.name):
+                continue
+            for event_path in sorted(run_dir.glob("*.json")):
+                event = json.loads(self.storage.read_bytes(f"events/{run_dir.name}/{event_path.name}"))
+                if event.get("kind") != "tool" or event.get("status") != "completed":
+                    continue
+                model_ref = event.get("model_ref")
+                if not isinstance(model_ref, str):
+                    continue
+                for reference in _CONTEXT_REF_RE.findall(self.read_text(model_ref)):
+                    if reference in verified:
+                        continue
+                    try:
+                        self.read_page(reference, limit=1)
+                    except (OSError, ValueError, KeyError) as exc:
+                        raise TraceStorageError(f"Committed Tool reference is unavailable: {reference}") from exc
+                    verified.add(reference)
 
     def inspect_step(
         self, run_step_number: int, *, max_inline_bytes: int = 65536,
