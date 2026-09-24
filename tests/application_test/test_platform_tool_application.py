@@ -478,7 +478,10 @@ def test_application_tool_outcome_has_durable_inspectable_payload(platform_proje
     result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
 
     with inspect_run(result.run) as trace:
-        calls = [event for event in trace.events() if event["kind"] == "tool"]
+        events = trace.events()
+        assert len({event["event_id"] for event in events}) == len(events)
+        assert all(event["event_id"] == f"{result.run.run_id}:{event['sequence']}" for event in events)
+        calls = [event for event in events if event["kind"] == "tool"]
         assert len(calls) == 1
         assert calls[0]["call_id"] == "trace-call"
         assert calls[0]["status"] == "completed"
