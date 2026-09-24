@@ -46,7 +46,10 @@ from agentloom.runtimes.pi.protocol import (
 
 def terminal(record: ToolCallRecord) -> TerminalRecord:
     values = record.to_dict()
-    values["error"] = record.error
+    values["error"] = (
+        replace(record.error, message=record.model_content())
+        if record.error is not None else None
+    )
     return TerminalRecord(**values)
 
 
@@ -265,7 +268,7 @@ class PiPlatformToolHandler:
         return PlatformResult(
             method="platform_invoke",
             record=terminal(wire_record),
-            model_output=record.model_output(),
+            model_output=record.model_content(),
         )
 
 

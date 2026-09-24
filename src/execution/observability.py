@@ -236,7 +236,7 @@ class TraceRecorder:
                 )
                 if record.status == "completed" or original_output is not _UNSET else None
             )
-            model_ref = self._payload(record.model_content(), content_type="text/plain")
+            model_ref = self._payload(record.model_content(), content_type="text/plain", redacted=True)
             self._append({
                 "kind": "tool",
                 "call_id": record.call_id,

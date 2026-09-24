@@ -126,6 +126,121 @@ def test_small_native_or_platform_result_is_redacted_before_model_and_trace(tmp_
         assert trace.read_text(tool['model_ref']) == worker_messages[-1]['content']
 
 
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_failed_platform_tool_error_matches_model_trace_and_log(tmp_path, runtime):
+    from agentloom.execution.observability import inspect_run
+
+    def program(request):
+        messages = tool_messages(request)
+        if not messages:
+            return [('secret-failure', 'fail_with_secret', {'value': 'sample'})]
+        assert 'fixture-secret' not in messages[-1]['content']
+        assert 'api_key=[REDACTED]' in messages[-1]['content']
+        return finish(request, 'handled')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        definition['tools'] = [{
+            'name': 'fail_with_secret',
+            'module': 'tests.application_test.test_platform_tool_application',
+            'function': 'fail_with_secret',
+        }]
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'handled'
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool'
+                    and event['tool_name'] == 'fail_with_secret')
+        visible = trace.read_text(tool['model_ref'])
+    assert visible == tool_messages(requests[1])[-1]['content']
+    assert result.run.log_path is not None
+    assert f'Observations: {visible}' in result.run.log_path.read_text()
+
+
+def test_pi_structured_platform_result_matches_trace_and_observations(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    def program(request):
+        messages = tool_messages(request)
+        if not messages:
+            return [('structured-result', 'structured_with_secret', {'value': 'sample'})]
+        content = messages[-1]['content']
+        assert json.loads(content) == {
+            'api_key': '[REDACTED]', 'status': 'ok', 'value': 'sample',
+        }
+        return finish(request, 'handled')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='pi', worker='pi')
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        definition['tools'] = [{
+            'name': 'structured_with_secret',
+            'module': 'tests.application_test.test_platform_tool_application',
+            'function': 'structured_with_secret',
+        }]
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'handled'
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool'
+                    and event['tool_name'] == 'structured_with_secret')
+        visible = trace.read_text(tool['model_ref'])
+    assert visible == tool_messages(requests[1])[-1]['content']
+    assert result.run.log_path is not None
+    assert f'Observations: {visible}' in result.run.log_path.read_text()
+
+
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_blocked_tool_result_matches_model_and_trace(tmp_path, runtime):
+    from agentloom.execution.observability import inspect_run
+
+    hook = tmp_path / 'block_tool.py'
+    hook.write_text(
+        'import json\nprint(json.dumps({"decision":"block",'
+        '"reason":"api_key=fixture-secret"}))\n'
+    )
+
+    def program(request):
+        messages = tool_messages(request)
+        if not messages:
+            return [('blocked-call', 'trace_payload', {'value': 'sample'})]
+        content = messages[-1]['content']
+        payload = json.loads(content)
+        assert payload['status'] == 'blocked'
+        assert payload['error']['message'] == 'api_key=[REDACTED]'
+        return finish(request, 'handled')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        definition['tools'] = [{
+            'name': 'trace_payload',
+            'module': 'tests.application_test.test_platform_tool_application',
+            'function': 'trace_payload',
+        }]
+        definition['hooks'] = {'PreToolUse': [{
+            'id': 'block-tool', 'matcher': 'trace_payload',
+            'command': f'{sys.executable} {hook}',
+        }]}
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'handled'
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool'
+                    and event['tool_name'] == 'trace_payload')
+        visible = trace.read_text(tool['model_ref'])
+    assert visible == tool_messages(requests[1])[-1]['content']
+    assert result.run.log_path is not None
+    assert f'Observations: {visible}' in result.run.log_path.read_text()
+
+
 @pytest.mark.parametrize('supervisor,worker', [('pi', 'pi'), ('smolagents', 'pi'), ('pi', 'smolagents')])
 def test_steps_and_tool_observations_reach_terminal_and_runtime_log(tmp_path, capsys, supervisor, worker):
     (tmp_path / 'note.txt').write_text('Visible result: MARIGOLD-8372\n')
