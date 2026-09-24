@@ -23,6 +23,8 @@ def model_service(
         [dict[str, Any]],
         str | ModelReply | list[tuple[str, str, dict]],
     ],
+    *,
+    fail_requests: set[int] | None = None,
 ):
     requests: list[dict[str, Any]] = []
     errors: list[Exception] = []
@@ -36,6 +38,10 @@ def model_service(
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             with lock:
                 requests.append(request)
+                number = len(requests)
+            if number in (fail_requests or set()):
+                self.send_error(500, 'Fixture provider failure')
+                return
             try:
                 answer = program(request)
                 finish_override = None

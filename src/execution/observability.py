@@ -287,11 +287,11 @@ class TraceRecorder:
 
     def record_model_request(
         self, request: Any, *, runtime: str, boundary: str, attempt: int | None = None,
-        provider_request_complete: bool = False,
+        provider_request_complete: bool = False, turn_id: str | None = None,
     ) -> str:
         execution = capture_explicit_execution_context()
         agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
-        turn_id = f"model_{uuid4().hex}"
+        turn_id = turn_id or f"model_{uuid4().hex}"
         try:
             run_step = self._run_step_number(execution.local_run_id, agent_step, create=True)
             with self._lock:

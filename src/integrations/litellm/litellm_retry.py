@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import time
 import os
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -17,6 +17,14 @@ from typing import Any
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from agentloom.execution.logging import get_logger
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from litellm.exceptions import (
     APIConnectionError,
     AuthenticationError,
@@ -25,13 +33,6 @@ from litellm.exceptions import (
     RateLimitError,
     ServiceUnavailableError,
     Timeout,
-)
-from tenacity import (
-    RetryCallState,
-    retry,
-    retry_if_exception,
-    stop_after_attempt,
-    wait_exponential,
 )
 
 logger = get_logger(__name__)
@@ -54,6 +55,26 @@ _PROVIDER_CALL_BUDGET: ContextVar[ProviderCallBudget | None] = ContextVar(
     "agentloom_provider_call_budget",
     default=None,
 )
+
+
+@dataclass
+class _ModelTraceTurn:
+    turn_id: str
+    attempt: int = 0
+
+
+_MODEL_TRACE_TURN: ContextVar[_ModelTraceTurn | None] = ContextVar(
+    "agentloom_litellm_model_trace_turn", default=None,
+)
+
+
+@contextmanager
+def bind_model_trace_turn(turn_id: str | None) -> Iterator[None]:
+    token = _MODEL_TRACE_TURN.set(_ModelTraceTurn(turn_id) if turn_id else None)
+    try:
+        yield
+    finally:
+        _MODEL_TRACE_TURN.reset(token)
 
 
 @contextmanager
@@ -84,7 +105,34 @@ def _call_provider(
         if budget.calls >= budget.max_calls:
             raise ProviderCallBudgetExceeded("provider call budget exhausted")
         budget.calls += 1
-    return original_func(*args, **kwargs)
+    turn = _MODEL_TRACE_TURN.get()
+    recorder = None
+    if turn is not None:
+        from agentloom.execution.observability import get_current_trace_recorder
+
+        recorder = get_current_trace_recorder()
+        turn.attempt += 1
+        if recorder is not None:
+            request = kwargs if not args else {"args": args, "kwargs": kwargs}
+            recorder.record_model_request(
+                request, runtime="smolagents", boundary="litellm_provider_call_input",
+                attempt=turn.attempt, turn_id=turn.turn_id,
+            )
+    try:
+        response = original_func(*args, **kwargs)
+    except Exception as error:
+        if recorder is not None and turn is not None:
+            recorder.record_model_response(
+                turn.turn_id, runtime="smolagents", error=error, attempt=turn.attempt,
+            )
+        raise
+    if recorder is not None and turn is not None:
+        model_dump = getattr(response, "model_dump", None)
+        captured = model_dump() if callable(model_dump) else response
+        recorder.record_model_response(
+            turn.turn_id, captured, runtime="smolagents", attempt=turn.attempt,
+        )
+    return response
 
 
 def _is_rate_limit_error(exception: Exception) -> bool:
