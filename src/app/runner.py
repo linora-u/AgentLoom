@@ -497,6 +497,7 @@ def _execute_app(
                                 f"Checkpoint {task_id} is not resumable "
                                 f"(status={tree_status}); start a new task instead"
                             )
+                        RunTrace(recorder.storage, run_id).verify_committed_context_refs()
                         persisted_goal = checkpoint_mgr.load_goal(task_id)
                         current_goal = normalize_goal_config(
                             config,

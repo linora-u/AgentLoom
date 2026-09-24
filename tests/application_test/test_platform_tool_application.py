@@ -635,6 +635,54 @@ def test_large_tool_reference_survives_context_cache_eviction(platform_project):
     assert "FIRST-RECORD-8426" in result.output
 
 
+@pytest.mark.parametrize("damage", ["corrupt", "delete"])
+def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(platform_project, damage):
+    from agentloom.execution.observability import inspect_run
+
+    root, _, programs, _, run = platform_project
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system_path.write_text(yaml.safe_dump(system))
+    calls = []
+    references = []
+
+    def execute(definition, request):
+        calls.append(request.run_id)
+        if request.checkpoint is None:
+            created = definition.tool_gateway.invoke(
+                call_id="large-before-interrupt", tool_name="trace_payload",
+                arguments={"value": "RETAINED-BEFORE-RESUME\n" + "z" * 5000},
+            )
+            references.append(re.search(r"ctx_[0-9a-f]{32}", created.model_content()).group())
+            request.checkpoint_sink(RuntimeCheckpointEnvelope(
+                runtime_id="platform-fixture", runtime_version="fixture",
+                state_schema_version=1, payload={"phase": "paused"},
+                task_id=request.task_id, run_id=request.run_id, progress=1,
+            ))
+            raise KeyboardInterrupt("pause after retaining result")
+        return "should not run with a broken reference"
+
+    programs["platform"] = execute
+    options = {
+        "tools": [{"name": "trace_payload", "module": __name__, "function": "trace_payload"}],
+        "context_engine": {"min_chars": 1000, "preview_max_chars": 100},
+    }
+    with pytest.raises(ApplicationRunInterrupted) as interrupted:
+        run(**options)
+    with inspect_run(interrupted.value.run) as trace:
+        digest = trace.reference_metadata(references[0])["sha256"]
+        payload_path = trace.storage.path / "payloads" / f"{digest}.blob"
+        if damage == "corrupt":
+            payload_path.write_bytes(b"corrupted")
+        else:
+            payload_path.unlink()
+
+    with pytest.raises(Exception, match="Trace payload integrity check failed|Committed Tool reference is unavailable"):
+        run(resume_task_id=interrupted.value.run.task_id, **options)
+    assert len(calls) == 1
+
+
 def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project):
     _, _, programs, _, run = platform_project
     payload = "汉字🙂" * 450
