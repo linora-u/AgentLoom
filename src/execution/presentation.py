@@ -63,8 +63,11 @@ class StepPresenter:
         elif kind == "model_request" and agent_id in self._agents:
             number = event.get("run_step_number")
             if isinstance(number, int):
+                attempt = event.get("attempt")
                 active = self._active_steps.get(agent_id)
                 if active is not None and active[0] == number:
+                    if isinstance(attempt, int):
+                        self.backend.log(Text(f"Model attempt {attempt}"), level=AgentLoomLogLevel.INFO)
                     return
                 if active is not None:
                     self._complete_step(agent_id)
@@ -73,23 +76,27 @@ class StepPresenter:
                     Rule(f"[bold white]Step {number}", characters="━", style="#d4b702"),
                     level=AgentLoomLogLevel.INFO,
                 )
+                if isinstance(attempt, int):
+                    self.backend.log(Text(f"Model attempt {attempt}"), level=AgentLoomLogLevel.INFO)
         elif kind == "model_response":
             number = event.get("run_step_number")
             usage = event.get("usage")
-            if isinstance(number, int) and isinstance(usage, dict):
+            attempt = event.get("attempt")
+            if (event.get("runtime") != "smolagents" or attempt is None) and isinstance(number, int) and isinstance(usage, dict):
                 prior_input, prior_output = self._step_usage.get(number, (0, 0))
                 self._step_usage[number] = (
                     prior_input + int(usage.get("input_tokens") or 0),
                     prior_output + int(usage.get("output_tokens") or 0),
                 )
             if event.get("error"):
+                label = f"Model attempt {attempt} error" if isinstance(attempt, int) else "Model error"
                 self.backend.log(
-                    Text(f"Model error: {event['error']}", style="bold red"),
+                    Text(f"{label}: {event['error']}", style="bold red"),
                     level=AgentLoomLogLevel.ERROR,
                 )
             level = getattr(self.backend, "level", None)
             response_ref = event.get("response_ref")
-            if level == AgentLoomLogLevel.DEBUG and isinstance(response_ref, str):
+            if (event.get("runtime") != "smolagents" or attempt is None) and level == AgentLoomLogLevel.DEBUG and isinstance(response_ref, str):
                 response = self.trace.read_text(response_ref)
                 self.backend.log(Text(f"Model response: {response}"),
                                  level=AgentLoomLogLevel.DEBUG)

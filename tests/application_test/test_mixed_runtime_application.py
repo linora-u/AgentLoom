@@ -63,9 +63,9 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
     smol_model = 'supervisor' if supervisor == 'smolagents' else 'worker'
     with inspect_run(result.run) as trace:
         model_requests = [event for event in trace.events() if event['kind'] == 'model_request'
-                          and event['runtime'] == 'smolagents']
+                          and event['runtime'] == 'smolagents' and event['attempt'] is None]
         model_responses = [event for event in trace.events() if event['kind'] == 'model_response'
-                           and event['runtime'] == 'smolagents']
+                           and event['runtime'] == 'smolagents' and event['attempt'] is None]
         sent = [request for request in requests if request['model'] == smol_model]
         assert len(model_requests) == len(model_responses) == len(sent)
         for event, actual in zip(model_requests, sent, strict=True):
@@ -78,15 +78,18 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
                     for message in saved['messages']] == actual['messages']
         assert {event['model_turn_id'] for event in model_requests} == {
             event['model_turn_id'] for event in model_responses}
-        all_requests = [event for event in trace.events() if event['kind'] == 'model_request']
+        all_requests = [event for event in trace.events() if event['kind'] == 'model_request'
+                        and event['boundary'] != 'litellm_provider_call_input']
         assert all(event['provider_request_complete'] is False for event in all_requests)
         assert [event['run_step_number'] for event in all_requests] == list(range(1, len(all_requests) + 1))
         worker_request = next(event for event in all_requests
                               if event['kind'] == 'model_request' and event['runtime'] == worker)
         step = trace.inspect_step(worker_request['run_step_number'])
         assert step['agent_id'] == worker_request['agent_id']
-        assert [event['kind'] for event in step['events']].count('model_request') == 1
-        assert [event['kind'] for event in step['events']].count('model_response') == 1
+        turn_events = [event['kind'] for event in step['events']
+                       if event.get('runtime') != 'smolagents' or event.get('attempt') is None]
+        assert turn_events.count('model_request') == 1
+        assert turn_events.count('model_response') == 1
         tool = next(event for event in step['events'] if event['kind'] == 'tool')
         assert tool['tool_name'] == ('read' if worker == 'pi' else 'read_file')
         assert 'SAFFRON-7419' in step['payloads'][tool['model_ref']]
@@ -95,6 +98,43 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
         inline_budget = sizes[1]
         bounded = trace.inspect_step(worker_request['run_step_number'], max_inline_bytes=inline_budget)
         assert sum(len(value.encode('utf-8')) for value in bounded['payloads'].values()) <= inline_budget
+
+
+def test_smol_provider_retries_share_one_step_and_record_attempts(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    with model_service(lambda request: finish(request, 'retry-complete'), fail_requests={1}) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='smolagents', worker='pi')
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        write_yaml(workflow, definition)
+        model_path = tmp_path / 'config/llm.yaml'
+        profiles = yaml.safe_load(model_path.read_text())
+        profiles['model']['supervisor'].update(num_retries=2, retry_delay=0, max_retry_delay=0)
+        write_yaml(model_path, profiles)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'retry-complete'
+    assert len(requests) == 2
+    with inspect_run(result.run) as trace:
+        events = trace.events()
+    base = [event for event in events if event['kind'] == 'model_request'
+            and event['runtime'] == 'smolagents' and event['attempt'] is None]
+    attempts = [event for event in events if event['kind'] == 'model_request'
+                and event['boundary'] == 'litellm_provider_call_input']
+    assert len(base) == 1
+    assert [event['attempt'] for event in attempts] == [1, 2]
+    assert {event['model_turn_id'] for event in base + attempts} == {base[0]['model_turn_id']}
+    assert {event['run_step_number'] for event in base + attempts} == {1}
+    responses = [event for event in events if event['kind'] == 'model_response'
+                 and event['runtime'] == 'smolagents']
+    assert [(event['attempt'], event['status']) for event in responses] == [
+        (1, 'error'), (2, 'completed'), (None, 'completed'),
+    ]
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert 'Model attempt 1' in log and 'Model attempt 2' in log
+    assert log.count('Input tokens:') == 1
 
 
 @pytest.mark.parametrize('worker', ['pi', 'smolagents'])
