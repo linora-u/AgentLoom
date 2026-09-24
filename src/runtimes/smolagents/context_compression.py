@@ -59,9 +59,6 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-from agentloom.integrations.litellm.model_binding import (
-    resolve_litellm_model_turn_binding,
-)
 from agentloom.config.defaults import DEFAULT_MAX_TOKENS
 from agentloom.execution.context_engine.engine import CONTEXT_REF_PREFIX
 from agentloom.execution.context_engine.runtime import get_current_context_engine
@@ -75,7 +72,12 @@ from agentloom.execution.model_protocol import (
     ReasoningItem,
     model_item_to_dict,
 )
+from agentloom.execution.observability import get_current_trace_recorder
+from agentloom.integrations.litellm.model_binding import (
+    resolve_litellm_model_turn_binding,
+)
 from litellm.utils import token_counter
+
 from smolagents import AgentLogger
 from smolagents.models import ChatMessage, MessageRole
 
@@ -1846,8 +1848,10 @@ class ConversationHistoryManager:
 
         current_tokens = _count_tokens(to_api_messages(self._internal_message_history), model_id)
 
-        step_prefix = f"\\[Step [red]{step}[/red]] " if step is not None else ""
-        log.info(f"{step_prefix}Current tokens: [red]{current_tokens:,}[/red] | max limit: [red]{self._max_tokens}[/red]")
+        recorder = get_current_trace_recorder()
+        if recorder is None or not recorder.has_presenter:
+            step_prefix = f"\\[Step [red]{step}[/red]] " if step is not None else ""
+            log.info(f"{step_prefix}Current tokens: [red]{current_tokens:,}[/red] | max limit: [red]{self._max_tokens}[/red]")
 
         if current_tokens <= self._max_tokens:
             return to_api_messages(self._internal_message_history)

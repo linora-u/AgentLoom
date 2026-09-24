@@ -11,6 +11,7 @@ type Obj = Record<string, any>;
 let nextRequestAt = 0;
 
 const EMPTY_IMAGE_PLACEHOLDER = "(see attached image)";
+const MAX_MODEL_CAPTURE_BYTES = 32 * 1024 * 1024;
 const httpCapture = new AsyncLocalStorage<(input: RequestInfo | URL, init?: RequestInit) => Promise<void>>();
 const nativeFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (input, init) => {
@@ -75,10 +76,19 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
   const capture = async (identity: Obj, attempt: number, phase: "request" | "response", value: unknown,
       boundary?: "openai_http_request") => {
     const captureId = randomUUID().replaceAll("-", "");
-    const bytes = Buffer.from(JSON.stringify(value));
-    await writeFile(resolve(agentDir, `model-${captureId}.json`), bytes, {mode: 0o600, flag: "wx"});
+    let inspectedBytes = 0;
+    const serialized = JSON.stringify(value, (key, item) => {
+      inspectedBytes += Buffer.byteLength(key);
+      if (typeof item === "string") inspectedBytes += Buffer.byteLength(item);
+      if (inspectedBytes > MAX_MODEL_CAPTURE_BYTES)
+        throw new Error("Pi Model trace exceeds the 32 MiB capture limit");
+      return item;
+    });
+    if (serialized === undefined || Buffer.byteLength(serialized) > MAX_MODEL_CAPTURE_BYTES)
+      throw new Error("Pi Model trace exceeds the 32 MiB capture limit");
+    await writeFile(resolve(agentDir, `model-${captureId}.json`), serialized, {mode: 0o600, flag: "wx"});
     const receipt = await invoke({method: "model_trace", identity, attempt, phase, ...(boundary ? {boundary} : {}),
-      capture_id: captureId, sha256: createHash("sha256").update(bytes).digest("hex")});
+      capture_id: captureId, sha256: createHash("sha256").update(serialized).digest("hex")});
     if (receipt.method !== "model_trace" || !receipt.accepted || receipt.phase !== phase || receipt.attempt !== attempt)
       throw new Error("Invalid Pi Model trace acknowledgement");
   };
@@ -102,7 +112,21 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           const baseUrl = settings.base_url || "https://api.openai.com/v1";
           if (!request.url.startsWith(baseUrl.replace(/\/$/, "") + "/") ||
               !/\/(?:chat\/completions|responses)$/.test(new URL(request.url).pathname)) return;
-          const body = JSON.parse(await request.clone().text());
+          const reader = request.clone().body?.getReader();
+          if (!reader) return;
+          const chunks: Uint8Array[] = [];
+          let size = 0;
+          while (true) {
+            const {value, done} = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > MAX_MODEL_CAPTURE_BYTES) {
+              void reader.cancel().catch(() => {});
+              throw new Error("Pi Model HTTP request exceeds the 32 MiB capture limit");
+            }
+            chunks.push(value);
+          }
+          const body = JSON.parse(Buffer.concat(chunks, size).toString("utf8"));
           await capture(permit.identity, attempt, "request",
             {method: request.method, url: request.url, headers: Object.fromEntries(request.headers), body},
             "openai_http_request");

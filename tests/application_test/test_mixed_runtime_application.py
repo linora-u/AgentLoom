@@ -384,9 +384,48 @@ def test_steps_and_tool_observations_reach_terminal_and_runtime_log(tmp_path, ca
     for text in ('Calling tool:', 'Observations:', 'MARIGOLD-8372'):
         assert text in terminal and text in log
     assert terminal.count('Duration') == log.count('Duration') == 4
+    assert 'Current tokens:' not in terminal and 'Current tokens:' not in log
     assert 'Input tokens:' in terminal and 'Input tokens:' in log
     assert terminal.count('Final answer: Verified MARIGOLD-8372') == 1
     assert log.count('Final answer: Verified MARIGOLD-8372') == 1
+
+
+@pytest.mark.parametrize('runtime', ['smolagents', 'pi'])
+def test_tool_projection_uses_model_input_budget(tmp_path, runtime):
+    from agentloom.execution.observability import inspect_run
+
+    source = tmp_path / 'short-window.txt'
+    source.write_text('TOKEN-PROJECTED-2481\n' + 'a' * 3000)
+
+    def program(request):
+        messages = tool_messages(request)
+        if not messages:
+            name = 'read' if runtime == 'pi' else 'read_file'
+            arguments = {'path': 'short-window.txt'} if runtime == 'pi' else {'file_path': str(source)}
+            return [('read-short-window', name, arguments)]
+        assert '[ContextRef ctx_' in messages[-1]['content']
+        assert 'TOKEN-PROJECTED-2481' in messages[-1]['content']
+        return finish(request, 'projected')
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        definition['tools'] = [{'name': 'read' if runtime == 'pi' else 'read_file'}]
+        write_yaml(workflow, definition)
+        profile_path = tmp_path / 'config/llm.yaml'
+        profiles = yaml.safe_load(profile_path.read_text())
+        profiles['model']['supervisor'].update(context_window=8192, max_output_tokens=1000)
+        write_yaml(profile_path, profiles)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == 'projected'
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool')
+        visible = trace.read_text(tool['model_ref'])
+        assert len(visible.encode()) <= (8192 - 1000) // 4
+        ref = re.search(r'ctx_[0-9a-f]{32}', visible).group()
+        assert 'a' * 3000 in trace.read_text(ref)
 
 
 @pytest.mark.parametrize('level', ['INFO', 'ERROR'])
