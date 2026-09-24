@@ -270,8 +270,6 @@ class ApplicationRunLifecycle:
             goal_snapshot = self.goal
             if goal_snapshot is not None:
                 finalization.manifest_updates["goal"] = goal_snapshot
-            if self.outcome == "completed" and finalization.record_final_answer is not None:
-                finalization.record_final_answer(self.result)
             self.commit_checkpoint(
                 checkpoint_manager=finalization.checkpoint_manager,
                 task_id=finalization.task_id,
@@ -324,6 +322,9 @@ class ApplicationRunLifecycle:
                     "Failed to persist terminal manifest: %s",
                     exc,
                 )
+
+            if self.outcome == "completed" and finalization.record_final_answer is not None:
+                finalization.record_final_answer(self.result)
 
             if (
                 self.outcome == "completed"

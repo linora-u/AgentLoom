@@ -108,6 +108,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         let stream;
         let errorText = "";
         let requestCaptured = false;
+        let responseAttempted = false;
         const captureHttp = async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = new Request(input, init);
           const baseUrl = settings.base_url || "https://api.openai.com/v1";
@@ -158,11 +159,21 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           const message = await stream.result();
           // An already-aborted turn can produce an SDK error stream without
           // reaching onPayload. There is no provider request to pair it with.
-          if (requestCaptured) await capture(permit.identity, attempt, "response", message);
+          if (requestCaptured) {
+            responseAttempted = true;
+            await capture(permit.identity, attempt, "response", message);
+          }
           if (!failure.timedOut && message.stopReason !== "error") return stream;
           errorText = message.errorMessage || "";
         } catch (error) {
           errorText = error instanceof Error ? error.message : "";
+          if (requestCaptured && !responseAttempted) {
+            responseAttempted = true;
+            await capture(permit.identity, attempt, "response", {
+              stopReason: options?.signal?.aborted ? "aborted" : "error",
+              errorMessage: errorText || "Pi model transport failed",
+            });
+          }
         } finally {
           if (timeout !== undefined) clearTimeout(timeout);
         }

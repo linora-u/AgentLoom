@@ -6,6 +6,7 @@ from typing import Any
 from agentloom.execution.agent_runtime import AgentRuntimeError
 from agentloom.execution.native_journal import snapshot
 from agentloom.execution.native_tools import NativeCallIdentity
+from agentloom.execution.observability import RunTrace, get_current_trace_recorder
 from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 
@@ -47,6 +48,8 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
 
 def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any]:
     """Produce an all-checked append plan; never invoke an executor here."""
+    recorder = get_current_trace_recorder()
+    trace = RunTrace(recorder.storage, recorder.context.run_id) if recorder is not None else None
     entries = bundle["session"]["entries"]
     calls = {(call["identity"]["native_parent_id"], call["identity"]["call_id"]): call
              for call in bundle["calls"]}
@@ -127,6 +130,12 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
         if record is not None and (record["call_id"] != call_id or record["tool_name"] != call["tool_name"]):
             raise ValueError("Pi committed result identity mismatch")
         expected = _result(call, record)
+        if trace is not None:
+            # A native journal can commit before its required Tool trace event.
+            # Check its Model-visible references before restoring the SDK result.
+            for part in expected["content"]:
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    trace.verify_model_content_refs(part["text"])
         existing = results.get(key)
         if existing is not None:
             if existing.get("toolName") != call["tool_name"] or existing.get("isError") != expected["isError"]:
