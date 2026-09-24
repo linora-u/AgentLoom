@@ -485,6 +485,15 @@ def test_application_tool_outcome_has_durable_inspectable_payload(platform_proje
         assert json.loads(trace.read_text(calls[0]["input_ref"])) == {"value": payload}
         assert json.loads(trace.read_text(calls[0]["output_ref"])) == payload
         assert trace.read_text(calls[0]["model_ref"]) == payload
+        pages = []
+        offset = 0
+        while True:
+            page = trace.read_page(calls[0]["model_ref"], offset=offset, limit=1024)
+            pages.append(page.data)
+            if page.next_offset is None:
+                break
+            offset = page.next_offset
+        assert b"".join(pages).decode() == payload
 
 
 def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):
