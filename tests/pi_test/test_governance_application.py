@@ -75,6 +75,10 @@ def test_native_read_preserves_policy_block_and_execution_error(tmp_path, scenar
         calls = [event for event in trace.events() if event['kind'] == 'tool']
         assert len(calls) == 1
         assert calls[0]['status'] == records[0]['status']
+        visible = trace.read_text(calls[0]['model_ref'])
+    model_tool = next(message['content'] for message in requests[1][1]['messages']
+                      if message['role'] == 'tool')
+    assert model_tool == visible
     assert 'DENIED-NATIVE-CONTENT-6941' not in json.dumps(requests)
     entries = [json.loads(path.read_text()) for path in (result.run.run_dir / 'native-tools').rglob('*.json')]
     assert len(entries) == 1
