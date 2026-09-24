@@ -918,8 +918,17 @@ def _blocked_tool_input(hook_run: Any, **kwargs: Any) -> ToolCallRecord:
         input=kwargs.pop("arguments"), ended_at=time.time(),
         kind=kwargs.pop("kind", "invalid_arguments"), **kwargs,
     )
-    hook_run.record_tool_outcome(record)
+    _record_tool_outcome(hook_run, record)
     return record
+
+
+def _record_tool_outcome(hook_run: Any, record: ToolCallRecord) -> None:
+    from agentloom.execution.observability import get_current_trace_recorder
+
+    recorder = get_current_trace_recorder()
+    if recorder is not None:
+        recorder.record_tool(record)
+    hook_run.record_tool_outcome(record)
 
 
 def _transform_tool_input(
@@ -1210,7 +1219,7 @@ class AgentLoomToolGateway:
         hook_run: Any,
         record: ToolCallRecord,
     ) -> ToolCallRecord:
-        hook_run.record_tool_outcome(record)
+        _record_tool_outcome(hook_run, record)
         return record
 
     def _blocked(

@@ -349,6 +349,12 @@ class RuntimeContext:
         return self.root_dir / "runs" / Path(*self.application_id.split("/")) / self.run_id
 
     @property
+    def trace_dir(self) -> Path:
+        """Persistent evidence shared by attempts of one logical Task."""
+
+        return self.root_dir / "traces" / Path(*self.application_id.split("/")) / self.task_id
+
+    @property
     def manifest_path(self) -> Path:
         return self.run_dir / "manifest.json"
 
@@ -709,6 +715,11 @@ class RuntimeContext:
     def prepare_checkpoint(self) -> None:
         self.validate_checkpoint_path()
         _ensure_runtime_directory(self.checkpoint_dir, root=self.root_dir)
+
+    def prepare_trace(self) -> Path:
+        """Create Task evidence without following runtime-owned symlinks."""
+
+        return _ensure_runtime_directory(self.trace_dir, root=self.root_dir)
 
     def validate_checkpoint_path(self, *, require_exists: bool = False) -> Path:
         """Validate the full canonical checkpoint path without following links."""
