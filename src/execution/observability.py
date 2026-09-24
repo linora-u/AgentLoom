@@ -287,6 +287,7 @@ class TraceRecorder:
 
     def record_model_request(
         self, request: Any, *, runtime: str, boundary: str, attempt: int | None = None,
+        provider_request_complete: bool = False,
     ) -> str:
         execution = capture_explicit_execution_context()
         agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
@@ -300,6 +301,7 @@ class TraceRecorder:
                 "kind": "model_request",
                 "runtime": runtime,
                 "boundary": boundary,
+                "provider_request_complete": provider_request_complete,
                 "model_turn_id": turn_id,
                 "attempt": attempt,
                 "agent_id": execution.local_run_id,
