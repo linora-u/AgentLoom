@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -46,6 +47,16 @@ class TraceRecorder:
         self._run_steps: dict[tuple[str, int], int] = {}
         self._model_steps: dict[str, int | None] = {}
         self._next_run_step = 1
+        self._presenter: Any | None = None
+
+    def attach_presenter(self, presenter: Any) -> None:
+        """Attach the run's human-readable projection after its logger exists."""
+
+        self._presenter = presenter
+
+    @property
+    def has_presenter(self) -> bool:
+        return self._presenter is not None
 
     def close(self) -> None:
         self.storage.close()
@@ -104,21 +115,25 @@ class TraceRecorder:
         )
 
     def _append(self, event: dict[str, Any]) -> None:
-        with self._lock, self.storage.advisory_file_lock("sequence.lock", create=True):
-            try:
-                current = json.loads(self.storage.read_bytes("sequence.json"))
-                sequence = int(current["last"]) + 1
-            except FileNotFoundError:
-                sequence = 1
-            self.storage.atomic_write_json("sequence.json", {"last": sequence})
-            event["sequence"] = sequence
-            event["schema_version"] = 1
-            event["run_id"] = self.context.run_id
-            event["task_id"] = self.context.task_id
-            event["application_id"] = self.context.application_id
-            self.storage.atomic_write_json(
-                f"events/{self.context.run_id}/{sequence:012d}.json", event
-            )
+        with self._lock:
+            with self.storage.advisory_file_lock("sequence.lock", create=True):
+                try:
+                    current = json.loads(self.storage.read_bytes("sequence.json"))
+                    sequence = int(current["last"]) + 1
+                except FileNotFoundError:
+                    sequence = 1
+                self.storage.atomic_write_json("sequence.json", {"last": sequence})
+                event["sequence"] = sequence
+                event["schema_version"] = 1
+                event["recorded_at"] = datetime.now(UTC).isoformat()
+                event["run_id"] = self.context.run_id
+                event["task_id"] = self.context.task_id
+                event["application_id"] = self.context.application_id
+                self.storage.atomic_write_json(
+                    f"events/{self.context.run_id}/{sequence:012d}.json", event
+                )
+            if self._presenter is not None:
+                self._presenter.consume(event)
 
     def _run_step_number(
         self, agent_id: str | None, agent_step_number: int | None, *, create: bool = False,
@@ -131,6 +146,51 @@ class TraceRecorder:
                 self._run_steps[key] = self._next_run_step
                 self._next_run_step += 1
             return self._run_steps.get(key)
+
+    def record_agent_start(self, *, task: str | None, agent_name: str, runtime: str) -> None:
+        """Mark one Agent invocation before its runtime starts its first turn."""
+
+        execution = capture_explicit_execution_context()
+        try:
+            task_ref = self._payload(task or "", content_type="text/plain")
+            self._append({
+                "kind": "agent_start",
+                "agent_id": execution.local_run_id,
+                "parent_agent_id": execution.hook_run.parent.local_run_id
+                if execution.hook_run is not None and execution.hook_run.parent is not None else None,
+                "agent_name": agent_name,
+                "runtime": runtime,
+                "task_ref": task_ref,
+            })
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist Agent start trace: {exc}") from exc
+
+    def record_agent_end(self, *, state: str, error: BaseException | None = None) -> None:
+        execution = capture_explicit_execution_context()
+        agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
+        try:
+            self._append({
+                "kind": "agent_end",
+                "agent_id": execution.local_run_id,
+                "step_number": agent_step,
+                "run_step_number": self._run_step_number(execution.local_run_id, agent_step),
+                "state": state,
+                "error": str(redact_value(str(error))) if error is not None else None,
+            })
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist Agent end trace: {exc}") from exc
+
+    def record_final_answer(self, output: Any) -> None:
+        """Record the accepted Application result after Run finalization."""
+
+        try:
+            rendered = output if isinstance(output, str) else json.dumps(
+                redact_value(output), ensure_ascii=False, indent=2, default=str
+            )
+            answer_ref = self._payload(rendered, content_type="text/plain")
+            self._append({"kind": "final_answer", "answer_ref": answer_ref})
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist final answer trace: {exc}") from exc
 
     def record_tool(self, record: ToolCallRecord, *, original_output: Any = _UNSET) -> None:
         execution = capture_explicit_execution_context()
@@ -225,6 +285,19 @@ class TraceRecorder:
         agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
         try:
             response_ref = self._payload(response, content_type="application/json") if response is not _UNSET else None
+            usage = None
+            if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+                raw_usage = response["usage"]
+                if runtime == "pi":
+                    usage = {
+                        "input_tokens": sum(int(raw_usage.get(key) or 0) for key in ("input", "cacheRead", "cacheWrite")),
+                        "output_tokens": int(raw_usage.get("output") or 0),
+                    }
+                else:
+                    usage = {
+                        "input_tokens": int(raw_usage.get("prompt_tokens") or raw_usage.get("input_tokens") or 0),
+                        "output_tokens": int(raw_usage.get("completion_tokens") or raw_usage.get("output_tokens") or 0),
+                    }
             self._append({
                 "kind": "model_response",
                 "runtime": runtime,
@@ -234,6 +307,7 @@ class TraceRecorder:
                 "run_step_number": self._model_steps.get(turn_id),
                 "status": "error" if error is not None else "completed",
                 "response_ref": response_ref,
+                "usage": usage,
                 "error": str(redact_value(str(error))) if error is not None else None,
             })
         except Exception as exc:
