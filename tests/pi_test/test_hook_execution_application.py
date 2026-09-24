@@ -41,6 +41,33 @@ def test_tool_hook_context_enters_exactly_the_next_internal_model_request(tmp_pa
     assert 'NEXT-TURN-HOOK-4821' not in json.dumps(requests[2][1])
 
 
+def test_native_post_hook_receives_full_result_when_model_gets_reference(tmp_path):
+    import shlex
+
+    observed = tmp_path / 'post-result.json'
+    hook = tmp_path / 'post.py'
+    hook.write_text(
+        'import json,sys\nfrom pathlib import Path\n'
+        'payload=json.load(sys.stdin)\n'
+        'result=payload["tool_response"]["result"]\n'
+        f'Path({str(observed)!r}).write_text(json.dumps({{"length":len(result),'
+        '"has_tail":"NATIVE-HOOK-4821" in result}))\n'
+        'print("{}")\n'
+    )
+    command = f'{shlex.quote(sys.executable)} -c "print(\'a\'*5000); print(\'NATIVE-HOOK-4821\')"'
+    with model_service(turns=[[('large', 'bash', {'command': command})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'bash'}],
+               shell_settings={'allowed_commands': ['*'], 'sandbox': {'enabled': False}},
+               context_engine={'min_chars': 1000, 'preview_max_chars': 100},
+               hooks={'PostToolUse': [{'id': 'capture-full', 'matcher': 'bash',
+                                       'command': f'{sys.executable} {hook}'}]})
+        with bind_config(load_project_config(tmp_path)):
+            execute_app(app, file_logging=False)
+    assert '[ContextRef ' in json.dumps(requests[-1][1])
+    assert json.loads(observed.read_text()) == {'length': 5018, 'has_tail': True}
+
+
 def test_unsafe_tool_metadata_serializes_actual_platform_callbacks(tmp_path):
     source = tmp_path / 'source.py'
     source.write_text('def ordered_tool_result():\n    return 1\n')

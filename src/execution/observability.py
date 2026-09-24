@@ -76,8 +76,8 @@ class TraceRecorder:
         if tool_name == "loom_retrieve_context":
             return safe_text
         engine = get_active_context_engine()
-        threshold = engine.config.min_chars if engine is not None else 32768
-        preview_limit = engine.config.preview_max_chars if engine is not None else 2048
+        threshold = min(engine.config.min_chars if engine is not None else 32768, 131072)
+        preview_limit = min(engine.config.preview_max_chars if engine is not None else 2048, 16384)
         if len(safe_text.encode("utf-8")) < threshold:
             return safe_text
         execution = capture_explicit_execution_context()

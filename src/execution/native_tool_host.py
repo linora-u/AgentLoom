@@ -410,9 +410,19 @@ class NativeToolHost:
             if outcome.status == "completed" and isinstance(compressible, str):
                 try:
                     from agentloom.execution.context_engine.runtime import get_active_context_engine
+                    from agentloom.execution.observability import (
+                        TraceStorageError,
+                        get_current_trace_recorder,
+                    )
                     engine = get_active_context_engine()
                     source = f"native:{grant.tool.provider}:{grant.identity.call_id}"
-                    if capture is not None and len(json.dumps(output).encode()) > 262144 and engine is not None:
+                    recorder = get_current_trace_recorder()
+                    if recorder is not None:
+                        compressed = recorder.project_tool_result(
+                            compressible, tool_name=grant.tool.visible_name,
+                            source=source, call_id=grant.identity.call_id,
+                        )
+                    elif capture is not None and len(json.dumps(output).encode()) > 262144 and engine is not None:
                         compressed = engine.capture_tool_result(compressible, tool_name=grant.tool.visible_name,
                             source=source, max_preview_chars=16384) or compressible
                     else:
@@ -423,6 +433,8 @@ class NativeToolHost:
                             output = {"content": [{"type": "text", "text": compressed}]}
                     else:
                         output = compressed
+                except TraceStorageError:
+                    raise
                 except Exception:
                     output = snapshot(actual["output"])
             # Even with compression disabled or failed, a terminal display must
@@ -496,7 +508,7 @@ class NativeToolHost:
         recorder = get_current_trace_recorder()
         if recorder is not None:
             recorder.record_tool(record, original_output=raw_output)
-        response: dict[str, Any] = {"result": record.output} if record.status == "completed" else {"error": record.reason}
+        response: dict[str, Any] = {"result": raw_output} if record.status == "completed" else {"error": record.reason}
         if evidence:
             response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = TrustedMemoryEvidenceEnvelope(evidence)
         try:

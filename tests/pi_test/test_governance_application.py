@@ -21,6 +21,12 @@ def file_probe(file_path: str) -> str:
     return Path(file_path).read_text()
 
 
+def large_platform_payload() -> str:
+    """Return a Tool result larger than the pi bridge frame budget."""
+
+    return "p" * (9 * 1024 * 1024) + "\nPLATFORM-FINAL-8426\n"
+
+
 def test_one_application_uses_official_read_and_selected_python_extension(tmp_path):
     from agentloom.execution.observability import inspect_run
 
@@ -39,7 +45,8 @@ def test_one_application_uses_official_read_and_selected_python_extension(tmp_pa
     assert {(item['record']['tool_name'], item['owner'], item['provider']) for item in records} == {
         ('read', 'runtime', 'pi'), ('file_probe', 'external', 'python')}
     assert all(item['record']['status'] == 'completed' for item in records)
-    assert {tool['function']['name'] for tool in requests[0][1]['tools']} == {'read', 'file_probe'}
+    assert {tool['function']['name'] for tool in requests[0][1]['tools']} == {
+        'read', 'file_probe', 'loom_retrieve_context'}
     assert all('verified_invoice_total' in str(item['record']['output']) for item in records)
     with inspect_run(result.run) as trace:
         calls = {item['tool_name']: item for item in trace.events() if item['kind'] == 'tool'}
@@ -85,8 +92,12 @@ def test_native_trace_write_failure_fails_application(tmp_path, monkeypatch):
     source = tmp_path / 'fact.txt'
     source.write_text('COMMITTED-NATIVE-8426')
 
-    def fail_write(_recorder, _event):
-        raise OSError('fixture disk full')
+    original_append = TraceRecorder._append
+
+    def fail_write(recorder, event):
+        if event['kind'] == 'tool':
+            raise OSError('fixture disk full')
+        return original_append(recorder, event)
 
     monkeypatch.setattr(TraceRecorder, '_append', fail_write)
     with model_service(turns=[[('native', 'read', {'path': str(source)})]]) as (url, _requests):
@@ -216,7 +227,7 @@ def test_context_refs_remain_retrievable_with_pi_checkpoint_disabled(tmp_path):
         mcp = tmp_path / 'config/mcp.json'
         mcp.write_text(json.dumps({'mcpServers': {'facts': {'command': sys.executable,
             'args': [str(Path(__file__).parents[1] / 'mcp_test/fixtures/stdio_server.py')]}}}))
-        select(app, mcp_servers=str(mcp), tools=[{'name': 'loom_retrieve_context'}],
+        select(app, mcp_servers=str(mcp),
                context_engine={'min_chars': 1000, 'preview_max_chars': 300})
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
@@ -225,6 +236,28 @@ def test_context_refs_remain_retrievable_with_pi_checkpoint_disabled(tmp_path):
     assert 'PLATFORM-CTX-8426' in records['large-output']['output']
     assert 'PLATFORM-CTX-8426' in records['retrieve-original']['output']
     assert records['retrieve-original']['status'] == 'completed'
+
+
+def test_platform_result_larger_than_bridge_frame_stays_inspectable(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    with model_service(turns=[[('large-platform', 'large_platform_payload', {})]]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{'name': 'large_platform_payload', 'module': __name__,
+                            'function': 'large_platform_payload'}],
+               context_engine={'min_chars': 1000, 'preview_max_chars': 300})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    record = next(event['details']['record'] for event in audit(result)
+                  if event['kind'] == 'tool' and event['details']['record']['call_id'] == 'large-platform')
+    assert record['status'] == 'completed'
+    assert record['output'].endswith('PLATFORM-FINAL-8426\n')
+    assert len(requests) == 2
+    assert '[ContextRef ' in json.dumps(requests[-1][1])
+    with inspect_run(result.run) as trace:
+        call = next(event for event in trace.events()
+                    if event['kind'] == 'tool' and event['call_id'] == 'large-platform')
+        assert json.loads(trace.read_text(call['output_ref'])) == record['output']
 
 
 def test_invalid_final_platform_arguments_are_rejected_without_execution(tmp_path):
