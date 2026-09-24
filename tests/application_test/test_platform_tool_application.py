@@ -513,7 +513,7 @@ def test_application_tool_outcome_has_durable_inspectable_payload(platform_proje
 
 
 def test_multimegabyte_single_line_tool_result_remains_pageable(platform_project):
-    from agentloom.execution.observability import inspect_run
+    from agentloom.execution.observability import TraceStorageError, inspect_run
 
     _, _, programs, _, run = platform_project
     payload = "A" * 4_000_000 + "终"
@@ -530,9 +530,17 @@ def test_multimegabyte_single_line_tool_result_remains_pageable(platform_project
     with inspect_run(result.run) as trace:
         tool = next(event for event in trace.events() if event["kind"] == "tool")
         ref = re.search(r"ctx_[0-9a-f]{32}", trace.read_text(tool["model_ref"])).group()
-        size = trace.reference_metadata(ref)["size"]
+        metadata = trace.reference_metadata(ref)
+        size = metadata["size"]
         assert size == len(payload.encode("utf-8"))
+        assert len(metadata["chunk_sha256"]) == 4
         assert trace.read_page(ref, offset=size - len("终".encode()), limit=16).data.decode() == "终"
+        content_path = result.run.trace_dir / "payloads" / f"{metadata['sha256']}.blob"
+        with content_path.open("r+b") as stream:
+            stream.seek(size - 1)
+            stream.write(b"X")
+        with pytest.raises(TraceStorageError, match="integrity check failed"):
+            trace.read_page(ref, offset=size - len("终".encode()), limit=16)
 
 
 def test_application_model_sees_the_same_redacted_small_tool_result_as_trace(platform_project):
@@ -626,7 +634,7 @@ def test_exporter_failure_is_diagnostic_and_does_not_fail_application(platform_p
 
 def test_slow_exporter_does_not_hold_application_result(platform_project):
     from threading import Event
-    from time import monotonic
+    from time import monotonic, sleep
 
     _, _, programs, _, run = platform_project
     programs["platform"] = lambda _definition, _request: "ready"
@@ -638,6 +646,7 @@ def test_slow_exporter_does_not_hold_application_result(platform_project):
             assert trace_dir.is_dir()
             entered.set()
             release.wait(10)
+            raise RuntimeError("late exporter failure")
 
     try:
         started = monotonic()
@@ -647,6 +656,13 @@ def test_slow_exporter_does_not_hold_application_result(platform_project):
         assert entered.wait(2)
     finally:
         release.set()
+    deadline = monotonic() + 3
+    diagnostics_path = result.run.trace_dir / "exporter/diagnostics.jsonl"
+    while monotonic() < deadline:
+        if diagnostics_path.exists() and "late exporter failure" in diagnostics_path.read_text():
+            break
+        sleep(0.02)
+    assert "late exporter failure" in diagnostics_path.read_text()
 
 
 def test_application_trace_records_effective_pre_tool_decision(platform_project):

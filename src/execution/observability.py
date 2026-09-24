@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import threading
 from collections.abc import Iterable, Iterator
@@ -33,6 +34,7 @@ _UNSET = object()
 _TRACE_REF_RE = re.compile(r"^(?:payload_[0-9a-f]{32}|ctx_[0-9a-f]{32})$")
 _CONTEXT_REF_RE = re.compile(r"\[ContextRef (ctx_[0-9a-f]{32})\b")
 _RUN_DIR_RE = re.compile(r"^run_[A-Za-z0-9_-]+$")
+_VERIFY_CHUNK_BYTES = 1024 * 1024
 
 
 def _utf8_chunks(pieces: Iterable[str]) -> Iterator[bytes]:
@@ -61,6 +63,7 @@ class TraceRecorder:
         self._lock = threading.RLock()
         self._run_steps: dict[tuple[str, int], int] = {}
         self._model_steps: dict[str, int | None] = {}
+        self._model_input_limits: dict[str, int] = {}
         self._next_run_step = 1
         self._presenter: Any | None = None
         self._export: AsyncTraceExport | None = None
@@ -96,13 +99,35 @@ class TraceRecorder:
             ).iterencode(safe)
         else:
             pieces = iter((str(safe),))
+        chunk_hashes: list[str] = []
+        chunk_checksum = hashlib.sha256()
+        chunk_size = 0
+
+        def indexed_chunks() -> Iterator[bytes]:
+            nonlocal chunk_checksum, chunk_size
+            for piece in _utf8_chunks(pieces):
+                cursor = 0
+                while cursor < len(piece):
+                    take = min(len(piece) - cursor, _VERIFY_CHUNK_BYTES - chunk_size)
+                    chunk_checksum.update(piece[cursor:cursor + take])
+                    chunk_size += take
+                    cursor += take
+                    if chunk_size == _VERIFY_CHUNK_BYTES:
+                        chunk_hashes.append(chunk_checksum.hexdigest())
+                        chunk_checksum = hashlib.sha256()
+                        chunk_size = 0
+                yield piece
+            if chunk_size:
+                chunk_hashes.append(chunk_checksum.hexdigest())
+
         digest, size = self.storage.write_content_addressed(
-            "payloads", _utf8_chunks(pieces)
+            "payloads", indexed_chunks()
         )
         reference = f"{prefix}_{uuid4().hex}"
         self.storage.atomic_write_json(
             f"refs/{reference}.json",
             {"sha256": digest, "size": size, "content_type": content_type,
+             "chunk_size": _VERIFY_CHUNK_BYTES, "chunk_sha256": chunk_hashes,
              **(metadata or {})},
         )
         return reference
@@ -118,10 +143,14 @@ class TraceRecorder:
         engine = get_active_context_engine()
         threshold = min(engine.config.min_chars if engine is not None else 32768, 131072)
         preview_limit = min(engine.config.preview_max_chars if engine is not None else 2048, 16384)
+        execution = capture_explicit_execution_context()
+        input_limit = self._model_input_limits.get(execution.local_run_id or "")
+        if input_limit is not None:
+            # Reserve most of the input window for instructions and prior turns.
+            threshold = min(threshold, max(1, input_limit // 4))
         size = sum(len(chunk) for chunk in _utf8_chunks(iter((safe_text,))))
         if size < threshold:
             return safe_text
-        execution = capture_explicit_execution_context()
         try:
             reference = self._payload(
                 safe_text, content_type="text/plain", prefix="ctx", redacted=True,
@@ -133,12 +162,21 @@ class TraceRecorder:
             )
         except Exception as exc:
             raise TraceStorageError(f"Could not persist large Tool result for {call_id}: {exc}") from exc
-        preview = safe_text[:max(1, preview_limit)]
-        return (
+        heading = (
             f"[ContextRef {reference} source={tool_name} size_bytes={size}]\n"
             f'Use loom_retrieve_context(ref="{reference}", offset=0, limit=8192) '
-            "to read more bytes.\n\n" + preview
+            "to read more bytes.\n\n"
         )
+        preview = safe_text[:max(1, preview_limit)]
+        if input_limit is not None:
+            budget = max(1, input_limit // 4)
+            if len(heading.encode("utf-8")) > budget:
+                heading = f"[ContextRef {reference} size_bytes={size}]\n"
+            if len(heading.encode("utf-8")) > budget:
+                raise TraceStorageError("Model input budget is too small for a Tool result reference")
+            preview_budget = budget - len(heading.encode("utf-8"))
+            preview = preview.encode("utf-8")[:preview_budget].decode("utf-8", errors="ignore")
+        return heading + preview
 
     def _append(self, event: dict[str, Any]) -> None:
         with self._lock:
@@ -179,10 +217,13 @@ class TraceRecorder:
                 self._next_run_step += 1
             return self._run_steps.get(key)
 
-    def record_agent_start(self, *, task: str | None, agent_name: str, runtime: str) -> None:
+    def record_agent_start(self, *, task: str | None, agent_name: str, runtime: str,
+                           input_token_limit: int | None = None) -> None:
         """Mark one Agent invocation before its runtime starts its first turn."""
 
         execution = capture_explicit_execution_context()
+        if isinstance(input_token_limit, int) and not isinstance(input_token_limit, bool) and input_token_limit > 0:
+            self._model_input_limits[execution.local_run_id or ""] = input_token_limit
         try:
             task_ref = self._payload(task or "", content_type="text/plain")
             self._append({
@@ -486,6 +527,41 @@ class RunTrace:
 
         return dict(self._metadata(reference))
 
+    @staticmethod
+    def _verify_window(stream: Any, metadata: dict[str, Any], start: int, end: int,
+                       reference: str) -> int:
+        """Verify only the indexed chunks touched by a bounded read."""
+
+        total = os.fstat(stream.fileno()).st_size
+        if total != metadata["size"]:
+            raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+        hashes = metadata.get("chunk_sha256")
+        chunk_size = metadata.get("chunk_size")
+        if hashes is None:
+            # Retained references created before chunk indexes still need a
+            # full verification. New references use bounded chunk reads.
+            checksum = hashlib.sha256()
+            stream.seek(0)
+            while chunk := stream.read(_VERIFY_CHUNK_BYTES):
+                checksum.update(chunk)
+            if checksum.hexdigest() != metadata["sha256"]:
+                raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+            return total
+        if (chunk_size != _VERIFY_CHUNK_BYTES or not isinstance(hashes, list)
+                or len(hashes) != (total + chunk_size - 1) // chunk_size
+                or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+                       for value in hashes)):
+            raise TraceStorageError(f"Invalid trace payload chunk index: {reference}")
+        if start < end:
+            first = start // chunk_size
+            last = (end - 1) // chunk_size
+            for index in range(first, last + 1):
+                stream.seek(index * chunk_size)
+                data = stream.read(min(chunk_size, total - index * chunk_size))
+                if hashlib.sha256(data).hexdigest() != hashes[index]:
+                    raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+        return total
+
     def read_text(self, reference: str) -> str:
         metadata = self._metadata(reference)
         digest = metadata["sha256"]
@@ -495,20 +571,14 @@ class RunTrace:
         return data.decode("utf-8")
 
     def read_page(self, reference: str, *, offset: int = 0, limit: int = 8192) -> TracePage:
-        """Read at most 64 KiB by byte offset, verifying the whole payload."""
+        """Read at most 64 KiB by byte offset, verifying the touched chunks."""
 
         if offset < 0 or not 1 <= limit <= 65536:
             raise ValueError("Trace page requires offset >= 0 and 1 <= limit <= 65536")
         metadata = self._metadata(reference)
         digest = metadata["sha256"]
         with self.storage.open_binary_reader(f"payloads/{digest}.blob") as stream:
-            checksum = hashlib.sha256()
-            total = 0
-            while chunk := stream.read(1024 * 1024):
-                checksum.update(chunk)
-                total += len(chunk)
-            if total != metadata["size"] or checksum.hexdigest() != digest:
-                raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+            total = self._verify_window(stream, metadata, offset, min(metadata["size"], offset + limit), reference)
             stream.seek(offset)
             data = stream.read(limit)
         next_offset = offset + len(data)
@@ -530,17 +600,16 @@ class RunTrace:
         metadata = self._metadata(reference)
         digest = metadata["sha256"]
         with self.storage.open_binary_reader(f"payloads/{digest}.blob") as stream:
-            checksum = hashlib.sha256()
-            total = 0
-            while chunk := stream.read(1024 * 1024):
-                checksum.update(chunk)
-                total += len(chunk)
-            if total != metadata["size"] or checksum.hexdigest() != digest:
-                raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+            total = metadata["size"]
             if offset >= total:
+                self._verify_window(stream, metadata, 0, 0, reference)
                 return TraceSearchPage([], None, total)
 
             scan_end = min(total, offset + 1024 * 1024)
+            self._verify_window(
+                stream, metadata, max(0, offset - 128),
+                min(total, scan_end + len(needle) + 256), reference,
+            )
             stream.seek(offset)
             window = stream.read(scan_end - offset + len(needle) - 1)
             matches: list[tuple[int, str]] = []

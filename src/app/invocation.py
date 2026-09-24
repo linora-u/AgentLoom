@@ -405,10 +405,20 @@ class AgentInvocation:
 
                 recorder = get_current_trace_recorder()
                 if recorder is not None:
+                    binding = getattr(self.owner, "_model_binding", None)
+                    selection = getattr(self.owner, "_model_selection", None)
+                    if binding is not None:
+                        configured_limit = binding.input_token_limit
+                    elif selection is not None:
+                        configured_limit = selection.settings.get("input_token_limit")
+                    else:
+                        configured_limit = None
+                    input_limit = configured_limit if type(configured_limit) is int else None
                     recorder.record_agent_start(
                         task=request.task,
                         agent_name=self.owner.name,
                         runtime=runtime_agent.runtime_id,
+                        input_token_limit=input_limit,
                     )
                 try:
                     result = runtime_agent.run(request)
