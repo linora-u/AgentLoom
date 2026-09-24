@@ -499,6 +499,31 @@ def test_application_tool_outcome_has_durable_inspectable_payload(platform_proje
         assert b"".join(pages).decode() == model_visible
 
 
+def test_application_model_sees_the_same_redacted_small_tool_result_as_trace(platform_project):
+    from agentloom.execution.observability import inspect_run
+
+    _, _, programs, _, run = platform_project
+    seen = {}
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="small-secret", tool_name="trace_payload",
+            arguments={"value": "api_key=fixture-secret\nstatus=ok"},
+        )
+        seen["model"] = record.model_content()
+        return "small result recorded"
+
+    programs["platform"] = execute
+    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event["kind"] == "tool")
+        retained = json.loads(trace.read_text(tool["output_ref"]))
+        model_visible = trace.read_text(tool["model_ref"])
+
+    assert seen["model"] == model_visible == "api_key=[REDACTED]\nstatus=ok"
+    assert retained == model_visible
+
+
 def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):
     from agentloom.app.run import ApplicationRunError
     from agentloom.execution.observability import TraceRecorder

@@ -89,6 +89,35 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
         assert 'SAFFRON-7419' in step['payloads'][tool['model_ref']]
 
 
+@pytest.mark.parametrize('worker', ['pi', 'smolagents'])
+def test_small_native_or_platform_result_is_redacted_before_model_and_trace(tmp_path, worker):
+    from agentloom.execution.observability import inspect_run
+
+    (tmp_path / 'note.txt').write_text('api_key=fixture-secret\nstatus=ok\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            if not messages:
+                return [('read-note', 'read' if worker == 'pi' else 'read_file',
+                         {'path': 'note.txt'} if worker == 'pi' else {'file_path': str(tmp_path / 'note.txt')})]
+            content = messages[-1]['content']
+            assert 'fixture-secret' not in content
+            assert 'api_key=[REDACTED]' in content
+            return finish(request, 'redacted')
+        return [('delegate', 'inspect_note', {'query': 'note.txt'})] if not messages else finish(request, 'verified')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='pi', worker=worker)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == 'verified'
+    worker_messages = tool_messages(next(request for request in requests if request['model'] == 'worker' and tool_messages(request)))
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool' and event['tool_name'] in {'read', 'read_file'})
+        assert trace.read_text(tool['model_ref']) == worker_messages[-1]['content']
+
+
 @pytest.mark.parametrize('supervisor,worker', [('pi', 'pi'), ('smolagents', 'pi'), ('pi', 'smolagents')])
 def test_steps_and_tool_observations_reach_terminal_and_runtime_log(tmp_path, capsys, supervisor, worker):
     (tmp_path / 'note.txt').write_text('Visible result: MARIGOLD-8372\n')
