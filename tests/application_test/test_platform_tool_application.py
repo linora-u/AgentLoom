@@ -69,13 +69,14 @@ def platform_project(tmp_path, monkeypatch):
     monkeypatch.setattr("agentloom.app.validation.build_builtin_runtime_registry", lambda: registry)
     monkeypatch.setattr("agentloom.app.agent.build_builtin_runtime_registry", lambda: registry)
 
-    def run(*, resume_task_id=None, **updates):
+    def run(*, resume_task_id=None, trace_exporter=None, **updates):
         workflow.write_text(yaml.safe_dump({**definition, **updates}))
         with bind_config(load_project_config(tmp_path)):
             return execute_app(
                 workflow,
                 file_logging=False,
                 resume_task_id=resume_task_id,
+                trace_exporter=trace_exporter,
             )
 
     return tmp_path, workflow, programs, definitions, run
@@ -571,6 +572,49 @@ def test_final_answer_trace_failure_preserves_failed_checkpoint(platform_project
     checkpoint = root / "state/runtime/checkpoints/platform" / failed.value.run.task_id
     assert checkpoint.is_dir()
     assert json.loads((checkpoint / "task_tree.json").read_text())["status"] == "failed"
+
+
+def test_exporter_failure_is_diagnostic_and_does_not_fail_application(platform_project):
+    root, _, programs, _, run = platform_project
+    programs["platform"] = lambda _definition, _request: "accepted answer"
+    submitted = []
+
+    class FailingExporter:
+        def export(self, event, *, trace_dir):
+            submitted.append((event["event_id"], trace_dir))
+            raise RuntimeError("fixture export service unavailable")
+
+    result = run(trace_exporter=FailingExporter())
+    assert result.output == "accepted answer"
+    assert submitted
+    assert all(directory == result.run.trace_dir for _, directory in submitted)
+    diagnostics = (result.run.trace_dir / "exporter/diagnostics.jsonl").read_text()
+    assert "fixture export service unavailable" in diagnostics
+
+
+def test_slow_exporter_does_not_hold_application_result(platform_project):
+    from threading import Event
+    from time import monotonic
+
+    _, _, programs, _, run = platform_project
+    programs["platform"] = lambda _definition, _request: "ready"
+    entered = Event()
+    release = Event()
+
+    class SlowExporter:
+        def export(self, _event, *, trace_dir):
+            assert trace_dir.is_dir()
+            entered.set()
+            release.wait(10)
+
+    try:
+        started = monotonic()
+        result = run(trace_exporter=SlowExporter())
+        assert result.output == "ready"
+        assert monotonic() - started < 5
+        assert entered.wait(2)
+    finally:
+        release.set()
 
 
 def test_application_trace_records_effective_pre_tool_decision(platform_project):
