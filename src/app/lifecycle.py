@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from agentloom.app.run import RunPhase
 from agentloom.execution.agent_runtime import (
