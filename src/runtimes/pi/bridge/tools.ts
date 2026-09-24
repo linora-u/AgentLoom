@@ -26,7 +26,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
               throw new Error("Platform receipt identity mismatch");
           } catch (error) {failRun(); throw error;}
           const record = completed.record;
-          if (record.status !== "completed") throw new Error(record.error?.message || "AgentLoom tool failed");
+          if (record.status !== "completed") throw new Error(record.model_content || "AgentLoom tool failed");
           return {content: [{type: "text" as const, text: typeof completed.model_output === "string" ? completed.model_output : JSON.stringify(completed.model_output)}],
             details: {agentloom: record}};
         },
@@ -46,7 +46,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
             permit.authorization.tool.visible_name !== entry.visible_name) throw new Error("Missing native authorization");
         try {await persistence.save();} catch (error) {failRun(); throw error;}
         const dispatched = await invoke({method: "tool_dispatch", authorization: permit.authorization});
-        if (!dispatched.authorization) throw new Error(dispatched.rejection?.error?.message || "Native dispatch rejected");
+        if (!dispatched.authorization) throw new Error(dispatched.rejection?.model_content || "Native dispatch rejected");
         if (!isDeepStrictEqual(dispatched.authorization, permit.authorization)) throw new Error("Native dispatch authorization mismatch");
         const grant = dispatched.authorization;
         let committed = false;
@@ -69,7 +69,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
           if (settled.state !== "committed" || !settled.commit_id || !isDeepStrictEqual(settled.identity, grant.identity) ||
               settled.authorization_id !== grant.authorization_id) throw new Error("Native result not durably committed");
           committed = true;
-          if (settled.record.status !== "completed") throw new Error(settled.record.error?.message || "Native tool failed");
+          if (settled.record.status !== "completed") throw new Error(settled.record.model_content || "Native tool failed");
           return settled.record.output;
         } finally {
           if (!committed) failRun();
@@ -110,12 +110,12 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
       await persistence.save();
       const permit = context.permit(key);
       if (permit?.platform) {
-        if (permit.rejection) return {block: true, reason: permit.rejection.error?.message || "AgentLoom preparation rejected"};
+        if (permit.rejection) return {block: true, reason: permit.rejection.model_content || "AgentLoom preparation rejected"};
         if (isDeepStrictEqual(permit.arguments, input)) return;
       }
       if (!permit?.authorization || permit.authorization.tool.visible_name !== toolName ||
           !isDeepStrictEqual(permit.authorization.final_arguments, input))
-        return {block: true, reason: permit?.rejection?.error?.message || "Missing or mismatched AgentLoom authorization"};
+        return {block: true, reason: permit?.rejection?.model_content || "Missing or mismatched AgentLoom authorization"};
     });
   };
   return {tools, extension};

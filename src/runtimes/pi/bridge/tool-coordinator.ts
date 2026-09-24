@@ -135,7 +135,7 @@ export class BridgeToolCoordinator {
       throw new Error("AgentLoom rejection identity mismatch");
     this.active.delete(message.toolCallId);
     this.permits.delete(key);
-    const text = permit.rejection.error?.message || "AgentLoom preparation rejected";
+    const text = permit.rejection.model_content || "AgentLoom preparation rejected";
     return {message: {...message, content: [{type: "text", text}], details: {}, isError: true}};
   }
 }

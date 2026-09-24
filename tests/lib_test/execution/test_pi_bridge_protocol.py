@@ -36,9 +36,35 @@ def test_platform_projection_stays_out_of_the_canonical_terminal_record():
     projected = PlatformResult(
         method="platform_invoke",
         record=canonical,
-        model_output=record.model_output(),
+        model_output=record.model_content(),
     )
     assert projected.model_output == "[ContextRef ctx_test] preview"
+
+
+def test_negative_terminal_keeps_error_metadata_separate_from_model_projection():
+    from agentloom.execution.tool_protocol import ToolCallRecord
+    from agentloom.runtimes.pi.protocol import PlatformPrepared, Response, encode_message
+    from agentloom.runtimes.pi.protocol_handlers import terminal
+
+    record = ToolCallRecord.blocked(
+        call_id="blocked-call", tool_name="worker", input={},
+        message="api_key=fixture-secret", stage="pre_tool_use",
+    )
+    wire = terminal(record)
+    assert wire.error is not None
+    assert wire.error.kind == record.error.kind
+    assert wire.error.message == "api_key=[REDACTED]"
+    assert wire.model_content == record.model_content()
+    response = Response(
+        version=2, kind="response", instance_id="worker-a", run_id="run",
+        request_id="pi:blocked", payload=PlatformPrepared(
+            method="platform_prepare", arguments={}, rejection=wire,
+        ),
+    )
+    serialized = json.loads(encode_message(response))["payload"]["rejection"]
+    assert serialized["error"]["message"] == "api_key=[REDACTED]"
+    assert serialized["model_content"] == record.model_content()
+    assert "fixture-secret" not in serialized["model_content"]
 
 
 def test_pi_handshake_roundtrip_and_rejects_unknown_protocol():

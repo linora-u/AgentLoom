@@ -1600,6 +1600,18 @@
           ],
           "default": null
         },
+        "model_content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Content"
+        },
         "metadata": {
           "additionalProperties": {
             "$ref": "#/$defs/JsonValue"
