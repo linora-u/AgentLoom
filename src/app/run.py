@@ -58,6 +58,7 @@ class RunInfo:
     run_dir: Path
     manifest_path: Path
     log_path: Path | None
+    trace_dir: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)

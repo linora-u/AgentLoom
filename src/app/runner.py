@@ -85,6 +85,7 @@ def _run_info(runtime_context: Any, log_path: Path | None) -> RunInfo:
         run_dir=runtime_context.run_dir.absolute(),
         manifest_path=runtime_context.manifest_path.absolute(),
         log_path=log_path.absolute() if log_path is not None else None,
+        trace_dir=runtime_context.trace_dir.absolute(),
     )
 
 
@@ -375,7 +376,9 @@ def _execute_app(
         else:
             manifest_initialized = True
 
-        with bind_run_context(runtime_context):
+        from agentloom.execution.observability import bind_trace_recorder
+
+        with bind_run_context(runtime_context), bind_trace_recorder(runtime_context):
             logger_backend = initialize_run_logger(
                 runtime_context,
                 logging_builder=logging_builder,
