@@ -292,6 +292,12 @@ class ToolCallRecord:
             output = self.model_output()
             if isinstance(output, str):
                 return output
+            if "native" in self.metadata and isinstance(output, dict):
+                content = output.get("content")
+                if isinstance(content, list) and len(content) == 1:
+                    item = content[0]
+                    if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                        return item["text"]
             return json.dumps(
                 output,
                 ensure_ascii=False,
