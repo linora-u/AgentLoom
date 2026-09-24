@@ -285,7 +285,9 @@ class TraceRecorder:
         except Exception as exc:
             raise TraceStorageError(f"Could not persist {event} Hook decision: {exc}") from exc
 
-    def record_model_request(self, request: Any, *, runtime: str, boundary: str) -> str:
+    def record_model_request(
+        self, request: Any, *, runtime: str, boundary: str, attempt: int | None = None,
+    ) -> str:
         execution = capture_explicit_execution_context()
         agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
         turn_id = f"model_{uuid4().hex}"
@@ -299,6 +301,7 @@ class TraceRecorder:
                 "runtime": runtime,
                 "boundary": boundary,
                 "model_turn_id": turn_id,
+                "attempt": attempt,
                 "agent_id": execution.local_run_id,
                 "parent_agent_id": execution.hook_run.parent.local_run_id
                 if execution.hook_run is not None and execution.hook_run.parent is not None else None,
@@ -311,7 +314,8 @@ class TraceRecorder:
         return turn_id
 
     def record_model_response(
-        self, turn_id: str, response: Any = _UNSET, *, runtime: str, error: BaseException | None = None
+        self, turn_id: str, response: Any = _UNSET, *, runtime: str,
+        error: BaseException | None = None, attempt: int | None = None,
     ) -> None:
         execution = capture_explicit_execution_context()
         agent_step = execution.hook_run.step_number if execution.hook_run is not None else None
@@ -334,6 +338,7 @@ class TraceRecorder:
                 "kind": "model_response",
                 "runtime": runtime,
                 "model_turn_id": turn_id,
+                "attempt": attempt,
                 "agent_id": execution.local_run_id,
                 "step_number": agent_step,
                 "run_step_number": self._model_steps.get(turn_id),
