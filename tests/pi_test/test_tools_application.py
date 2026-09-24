@@ -3,13 +3,12 @@ import json
 import sys
 from threading import Barrier
 
-import yaml
 import pytest
-
+import yaml
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
-from tests.pi_test.test_application import model_service, project
 
+from tests.pi_test.test_application import model_service, project
 
 _batch_gate = None
 
@@ -38,6 +37,7 @@ def wait_for_cleanup(marker: str) -> str:
     """
     from pathlib import Path
     from threading import Event
+
     from agentloom.execution.resources import register_resource
     released = Event()
 
@@ -234,8 +234,9 @@ def test_completed_goal_cannot_hide_stop_rejection(tmp_path):
 @pytest.mark.parametrize('fault', ['keyboard', 'bridge_exit'])
 def test_application_cancels_and_reaps_a_pending_platform_callback(tmp_path, fault):
     import os
-    from pathlib import Path
     import signal
+    from pathlib import Path
+
     from tests.pi_test.test_process_lifecycle import assert_gone, node_launcher, start_cli, until
     marker = tmp_path / 'callback-started'
     with model_service(turns=[[('pending-platform', 'wait_for_cleanup', {'marker': str(marker)})]]) as (url, requests):
@@ -332,6 +333,7 @@ def test_model_timeout_excludes_platform_callback_time(tmp_path):
 
 def test_profile_request_rate_applies_between_internal_pi_model_turns(tmp_path):
     import time
+
     from tests.pi_test.test_application import change_model
     times = []
     (tmp_path / 'note.txt').write_text('Read before next paced model call')

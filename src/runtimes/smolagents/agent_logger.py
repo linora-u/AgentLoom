@@ -6,6 +6,7 @@ from agentloom.execution.logging.levels import AgentLoomLogLevel
 from agentloom.execution.trace import capture_explicit_execution_context
 from rich.console import Console
 from rich.text import Text
+
 from smolagents import AgentLogger
 from smolagents import LogLevel as SmolaLogLevel
 

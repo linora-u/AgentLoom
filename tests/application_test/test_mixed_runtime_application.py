@@ -164,8 +164,8 @@ def test_steps_and_tool_observations_reach_terminal_and_runtime_log(tmp_path, ca
 
 @pytest.mark.parametrize('level', ['INFO', 'ERROR'])
 def test_text_cli_prints_final_answer_once_with_pi_steps(tmp_path, level):
-    from click.testing import CliRunner
     from agentloom.__main__ import main
+    from click.testing import CliRunner
 
     (tmp_path / 'note.txt').write_text('CLI token: DAHLIA-6104\n')
 
