@@ -992,6 +992,14 @@ def _transform_tool_input(
             kind="policy_blocked",
             started_at=started_at,
         )
+    from agentloom.execution.observability import get_current_trace_recorder
+
+    recorder = get_current_trace_recorder()
+    if recorder is not None:
+        recorder.record_hook_decision(
+            event="PreToolUse", subject=tool_name,
+            input_value=tool_input, decision=pre_result, call_id=call_id,
+        )
     candidate_input = (
         deepcopy(pre_result.modified_input)
         if isinstance(pre_result.modified_input, dict)

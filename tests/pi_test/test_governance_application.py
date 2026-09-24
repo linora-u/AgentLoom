@@ -260,6 +260,34 @@ def test_platform_result_larger_than_bridge_frame_stays_inspectable(tmp_path):
         assert json.loads(trace.read_text(call['output_ref'])) == record['output']
 
 
+def test_pi_trace_records_stop_rejection_and_acceptance(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    marker = tmp_path / 'stop-count'
+    hook = tmp_path / 'stop_once.py'
+    hook.write_text(
+        'import json\nfrom pathlib import Path\n'
+        f'p=Path({str(marker)!r})\n'
+        'count=int(p.read_text()) if p.exists() else 0\n'
+        'p.write_text(str(count+1))\n'
+        'print(json.dumps({"decision":"block","reason":"continue once"}'
+        ' if count==0 else {"decision":"allow"}))\n'
+    )
+    with model_service(turns=[]) as (url, requests):
+        app = project(tmp_path, url)
+        select(app, runtime_options={'max_stop_attempts': 3},
+               hooks={'Stop': [{'id': 'stop-once', 'command': f'{sys.executable} {hook}'}]})
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert result.output == 'Pi answer'
+    assert len(requests) == 2
+    with inspect_run(result.run) as trace:
+        decisions = [event for event in trace.events()
+                     if event['kind'] == 'hook_decision' and event['event'] == 'Stop']
+        assert [json.loads(trace.read_text(event['decision_ref']))['result']['decision']
+                for event in decisions] == ['block', 'allow']
+
+
 def test_invalid_final_platform_arguments_are_rejected_without_execution(tmp_path):
     source = tmp_path / 'facts.py'
     source.write_text('def forbidden_probe_5729():\n    return 1\n')
