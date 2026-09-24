@@ -184,7 +184,7 @@ def test_parallel_and_repeated_workers_have_separate_sessions_and_hook_owners(tm
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])
 def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, supervisor, worker):
-    original = ''.join(f'def release_item_{i}():\n    return {i}\n\n' for i in range(180)) + 'def TARGET_RECORD_CORIANDER_5287():\n    return 5287\n'
+    original = ''.join(f'def release_item_{i}():\n    return {i}\n\n' for i in range(30000)) + 'def TARGET_RECORD_CORIANDER_5287():\n    return 5287\n'
     source = tmp_path / 'large-note.py'
     source.write_text(original)
     refs = []
@@ -207,7 +207,11 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
             assert match is not None
             ref = match.group()
             return [('retrieve', 'loom_retrieve_context', {'ref': ref, 'query': 'TARGET_RECORD', 'limit': 3})]
-        assert 'CORIANDER_5287' in messages[-1]['content']
+        if 'CORIANDER_5287' not in messages[-1]['content']:
+            next_offset = re.search(r'next_offset=(\d+)', messages[-1]['content'])
+            assert next_offset is not None
+            return [(f'retrieve-{len(messages)}', 'loom_retrieve_context',
+                     {'ref': refs[0], 'query': 'TARGET_RECORD', 'offset': int(next_offset.group(1)), 'limit': 3})]
         assert 'WRONG-NEW-CONTENT' not in messages[-1]['content']
         return finish(request, 'CORIANDER_5287')
 
@@ -241,8 +245,13 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         original = trace.read_text(refs[0])
         assert metadata['tool_name'] == 'read_context_fixture'
         assert 'TARGET_RECORD_CORIANDER_5287' in original
-        assert all(f'release_item_{i}' in original for i in range(180))
+        assert 'release_item_0' in original and 'release_item_29999' in original
         assert 'WRONG-NEW-CONTENT' not in original
+        page = trace.search_page(refs[0], 'TARGET_RECORD', limit=1)
+        assert page.matches == [] and page.next_offset is not None
+        page = trace.search_page(refs[0], 'TARGET_RECORD', offset=page.next_offset, limit=1)
+        assert len(page.matches) == 1
+        assert 'CORIANDER_5287' in page.matches[0][1]
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])
