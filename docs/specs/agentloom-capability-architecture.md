@@ -43,7 +43,7 @@ flowchart LR
 | Task | 一次逻辑任务，可跨多次运行尝试 | Task ID 在续跑时不变；checkpoint、#79 内容引用和详录按 Task 关联 |
 | Run | 一次执行尝试 | 每次新建 Run ID；`app.lifecycle` 最终结算；manifest、日志和本次审计属 Run |
 | Agent invocation | Supervisor 或 Worker 的一次调用，形成父子树 | `app.invocation` 创建身份与上下文；每个调用有自己的局部 Step 序列 |
-| Step / Model turn / Tool call | 一次模型回复及其工具批次为一个 Step；并行工具以 call ID 区分；重试为 attempt | runtime adapter 报告事实，#79 的共用观测模块规范化并存储 |
+| Step / Model turn / Tool call | 一次模型轮次及其工具批次为一个 Step；Run 内展示编号连续，Agent 本地轮次用于 Hook/checkpoint 关联；并行工具以 call ID 区分，传输重试为 attempt | runtime adapter 报告事实，#79 的共用观测模块规范化并存储 |
 | Tool result / payload reference | 工具原结果、模型可见结果及其关联；大结果通过不透明引用读取 | Tool Gateway 治理最终调用；#79 Task 范围内容存储保存完整内容，不借用 ContextStore |
 
 ## 3. 先定能力，再定模块
@@ -112,7 +112,7 @@ flowchart LR
 
 ## 6. 尚须在实现时明确的接口细节
 
-- **脱敏与“完全一致”的含义**：先形成唯一的模型可见文本，详录保存它；展示除统一敏感信息掩码外不得再摘要或改写。如果要求人读日志逐字等于模型输入，应在投影进入模型之前执行同一脱敏规则。完整原结果的检查权限与脱敏范围应单独写入内容接口测试。
+- **脱敏与“完全一致”的含义**：先按统一规则脱敏，再形成唯一的模型可见文本；详录保存该文本，Observations 原样显示，不在打印时二次摘要或遮盖。未按长度截断的脱敏结果单独保存，其检查权限与脱敏范围进入内容接口测试。
 - **提交顺序**：工具有副作用时，“工具已提交、payload 写失败”必须有明确失败和恢复记录；不得生成悬空引用，也不得因下一次 Run 重复执行该工具。
 - **并发顺序**：并行工具、Worker 和重试需要稳定的全局序号与局部 Step 编号；不能用日志到达顺序推断父子或因果关系。
 
