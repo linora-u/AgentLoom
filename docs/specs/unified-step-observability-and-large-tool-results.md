@@ -1,119 +1,116 @@
-# Spec: Unified Step Observability and Durable Large Tool Results
+# Spec：统一 Step 观测与大工具结果的持久引用
 
-## Problem Statement
+状态：目标规格，非实现进度报告。对应 [#79](https://github.com/linora-u/AgentLoom/issues/79)。项目整体职责与开发顺序见[能力架构](agentloom-capability-architecture.md)。
 
-Users cannot reliably follow a pi Run Step by Step. Its text output mainly shows setup messages and the final answer, while smolagents already prints a useful New run and Step sequence. The runtimes present different views of the same work. Existing RuntimeEvent messages, Hook diagnostics, runtime.log, and checkpoints each serve a narrower purpose; none alone shows the actual Model request, the committed Tool outcome, and what the Model subsequently received.
+## Problem Statement（问题）
 
-Large Tool results create a second problem. The original result, the content shown to the Model, and the human log can differ without a durable record linking them. ContextStore is a bounded cache whose entries can be evicted or expire; it cannot guarantee later retrieval of a full result. A large platform Tool result can also cross the pi bridge in full even when the Model receives only a preview. Users need to inspect the original result, see exactly what the Model saw, and continue a Task from its latest safe checkpoint without silently losing a reference or repeating a committed Tool effect.
+运行同一个 Application 时，smolagents 能按 New run、Step、Calling tool、Observations、Final answer 展示过程，pi 目前主要输出启动信息和最终答案。用户无法稳定地看到每轮模型调用、工具结果和失败，也无法用同一种方式理解 Supervisor 与 Worker 的执行。
 
-## Solution
+现有 runtime.log、RuntimeEvent、Hook 诊断和 checkpoint 各有用途，却没有一份证据能同时回答：模型当轮实际收到了什么、Hook 最终允许了什么、工具执行了什么、模型随后看到了哪段结果。大工具输出会让原结果、模型可见的缩减结果和日志脱节。ContextStore 会按容量淘汰条目，也可设置 TTL，因此其引用不能作为可续跑、可事后查看的全文凭据。
 
-The pi and smolagents adapters report the same runtime-neutral execution facts. One shared presenter renders them in the existing smolagents style: New run, Step, Calling tool with the final authorized arguments, Observations, errors, duration and tokens, and one accepted final answer. At INFO level, Observations prints the text actually delivered to the Model: a small result in full, or the same preview and resolvable reference delivered for a large result. The Model response body follows smolagents' DEBUG behavior. Terminal text mode and runtime.log use the same presentation. Required local records separately link the actual Model request and response, effective Hook decisions, complete Tool input and result, and Model-visible projection.
+用户需要像 smolagents 一样直接阅读运行过程，同时能完整查看保留的执行内容，并从最近安全 checkpoint 继续同一 Task。运行展示、持久记录和恢复状态需要各有明确职责。
 
-The trace index and large content are files associated with the logical Task, independent of any one Run and of checkpoint cleanup. A Run's evidence and runtime checkpoint can refer to the same content through a scoped opaque reference. This does not require a new database. A bounded, read-only capability lets the Agent search or page through content by byte range; a Python inspection API expands a retained Step. A reference is never shown to the Model until its content is durable and retrievable.
+## Solution（方案）
 
-The existing Hook Plan and per-invocation HookRun remain responsible for Tool authorization, input changes, observers, and Stop decisions. The Agent loop still owns Model calls, Tool scheduling, retries, and checkpoint state; Model configuration is bound when the runtime is constructed, then called by that loop. Trace and presentation observe actual execution boundaries rather than creating new decision Hooks. Local trace persistence is required for Run success. Future external exporters consume the provider-neutral facts and references asynchronously; their failures do not fail the Run.
+pi 和 smolagents 在各自真实的模型、工具执行边界报告同一套执行事实。一个与具体 runtime 解耦的展示器按当前 smolagents 的格式渲染 New run、Step、工具调用、Observations、错误、耗时、token 用量和最终答案。普通工具结果完整显示；大结果先持久保存，再把**同一份**“预览 + 可取回引用”交给模型并显示在 Observations。终端 text 模式与 runtime.log 保留相同的事件顺序、字段和正文；文件日志可以使用无 ANSI 的文本样式。模型回复正文沿用 smolagents 的 DEBUG 可见性。机器输出模式保持现有协议。
 
-## User Stories
+独立的必需本地记录保存每轮模型请求与回复、有效 Hook 决策、工具最终参数、未按长度截断的结果及模型可见投影，并用 Task、Run、Agent、Step 和 call ID 关联。大正文放在 Task 范围的普通文件中，索引保存身份、元数据和内容引用，不引入新数据库。Agent 通过统一的受限读取能力分页或搜索；人通过本地内容位置和 Python 检查接口展开 Step。记录写入失败使 Run 失败；未来外部 trace exporter 失败不阻断 Run。
 
-1. As a CLI user, I want pi Runs to show a New run panel, so that the task and Agent context are visible before execution.
-2. As a CLI user, I want both runtimes to show the same Step rule and numbering style, so that switching runtimes does not change how I read a Run.
-3. As a CLI user, I want each Tool invocation to show its final authorized arguments, so that I can tell what actually executed.
-4. As a CLI user, I want each Tool result to appear under Observations, so that I can follow the Agent's work without opening audit files.
-5. As a CLI user, I want the Observations text to match what the Model was shown, so that the log does not imply the Model read unavailable content.
-6. As a CLI user, I want small Tool results printed in full, so that ordinary Steps remain directly readable.
-7. As a CLI user, I want large Tool results displayed as a preview with a usable reference, so that I can see the Model's actual context without flooding the Run log.
-8. As a CLI user, I want Step duration and token totals and deltas, so that I can identify slow or expensive turns.
-9. As a CLI user, I want errors shown in the same Step presentation, so that a failed Tool or Model call is not mistaken for success.
-10. As a CLI user, I want the accepted final answer printed once, so that a rejected Stop proposal or CLI duplication does not look like completion.
-11. As a CLI user, I want the runtime log to preserve the same Step content as text mode, so that I can inspect a Run after the terminal closes.
-12. As a machine-output consumer, I want JSON and JSONL stdout to retain their existing lifecycle protocol, so that human Step formatting cannot corrupt parsing.
-13. As an Application author, I want pi and smolagents to use the same Step semantics, so that one workflow has comparable evidence under either runtime.
-14. As an Application author, I want parallel Tool calls associated with their call IDs inside one Step, so that interleaved results remain attributable.
-15. As an Application author, I want Supervisor and Worker Steps linked by parent identity, so that nested execution remains understandable.
-16. As an Application author, I want retry attempts distinguished from new Steps, so that transient Model errors do not distort the execution history.
-17. As an Application author, I want Stop continuation and output correction shown as later Model turns, so that the displayed sequence matches execution.
-18. As an Agent, I want a small Tool result delivered directly, so that ordinary work needs no extra retrieval call.
-19. As an Agent, I want a large result represented by a preview and reference, so that it does not consume the entire Model context.
-20. As an Agent, I want a read-only retrieval capability available whenever a result reference can be produced, so that I never receive an unusable reference.
-21. As an Agent, I want to search and page through a referenced result with a strict byte limit, so that one very long line cannot overflow the next Model turn.
-22. As a Run inspector, I want to expand a Step through a Python API, so that I can view the complete retained Tool result and Model exchange without a new CLI command.
-23. As a Run inspector, I want the size-unabridged retained result and Model-visible projection linked to the same Tool call, so that I can explain why the Model made a decision.
-24. As a Run inspector, I want the actual Model request and response captured after AgentLoom's request projection, so that I can see the context used for each turn.
-25. As a Run inspector, I want sensitive fields redacted according to one policy, so that local presentation and later export do not expose them accidentally.
-26. As a Task owner, I want referenced results to survive a resumed Run with a new run ID, so that checkpoint recovery can continue from committed work.
-27. As a Task owner, I want completed Tool effects recognized during resume, so that recovering a Step does not repeat an already committed side effect.
-28. As a Task owner, I want a missing or corrupt reference reported explicitly, so that recovery never silently substitutes an incomplete result.
-29. As a maintainer, I want full large results kept out of pi bridge frames, so that a Model preview does not hide a transport-size failure.
-30. As a maintainer, I want local trace write failures to fail the Run clearly, so that a reported success always has its required execution evidence.
-31. As a maintainer, I want external exporter failures isolated from execution, so that an observability service outage cannot stop an Agent.
-32. As a maintainer, I want a runtime-neutral presenter without a smolagents dependency, so that the pi-only installation remains valid.
-33. As an integration author, I want stable event, parent, Step, and payload identities, so that a future Langfuse or other exporter can build its own trace tree.
-34. As a reviewer, I want the same Application-level validation seam used for both runtimes, so that the feature is proven by observable Run behavior rather than internal method assertions.
-35. As an Application author, I want PreToolUse and Stop to retain their current blocking behavior, so that adding trace does not bypass execution policy.
-36. As a Run inspector, I want a blocked Tool call distinguished from an executed Tool failure, so that the history does not claim a side effect occurred.
-37. As a maintainer, I want pi's Hook context to carry the real Step number, so that Hook decisions and Tool calls can be correlated with the displayed Step.
-38. As a Shell Hook author, I want the current PostToolUse tool_response contract preserved, so that adding large-result references does not silently change my Hook input.
+既有 Hook 继续负责工具门禁、输入转换和 Stop 决策；runtime loop 继续负责模型调用、工具调度、重试和 checkpoint。Step 观测不是新的 Hook，也不是新的 AgentRuntime 按 Step 执行接口。
 
-## Implementation Decisions
+## User Stories（用户故事）
 
-### Execution facts and ownership
+1. 作为终端用户，我希望 pi 与 smolagents 都显示同样的 New run 和 Step 序列，以便逐轮理解执行。
+2. 作为终端用户，我希望看到工具的最终授权参数与 Observations，以便知道实际调用和返回了什么。
+3. 作为终端用户，我希望普通工具结果直接完整打印，以便不必为常见结果另开文件。
+4. 作为终端用户，我希望大结果显示模型实际收到的预览和可用引用，以便日志可读且不会误以为模型读过全文。
+5. 作为终端用户，我希望失败、每步耗时及可得的 token 用量出现在对应 Step，以便定位问题和成本。
+6. 作为终端用户，我希望只看到一次通过 Stop 与输出校验的最终答案，以便续跑提案不会被误认为完成。
+7. 作为终端用户，我希望关闭终端后仍能从 runtime.log 和 Run 的本地记录位置找到相同过程与完整内容。
+8. 作为机器输出的消费者，我希望 JSON/JSONL stdout 保持现有协议，不混入人读版 Step 文本。
+9. 作为 Application 作者，我希望一次模型轮次和它发起的工具批次构成一个 Step，并行工具按 call ID 区分。
+10. 作为 Application 作者，我希望 Worker 有独立 Step 编号并与父 Agent 关联，重试 attempt 与新模型轮次也能区分。
+11. 作为 Application 作者，我希望 pi 和 smolagents 的 PreToolUse、PostToolUse、失败 Post 和 Stop 语义一致。
+12. 作为 Agent，我希望小结果直接进入上下文，大结果只占用受控的预览空间，并能按需读取全文。
+13. 作为 Agent，我希望每个收到的引用都已持久保存且当前 Task 有权读取。
+14. 作为 Agent，我希望能按字节分页和有界搜索，即使结果是一行超长 JSON 也能完整取回。
+15. 作为检查运行的人，我希望按 Run 和 Step 查看实际模型请求、回复、工具原结果、模型可见结果及其关联。
+16. 作为检查运行的人，我希望记录明确说明模型请求在哪个边界采集，避免把上层草稿误称为 provider 实收请求。
+17. 作为 Task 所有者，我希望续跑后的新 Run 仍能读取先前已提交的大结果引用。
+18. 作为 Task 所有者，我希望只从最近安全 checkpoint 继续；引用损坏或工具副作用状态不明时明确失败。
+19. 作为 Hook 作者，我希望现有 Shell PostToolUse 的 tool_response 输入契约保持不变。
+20. 作为维护者，我希望模型失败、bridge 故障、被 Hook 阻止的调用与真正的工具失败分开记录。
+21. 作为维护者，我希望 pi bridge 不因平台工具全文二次传输而超过帧上限。
+22. 作为维护者，我希望必需本地记录故障使 Run 明确失败，外部观测服务故障则只留下诊断。
+23. 作为集成作者，我希望未来 Langfuse 等组件能消费稳定、与 runtime 无关的事实和内容引用，并自行决定导出字段。
+24. 作为审查者，我希望通过 Application 公开运行入口验证上述行为，而非仅检查私有回调或渲染对象。
 
-- Keep the existing AgentRuntime operation at the level of a complete Agent invocation. Model configuration enters the concrete runtime at construction; its Agent loop decides when to call the Model and Tools. The pi Node bridge and smolagents Python Model-turn boundary capture the actual request after request projection, before provider dispatch, and the corresponding response or failure. A higher Application layer cannot infer what the provider actually received.
-- Normalize these runtime facts into a versioned internal vocabulary identifying Application, logical Task, execution Run, Agent invocation and parent, local Step, commit sequence, Model turn and retry attempt, and Tool call. A Step covers one Model turn and its Tool batch; parallel calls are Step children correlated by call ID. A retry of the same turn is an attempt; output correction and Stop continuation create later turns. The Step is observational, not a new AgentRuntime operation or configured Hook.
-- Use existing boundaries. smolagents Tools and pi platform Tools pass through Tool Gateway; pi native file and Shell Tools pass through NativeToolHost. Both runtimes' Stop decisions use their existing HookRun, owned by each Agent invocation. Take Tool facts from terminal ToolCallRecord values and Hook facts from effective PreToolUse and Stop decisions. smolagents already has a Step callback; pi has Model-turn events but currently leaves HookRun.step_number at its default zero. Synchronize pi's real Step identity to that context and verify parallel calls and resumed runs.
-- Preserve Hook semantics: PreToolUse may change or block Tool input before strict validation and CoreToolGuard; Stop may reject a final answer. PostToolUse, PostToolUseFailure and StopFailure only observe. A blocked call has no Tool effect and does not emit PostToolUseFailure. An unavailable Tool, Model failure, or bridge failure is not an executed Tool failure. Do not duplicate Post dispatch across the pi bridge and Python execution boundary, introduce a general SDK Hook forwarding layer, or add an automatic retry Hook.
-- Separate a required internal recorder from the existing best-effort RuntimeEvent/user event sink and Post observers. Write from the committed Tool boundary and actual Model boundary; do not use HookRun.dispatch or its bounded diagnostic snapshot as the required record. The recorder write must sit outside the exception handlers that deliberately ignore Post observer failures. A local write failure fails the Run, even if a Tool effect was already committed; recovery must then reconcile that effect instead of retrying blindly. User observer errors keep their current Run API behavior, and future exporter failures do not block execution.
-- Store the actual projected Model request and provider response, the Tool's final authorized input, returned content, Model-visible content, status, timing and error. Apply one sensitive-data policy to stored content; non-secret content is not truncated for size, and large bodies are linked by stable IDs rather than duplicated in every event. “Complete” means complete apart from that policy. The inspection API reconstructs a Step from these linked records.
+## Implementation Decisions（实现决策）
 
-### Shared smolagents-style presentation
+### 1. 执行对象、Step 与模型边界
 
-- Extract a runtime-neutral Rich presenter using the current AgentLoom smolagents labels, order, and visual vocabulary: New run panel, yellow Step rule, Calling tool argument panel, Observations, red errors, Step duration with cumulative and per-Step token usage, and yellow final answer. Both runtimes render the same fact in the same format without adding a smolagents dependency to a pi-only installation. Text mode and runtime file logging render the same Step facts; machine-readable stdout remains reserved for its current protocol.
-- The displayed Step number is local to an Agent invocation, as in smolagents. Agent and parent identity disambiguate concurrent Workers; the trace also records a global sequence. Model reply body stays at DEBUG, matching smolagents INFO behavior. The structured trace retains the Model exchange independently of log verbosity.
-- The Observations body is the exact Tool text delivered to the Model. Apply required sensitive-field masking before storing retrievable Tool content and forming the Model-visible projection, rather than masking or summarizing the display independently. Small results appear in full; large results show the same preview and reference delivered to the Model. Retain the full-size, policy-sanitized result separately for inspection; Agent retrieval must not reveal fields removed by that policy.
-- Print an accepted final answer only after Stop and output validation succeed. Prevent the final CLI echo from printing it a second time. Display rejected proposals as failed or continued Steps, not as completed answers.
-- Preserve all Step text for a retained trace, either by retaining every runtime-log segment or by regenerating the plain-text projection from durable execution records. A bounded active log must not be the only copy of historical Step content.
+- Application 定义负责选择模型与 runtime；构造时把模型绑定交给具体 Agent runtime。运行时由 pi 或 smolagents 的 Agent loop 决定何时向模型发请求、何时调用工具。观测只读取已发生的执行事实，不把模型接入误画成一个在 Agent loop 之前执行的步骤。
+- Task 是可跨 Run 的逻辑任务；Run 是一次执行尝试；Agent invocation 构成 Supervisor/Worker 父子树。Step 在**单个 Agent invocation 内编号**：一次模型轮次及其工具批次为一个 Step，并行调用是该 Step 下以 call ID 区分的子项。模型传输重试记为同一轮次的 attempt；输出纠错与 Stop 拒绝后的继续产生后续轮次。另记全局提交序号，不用日志到达顺序推断因果。
+- 规范化事实至少携带版本、事件 ID、Task/Run/Agent/父 Agent 身份、Step/attempt、call ID、时间、状态、错误和内容引用。运行时只负责把各自事件映射进这套事实；展示器、检查接口和将来的 exporter 从事实读取，不另建执行真相。
+- “实际模型请求”指经 AgentLoom 和 provider 适配层最终转换、送入可观察 provider 传输边界的消息和参数；响应也在对应边界配对记录。记录必须标明 capture boundary，不得把 LiteLLM 输入、pi bridge 投影或其它上游对象无条件声称为网络实际发送内容。若某 provider 暂不能观测最终边界，要明确标成未满足完整采集，不得静默用近似值替代。
+- 必需记录与用户 RuntimeEvent sink、Hook 诊断及 Post 观察者分开。模型请求/响应在模型出口记；工具终态在已提交的工具执行出口记；有效 PreToolUse/Stop 决策在门禁出口记。记录失败位于 Post 观察者的吞错范围之外，不能被当成普通日志失败忽略。
 
-### Large results and references
+### 2. 现有 Hook 接在哪一层
 
-- Use ordinary files for immutable Task-scoped payload storage and a small Task-scoped trace index under the configured runtime root. Task scope is required because resume creates a new Run ID while retaining the Task ID. This storage is independent of successful checkpoint cleanup, ordinary Run retention, and Run log rotation. It is not a new database.
-- Stream content into a temporary file, calculate a full integrity hash and byte count, then atomically publish it. A small metadata record links an opaque scoped result reference to content type, hash, Tool call, producing Run and Step, and storage key. The Model receives the opaque reference, not a filesystem path or raw content hash.
-- Select inline content or a preview-plus-reference using both the available Model context budget and bridge byte budget. The terminal presentation does not determine the Model budget. Small content is delivered to the Model and printed in full; a large result's projection includes its size, source identity, and a clear retrieval instruction.
-- Provide one internal, read-only retrieval capability for both runtimes whenever references can be issued. It resolves only content authorized for the current Task and Agent context. Preserve compatibility with existing ContextRef consumers while backing new durable result references with the payload store. Do not require every Agent YAML to list a second external Tool.
-- Retrieval supports bounded search and byte-range paging with an opaque continuation cursor. Every response has a hard byte ceiling and reports whether more content remains. There is no unlimited read option; a single-line JSON result remains fully recoverable across pages.
-- Pi platform Tool callbacks return a committed receipt and Model-visible projection across the bridge. The full platform result remains in AgentLoom-owned storage and does not re-enter the bridge as a second large record; smolagents likewise keeps original content and projection distinct. This does not change the existing Shell Post Hook stdin contract: PostToolUse still receives the full tool_response. A versioned reference input for Shell Hooks requires separate evidence and design; it is not introduced silently here.
-- Persist the payload before publishing its reference or sending the Model projection. A local persistence failure fails the Run with a clear cause. If a Tool effect already occurred, recovery must verify existing commit evidence and either reuse the committed outcome or refuse automatic replay when its state is uncertain. It must not claim exactly-once effects merely because a trace entry was written.
-- The trace index and payload store have no ContextStore-style entry-count eviction or independent TTL in this release. They are not removed by current automatic Run cleanup or successful checkpoint cleanup. Explicit deletion and eventual storage-management policy are separate work; no new automatic trace-cleanup policy is introduced.
+| 现有 Hook | 所在层与作用 | 本规格的最小适配 |
+| --- | --- | --- |
+| PreToolUse | Tool Gateway 和 pi 原生工具宿主；执行前转换或阻止输入 | 记录最终有效决策和参数；仍须经过严格解码及 CoreToolGuard |
+| PostToolUse / PostToolUseFailure | 同一工具执行出口；分别观察已完成和已执行失败的调用 | 关联终态 ToolCallRecord；每个适用调用只派发一次；不让观察者改写结果 |
+| Stop / StopFailure | Agent 终止门禁及根运行失败观察 | 记录有效 Stop 决策；只有接受并完成输出校验才展示最终答案 |
+| SessionStart / SessionEnd | 根运行生命周期 | 保留现有派发时机，与 Run 身份关联 |
+| SubagentStart / SubagentStop | 父 Agent 拥有的 Worker 生命周期 | 保留父子身份，不复制到每个 Worker Step |
+| TaskCreated / TaskCompleted | 根 Task 生命周期 | 保留现有派发时机，与 Task 身份关联 |
 
-### Recovery and export
+- 以上是当前全部 11 个 Hook 事件。真正能阻止执行的只有 PreToolUse 和 Stop；其余为观察或生命周期事件。被阻止的工具调用是 blocked，没有工具副作用，也不触发 PostToolUseFailure。模型错误、未知工具和 bridge 协议错误不伪装成“工具执行失败”。
+- smolagents 工具和 pi 平台工具仍经 Tool Gateway；pi 原生文件/Shell 工具仍经原生工具宿主。pi bridge 只在 SDK 执行前取得已授权参数；成功或失败后的 Post 由 Python 执行边界派发，避免双重派发。两个 runtime 沿用各自 Agent invocation 的 HookRun；pi 要把真实 Step 编号同步到 Hook 上下文，并验证并行调用及续跑。
+- 不新增 Step/Model Hook、通用 SDK Hook 转发层、自动重试 Hook 或新 Hook 配置。Hook 的有界诊断快照也不承担完整审计存储。
 
-- Runtime checkpoints continue to own resumable Agent state and committed-effect evidence. Trace records own inspection evidence. Resume starts from the latest safe committed checkpoint only after validating referenced content and Tool commit state. A missing or corrupt reference, or an uncertain side effect, must cause an explicit failure rather than an incomplete replay. Historical browsing does not imply arbitrary-Step time travel or deterministic rerun.
-- The Python inspection interface resolves a Run and Step to ordered metadata, Model-visible content, and complete retained payloads with integrity checks. It offers bounded reads for large content.
-- Internal events and payload references are provider-neutral. A future exporter may map them to spans and selectively load content under its own policy; full local payloads are not sent remotely by default. Export is asynchronous and non-blocking, with failures recorded diagnostically. No Langfuse, OTLP, or other remote destination is enabled by this specification.
+### 3. 统一展示与记录的对应关系
 
-## Testing Decisions
+- 以当前 AgentLoom smolagents 的 INFO 输出为视觉和内容基准：New run 面板、Step 分隔、Calling tool 参数、Observations、红色错误、Step 耗时和累计/增量 token、最终答案。pi 和 smolagents 使用同一展示实现；pi 单独安装不依赖 smolagents 包。用对照样例验收版式，不复制上游 logger 的整套内部实现。
+- Observations 的工具结果正文必须等于**交给模型的工具结果正文**；展示层不能自行再截断或摘要。普通结果全文显示。大结果的模型投影是尺寸、来源、预览、引用和读取说明，日志完整打印这份投影；保留的完整正文在持久内容中查看。时间戳、Step 标题和本地检查位置属于展示元数据，不属于模型结果正文。
+- 模型回复正文按现有 smolagents 行为在 DEBUG 展示；实际请求与回复无论日志级别均进入必需本地记录。终端 text 与 runtime.log 保持语义及正文一致，Rich 颜色不要求写入文件。若活动日志会轮转，历史 Step 仍须能从持久事实重建或从保留的日志分段读取。
+- Stop 拒绝和输出校验失败显示为继续/失败过程，不打印为成功最终答案；接受后的答案只由一个出口打印一次。
 
-- The primary test seam is a real Application Run through the public execution API and text CLI, using deterministic local Model and Tool fixtures. Run the same behavioral scenarios with pi and smolagents. Assertions inspect user-visible text, the runtime log, the Run receipt, the Python inspection API, and resume outcome rather than Rich object types or private callback order.
-- Prior art is the existing pi Application tests, smolagents Runtime Adapter and checkpoint tests, CLI output-protocol tests, Tool Gateway tests, and Run-observability tests. Reuse their fake-provider and isolated-runtime-root patterns.
-- Verify the New run, Step, final authorized Tool argument, Observations, duration/token, error, and single accepted final-answer presentation in both runtimes. Verify per-Agent numbering and parent/call correlation with parallel Workers and Tool calls, retries, output correction, and Stop continuation. Pi's existing Hook context must report the real Step number, including after resume.
-- Verify that small Tool content is identical in Model input and Observations. For a large multiline result and a single-line result larger than one page, verify the Model and log receive the same preview/reference, repeated bounded reads reconstruct the complete result, and the local inspection API returns it. The existing Shell Post Hook must still receive the full tool_response.
-- Verify that pi bridge communication stays bounded even when the platform Tool returns a result larger than its frame limit. The Tool is invoked once, and its full result remains inspectable. Verify both runtimes capture the actual projected Model request, including history and Tool definitions, and its corresponding response or error rather than an upper-layer approximation.
-- Verify interruption after committed work, resume under a new Run ID, reference resolution, and no repeated committed Tool effect. Missing or modified payloads and uncertain Tool commit states must produce explicit failures rather than automatic replay.
-- Verify PreToolUse input modification and blocking, exactly one matching Post observer for a completed or failed call, no PostToolUseFailure for a blocked call, and Stop gating in both runtimes. Model and bridge failures must not become Tool-failure Hook events. Verify Post observer failure cannot hide a required trace-write failure or change an already committed Tool result.
-- Verify local trace-write failure changes the Run outcome and never publishes an unusable reference. Check that the Model-visible projection and Observations apply the same redaction before delivery. A failing stub of the future exporter interface, if introduced in this release, must not affect the Run.
-- Verify text formatting never contaminates JSON or JSONL stdout and that the pi-only installation does not import smolagents. Avoid tests that merely mirror private storage structures or renderer implementation.
+### 4. 大结果、引用与读取
 
-## Out of Scope
+- 使用 Task 范围的不可变普通文件保存未经**长度截断**且按统一策略脱敏的工具结果；Run 记录索引、工具调用与模型投影。它不是数据库，也不借用有容量淘汰和可选 TTL 的 ContextStore。文件与引用不因成功 checkpoint 清理、Run 日志轮转或现有 Run 自动清理而失效；本轮不新增自动 trace 清理。
+- 先将正文流式写入临时文件，计算字节数和完整性哈希，原子发布并写索引，成功后才把不透明引用交给模型。引用关联 Task、产出 Run、Agent、Step、call ID、类型、大小与内容哈希；模型只收到引用 ID，不收到磁盘路径。Run receipt 或人读日志给出本地检查位置；Python 接口按 Run/Step 和引用校验后读取。
+- 是否投影为大结果由模型上下文预算与 pi bridge 字节预算决定，与终端宽度无关。只做一次模型投影；模型输入、Observations 和记录中的 model_visible_result 复用该值。未按长度截断的工具正文另存为 retained_result。统一脱敏发生在持久化与形成可读取/可展示内容之前；“完整”指脱敏后保留全部非秘密内容，而非承诺恢复已移除的敏感字段。
+- 只要能生成引用，就自动向该 Agent 提供同一个只读取回能力；不要求每份 Agent YAML 手动选择第二个工具。复用现有 loom_retrieve_context 入口时，对新旧引用采用明确的版本/格式分流，保持旧引用读取语义。新持久引用限定当前 Task 与授权 Agent 范围；搜索和字节分页均有固定响应上限、续读位置与完整性检查。limit=0 不能变成无限读取，超长单行和 UTF-8 多字节内容可以分段复原。
+- pi 平台工具的全文留在 AgentLoom 持久存储；bridge 回传工具完成凭据和模型投影，不再带着同一大正文跨帧二次传输。Shell Post Hook 仍收到其现有的完整 tool_response；若未来要给 Shell Hook 引用输入，需另立兼容性设计。
+- 工具有副作用且正文持久化失败时，Run 明确失败并保留可用的已提交证据；不得发布悬空引用。续跑时核对工具提交状态，能证实已提交则复用结果，状态不明则拒绝自动重放。记录并不等于对外部副作用作“恰好一次”的保证。
 
-- A new Step or Model Hook, general SDK Hook forwarding layer, automatic retry Hook, changes to configured Hook authorization or Stop semantics, or a public AgentRuntime step execution API.
-- A Studio trace page, a new CLI trace command, or a separate user-facing trace JSONL protocol.
-- Actual Langfuse, OTLP, or other remote exporter installation and any default remote full-content upload policy.
-- Arbitrary historical Step time travel, deterministic replay of external Model or Tool responses, and cross-runtime checkpoint conversion.
-- Rendering binary media inline as text. Media retains type and payload identity, with a human-readable reference in text output.
-- A new automatic cleanup policy for trace content, or a breaking change to the Shell Post Hook input contract.
+### 5. 检查、恢复与外部扩展
 
-## Further Notes
+- Python 检查接口按 Run/Step 返回有序元数据及模型可见内容，并以有界读取展开完整模型请求/回复和工具结果。人读日志标出本地位置；不为此增加 Studio 页面或新 CLI 命令。
+- checkpoint 保存继续执行所需的 Agent 状态，trace 保存发生过什么；不能从日志重建 checkpoint。仅从最近安全且已提交的 checkpoint 续跑，先校验引用和已提交工具状态。历史 Step 可完整查看，不承诺从任意 Step time travel，也不承诺外部模型或工具确定性重演。
+- 对未来 exporter 预留可注入的事件消费契约，输入为版本化、与 runtime 无关的事实和受控内容引用，默认不连接外部 sink。Langfuse 等组件可自行映射 span 和选择字段；本轮不接任何远端服务。未来导出采用异步、失败隔离和诊断记录；远端究竟发送哪些正文应在具体集成时明确定义，不能从“本地详录”推导为默认上传全文。
 
-- This specification follows the established distinction between Task ID and Run ID and between Run evidence and checkpoint state. The runtime-neutral AgentRuntime seam and Hook Runtime ordering remain authoritative.
-- The local record retains non-secret content without size truncation and links the full-size, policy-sanitized Tool result to its Model-visible projection. "Complete" does not promise recovery of fields removed by the shared sensitive-data policy. Observations follows the Model-visible projection; the retained result remains available through authorized local inspection and bounded retrieval.
-- HookRun diagnostics are bounded and do not retain successful Tool result bodies, so they cannot provide the required full trace. ContextStore's capacity eviction and optional TTL likewise make it unsuitable as the only source of a durable result reference.
+## Testing Decisions（测试决策）
+
+- 主验收入口是 Application 公开运行接口及其 text CLI，以同一组外部可见场景覆盖 pi 与 smolagents；检查终端、runtime.log、Run receipt、Python 检查接口、取回能力和续跑结果。沿用现有 Application、pi 协议、checkpoint、Tool Gateway 与输出协议测试的 fixture 风格。测试行为和不变量，不断言私有回调顺序或具体磁盘文件名。
+- 对照现有 smolagents INFO/DEBUG 样例验证两 runtime 的 New run、Step、最终参数、Observations、错误、耗时/token 和一次最终答案；验证 Worker 父子关联、并行调用、重试 attempt、输出纠错及 Stop 续跑。JSON/JSONL stdout 不得混入人读版式；pi 单独安装可运行。
+- 用普通、小型和超过 bridge 帧上限的大型工具结果（包括多行文本及超长单行 JSON）验证：模型输入与 Observations 的结果正文一致；分页可复原脱敏后的完整结果；缓存淘汰、成功 checkpoint 清理及跨 Run 续跑均不使新引用失效；pi bridge 帧有界；工具只调用一次。
+- 验证实际模型请求包含当轮历史、工具定义和最终 provider 参数，并与回复/错误配对；同时断言记录的 capture boundary。使用可观察传输的确定性 provider fixture 做边界验证，再以真实复杂 Application 的模型调用检查端到端 Step、工具和 trace 的可读性，避免仅靠模拟路径宣称完成。
+- 验证 PreToolUse 修改和阻止、完成/失败后对应 Post 只派发一次、blocked 无失败 Post、Stop 门禁、pi Hook 的真实 Step 编号。验证模型及 bridge 错误不派发工具失败 Hook，观察 Hook 故障不覆盖工具终态。
+- 故障注入覆盖本地记录写失败、内容损坏、引用越权、外部导出适配器失败和已提交工具后中断：本地故障使 Run 失败且不产生不可用引用；外部故障不影响 Run；提交状态不明时不自动重放。验证 Shell Post Hook 的完整 tool_response 契约。
+
+## Out of Scope（本轮不做）
+
+- 新 Step/Model Hook、通用 pi SDK Hook 转发、新工具重试策略、公开的按 Step 执行 runtime API，或重写整套 Hook 机制。
+- Studio trace 页面、新 CLI trace 命令、另起一套面向用户的 trace JSONL 协议、Langfuse/OTLP 实际接入。
+- 任意历史 Step 的 time travel、外部模型/工具的确定性重放、跨 runtime checkpoint 转换。
+- 二进制媒体按文本内联打印；新增自动 trace 清理策略；改变 Shell Post Hook 的输入协议。
+- 借 #79 对整个 app 或 execution 目录做一次性重排。职责整理按[能力架构](agentloom-capability-architecture.md)分步处理。
+
+## Further Notes（说明）
+
+- runtime.log 是人读展示，trace 是可检查的执行证据，checkpoint 是可恢复状态，ContextStore 是可淘汰缓存；四者不能互相代替。最终答案与 Step 正文可以由 trace 重建，但恢复不能靠重新打印日志完成。
+- “日志与模型看到的结果一致”特指工具结果正文。日志额外的标题、耗时、本地路径，以及 DEBUG 级模型回复，均不属于模型收到的工具结果。
+- 当前代码中的局部 recorder 或模型输入记录可以作为实施起点；只有在模型采集边界、Hook 决策、持久引用、两 runtime 展示和安全续跑均通过上述验收后，才可称本规格完成。
