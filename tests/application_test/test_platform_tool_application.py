@@ -730,7 +730,7 @@ def test_large_tool_reference_survives_context_cache_eviction(platform_project):
     assert "FIRST-RECORD-8426" in result.output
 
 
-@pytest.mark.parametrize("damage", ["corrupt", "delete"])
+@pytest.mark.parametrize("damage", ["corrupt", "late_corrupt", "delete"])
 def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(platform_project, damage):
     from agentloom.execution.observability import inspect_run
 
@@ -747,7 +747,9 @@ def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(plat
         if request.checkpoint is None:
             created = definition.tool_gateway.invoke(
                 call_id="large-before-interrupt", tool_name="trace_payload",
-                arguments={"value": "RETAINED-BEFORE-RESUME\n" + "z" * 5000},
+                arguments={"value": "RETAINED-BEFORE-RESUME\n" + "z" * (
+                    2_200_000 if damage == "late_corrupt" else 5000
+                )},
             )
             references.append(re.search(r"ctx_[0-9a-f]{32}", created.model_content()).group())
             request.checkpoint_sink(RuntimeCheckpointEnvelope(
@@ -770,6 +772,10 @@ def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(plat
         payload_path = trace.storage.path / "payloads" / f"{digest}.blob"
         if damage == "corrupt":
             payload_path.write_bytes(b"corrupted")
+        elif damage == "late_corrupt":
+            with payload_path.open("r+b") as stream:
+                stream.seek(payload_path.stat().st_size - 1)
+                stream.write(b"X")
         else:
             payload_path.unlink()
 

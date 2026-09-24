@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from agentloom.app.run import ApplicationRunError
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.observability import inspect_run
@@ -66,3 +67,18 @@ def test_pi_retry_attempts_share_one_step_and_are_distinguishable(tmp_path):
     assert {event["model_turn_id"] for event in started} == {
         event["model_turn_id"] for event in completed
     }
+    assert [event["status"] for event in completed] == ["error", "completed"]
+
+
+def test_pi_failed_model_response_is_recorded_as_error(tmp_path):
+    with model_service(fail_count=1, error_status=400) as (url, requests):
+        app = project(tmp_path, url)
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
+            execute_app(app, file_logging=False)
+
+    assert len(requests) == 1
+    with inspect_run(failure.value.run) as trace:
+        responses = [event for event in trace.events() if event["kind"] == "model_response"]
+    assert len(responses) == 1
+    assert responses[0]["status"] == "error"
+    assert responses[0]["error"]

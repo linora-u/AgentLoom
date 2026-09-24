@@ -188,7 +188,14 @@ class PiModelHandler:
                         turn_id = self._trace_turns.pop(key)
                     except KeyError as exc:
                         raise AgentRuntimeError("Pi Model response has no request trace", category="internal") from exc
-                recorder.record_model_response(turn_id, captured, runtime="pi", attempt=payload.attempt)
+                stop_reason = captured.get("stopReason")
+                error = None
+                if stop_reason == "error" or stop_reason == "aborted":
+                    message = captured.get("errorMessage") or f"Pi Model {stop_reason}"
+                    error = RuntimeError(str(message))
+                recorder.record_model_response(
+                    turn_id, captured, runtime="pi", attempt=payload.attempt, error=error,
+                )
         return ModelTraceResult(
             method="model_trace", identity=identity, attempt=payload.attempt,
             phase=payload.phase, accepted=True,
