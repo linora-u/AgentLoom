@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ _CURRENT_RECORDER: ContextVar[TraceRecorder | None] = ContextVar(
     "agentloom_trace_recorder", default=None
 )
 _UNSET = object()
+_TRACE_REF_RE = re.compile(r"^(?:payload_[0-9a-f]{32}|ctx_[0-9a-f]{32})$")
 
 
 class TraceStorageError(RuntimeError):
@@ -45,7 +47,10 @@ class TraceRecorder:
     def close(self) -> None:
         self.storage.close()
 
-    def _payload(self, value: Any, *, content_type: str) -> str:
+    def _payload(
+        self, value: Any, *, content_type: str, prefix: str = "payload",
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         if content_type == "application/json":
             data = json.dumps(
                 redact_value(value), ensure_ascii=False, separators=(",", ":"), default=str
@@ -53,13 +58,47 @@ class TraceRecorder:
         else:
             data = str(redact_value(value)).encode("utf-8")
         digest = hashlib.sha256(data).hexdigest()
-        reference = f"payload_{uuid4().hex}"
+        reference = f"{prefix}_{uuid4().hex}"
         self.storage.atomic_write(f"payloads/{digest}.blob", data)
         self.storage.atomic_write_json(
             f"refs/{reference}.json",
-            {"sha256": digest, "size": len(data), "content_type": content_type},
+            {"sha256": digest, "size": len(data), "content_type": content_type,
+             **(metadata or {})},
         )
         return reference
+
+    def project_tool_result(self, text: str, *, tool_name: str, source: str, call_id: str) -> str:
+        """Make a durable, bounded Model projection for a large text result."""
+
+        from agentloom.execution.context_engine.runtime import get_active_context_engine
+
+        safe_text = str(redact_value(text))
+        if tool_name == "loom_retrieve_context":
+            return safe_text
+        engine = get_active_context_engine()
+        threshold = engine.config.min_chars if engine is not None else 32768
+        preview_limit = engine.config.preview_max_chars if engine is not None else 2048
+        if len(safe_text.encode("utf-8")) < threshold:
+            return safe_text
+        execution = capture_explicit_execution_context()
+        try:
+            reference = self._payload(
+                safe_text, content_type="text/plain", prefix="ctx",
+                metadata={
+                    "tool_name": tool_name, "source": source, "call_id": call_id,
+                    "agent_path": execution.runtime_agent_path,
+                    "producing_run_id": self.context.run_id,
+                },
+            )
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist large Tool result for {call_id}: {exc}") from exc
+        preview = safe_text[:max(1, preview_limit)]
+        size = len(safe_text.encode("utf-8"))
+        return (
+            f"[ContextRef {reference} source={tool_name} size_bytes={size}]\n"
+            f'Use loom_retrieve_context(ref="{reference}", offset=0, limit=8192) '
+            "to read more bytes.\n\n" + preview
+        )
 
     def _append(self, event: dict[str, Any]) -> None:
         with self._lock, self.storage.advisory_file_lock("sequence.lock", create=True):
@@ -199,13 +238,18 @@ class RunTrace:
         ]
 
     def _metadata(self, reference: str) -> dict[str, Any]:
-        if not reference.startswith("payload_") or len(reference) != 40:
+        if not _TRACE_REF_RE.fullmatch(reference):
             raise ValueError("Invalid trace payload reference")
         metadata = json.loads(self.storage.read_bytes(f"refs/{reference}.json"))
         digest = metadata["sha256"]
         if not isinstance(digest, str) or len(digest) != 64:
             raise TraceStorageError("Invalid trace payload digest")
         return metadata
+
+    def reference_metadata(self, reference: str) -> dict[str, Any]:
+        """Return validated metadata for an opaque retained payload reference."""
+
+        return dict(self._metadata(reference))
 
     def read_text(self, reference: str) -> str:
         metadata = self._metadata(reference)

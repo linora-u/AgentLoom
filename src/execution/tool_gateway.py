@@ -1435,16 +1435,26 @@ class AgentLoomToolGateway:
         )
         if projection_text is not None:
             try:
-                model_output = _compress_tool_result(
-                    tool_name=tool_name,
-                    source=(
-                        binding.compression_source
-                        or f"tool_result:{tool_name}"
-                    ),
-                    result=projection_text,
+                from agentloom.execution.observability import (
+                    TraceStorageError,
+                    get_current_trace_recorder,
                 )
+
+                source = binding.compression_source or f"tool_result:{tool_name}"
+                recorder = get_current_trace_recorder()
+                if recorder is not None:
+                    model_output = recorder.project_tool_result(
+                        projection_text, tool_name=tool_name,
+                        source=source, call_id=call_id,
+                    )
+                else:
+                    model_output = _compress_tool_result(
+                        tool_name=tool_name, source=source, result=projection_text,
+                    )
                 if model_output != projection_text:
                     metadata[MODEL_OUTPUT_METADATA_KEY] = model_output
+            except TraceStorageError:
+                raise
             except Exception as processing_error:
                 logger.warning(
                     "Context compression failed open for tool %s; "
