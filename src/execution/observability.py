@@ -387,11 +387,16 @@ class RunTrace:
             value for event in selected for key, value in event.items()
             if key.endswith("_ref") and isinstance(value, str)
         }
-        payloads = {
-            reference: self.read_text(reference)
-            for reference in references
-            if self._metadata(reference)["size"] <= max_inline_bytes
-        }
+        sizes = sorted(
+            ((self._metadata(reference)["size"], reference) for reference in references)
+        )
+        remaining = max_inline_bytes
+        payloads: dict[str, str] = {}
+        for size, reference in sizes:
+            if size > remaining:
+                continue
+            payloads[reference] = self.read_text(reference)
+            remaining -= size
         return {
             "agent_id": agent_id,
             "run_step_number": run_step_number,
