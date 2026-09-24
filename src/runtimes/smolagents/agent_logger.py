@@ -133,6 +133,11 @@ class EnhancedAgentLogger(AgentLogger):
         **kwargs,
     ) -> None:  # type: ignore[override]
         """Emit args if resolved level >= ``self._agent_loom_level``."""
+        from agentloom.execution.observability import get_current_trace_recorder
+
+        recorder = get_current_trace_recorder()
+        if recorder is not None and recorder.has_presenter:
+            return
         agent_loom_level = self._to_agent_loom_level(level)
         if agent_loom_level < self._agent_loom_level:
             return

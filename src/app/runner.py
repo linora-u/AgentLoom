@@ -66,6 +66,7 @@ from agentloom.execution.checkpoint.file_history import FileHistoryManager
 from agentloom.execution.goal import normalize_goal_config
 from agentloom.execution.heartbeat import SupervisorHeartbeat
 from agentloom.execution.logging import (
+    AgentLoomLogLevel,
     LoggingConfigBuilder,
     bind_logger_backend,
     get_logger,
@@ -348,6 +349,7 @@ def _execute_app(
     file_history: FileHistoryManager | None = None
     supervisor: YamlConfiguredSupervisorAgent | None = None
     event_start_offset: int | None = None
+    final_answer_presented = False
 
     try:
         runtime_context.prepare_run()
@@ -378,11 +380,23 @@ def _execute_app(
 
         from agentloom.execution.observability import bind_trace_recorder
 
-        with bind_run_context(runtime_context), bind_trace_recorder(runtime_context):
+        with bind_run_context(runtime_context), bind_trace_recorder(runtime_context) as recorder:
             logger_backend = initialize_run_logger(
                 runtime_context,
                 logging_builder=logging_builder,
                 file_logging=file_logging,
+            )
+            from agentloom.execution.observability import RunTrace
+            from agentloom.execution.presentation import StepPresenter
+
+            recorder.attach_presenter(
+                StepPresenter(logger_backend, RunTrace(recorder.storage, runtime_context.run_id))
+            )
+            console = getattr(logger_backend, "console", None)
+            final_answer_presented = console is not None and bool(
+                getattr(console, "console_enabled", True)
+            ) and isinstance(getattr(logger_backend, "level", None), AgentLoomLogLevel) and (
+                logger_backend.level <= AgentLoomLogLevel.INFO
             )
             public_run = _run_info(
                 runtime_context,
@@ -602,6 +616,8 @@ def _execute_app(
                                 task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
                             )
                         )
+                        if lifecycle.outcome == "completed":
+                            recorder.record_final_answer(lifecycle.result)
                     finally:
                         lifecycle.close_resources(
                             ApplicationRunResources(
@@ -705,6 +721,7 @@ def _execute_app(
         started_at=started_at,
         ended_at=ended_at,
         goal=durable_manifest_updates.get("goal"),
+        final_answer_presented=final_answer_presented,
     )
     _emit_lifecycle_event(
         event_sink,

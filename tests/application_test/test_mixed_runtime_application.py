@@ -89,6 +89,103 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
         assert 'SAFFRON-7419' in step['payloads'][tool['model_ref']]
 
 
+@pytest.mark.parametrize('supervisor,worker', [('pi', 'pi'), ('smolagents', 'pi'), ('pi', 'smolagents')])
+def test_steps_and_tool_observations_reach_terminal_and_runtime_log(tmp_path, capsys, supervisor, worker):
+    (tmp_path / 'note.txt').write_text('Visible result: MARIGOLD-8372\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            if not messages:
+                return [('read-note', 'read' if worker == 'pi' else 'read_file',
+                         {'path': 'note.txt'} if worker == 'pi' else {'file_path': str(tmp_path / 'note.txt')})]
+            return finish(request, 'MARIGOLD-8372')
+        if not messages:
+            return [('delegate', 'inspect_note', {'query': 'note.txt'})]
+        return finish(request, 'Verified MARIGOLD-8372')
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor=supervisor, worker=worker)
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': True, 'file_enabled': True}
+        write_yaml(system_path, system)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    terminal = capsys.readouterr().out
+    assert result.output == 'Verified MARIGOLD-8372'
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert terminal.count('New run') == log.count('New run') == 2
+    for number in range(1, 5):
+        assert sum(f'Step {number}' in line for line in terminal.splitlines() if '━' in line) == 1
+        assert sum(f'Step {number}' in line for line in log.splitlines() if '━' in line) == 1
+    for text in ('Calling tool:', 'Observations:', 'MARIGOLD-8372'):
+        assert text in terminal and text in log
+    assert terminal.count('Duration') == log.count('Duration') == 4
+    assert 'Input tokens:' in terminal and 'Input tokens:' in log
+    assert terminal.count('Final answer: Verified MARIGOLD-8372') == 1
+    assert log.count('Final answer: Verified MARIGOLD-8372') == 1
+
+
+@pytest.mark.parametrize('level', ['INFO', 'ERROR'])
+def test_text_cli_prints_final_answer_once_with_pi_steps(tmp_path, level):
+    from click.testing import CliRunner
+    from agentloom.__main__ import main
+
+    (tmp_path / 'note.txt').write_text('CLI token: DAHLIA-6104\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            return [('read-note', 'read', {'path': 'note.txt'})] if not messages else 'DAHLIA-6104'
+        return [('delegate', 'inspect_note', {'query': 'note.txt'})] if not messages else 'Verified DAHLIA-6104'
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor='pi', worker='pi')
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': True, 'file_enabled': True, 'level': level}
+        write_yaml(system_path, system)
+        with bind_config(load_project_config(tmp_path)):
+            result = CliRunner().invoke(main, ['run', str(workflow)])
+    assert result.exit_code == 0, result.output
+    assert result.stdout.count('Verified DAHLIA-6104') == 1
+    if level == 'INFO':
+        assert result.stdout.count('Final answer: Verified DAHLIA-6104') == 1
+        assert 'Step 1' in result.stdout
+        logs = list((tmp_path / 'runtime/runs/mixed').glob('*/logs/runtime.log'))
+        assert len(logs) == 1
+        assert logs[0].read_text().count('Final answer: Verified DAHLIA-6104') == 1
+
+
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_debug_log_contains_the_models_reply_for_both_runtimes(tmp_path, runtime):
+    (tmp_path / 'note.txt').write_text('Reply token: AZALEA-4920\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            if not messages:
+                return [('read-note', 'read' if runtime == 'pi' else 'read_file',
+                         {'path': 'note.txt'} if runtime == 'pi' else {'file_path': str(tmp_path / 'note.txt')})]
+            return finish(request, 'AZALEA-4920')
+        return [('delegate', 'inspect_note', {'query': 'note.txt'})] if not messages else finish(request, 'Verified AZALEA-4920')
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': False, 'file_enabled': True, 'level': 'DEBUG'}
+        write_yaml(system_path, system)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert 'Model response:' in log
+    assert 'AZALEA-4920' in log
+
+
 def test_smol_supervisor_trace_records_stop_rejection_and_acceptance(tmp_path):
     from agentloom.execution.observability import inspect_run
 
@@ -111,8 +208,12 @@ def test_smol_supervisor_trace_records_stop_rejection_and_acceptance(tmp_path):
         definition = yaml.safe_load(workflow.read_text())
         definition['hooks'] = {'Stop': [{'id': 'stop-once', 'command': f'{sys.executable} {hook}'}]}
         write_yaml(workflow, definition)
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': False, 'file_enabled': True}
+        write_yaml(system_path, system)
         with bind_config(load_project_config(tmp_path)):
-            result = execute_app(workflow, file_logging=False)
+            result = execute_app(workflow, file_logging=True)
     assert result.output == 'accepted-answer-8426'
     assert len(requests) >= 2
     with inspect_run(result.run) as trace:
@@ -120,6 +221,10 @@ def test_smol_supervisor_trace_records_stop_rejection_and_acceptance(tmp_path):
                      if event['kind'] == 'hook_decision' and event['event'] == 'Stop']
         assert [json.loads(trace.read_text(event['decision_ref']))['result']['decision']
                 for event in decisions] == ['block', 'allow']
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert 'Stop blocked: continue once' in log
+    assert log.count('Final answer: accepted-answer-8426') == 1
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])
@@ -252,6 +357,11 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         page = trace.search_page(refs[0], 'TARGET_RECORD', offset=page.next_offset, limit=1)
         assert len(page.matches) == 1
         assert 'CORIANDER_5287' in page.matches[0][1]
+        tool = next(event for event in trace.events()
+                    if event['kind'] == 'tool' and event['tool_name'] == 'read_context_fixture')
+        model_visible = trace.read_text(tool['model_ref'])
+    assert result.run.log_path is not None
+    assert f'Observations: {model_visible}' in result.run.log_path.read_text()
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])

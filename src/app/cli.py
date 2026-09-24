@@ -287,7 +287,8 @@ def run(
                     if isinstance(completed.output, str)
                     else json.dumps(completed.output, ensure_ascii=False, indent=2)
                 )
-                click.echo(rendered_output)
+                if not getattr(completed, "final_answer_presented", False):
+                    click.echo(rendered_output)
                 completed_goal = getattr(completed, "goal", None)
                 if isinstance(completed_goal, Mapping):
                     click.echo(_goal_text(completed_goal))
