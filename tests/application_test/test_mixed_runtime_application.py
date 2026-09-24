@@ -76,6 +76,17 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
                     for message in saved['messages']] == actual['messages']
         assert {event['model_turn_id'] for event in model_requests} == {
             event['model_turn_id'] for event in model_responses}
+        all_requests = [event for event in trace.events() if event['kind'] == 'model_request']
+        assert [event['run_step_number'] for event in all_requests] == list(range(1, len(all_requests) + 1))
+        worker_request = next(event for event in all_requests
+                              if event['kind'] == 'model_request' and event['runtime'] == worker)
+        step = trace.inspect_step(worker_request['run_step_number'])
+        assert step['agent_id'] == worker_request['agent_id']
+        assert [event['kind'] for event in step['events']].count('model_request') == 1
+        assert [event['kind'] for event in step['events']].count('model_response') == 1
+        tool = next(event for event in step['events'] if event['kind'] == 'tool')
+        assert tool['tool_name'] == ('read' if worker == 'pi' else 'read_file')
+        assert 'SAFFRON-7419' in step['payloads'][tool['model_ref']]
 
 
 def test_smol_supervisor_trace_records_stop_rejection_and_acceptance(tmp_path):
