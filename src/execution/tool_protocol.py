@@ -7,6 +7,8 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from agentloom.self_learning.redaction import redact_value
+
 TOOL_CALL_RAW_KEY = "agentloom_tool_call"
 TOOL_RESULT_RAW_KEY = "agentloom_tool_result"
 MODEL_OUTPUT_METADATA_KEY = "agentloom_model_output"
@@ -291,15 +293,15 @@ class ToolCallRecord:
         if self.status == "completed":
             output = self.model_output()
             if isinstance(output, str):
-                return output
+                return str(redact_value(output))
             if "native" in self.metadata and isinstance(output, dict):
                 content = output.get("content")
                 if isinstance(content, list) and len(content) == 1:
                     item = content[0]
                     if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
-                        return item["text"]
+                        return str(redact_value(item["text"]))
             return json.dumps(
-                output,
+                redact_value(output),
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,
@@ -314,7 +316,7 @@ class ToolCallRecord:
         payload = {
             "ok": False,
             "status": self.status,
-            "error": asdict(error),
+            "error": redact_value(asdict(error)),
         }
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 

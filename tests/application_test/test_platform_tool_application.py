@@ -462,6 +462,15 @@ def trace_payload(value: str) -> str:
     return value
 
 
+def fail_with_secret(value: str) -> str:
+    _ = value
+    raise RuntimeError("api_key=fixture-secret")
+
+
+def structured_with_secret(value: str) -> dict[str, str]:
+    return {"value": value, "api_key": "fixture-secret", "status": "ok"}
+
+
 def test_application_tool_outcome_has_durable_inspectable_payload(platform_project):
     from agentloom.execution.observability import inspect_run
 
