@@ -66,6 +66,7 @@ class AsyncTraceExport:
         self._thread.join(timeout=0.5)
         if self._thread.is_alive():
             record_export_diagnostic(self._storage, "pending", None, "Trace export continues after Run completion")
+            self._storage.close()
 
     def _drain(self) -> None:
         try:
