@@ -97,8 +97,8 @@ async function createSession(p: Obj): Promise<AgentSession> {
     const permit = await invoke({method: "model_prepare", identity: requestIdentity});
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
     finalDelivery = permit.state === "final";
-    return {state: permit.state, agent_context: permit.agent_context};
-  }, attempt => reportRetry?.(attempt));
+    return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
+  }, attempt => reportRetry?.(attempt), agentDir, invoke);
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
