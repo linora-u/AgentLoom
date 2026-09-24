@@ -3,6 +3,7 @@
 import json
 
 import pytest
+import yaml
 from agentloom.app.run import ApplicationRunError
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
@@ -82,3 +83,23 @@ def test_pi_failed_model_response_is_recorded_as_error(tmp_path):
     assert len(responses) == 1
     assert responses[0]["status"] == "error"
     assert responses[0]["error"]
+
+
+def test_pi_abort_before_next_provider_request_has_no_unpaired_response(tmp_path):
+    unavailable = [("unknown_call", "write", {"path": "should-not-exist", "content": "bad"})]
+    with model_service(turns=[unavailable]) as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["runtime_options"] = {"max_stop_attempts": 1}
+        app.write_text(yaml.safe_dump(config))
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
+            execute_app(app, file_logging=False)
+
+    assert len(requests) == 1
+    with inspect_run(failure.value.run) as trace:
+        events = trace.events()
+    requests_in_trace = [event for event in events if event["kind"] == "model_request"
+                         and event["boundary"] == "pi_payload"]
+    responses = [event for event in events if event["kind"] == "model_response"]
+    assert len(requests_in_trace) == len(responses) == 1
+    assert requests_in_trace[0]["model_turn_id"] == responses[0]["model_turn_id"]
