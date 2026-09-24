@@ -73,7 +73,7 @@ def test_selected_official_read_commits_before_model_continues(tmp_path):
             result = execute_app(app, file_logging=False)
     assert result.output == "Pi answer"
     assert len(requests) == 2
-    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['read']
+    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['read', 'loom_retrieve_context']
     tool_messages = [message for message in requests[1][1]['messages'] if message['role'] == 'tool']
     assert len(tool_messages) == 1
     assert 'saffron-19' in tool_messages[0]['content']
@@ -101,7 +101,7 @@ def test_platform_tool_repairs_raw_input_and_returns_to_same_pi_application(tmp_
             result = execute_app(app, file_logging=False)
     assert result.output == 'Pi answer'
     assert len(requests) == 2
-    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['file_probe']
+    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['file_probe', 'loom_retrieve_context']
     messages = requests[1][1]['messages']
     assert 'saffron_entrypoint' in next(message['content'] for message in messages if message['role'] == 'tool')
     call = next(message['tool_calls'][0] for message in messages if message.get('tool_calls'))
