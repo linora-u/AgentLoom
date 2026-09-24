@@ -401,7 +401,23 @@ class AgentInvocation:
             start = len(runtime_events)
             token = _RUNTIME_EVENT_SINK.set(observe_runtime_event)
             try:
-                result = runtime_agent.run(request)
+                from agentloom.execution.observability import get_current_trace_recorder
+
+                recorder = get_current_trace_recorder()
+                if recorder is not None:
+                    recorder.record_agent_start(
+                        task=request.task,
+                        agent_name=self.owner.name,
+                        runtime=runtime_agent.runtime_id,
+                    )
+                try:
+                    result = runtime_agent.run(request)
+                except BaseException as exc:
+                    if recorder is not None:
+                        recorder.record_agent_end(state="failed", error=exc)
+                    raise
+                if recorder is not None:
+                    recorder.record_agent_end(state=result.state)
                 for event in result.events:
                     if event not in runtime_events[start:]:
                         observe_runtime_event(event)

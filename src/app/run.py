@@ -70,6 +70,7 @@ class ApplicationRunResult:
     started_at: datetime
     ended_at: datetime
     goal: GoalSnapshot | None = None
+    final_answer_presented: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
