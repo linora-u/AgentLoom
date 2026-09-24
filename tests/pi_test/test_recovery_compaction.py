@@ -19,6 +19,8 @@ from agentloom.runtimes.pi.protocol import (
     ModelPermit,
     ModelPrepare,
     ModelSelection,
+    ModelTrace,
+    ModelTraceResult,
     Run,
     RunResult,
 )
@@ -94,6 +96,12 @@ def test_each_continued_empty_task_gets_independent_overflow_recovery(tmp_path):
             events = []
 
             def permit(payload):
+                if isinstance(payload, ModelTrace):
+                    return ModelTraceResult(
+                        method="model_trace", identity=payload.identity,
+                        attempt=payload.attempt, phase=payload.phase,
+                        accepted=True,
+                    )
                 assert isinstance(payload, ModelPrepare)
                 return ModelPermit(
                     method="model_prepare",
