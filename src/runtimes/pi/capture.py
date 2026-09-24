@@ -8,6 +8,8 @@ from typing import Any
 
 from agentloom.execution.native_tools import NativeResultCapture
 
+_MAX_MODEL_CAPTURE_BYTES = 32 * 1024 * 1024
+
 
 def read_capture(directory: Path, authorization_id: str, digest: str, *, completed: bool) -> tuple[Any, NativeResultCapture]:
     if len(authorization_id) != 32 or any(c not in "0123456789abcdef" for c in authorization_id):
@@ -43,9 +45,14 @@ def read_model_capture(directory: Path, capture_id: str, digest: str) -> dict[st
     path = directory / f"model-{capture_id}.json"
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(descriptor, "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
             raise ValueError("Pi Model capture must be a regular file")
-        data = stream.read()
+        if info.st_size > _MAX_MODEL_CAPTURE_BYTES:
+            raise ValueError("Pi Model capture exceeds the 32 MiB limit")
+        data = stream.read(_MAX_MODEL_CAPTURE_BYTES + 1)
+    if len(data) > _MAX_MODEL_CAPTURE_BYTES:
+        raise ValueError("Pi Model capture exceeds the 32 MiB limit")
     if hashlib.sha256(data).hexdigest() != digest:
         raise ValueError("Pi Model capture digest mismatch")
     value = json.loads(data)
