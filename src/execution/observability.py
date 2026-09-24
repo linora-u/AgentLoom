@@ -112,6 +112,43 @@ class TraceRecorder:
                 f"Could not persist Tool trace for call {record.call_id}: {exc}"
             ) from exc
 
+    def record_model_request(self, request: Any, *, runtime: str, boundary: str) -> str:
+        execution = capture_explicit_execution_context()
+        turn_id = f"model_{uuid4().hex}"
+        try:
+            request_ref = self._payload(request, content_type="application/json")
+            self._append({
+                "kind": "model_request",
+                "runtime": runtime,
+                "boundary": boundary,
+                "model_turn_id": turn_id,
+                "agent_id": execution.local_run_id,
+                "parent_agent_id": execution.hook_run.parent.local_run_id
+                if execution.hook_run is not None and execution.hook_run.parent is not None else None,
+                "step_number": execution.hook_run.step_number
+                if execution.hook_run is not None else None,
+                "request_ref": request_ref,
+            })
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist Model request trace: {exc}") from exc
+        return turn_id
+
+    def record_model_response(
+        self, turn_id: str, response: Any = _UNSET, *, runtime: str, error: BaseException | None = None
+    ) -> None:
+        try:
+            response_ref = self._payload(response, content_type="application/json") if response is not _UNSET else None
+            self._append({
+                "kind": "model_response",
+                "runtime": runtime,
+                "model_turn_id": turn_id,
+                "status": "error" if error is not None else "completed",
+                "response_ref": response_ref,
+                "error": str(redact_value(str(error))) if error is not None else None,
+            })
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist Model response trace: {exc}") from exc
+
 
 @contextmanager
 def bind_trace_recorder(context: RuntimeContext) -> Iterator[TraceRecorder]:
