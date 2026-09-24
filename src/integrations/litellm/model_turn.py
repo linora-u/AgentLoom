@@ -107,13 +107,15 @@ def _traced_transport(
     """Record the final AgentLoom-to-LiteLLM request and its actual response."""
 
     from agentloom.execution.observability import get_current_trace_recorder
+    from agentloom.integrations.litellm.litellm_retry import bind_model_trace_turn
 
     recorder = get_current_trace_recorder()
     turn_id = recorder.record_model_request(
         request, runtime="smolagents", boundary="litellm_input"
     ) if recorder else None
     try:
-        response = _as_dict(transport(**request), context=response_context)
+        with bind_model_trace_turn(turn_id):
+            response = _as_dict(transport(**request), context=response_context)
     except Exception as error:
         if recorder is not None and turn_id is not None:
             recorder.record_model_response(turn_id, runtime="smolagents", error=error)
