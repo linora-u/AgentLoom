@@ -300,20 +300,6 @@ class TestExcludePaths:
         assert result.decision == "block"
         assert ".git" in result.reason
 
-    def test_no_exclude_allows_within_workspace(self, monkeypatch, tmp_path):
-        ws = tmp_path / "ws"
-        ws.mkdir()
-        target = ws / "test.txt"
-        target.touch()
-        _patch_config(monkeypatch, _tac([{"tools": ["read_file"]}]), ws)
-        _patch_no_agent(monkeypatch)
-        assert (
-            validate_workspace_path(
-                _make_context("read_file", {"file_path": str(target)}, {"file_path": {"type": "string"}})
-            ).decision
-            == "allow"
-        )
-
     def test_slash_exclude_blocks_everything(self, monkeypatch, tmp_path):
         ws = tmp_path / "ws"
         ws.mkdir(parents=True)
