@@ -317,8 +317,8 @@ uv run --locked --extra smol --extra code loom run applications/ai_quality_analy
 Use machine-readable lifecycle events when another program owns execution:
 
 ```bash
-uv run --locked --extra smol --extra code loom run <workflow> --output-format json
-uv run --locked --extra smol --extra code loom run <workflow> --output-format jsonl
+uv run --locked --extra smol --extra code loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml --output-format json
+uv run --locked --extra smol --extra code loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml --output-format jsonl
 ```
 
 For programmatic execution, `execute_app()` returns an `ApplicationRunResult`
