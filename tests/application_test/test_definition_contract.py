@@ -11,7 +11,7 @@ def write(path: Path, content: str) -> Path:
     return path
 
 
-BASE = "name: demo\nagent_runtime: smolagents\ndescription: Demo\nworkflow: Run the task.\n"
+BASE = "name: demo\nagent_runtime: smolagents\ndescription: Demo\ntask: Run the task.\n"
 SCHEMA = """input_schema:
   type: object
   properties:
@@ -23,7 +23,6 @@ SCHEMA = """input_schema:
 """
 
 
-@pytest.mark.parametrize("suffix", [".yaml", ".md"])
 @pytest.mark.parametrize(
     "body,key",
     [
@@ -32,29 +31,26 @@ SCHEMA = """input_schema:
         (BASE + "defaults: &d {timeout: 1, timeout: 2}\noptions: {<<: *d}\n", "timeout"),
     ],
 )
-def test_duplicate_keys_rejected_with_source(tmp_path, suffix, body, key):
-    path = write(tmp_path / f"agent{suffix}", f"```yaml\n{body}```\nWorkflow" if suffix == ".md" else body)
+def test_duplicate_keys_rejected_with_source(tmp_path, body, key):
+    path = write(tmp_path / "agent.yaml", body)
     with pytest.raises(ValueError, match=f"Duplicate YAML mapping key: {key!r}"):
         load_agent_definition(path)
 
 
-def test_merge_defaults_and_markdown_workflow_are_preserved(tmp_path):
+def test_merge_defaults_in_yaml_are_preserved(tmp_path):
     path = write(
-        tmp_path / "agent.md",
-        """```yaml
+        tmp_path / "agent.yaml",
+        """
 name: demo
 description: Demo
 defaults: &defaults {timeout: 2, retries: 3}
 options: {<<: *defaults, timeout: 4}
-workflow: discarded
-```
-
-The actual Markdown workflow.
+task: Inspect the YAML merge result.
 """,
     )
     parsed = load_agent_definition(path)
     assert parsed["options"] == {"timeout": 4, "retries": 3}
-    assert parsed["workflow"] == "The actual Markdown workflow."
+    assert parsed["task"] == "Inspect the YAML merge result."
 
 
 def test_worker_dot_paths_are_relative_to_definition_source(tmp_path):
@@ -103,6 +99,26 @@ def project_config(root):
         "model:\n  default_model_type: test\n  test: {model: openai/test, adapter: openai_chat, api_key: hidden-key}\n  summary: {model: openai/test, adapter: openai_chat}\n",
     )
     return load_project_config(root)
+
+
+def test_agent_yaml_task_without_system_prompt_is_valid(tmp_path):
+    project_config(tmp_path)
+    path = write(
+        tmp_path / "applications/demo/workflows/root.yaml",
+        "name: demo\nagent_runtime: smolagents\ndescription: Demo\ntask: Inspect this repository.\n",
+    )
+
+    assert validate_agent_definition(tmp_path, str(path), load_agent_definition(path)) == []
+
+
+def test_markdown_file_is_not_an_agent_definition(tmp_path):
+    path = write(
+        tmp_path / "applications/demo/workflows/legacy.md",
+        "```yaml\nname: legacy\nagent_runtime: smolagents\ndescription: Legacy\ntask: Read this.\n```\n",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported file format"):
+        load_agent_definition(path)
 
 
 def test_effective_values_sources_and_secret_projection_are_independent(tmp_path):
@@ -245,17 +261,17 @@ def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(t
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/nested/demo"
-    path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: child.md}]\n")
-    worker = write(path.parent / "worker_agents/child.md", "```yaml\n" + BASE + SCHEMA + "```\nOriginal task.\n")
+    path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
+    worker = write(path.parent / "worker_agents/child.yaml", BASE.replace("Run the task.", "Original task.") + SCHEMA)
     app_config = write(app / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\n')
     first = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
-    worker.write_text("```yaml\n" + BASE + SCHEMA + "```\nEdited task.\n")
+    worker.write_text(BASE.replace("Run the task.", "Edited task.") + SCHEMA)
     app_config.write_text('runtime_options: {todo_mode: "off"}\n')
     second = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
     first_worker = first["_worker_definitions"][str(worker)]
     second_worker = second["_worker_definitions"][str(worker)]
-    assert first_worker["workflow"] == "Original task."
-    assert second_worker["workflow"] == "Edited task."
+    assert first_worker["task"] == "Original task."
+    assert second_worker["task"] == "Edited task."
     assert first_worker["_effective_agent_config_snapshot"].values["runtime_options"]["todo_mode"] == "on"
     assert second_worker["_effective_agent_config_snapshot"].values["runtime_options"]["todo_mode"] == "off"
 
@@ -426,21 +442,36 @@ def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
 
     class DefinitionTool:
         def __init__(self, config, **kwargs):
-            self.workflow = config["workflow"]
+            self.task = config["task"]
+            self.instructions = config["_resolved_system_prompt"]
 
         def agent_as_tool(self):
             def work():
-                return self.workflow
+                return self.task, self.instructions
 
             return work
 
-    path = write(tmp_path / "worker.yaml", BASE)
+    prompt = write(tmp_path / "prompts/instructions.md", "Original instructions.")
+    path = write(
+        tmp_path / "worker.yaml",
+        BASE + "system_prompt:\n  path: prompts/instructions.md\n",
+    )
     first = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
-    write(path, BASE.replace("Run the task.", "Use new definition."))
+    write(prompt, "Edited instructions.")
+    write(
+        path,
+        BASE.replace("Run the task.", "Use new definition.")
+        + "system_prompt:\n  path: prompts/instructions.md\n",
+    )
     second = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
-    assert first() == "Run the task."
-    assert second() == "Use new definition."
+    assert first() == ("Run the task.", "Original instructions.")
+    assert second() == ("Use new definition.", "Edited instructions.")
     assert first is not second
+    with pytest.raises(ValueError, match="source YAML path"):
+        YamlAgentFactory.create_agent_as_tool(
+            {"name": "orphan", "task": "Inspect.", "system_prompt": {"path": "prompt.md"}},
+            agent_class=DefinitionTool,
+        )
 
 
 def test_worker_resolution_rejects_symlink_escape_and_allows_absolute_file(tmp_path):
@@ -695,8 +726,7 @@ def test_public_connection_urls_never_expose_authentication(tmp_path):
 
 
 @pytest.mark.parametrize("target", ["supervisor", "worker"])
-@pytest.mark.parametrize("suffix", [".yaml", ".md"])
-def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monkeypatch, target, suffix):
+def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monkeypatch, target):
     from types import SimpleNamespace
 
     import agentloom.app.runner as runner
@@ -707,15 +737,15 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     from agentloom.app.studio.query_service import StudioQueryService
 
     base = project_config(tmp_path)
-    path = tmp_path / f"applications/demo/workflows/root{suffix}"
-    worker = path.parent / f"worker_agents/child{suffix}"
+    path = tmp_path / "applications/demo/workflows/root.yaml"
+    worker = path.parent / "worker_agents/child.yaml"
     removed = "tools_mapping: {Claude: {Read: read_file}}\n"
-    supervisor_text = BASE + f"worker_agents: [{{path: child{suffix}}}]\n"
+    supervisor_text = BASE + "worker_agents: [{path: child.yaml}]\n"
     worker_text = BASE + SCHEMA
     for role, source, body in (("supervisor", path, supervisor_text), ("worker", worker, worker_text)):
         if role == target:
             body += removed
-        write(source, f"```yaml\n{body}```\nRun the task.\n" if source.suffix == ".md" else body)
+        write(source, body)
 
     message = "Configuration error: tools_mapping was removed; Skills do not grant tools"
     invalid_path = path if target == "supervisor" else worker
@@ -754,32 +784,6 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
         agent._validate_config()
     assert str(runtime_error.value) == message
 
-    monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
-    monkeypatch.setattr(runner, "get_config", lambda: base)
-    monkeypatch.setattr(runner, "generate_runtime_id", lambda *args: pytest.fail("allocated a Run for a removed field"))
-    events = []
-    with pytest.raises(ValueError, match="tools_mapping was removed"):
-        runner.execute_app(path, event_sink=events.append)
-    assert not (tmp_path / ".agentloom").exists()
-    assert len(events) == 1 and events[0].event == "run.rejected"
-
-
-def test_removed_fields_in_markdown_supervisor_reject_before_run(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    import agentloom.app.runner as runner
-    from agentloom.app.definition import prepare_application_definition
-
-    base = project_config(tmp_path)
-    path = write(
-        tmp_path / "applications/demo/workflows/root.md",
-        "```yaml\n" + BASE + "tools_mapping: {}\n```\nRun the task.\n",
-    )
-    definition = load_agent_definition(path)
-    errors = validate_agent_definition(tmp_path, str(path), definition)
-    assert any("tools_mapping was removed" in error for error in errors)
-    with pytest.raises(ValueError, match="tools_mapping was removed"):
-        prepare_application_definition(tmp_path, path, definition, base_config=base)
     monkeypatch.setattr(runner, "C", SimpleNamespace(agent_root=tmp_path))
     monkeypatch.setattr(runner, "get_config", lambda: base)
     monkeypatch.setattr(runner, "generate_runtime_id", lambda *args: pytest.fail("allocated a Run for a removed field"))

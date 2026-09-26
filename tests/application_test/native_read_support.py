@@ -169,7 +169,7 @@ def write_application(root: Path, name: str, profile: str, scenario: str, *, smo
     config = {
         "name": name,
         "description": "Native read governance acceptance",
-        "workflow": f"Call {'read_file' if smol else 'native_read'} with {'file_path' if smol else 'path'}={str(path)!r} exactly once. Return the complete receipt text on success or the refusal/error label. Do not infer file contents.",
+        "task": f"Call {'read_file' if smol else 'native_read'} with {'file_path' if smol else 'path'}={str(path)!r} exactly once. Return the complete receipt text on success or the refusal/error label. Do not infer file contents.",
         "agent_runtime": "smolagents" if smol else "native-read-acceptance",
         "model_type": profile,
         "tools": [{"name": "read_file"}] if smol else [],

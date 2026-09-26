@@ -15,8 +15,7 @@ name: report_agent
 agent_runtime: smolagents
 description: Build a concise report.
 model_type: powerful
-workflow: |
-  Ask for the report topic, collect the required facts, and return a concise report.
+task: Build a concise report from the supplied topic and facts.
 """
 REPORT_AGENT_PATH = "applications/reports/workflows/report_agent.yaml"
 
@@ -777,7 +776,7 @@ def test_validation_reports_missing_required_agent_fields(tmp_path: Path) -> Non
 
     assert result["valid"] is False
     assert "description" in result["errors"][0]
-    assert "workflow" in result["errors"][0]
+    assert "task" in result["errors"][0]
 
 
 def test_validation_rejects_numeric_description_before_runtime(tmp_path: Path) -> None:
@@ -788,7 +787,7 @@ def test_validation_rejects_numeric_description_before_runtime(tmp_path: Path) -
         "name: broken\n"
         "agent_runtime: smolagents\n"
         "description: 123\n"
-        "workflow: do the task\n",
+        "task: do the task\n",
     )
 
     result = _validate_draft(service)
@@ -837,7 +836,7 @@ def test_draft_validation_rejects_an_invalid_existing_worker_definition(tmp_path
 name: broken_worker
 agent_runtime: smolagents
 description: invalid worker
-workflow: do the task
+task: do the task
 runtime_options: {max_steps: true}
 """,
         encoding="utf-8",
@@ -851,7 +850,7 @@ runtime_options: {max_steps: true}
 name: supervisor
 agent_runtime: smolagents
 description: delegate
-workflow: delegate the task
+task: delegate the task
 worker_agents:
   - path: broken_worker.yaml
 """,
@@ -894,7 +893,7 @@ def test_draft_validation_rejects_invalid_staged_referenced_worker_definition(
 name: supervisor
 agent_runtime: smolagents
 description: delegate
-workflow: delegate the task
+task: delegate the task
 worker_agents:
   - path: staged_worker.yaml
 """,
@@ -906,7 +905,7 @@ worker_agents:
 name: staged_worker
 agent_runtime: smolagents
 description: staged worker
-workflow: do the task
+task: do the task
 """
         + worker_schema,
     )

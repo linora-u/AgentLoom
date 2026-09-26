@@ -118,11 +118,12 @@ def project(root: Path, url: str):
     model = {"model": "openai/fixture-model", "adapter": "openai_chat", "base_url": url,
              "api_key": "fixture-secret", "temperature": 0.25, "context_window": 8192,
              "max_output_tokens": 100, "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000,
+             "supports_structured_output": True,
              "extra_headers": {"X-Fixture": "selected-profile"}}
     (root / "config/llm.yaml").write_text(yaml.safe_dump({"model": {"default_model_type": "test", "test": model, "summary": model}}))
     app = root / "applications/pi/workflows/root.yaml"
     app.parent.mkdir(parents=True)
-    app.write_text("name: pi\nagent_runtime: pi\ndescription: Answer directly.\nworkflow: Say Pi answer.\ntools: []\ntoolsets: []\n")
+    app.write_text("name: pi\nagent_runtime: pi\ndescription: Answer directly.\nsystem_prompt: Say Pi answer.\ntask: Answer the configured request.\ntools: []\ntoolsets: []\n")
     return app
 
 
@@ -144,7 +145,10 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
         message["role"] == "system" and "Say Pi answer." in message["content"]
         for message in messages
     )
-    assert not any(message["role"] == "user" for message in messages)
+    assert any(
+        message["role"] == "user" and "Answer the configured request." in json.dumps(message["content"])
+        for message in messages
+    )
     assert headers["X-Fixture"] == "selected-profile"
     assert "todo_write" not in json.dumps(payload)
     assert "final_answer" not in json.dumps(payload)
@@ -251,8 +255,14 @@ def test_structured_output_uses_native_wire_and_validates_json(
             change_model(tmp_path, adapter="openai_responses")
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
+        change_model(tmp_path, supports_structured_output=False)
+        with bind_config(load_project_config(tmp_path)), pytest.raises(
+            (ValueError, RuntimeError), match="supports_structured_output"
+        ):
+            execute_app(app, file_logging=False)
 
     assert result.run.manifest_path.is_file()
+    assert len(requests) == 1
     path, payload, _ = requests[0]
     assert path == expected_path
     if responses:

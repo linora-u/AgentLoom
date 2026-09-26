@@ -165,6 +165,7 @@ class DummyAgent(base_agent_module.RoleDrivenAgent):
     def __init__(self, *args, **kwargs):
         config = dict(kwargs.pop("config", None) or {})
         config.setdefault("agent_runtime", "smolagents")
+        config.setdefault("task", "configured runtime task")
         super().__init__(*args, config=config, **kwargs)
 
     def _role_profile(self) -> base_agent_module.AgentRoleProfile:
@@ -211,6 +212,13 @@ def _make_review_agent(*, logger=None) -> DummyAgent:
     )
 
 
+def _run_configured_task(agent: DummyAgent, configured_task: str, **kwargs):
+    """Give a runtime-focused fixture its YAML task before invoking the public API."""
+    with agent._cached_runtime_run_lock:
+        agent._config["task"] = configured_task
+        return agent.run(**kwargs)
+
+
 def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
     runtime = RecordingAgentRuntime("reported-result")
@@ -218,7 +226,7 @@ def test_role_driven_agent_reports_to_application_lifecycle(monkeypatch):
     monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    result = agent.run(
+    result = _run_configured_task(agent,
         "application task",
         task_id="task-1",
         application_lifecycle=lifecycle,
@@ -249,7 +257,7 @@ def test_role_driven_agent_delegates_one_run_to_the_invocation_module(monkeypatc
 
     monkeypatch.setattr(invocation_module, "AgentInvocation", RecordingInvocation)
 
-    assert agent.run("delegated task", task_id="task-invocation") == "invocation-result"
+    assert _run_configured_task(agent, "delegated task", task_id="task-invocation") == "invocation-result"
     assert len(observed) == 1
     owner, arguments = observed[0]
     assert owner is agent
@@ -264,7 +272,7 @@ def test_invocation_uses_runtime_neutral_request(monkeypatch):
     monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    result = agent.run(
+    result = _run_configured_task(agent,
         "runtime-neutral task",
         task_id="task-runtime-neutral",
         additional_args={"scope": "contract"},
@@ -273,7 +281,7 @@ def test_invocation_uses_runtime_neutral_request(monkeypatch):
     assert result == "runtime-result"
     assert len(runtime.requests) == 1
     request = runtime.requests[0]
-    assert request.task == "runtime-neutral task"
+    assert request.task == 'runtime-neutral task\n\nInput data (JSON):\n{"scope":"contract"}'
     assert request.task_id == "task-runtime-neutral"
     assert request.run_id
     assert request.requirements == RuntimeRequirements(
@@ -283,7 +291,7 @@ def test_invocation_uses_runtime_neutral_request(monkeypatch):
     assert callable(request.event_sink)
     assert request.continue_session is False
     assert request.record_task is False
-    assert dict(request.additional_args) == {"scope": "contract"}
+    assert dict(request.additional_args) == {}
 
 
 def test_invocation_populates_runtime_context_identity_and_real_requirements(
@@ -307,7 +315,7 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
     )
 
     with bind_run_context(context):
-        result = agent.run(
+        result = _run_configured_task(agent,
             "runtime-neutral task",
             task_id="agent-local-task",
             run_id="worker-local-run",
@@ -354,6 +362,38 @@ def test_subtask_runtime_projects_owned_subagent_lifecycle_events() -> None:
     } == {("application", "canonical-task", "canonical-run")}
 
 
+def test_worker_recovery_uses_configured_input_when_memory_projection_changes(
+    tmp_path, monkeypatch
+):
+    from agentloom.execution.checkpoint import CheckpointManager
+    from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
+
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="first-run")
+    coordinator = CheckpointCoordinator(manager, "task-memory-worker", "delegate")
+    monkeypatch.setattr(CheckpointCoordinator, "current", staticmethod(lambda: coordinator))
+    runtime = RecordingAgentRuntime("worker answer")
+    worker = base_agent_module.SubTaskTrackedAgent(runtime, "worker")
+
+    first = worker.run(AgentRuntimeRequest(
+        task="memory snapshot A\n\nRead the configured file.",
+        recovery_task_input="Read the configured file.",
+    ))
+    assert first.output == "worker answer"
+    checkpoint = manager.load_worker_checkpoint("task-memory-worker", "worker", call_index=0)
+    assert checkpoint["task_input"] == "Read the configured file."
+    manager.close()
+
+    manager = CheckpointManager("supervisor", checkpoints_root=tmp_path, run_id="second-run")
+    coordinator = CheckpointCoordinator(manager, "task-memory-worker", "delegate", resume=True)
+    resumed = worker.run(AgentRuntimeRequest(
+        task="memory snapshot B\n\nRead the configured file.",
+        recovery_task_input="Read the configured file.",
+    ))
+    assert resumed.output == "worker answer"
+    assert len(runtime.requests) == 1
+    manager.close()
+
+
 def test_standalone_checkpoint_failure_still_deactivates_coordinator(
     tmp_path,
     monkeypatch,
@@ -375,7 +415,7 @@ def test_standalone_checkpoint_failure_still_deactivates_coordinator(
     )
 
     with pytest.raises(OSError, match="checkpoint write failed"):
-        agent.run(
+        _run_configured_task(agent,
             "standalone task",
             task_id="task-checkpoint-failure",
             checkpoint_manager=manager,
@@ -394,7 +434,7 @@ def test_standalone_base_exception_is_persisted_as_failure(tmp_path, monkeypatch
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     with pytest.raises(SystemExit, match="runtime exited"):
-        agent.run(
+        _run_configured_task(agent,
             "standalone task",
             task_id="task-system-exit",
             checkpoint_manager=manager,
@@ -453,7 +493,7 @@ def test_manual_review_policy_never_enters_run_end_reviewer(monkeypatch):
         lambda **kwargs: calls.append(kwargs),
     )
 
-    assert agent.run("top-level") == "main-result"
+    assert _run_configured_task(agent, "top-level") == "main-result"
     assert calls == []
 
 
@@ -475,7 +515,7 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
         config={
             "name": "definition_agent",
             "description": "Complete neutral definition.",
-            "workflow": "Use the proof tool.",
+            "system_prompt": "Use the proof tool.",
             "runtime_options": {
                 "prompt_template_path": "prompts/custom.yaml", "planning_interval": 3,
                 "smart_summary": False, "todo_mode": "on", "max_steps": 11,
@@ -545,8 +585,8 @@ def test_each_invocation_builds_and_closes_a_fresh_runtime(monkeypatch):
     monkeypatch.setattr(agent, "build_runtime", build_runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    assert agent.run("first") == "run-1"
-    assert agent.run("second") == "run-2"
+    assert _run_configured_task(agent, "first") == "run-1"
+    assert _run_configured_task(agent, "second") == "run-2"
     assert len(runtimes) == 2
     assert runtimes[0] is not runtimes[1]
     assert [runtime.close_calls for runtime in runtimes] == [1, 1]
@@ -565,7 +605,7 @@ def test_task_created_is_emitted_once_through_runtime_request(monkeypatch):
 
     _append_hook_handler(agent, HookEvent.TASK_CREATED, record)
 
-    assert agent.run("one task", task_id="task-created") == "done"
+    assert _run_configured_task(agent, "one task", task_id="task-created") == "done"
     assert events == [HookEvent.TASK_CREATED]
     assert [request.task for request in runtime.requests] == ["one task"]
 
@@ -595,7 +635,7 @@ def test_base_run_emits_task_complete_on_success(monkeypatch):
 
     _append_hook_handler(agent, HookEvent.TASK_COMPLETED, _record)
 
-    result = agent.run("do work", task_id="task-complete")
+    result = _run_configured_task(agent, "do work", task_id="task-complete")
 
     assert result == "ok"
     assert any(event is HookEvent.TASK_COMPLETED for event, *_ in events)
@@ -643,7 +683,7 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
     _append_hook_handler(agent, HookEvent.SESSION_START, _record)
     _append_hook_handler(agent, HookEvent.SESSION_END, _record)
 
-    assert agent.run("top-level") == "ok"
+    assert _run_configured_task(agent, "top-level") == "ok"
     first_root = snapshot_roots[0]
     assert first_root
     assert events.count(HookEvent.SESSION_START) == 1
@@ -652,7 +692,7 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
 
     events.clear()
     snapshot_roots.clear()
-    assert agent.run("same-instance-second-run") == "ok"
+    assert _run_configured_task(agent, "same-instance-second-run") == "ok"
     assert snapshot_roots[0] != first_root
     assert events.count(HookEvent.SESSION_START) == 1
     assert events.count(HookEvent.SESSION_END) == 1
@@ -660,7 +700,7 @@ def test_base_run_binds_root_before_memory_snapshot_and_only_owner_emits_session
     events.clear()
     snapshot_roots.clear()
     with bind_root_run("supervisor-root"):
-        assert agent.run("nested-worker") == "ok"
+        assert _run_configured_task(agent, "nested-worker") == "ok"
         assert get_current_session_run_id() == "supervisor-root"
 
     assert snapshot_roots == ["supervisor-root"]
@@ -757,7 +797,7 @@ def test_base_run_uses_runner_supplied_run_id_for_root_lifecycle(monkeypatch):
         lambda tasks: observed.append(capture_explicit_execution_context()) or tasks,
     )
 
-    assert agent.run("top-level", task_id="task-1", run_id="run-from-runner") == "ok"
+    assert _run_configured_task(agent, "top-level", task_id="task-1", run_id="run-from-runner") == "ok"
     assert observed[0].root_run_id == "run-from-runner"
     assert observed[0].local_run_id == "run-from-runner"
 
@@ -776,7 +816,7 @@ def test_base_run_releases_owned_root_after_failure(monkeypatch):
         lambda tasks: snapshot_roots.append(require_root_run_id()) or tasks,
     )
     with pytest.raises(RuntimeError, match="boom-root"):
-        agent.run("top-level-failure")
+        _run_configured_task(agent, "top-level-failure")
 
     assert len(snapshot_roots) == 1
     assert snapshot_roots[0]
@@ -797,7 +837,7 @@ def test_runtime_close_failure_does_not_replace_run_failure(monkeypatch):
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     with pytest.raises(RuntimeError) as captured:
-        agent.run("top-level-failure")
+        _run_configured_task(agent, "top-level-failure")
 
     assert captured.value is run_error
     assert runtime_agent.close_calls == 1
@@ -830,7 +870,7 @@ def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch
     monkeypatch.setattr(agent, "_emit_session_lifecycle_event", _capture_session)
     monkeypatch.setattr(reviewer, "review_finished_run", _capture_review)
 
-    assert agent.run("top-level") == "ok"
+    assert _run_configured_task(agent, "top-level") == "ok"
     assert [item[0] for item in order] == [
         HookEvent.SESSION_START.value,
         HookEvent.SESSION_END.value,
@@ -841,7 +881,7 @@ def test_root_memory_review_runs_after_session_end_inside_owned_root(monkeypatch
 
     order.clear()
     with bind_root_run("supervisor-root"):
-        assert agent.run("nested-worker") == "ok"
+        assert _run_configured_task(agent, "nested-worker") == "ok"
     assert order == []
 
 
@@ -866,7 +906,7 @@ def test_memory_review_failure_does_not_change_root_run_result(monkeypatch):
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("review failed")),
     )
 
-    assert agent.run("top-level") == "main-result"
+    assert _run_configured_task(agent, "top-level") == "main-result"
     assert session_events == [HookEvent.SESSION_START, HookEvent.SESSION_END]
 
 
@@ -894,7 +934,7 @@ def test_disabled_self_learning_never_enters_completed_run_review(monkeypatch):
         lambda **kwargs: review_calls.append(kwargs),
     )
 
-    assert agent.run("top-level") == "main-result"
+    assert _run_configured_task(agent, "top-level") == "main-result"
     assert review_calls == []
 
 
@@ -920,7 +960,7 @@ def test_failed_root_records_session_end_without_running_memory_review(monkeypat
     )
 
     with pytest.raises(RuntimeError, match="main failed"):
-        agent.run("top-level")
+        _run_configured_task(agent, "top-level")
 
     assert session_events == [HookEvent.SESSION_START, HookEvent.SESSION_END]
 
@@ -955,7 +995,7 @@ def test_max_steps_root_is_a_failure_and_never_runs_memory_review(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="max_steps_error"):
-        agent.run("top-level")
+        _run_configured_task(agent, "top-level")
 
     assert HookEvent.TASK_COMPLETED not in task_events
     assert HookEvent.STOP_FAILURE in task_events
@@ -1297,7 +1337,7 @@ def test_successful_root_review_waits_for_session_end_recorder_commit(monkeypatc
 
     monkeypatch.setattr(reviewer, "review_finished_run", _capture_review)
 
-    assert agent.run("top-level") == "main-result"
+    assert _run_configured_task(agent, "top-level") == "main-result"
     # Let a timed-out daemon recorder finish before tmp-path cleanup when the
     # regression fails, so the test never leaks a background database write.
     assert recorder_committed.wait(timeout=2)
@@ -1345,7 +1385,7 @@ def test_custom_session_end_telemetry_cannot_disable_persisted_review(monkeypatc
     )
     monkeypatch.setattr(reviewer, "review_finished_run", _capture_review)
 
-    assert agent.run("top-level") == "main-result"
+    assert _run_configured_task(agent, "top-level") == "main-result"
     assert len(reviewed_roots) == 1
 
 
@@ -1391,7 +1431,7 @@ def test_session_end_persistence_failure_never_builds_completed_run_review(
         lambda _model_type: pytest.fail("incomplete root resolved a review model"),
     )
 
-    assert agent.run("top-level") == "main-result"
+    assert _run_configured_task(agent, "top-level") == "main-result"
     assert len(failed_root_ids) == 1
     assert len(review_calls) == 1
 
@@ -1451,7 +1491,7 @@ def test_custom_session_end_telemetry_cannot_create_orphan_review_audit(
         source="test:forged_shared_telemetry",
     )
 
-    assert agent.run("top-level") == "main-result"
+    assert _run_configured_task(agent, "top-level") == "main-result"
     assert len(failed_root_ids) == 1
 
     root_run_id = failed_root_ids[0]
@@ -1524,7 +1564,7 @@ def test_same_base_agent_concurrent_top_level_runs_do_not_cross_context(monkeypa
     set_current_task_id("wrong-global-task")
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {label: pool.submit(agent.run, label, task_id=f"task-{label}") for label in ("A", "B")}
+            futures = {label: pool.submit(_run_configured_task, agent, label, task_id=f"task-{label}") for label in ("A", "B")}
             assert {label: future.result() for label, future in futures.items()} == {
                 "A": "A",
                 "B": "B",
@@ -1822,8 +1862,8 @@ def test_each_run_rebinds_message_sink_for_fresh_runtime(monkeypatch):
         lambda context: HookResult(user_message=context.local_run_id),
     )
 
-    assert agent.run("first") == "ok"
-    assert agent.run("second") == "ok"
+    assert _run_configured_task(agent, "first") == "ok"
+    assert _run_configured_task(agent, "second") == "ok"
 
     assert len(delivered) == 2
     assert delivered[0] != delivered[1]
@@ -1879,10 +1919,10 @@ def test_same_base_agent_serializes_fresh_runtime_runs(monkeypatch):
 
     def _run_second():
         second_attempted.set()
-        return agent.run("B", task_id="task-B")
+        return _run_configured_task(agent, "B", task_id="task-B")
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(agent.run, "A", task_id="task-A")
+        first = pool.submit(_run_configured_task, agent, "A", task_id="task-A")
         assert first_entered.wait(timeout=5)
         second = pool.submit(_run_second)
         assert second_attempted.wait(timeout=5)
@@ -1926,7 +1966,7 @@ def test_base_run_executes_transformed_tasks_sequentially_with_reset_false(tmp_p
     )
     monkeypatch.setattr(agent, "_transform_tasks", lambda _task: ["first task", "second task", "third task"])
 
-    result = agent.run("do work", task_id="multi-workflow")
+    result = _run_configured_task(agent, "do work", task_id="multi-workflow")
 
     assert result == "final-result"
     assert build_calls == [runtime_agent]
@@ -1990,7 +2030,7 @@ def test_invocation_collects_ordered_runtime_events_without_sink_duplicates(
         lambda _task: ["first task", "second task"],
     )
 
-    assert agent.run(
+    assert _run_configured_task(agent,
         "do work",
         task_id="event-task",
         application_lifecycle=lifecycle,
@@ -2018,7 +2058,7 @@ def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
         config={
             "name": "goal-runtime",
             "description": "Finish all work.",
-            "workflow": "Implement and verify.",
+            "system_prompt": "Implement and verify.",
             "goal": {"enabled": True},
         },
         model_binding=_model_binding(),
@@ -2036,7 +2076,7 @@ def test_goal_mode_continues_after_normal_final_until_update_goal(monkeypatch):
     monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    result = agent.run("Add Goal mode", task_id="goal-task")
+    result = _run_configured_task(agent, "Add Goal mode", task_id="goal-task")
 
     assert result == "segment-2"
     assert len(runtime.requests) == 2
@@ -2055,7 +2095,7 @@ def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
         config={
             "name": "goal-runtime",
             "description": "Finish all work.",
-            "workflow": "Implement and verify.",
+            "system_prompt": "Implement and verify.",
             "goal": True,
         },
         model_binding=_model_binding(),
@@ -2072,18 +2112,19 @@ def test_goal_mode_treats_max_steps_as_continuation_boundary(monkeypatch):
     monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    assert agent.run("Add Goal mode", task_id="goal-task") == "done"
+    assert _run_configured_task(agent, "Add Goal mode", task_id="goal-task") == "done"
     assert len(runtime.requests) == 2
 
 
-def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatch):
+def test_goal_mode_does_not_synthesize_a_final_reply_from_evidence(monkeypatch):
+    from agentloom.execution.agent_runtime import AgentRuntimeError, OutputContract
     from agentloom.execution.goal import get_current_goal_provider
 
     agent = DummyGoalAgent(
         config={
             "name": "goal-runtime",
             "description": "Finish all work.",
-            "workflow": "Implement and verify.",
+            "system_prompt": "Implement and verify.",
             "goal": True,
         },
         model_binding=_model_binding(),
@@ -2093,14 +2134,33 @@ def test_goal_mode_uses_evidence_when_max_steps_final_delivery_failed(monkeypatc
         get_current_goal_provider(required=True).complete("durable evidence")
         return AgentRuntimeResult(
             state="max_steps_error",
-            output="Error in generating final LLM output: Goal is already complete",
+            output=None,
         )
 
     runtime = RecordingAgentRuntime(side_effect=_run)
     monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    assert agent.run("Add Goal mode", task_id="goal-task") == "durable evidence"
+    assert _run_configured_task(agent, "Add Goal mode", task_id="goal-task") is None
+
+    constrained = DummyGoalAgent(
+        config={
+            "name": "goal-with-output-schema",
+            "description": "Finish all work.",
+            "goal": True,
+            "output_schema": {"type": "string"},
+        },
+        model_binding=_model_binding(),
+        logger=DummyLoggerBackend(),
+    )
+    constrained._normalized = SimpleNamespace(
+        output_contract=OutputContract("goal_output", {"type": "string"}),
+    )
+    monkeypatch.setattr(constrained, "build_runtime", lambda: RecordingAgentRuntime(side_effect=_run))
+    monkeypatch.setattr(constrained, "_inject_memory_snapshot", lambda tasks: tasks)
+    with pytest.raises(AgentRuntimeError) as error:
+        _run_configured_task(constrained, "Add Goal mode", task_id="goal-with-schema")
+    assert error.value.category == "output_validation"
 
 
 def test_goal_mode_ignores_legacy_budget_and_continues_until_completed(monkeypatch):
@@ -2110,7 +2170,7 @@ def test_goal_mode_ignores_legacy_budget_and_continues_until_completed(monkeypat
         config={
             "name": "goal-runtime",
             "description": "Finish all work.",
-            "workflow": "Implement and verify.",
+            "system_prompt": "Implement and verify.",
             "goal": {"enabled": True, "token_budget": 100},
         },
         model_binding=_model_binding(),
@@ -2126,12 +2186,12 @@ def test_goal_mode_ignores_legacy_budget_and_continues_until_completed(monkeypat
     monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
     monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    assert agent.run("Add Goal mode", task_id="goal-task") == "ordinary final"
+    assert _run_configured_task(agent, "Add Goal mode", task_id="goal-task") == "ordinary final"
     assert len(runtime.requests) == 2
     assert "budget" not in runtime.requests[1].task.lower()
 
 
-def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
+def test_goal_resume_keeps_committed_item_index_during_runtime_checkpoint(
     tmp_path,
     monkeypatch,
 ):
@@ -2141,33 +2201,47 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
     config = {
         "name": "goal-runtime",
         "description": "Finish all work.",
-        "workflow": "Implement and verify.",
+        "system_prompt": "Implement and verify.",
         "goal": True,
     }
-    manager = CheckpointManager("goal-runtime", checkpoints_root=tmp_path)
+    manager = CheckpointManager(
+        "goal-runtime", checkpoints_root=tmp_path, run_id="goal-checkpoint-run",
+    )
     first_agent = DummyGoalAgent(
         config=config,
         model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    def _commit_then_interrupt(_request: AgentRuntimeRequest) -> AgentRuntimeResult:
-        get_current_goal_provider(required=True).complete("delivered; tests passed")
-        raise KeyboardInterrupt("crash after completion commit")
+    calls = 0
 
-    first_runtime = RecordingAgentRuntime(side_effect=_commit_then_interrupt)
+    def _commit_first_then_interrupt_second(request: AgentRuntimeRequest) -> AgentRuntimeResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            get_current_goal_provider(required=True).complete("first phase verified")
+            return AgentRuntimeResult(
+                state="success", output="first answer", checkpoint=first_runtime.snapshot(),
+            )
+        assert request.task == "Verify the second phase"
+        assert request.checkpoint_sink is not None
+        request.checkpoint_sink(first_runtime.snapshot())
+        raise KeyboardInterrupt("crash in second phase")
+
+    first_runtime = RecordingAgentRuntime(side_effect=_commit_first_then_interrupt_second)
     monkeypatch.setattr(first_agent, "build_runtime", lambda: first_runtime)
     monkeypatch.setattr(first_agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
     with pytest.raises(KeyboardInterrupt):
-        first_agent.run(
-            "Add Goal mode",
+        _run_configured_task(first_agent,
+            ["Add Goal mode", "Verify the second phase"],
             task_id="goal-complete-crash",
             checkpoint_manager=manager,
         )
 
     persisted = manager.load_goal("goal-complete-crash")
-    assert persisted["status"] == "complete"
-    assert persisted["evidence"] == "delivered; tests passed"
+    assert persisted["status"] == "active"
+    assert persisted["phase_index"] == 1
+    assert manager.load_supervisor_checkpoint("goal-complete-crash")["task_item_next_index"] == 1
 
     resumed_agent = DummyGoalAgent(
         config={
@@ -2177,19 +2251,26 @@ def test_goal_mode_resume_after_completion_commit_does_not_restart_work(
         model_binding=_model_binding(),
         logger=DummyLoggerBackend(),
     )
-    resumed_runtime = RecordingAgentRuntime()
+    def _checkpoint_resumed_phase(request: AgentRuntimeRequest) -> AgentRuntimeResult:
+        assert request.task == "Verify the second phase"
+        assert request.checkpoint_sink is not None
+        request.checkpoint_sink(resumed_runtime.snapshot())
+        assert manager.load_supervisor_checkpoint("goal-complete-crash")["task_item_next_index"] == 1
+        raise KeyboardInterrupt("stop after resumed checkpoint")
+
+    resumed_runtime = RecordingAgentRuntime(side_effect=_checkpoint_resumed_phase)
     monkeypatch.setattr(resumed_agent, "build_runtime", lambda: resumed_runtime)
     monkeypatch.setattr(resumed_agent, "_inject_memory_snapshot", lambda tasks: tasks)
 
-    result = resumed_agent.run(
-        "Add Goal mode",
-        task_id="goal-complete-crash",
-        checkpoint_manager=manager,
-        resume=True,
-    )
+    with pytest.raises(KeyboardInterrupt, match="stop after resumed checkpoint"):
+        _run_configured_task(resumed_agent,
+            ["Add Goal mode", "Verify the second phase"],
+            task_id="goal-complete-crash",
+            checkpoint_manager=manager,
+            resume=True,
+        )
 
-    assert result == "delivered; tests passed"
-    assert resumed_runtime.requests == []
+    assert len(resumed_runtime.requests) == 1
     assert manager.load_goal("goal-complete-crash")["goal_id"] == persisted["goal_id"]
 
 
@@ -2198,7 +2279,7 @@ def test_goal_tools_are_absent_when_goal_mode_is_disabled(monkeypatch, goal):
     config = {
         "name": "goal-runtime",
         "description": "Finish all work.",
-        "workflow": "Implement and verify.",
+        "system_prompt": "Implement and verify.",
         "runtime_options": {"todo_mode": "off"},
     }
     if goal is not None:
@@ -2218,7 +2299,7 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
         config={
             "name": "goal-runtime",
             "description": "Finish all work.",
-            "workflow": "Implement and verify.",
+            "system_prompt": "Implement and verify.",
             "goal": True,
             "runtime_options": {"todo_mode": "off"},
         },
@@ -2268,7 +2349,7 @@ def test_base_run_emits_task_fail_on_exception(monkeypatch):
     _append_hook_handler(agent, HookEvent.STOP_FAILURE, _record)
 
     with pytest.raises(RuntimeError, match="boom-run"):
-        agent.run("do work", task_id="task-fail")
+        _run_configured_task(agent, "do work", task_id="task-fail")
 
     assert any(event is HookEvent.STOP_FAILURE for event, *_ in events)
     fail_event = next(item for item in events if item[0] is HookEvent.STOP_FAILURE)

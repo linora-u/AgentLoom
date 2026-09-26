@@ -34,7 +34,7 @@ def _worker_definition(
     *,
     name: str,
     runtime: str,
-    workflow: str,
+    task: str,
     input_schema: dict | None = None,
     output_schema: dict | None = None,
 ) -> dict:
@@ -43,7 +43,7 @@ def _worker_definition(
         "agent_runtime": runtime,
         "model_type": "worker",
         "description": f"Execute the {name} contract.",
-        "workflow": workflow,
+        "task": task,
         "tools": [],
         "toolsets": [],
     }
@@ -90,7 +90,7 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
 
         if not messages:
             return [
-                ("simple-call", "simple_text", {"task": "simple request"}),
+                ("simple-call", "simple_text", {}),
                 (
                     "object-call",
                     "typed_object",
@@ -100,7 +100,7 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
                         "labels": ["alpha", "beta"],
                     },
                 ),
-                ("array-call", "structured_array", {"task": "array request"}),
+                ("array-call", "structured_array", {}),
             ]
         joined = "\n".join(message["content"] for message in messages)
         assert "SIMPLE-TEXT-517" in joined
@@ -117,7 +117,7 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
             worker=runtime,
         )
         root = yaml.safe_load(workflow.read_text())
-        root["workflow"] = "Delegate each contract exactly once, then return their values."
+        root["task"] = "Delegate each contract exactly once, then return their values."
         root["worker_agents"] = [
             {"path": "simple.yaml"},
             {"path": "object.yaml"},
@@ -156,7 +156,7 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
             _worker_definition(
                 name="simple_text",
                 runtime=runtime,
-                workflow="Return the supplied task as a plain text token.",
+                task="For this simple request, return SIMPLE-TEXT-517 as plain text.",
             ),
         )
         write_yaml(
@@ -164,7 +164,7 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
             _worker_definition(
                 name="typed_object",
                 runtime=runtime,
-                workflow="Return a structured object preserving all typed inputs.",
+                task="Return a structured object preserving all typed inputs.",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -186,7 +186,7 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
             _worker_definition(
                 name="structured_array",
                 runtime=runtime,
-                workflow="Return the requested result as a structured array.",
+                task="For this array request, return the requested result as a structured array.",
                 output_schema={
                     "type": "array",
                     "items": {"type": "string"},
@@ -217,12 +217,8 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
         tool["function"]["name"]: tool["function"]["parameters"]
         for tool in supervisor_request.get("tools", [])
     }
-    assert tools["simple_text"]["properties"] == {
-        "task": {
-            "type": "string",
-            "description": "Task for this Agent.",
-        }
-    }
+    assert tools["simple_text"]["properties"] == {}
+    assert tools["structured_array"]["properties"] == {}
     assert tools["typed_object"]["properties"]["count"]["type"] == "integer"
     assert tools["typed_object"]["properties"]["enabled"]["type"] == "boolean"
     assert tools["typed_object"]["properties"]["labels"]["type"] == "array"
@@ -251,7 +247,7 @@ def test_invalid_subagent_output_becomes_an_output_validation_tool_record(
             return _structured_finish(request, {"findings": [3]})
 
         if not messages:
-            return [("invalid-call", "invalid_structured", {"task": "inspect"})]
+            return [("invalid-call", "invalid_structured", {})]
         assert "invalid structured output" in messages[-1]["content"].lower()
         return finish(request, "Handled invalid Worker output")
 
@@ -263,14 +259,14 @@ def test_invalid_subagent_output_becomes_an_output_validation_tool_record(
             worker=worker_runtime,
         )
         root = yaml.safe_load(workflow.read_text())
-        root["workflow"] = "Call the Worker once and handle its contract failure."
+        root["task"] = "Call the Worker once and handle its contract failure."
         root["worker_agents"] = [{"path": "invalid.yaml"}]
         write_yaml(workflow, root)
 
         worker = _worker_definition(
             name="invalid_structured",
             runtime=worker_runtime,
-            workflow="Return findings that satisfy the output contract.",
+            task="Return findings that satisfy the output contract.",
             output_schema={
                 "type": "object",
                 "properties": {
