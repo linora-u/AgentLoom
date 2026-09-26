@@ -7,12 +7,16 @@ import re
 from agentloom.execution.context_engine.runtime import get_active_context_engine
 
 _DURABLE_REF = re.compile(r"^ctx_[0-9a-f]{32}$")
-_MAX_PAGE_BYTES = 65536
 
 
 def _retrieve_durable(ref: str, query: str, offset: int, limit: int) -> str:
     from agentloom.execution import SecureDirectory, get_current_run_context
-    from agentloom.execution.observability import RunTrace, TraceStorageError
+    from agentloom.execution.observability import (
+        MAX_DURABLE_CONTEXT_PAGE_BYTES,
+        RunTrace,
+        TraceStorageError,
+        get_current_trace_recorder,
+    )
     from agentloom.execution.trace import capture_explicit_execution_context
 
     context = get_current_run_context()
@@ -39,7 +43,12 @@ def _retrieve_durable(ref: str, query: str, offset: int, limit: int) -> str:
                     f"total_bytes={page.total_bytes} next_offset={page.next_offset if page.next_offset is not None else 'none'}]\n"
                     + "\n".join(f"byte_offset={position} {excerpt}" for position, excerpt in page.matches)
                 )
-            page_limit = min(limit or _MAX_PAGE_BYTES, _MAX_PAGE_BYTES)
+            recorder = get_current_trace_recorder()
+            budget_limit = (
+                recorder.context_page_byte_limit()
+                if recorder is not None else MAX_DURABLE_CONTEXT_PAGE_BYTES
+            )
+            page_limit = min(limit or MAX_DURABLE_CONTEXT_PAGE_BYTES, budget_limit)
             page = trace.read_page(ref, offset=offset, limit=page_limit)
             data = page.data
             while data:
@@ -78,9 +87,10 @@ def loom_retrieve_context(
             refs. Repeat the same offset to reread a page; use ``next_offset``
             from the result to continue.
         limit: For durable refs, maximum bytes or search matches per call;
-            omitted or ``0`` reads up to 65536 bytes when not searching. For older
-            refs, maximum lines; omitted selects 200 and ``0`` returns all
-            remaining lines.
+            omitted or ``0`` reads up to 65536 bytes when not searching, further
+            bounded by the receiving model's input budget. For older refs,
+            maximum lines; omitted selects 200 and ``0`` returns all remaining
+            lines.
 
     Returns:
         Retained content or search excerpts with a continuation offset.

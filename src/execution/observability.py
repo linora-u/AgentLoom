@@ -35,6 +35,7 @@ _TRACE_REF_RE = re.compile(r"^(?:payload_[0-9a-f]{32}|ctx_[0-9a-f]{32})$")
 _CONTEXT_REF_RE = re.compile(r"\[ContextRef (ctx_[0-9a-f]{32})\b")
 _RUN_DIR_RE = re.compile(r"^run_[A-Za-z0-9_-]+$")
 _VERIFY_CHUNK_BYTES = 1024 * 1024
+MAX_DURABLE_CONTEXT_PAGE_BYTES = 65536
 
 
 def _utf8_chunks(pieces: Iterable[str]) -> Iterator[bytes]:
@@ -133,6 +134,17 @@ class TraceRecorder:
         )
         return reference
 
+    def context_page_byte_limit(self) -> int:
+        """Reserve model input space while keeping durable retrieval bounded."""
+
+        execution = capture_explicit_execution_context()
+        input_limit = self._model_input_limits.get(execution.local_run_id or "")
+        if input_limit is None:
+            return MAX_DURABLE_CONTEXT_PAGE_BYTES
+        # One byte can cost one token; leave at least half the input budget and
+        # enough room for the page header and surrounding conversation.
+        return max(4, min(MAX_DURABLE_CONTEXT_PAGE_BYTES, input_limit // 2 - 256))
+
     def project_tool_result(self, text: str, *, tool_name: str, source: str, call_id: str) -> str:
         """Make a durable, bounded Model projection for a large text result."""
 
@@ -165,7 +177,8 @@ class TraceRecorder:
             raise TraceStorageError(f"Could not persist large Tool result for {call_id}: {exc}") from exc
         heading = (
             f"[ContextRef {reference} source={tool_name} size_bytes={size}]\n"
-            f'Use loom_retrieve_context(ref="{reference}") to read up to 65536 bytes. '
+            f'Use loom_retrieve_context(ref="{reference}") to read up to '
+            f'{self.context_page_byte_limit()} bytes. '
             "If next_offset is not none, pass offset=next_offset to read the next page.\n\n"
         )
         preview = safe_text[:max(1, preview_limit)]
