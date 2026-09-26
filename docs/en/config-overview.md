@@ -10,7 +10,7 @@ The configuration of AgentLoom is primarily divided into three major categories,
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **Global system configuration**. Controls tools, workspace policy, permissions, and runtime storage. |
 | `llm.yaml` | `config/llm.yaml` | **Global model configuration**. Every model type explicitly selects a wire adapter and independently configures its model name, credentials, endpoint, and request parameters. |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, runtime, workflow, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, runtime, required task, optional system prompt, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
 | *Application-level system configuration* | `applications/<app>/config/system.yaml` | **Optional application-level override**. Used to override default system behaviors for specific applications (e.g., modifying tool access control or replacing default tools). |
 
 > For more information, refer to:
@@ -44,7 +44,7 @@ The system first locates the project root directory (`agent_root`) and loads `co
 When loading an Agent YAML, the system automatically searches upward for its parent `applications/<app>` directory. If a `config/system.yaml` exists in that application directory, it is deep-merged on top of the global configuration.
 
 #### Level 3: Agent-level Override
-In addition to defining its own workflow, a single Agent's YAML file can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
+In addition to defining its task and optional system prompt, an Agent YAML can override selected system configurations. The whitelisted fields that support override (`_WORKFLOW_OVERLAY_KEYS`) are:
 - `system`, `runtime_options`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`.
 
 `context_engine` is intentionally small. It is enabled by the task runtime and uses the task-scoped checkpoint context store; normal overrides should only tune:

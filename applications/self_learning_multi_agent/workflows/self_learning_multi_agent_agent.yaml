@@ -22,7 +22,7 @@ worker_agents:
   - path: "applications/self_learning_multi_agent/workflows/worker_agents/skill_packager.yaml"
   - path: "applications/self_learning_multi_agent/workflows/worker_agents/artifact_auditor.yaml"
 
-workflow: |
+task: |
   # Self-Learning Multi-Agent Functional Validation
 
   Execute a real multi-worker validation of the self-learning foundation. This

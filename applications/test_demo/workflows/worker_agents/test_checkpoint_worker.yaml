@@ -6,10 +6,11 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a file processing worker."
+task: |
   # File Processor Worker
 
-  You are a file processing worker. Follow the query instructions exactly.
+  Follow the query instructions exactly.
   Read the specified input files, merge their content, and write the output with write_file.
 
 input_schema:

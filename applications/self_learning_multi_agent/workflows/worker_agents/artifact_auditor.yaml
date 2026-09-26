@@ -26,7 +26,7 @@ input_schema:
   required:
   - query
   additionalProperties: false
-workflow: |
+task: |
   # Artifact Auditor Worker
 
   Parse `query`, verify durable artifacts and proposal isolation, and return JSON

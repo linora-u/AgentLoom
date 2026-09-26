@@ -4,7 +4,7 @@ description: "Validate shell_tool exit code semantic interpretation (grep no-mat
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Shell Exit Code Semantics Validation
 
   Execute ALL steps below. Report PASS/FAIL for each.

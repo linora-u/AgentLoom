@@ -34,8 +34,8 @@ Application Studio 可以修改这份契约、展示 Diff、为副作用请求�
 ### Worker 会成为类型化工具
 
 Supervisor 通过 `worker_agents` 显式选择 Worker；每个被选中的 Worker 会自动成为
-以自身 `name` 和 `description` 命名、说明的可调用 Tool。简单 Worker 默认使用
-`task: string` 输入与文本输出；复杂 Worker 使用 Draft 2020-12
+以自身 `name` 和 `description` 命名、说明的可调用 Tool。简单 Worker 的 Tool 无参数，
+任务来自自己的 YAML `task`，默认返回文本；复杂 Worker 使用 Draft 2020-12
 `input_schema` / `output_schema` 声明由 Runtime 真正执行的结构化契约。
 
 ### Run 产出证据，不靠解析终端猜状态
@@ -191,7 +191,7 @@ worker_agents:
   - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
   - path: "applications/release_review/workflows/worker_agents/test_reviewer.yaml"
 
-workflow: |
+task: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
 
 tools: []
@@ -201,8 +201,8 @@ goal:
   enabled: true
 ```
 
-每个 Worker 声明 Supervisor 看到的接口。省略两个 schema 时使用默认
-`task: string` 输入与文本输出；只有真实需要类型化 JSON 时才声明：
+每个 Worker 声明 Supervisor 看到的接口。省略两个 schema 时 Tool 无参数，
+Worker 执行自己的 YAML `task` 并返回文本；只有真实需要类型化 JSON 时才声明：
 
 ```yaml
 name: "api_reviewer"
@@ -232,7 +232,7 @@ output_schema:
   required: [decision, findings]
   additionalProperties: false
 
-workflow: |
+task: |
   Review the request, cite evidence, and return prioritized findings.
 
 tools: []

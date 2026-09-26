@@ -10,7 +10,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: |
   # Universal Code Review Workflow (Standard Operating Procedure)
 
   ## Overview
@@ -150,6 +150,11 @@ workflow: |
   - `report_integration` — reads ALL prior reports, produces the unified final report.
 
   **Success criteria**: `QA_FinalReport.md` is complete, traceable, and actionable.
+
+task: |
+  Review the project available in this Application. Call get_module_context() to
+  determine the target files, then coordinate the configured Worker stages and
+  deliver the evidence-backed final code review report.
 
 tools:
   - name: "get_module_context"

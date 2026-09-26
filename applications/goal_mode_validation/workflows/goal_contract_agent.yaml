@@ -8,7 +8,7 @@ runtime_options:
 goal:
   enabled: true
 
-workflow: |
+task: |
   Call run_goal_audit_batch for worker_name=contract, concurrency=1, and one task
   config_contract covering strict config, stable goal_id, and native prompt semantics;
   retain its completed result.

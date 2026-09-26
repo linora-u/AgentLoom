@@ -15,7 +15,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Multi-Agent Checkpoint Test
 
   Execute ALL steps below IN ORDER. Each step MUST complete before

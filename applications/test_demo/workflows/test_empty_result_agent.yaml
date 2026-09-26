@@ -4,7 +4,7 @@ description: "Validate empty result protection — tools returning no output get
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Empty Result Protection Validation
 
   Execute ALL steps below. Report PASS or FAIL for each.

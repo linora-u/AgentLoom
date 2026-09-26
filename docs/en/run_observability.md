@@ -1,6 +1,6 @@
 # Structured Run API and Observability
 
-Use the structured interface when another program must track an AgentLoom run reliably. It provides one immutable run receipt, typed post-allocation failures, and a versioned lifecycle-event stream. `run_app()` remains the string-returning compatibility API.
+Use the structured interface when another program must track an AgentLoom run reliably. It provides one immutable run receipt, typed post-allocation failures, and a versioned lifecycle-event stream. `run_app()` returns the Agent's final JSON-compatible value without a receipt.
 
 ## Python API
 
@@ -10,7 +10,6 @@ from agentloom.app.runner import execute_app
 events = []
 result = execute_app(
     "applications/example/workflows/supervisor.yaml",
-    task_override="Summarize the repository",
     event_sink=events.append,
 )
 
@@ -19,7 +18,7 @@ print(result.run.run_id, result.run.manifest_path, result.run.log_path)
 print([event.event for event in events])
 ```
 
-`execute_app(...) -> ApplicationRunResult` accepts the same `resume_task_id`, `task_override`, and `file_logging` options as `run_app()`, plus a synchronous `event_sink`. The result contains `output`, `started_at`, `ended_at`, optional structured `goal`, and a `RunInfo` receipt with `application_id`, `task_id`, `run_id`, `run_dir`, `manifest_path`, and `log_path`.
+The Agent's user task comes from its YAML `task` field. `execute_app(...) -> ApplicationRunResult` accepts the same `resume_task_id` and `file_logging` options as `run_app()`, plus a synchronous `event_sink`. The result contains `output`, `started_at`, `ended_at`, optional structured `goal`, and a `RunInfo` receipt with `application_id`, `task_id`, `run_id`, `run_dir`, `manifest_path`, and `log_path`.
 
 Preflight configuration rejection happens before storage is allocated: the original configuration exception is raised and the sink receives one `run.rejected` event with a typed `RunRejection`; it has no `run` receipt. Once allocation succeeds, the sink receives `run.started` followed by exactly one terminal event:
 

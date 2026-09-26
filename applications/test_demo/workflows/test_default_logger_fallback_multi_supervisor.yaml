@@ -7,7 +7,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Multi-Agent Default Logger Fallback Demo
   目标：验证未显式传 logger 时，主 agent 与子 agent 都可以正常运行并打印日志。
 

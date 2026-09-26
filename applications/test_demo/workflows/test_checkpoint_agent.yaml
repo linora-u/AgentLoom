@@ -27,7 +27,7 @@ runtime_options:
   max_steps: 12
   smart_summary: false
 
-workflow: |
+task: |
   # Checkpoint Resume Test Workflow
 
   Invoke tools through their native structured schemas, in this order:

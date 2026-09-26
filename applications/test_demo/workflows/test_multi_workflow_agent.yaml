@@ -8,7 +8,7 @@ runtime_options:
   max_steps: 3
   smart_summary: false
 
-workflow: |
+task: |
   # Multi-stage workflow
 
   Complete both instructions in one Agent run:

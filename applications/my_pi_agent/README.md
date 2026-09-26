@@ -1,9 +1,8 @@
 # my_pi_agent
 
-一个单 Agent Pi Application，用于阅读 AgentLoom 项目文档并回答通过 `--task`
-传入的问题。
+一个单 Agent Pi Application，用于阅读 AgentLoom 项目文档并回答 YAML 中配置的问题。
 
-- 输入：`--task` 中的问题文本。
+- 输入：Agent YAML 的 `task` 字段；长期行为写在 `system_prompt`。
 - 输出：Agent 的文本回答。
 - 分工：只有一个 Supervisor；使用 Pi 原生 `read` 读取相关文档，不调用 Worker，
   也不会修改文件。
@@ -19,8 +18,7 @@
 运行：
 
 ```bash
-.venv/bin/loom run applications/my_pi_agent/workflows/my_pi_agent_agent.yaml \
-  --task "解释一下 AgentLoom 的 Application 是什么"
+.venv/bin/loom run applications/my_pi_agent/workflows/my_pi_agent_agent.yaml
 ```
 
 定义校验：

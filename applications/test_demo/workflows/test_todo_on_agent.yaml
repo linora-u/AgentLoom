@@ -9,7 +9,7 @@ runtime_options:
   smart_summary: false
 
 
-workflow: |
+task: |
   This is an acceptance run for the system-defined execution-state tracking
   policy. Follow that policy and do not skip its required initial tracking call.
 

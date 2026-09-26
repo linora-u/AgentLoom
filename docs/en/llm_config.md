@@ -184,6 +184,7 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 |------|------|--------|------|------|
 | `adapter` | `str` | — | ❗ **Required** | Wire protocol: `openai_chat`, `openai_responses`, or `anthropic_messages`. Missing and unknown values fail at configuration load |
 | `model` | `str` | — | ❗ **Required** | Opaque model name passed to LiteLLM. AgentLoom does not infer the adapter from its content or prefix. Missing values fail at configuration load |
+| `supports_structured_output` | `bool` | `false` | ❌ No | Set to `true` only when this Pi model/provider supports native JSON Schema response format. A Pi Agent with `output_schema` fails before its model call unless this is `true`; smolagents uses its terminal Tool contract instead. |
 | `base_url` | `str` | `""` | ❌ No | API gateway address. Configure independently for each model type. **Note: field name is `base_url`, not `api_base`** |
 | `api_key` | `str` | `""` | ❌ No | API authentication key. Configure independently for each model type |
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ No | Human-readable model description. Used in logs and documentation |

@@ -7,7 +7,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Shell Session Isolation Test
   我们的目标是验证主 agent (你) 和子 agent (shell_session_worker) 的 shell session 完全隔离：
   - CWD 会在同一个 agent 的多次 shell_tool 调用之间保持。

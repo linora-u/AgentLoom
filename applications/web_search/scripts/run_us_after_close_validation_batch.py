@@ -48,13 +48,6 @@ DEFAULT_NOWS_UTC = [
     "2026-07-02T11:00:00Z",
 ]
 
-TASK = """
-按 workflow 的搜索优先工具流生成一次报告：先取市场时间，再做最低搜索矩阵，并按 workflow 继续补充搜索/抽取直到证据足够。
-最低搜索矩阵是硬前置：即使第一轮 MarketDiscovery 已经搜到榜单，也必须先完成第二轮 DriverDiscovery batch_search；第一次 extract 之前必须已经有两次有效 batch_search。
-不要为了省搜索调用牺牲准确性；但 extract 是高成本全文阅读，必须遵守 workflow 的 extra_search_round/extract_count 上限，达到停止条件或计数上限后立刻写报告。
-不要使用 workflow 禁止的工具。最终 final_answer 只回复报告路径。
-"""
-
 
 def _context(now_utc: str) -> dict[str, object]:
     return json.loads(get_market_time_context(now_utc))
@@ -444,8 +437,6 @@ def _run_one(
         "agentloom.__main__",
         "run",
         WORKFLOW,
-        "--task",
-        TASK,
         "--output-format",
         "jsonl",
     ]

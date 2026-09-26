@@ -239,7 +239,7 @@ mcp_servers: "my_app/config/.mcp.json"
 tools:
   - name: "read_file"
 
-workflow: |
+task: |
   You have access to web_search from MCP.
   Use mcp__MiniMax__web_search to search for information.
 

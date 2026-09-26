@@ -8,15 +8,11 @@
 > 关于 `config/system.yaml`，请参阅 [系统配置文档](system_config.md)。
 > 关于 `config/llm.yaml`，请参阅 [LLM 配置文档](llm_config.md)。
 
-Agent YAML 是 AgentLoom 框架中**定义单个 Agent 行为**的配置文件，控制 Agent 的角色描述、工作流指令、可用工具、模型选择、执行环境、技能包等。Agent 分为 **Supervisor**（多 Agent 编排者）和 **Worker**（具体任务执行者）两种角色。
+Agent YAML 定义单个 Agent 的可选长期指令、必填用户任务、工具、模型和 Skill。Agent 分为 **Supervisor**（多 Agent 编排者）和 **Worker**（具体任务执行者）两种角色。
 Agent 运行时通过必填的 `agent_runtime` 选择；当前注册值为
 `smolagents` 和 `pi`。所有 Tool 均通过模型原生结构化 tool call 调用。
 
-两种角色都支持 `.yaml`、`.yml` 和 `.md` 定义。Markdown 在 `yaml` 围栏代码块中
-声明配置，代码块外非空正文成为 `workflow`。Application Studio 的目录、详情、
-校验及 schedule 目标均支持顶层或嵌套 Application/workflow 目录中的 Markdown
-Supervisor，并复用执行入口的定义读取器。Worker 仍通过 Supervisor 引用呈现；
-非法 Markdown、重复 YAML key 等错误使用相同校验诊断。读取这些视图不会启动 Run 或模型。
+两种角色只使用 `.yaml` 或 `.yml` 定义。Markdown 可作为 `system_prompt.path` 指向的提示词正文，不能直接作为 Agent 定义。Application Studio、CLI、Schedule 和 Python 入口读取同一份 YAML 任务。
 
 > ⚠️ **LLM 配置隔离**：Agent YAML 中的 `model`/`llm`/`langfuse` 会被自动过滤并输出 warning。LLM 参数只能在 `config/llm.yaml` 中定义，Agent 通过 `model_type` 字段选择使用哪个预定义模型类型。
 
@@ -85,7 +81,7 @@ name: "my_check_agent"
 agent_runtime: "smolagents"
 description: |
   作为代码检查监督智能体，你的核心职责是...
-workflow: |
+task: |
   # My Check Workflow
   ## 步骤
   1. 调用 get_module_context 获取上下文
@@ -125,7 +121,7 @@ skills:
 name: "project_scan"
 agent_runtime: "smolagents"
 description: "项目结构扫描智能体"
-workflow: |
+task: |
   你是一个资深工程师，负责...
   ## 输出要求
   - A. 文件清单与角色归类
@@ -184,18 +180,17 @@ Supervisor 和 Worker 共有 4 个必填字段：
 | `name` | `str` | 非空字符串 | Agent 唯一标识符。Worker 中同时作为导出工具的函数名 |
 | `agent_runtime` | `str` | 必须是已注册值：`smolagents` / `pi` | 选择完整 Agent runtime。缺失或未知值在预检阶段失败 |
 | `description` | `str` | 非空字符串 | Agent 能力元数据；作为 Subagent Tool 说明，但绝不作为本轮输入 |
-| `workflow` | `str` | 非空字符串 | Agent system instructions。Markdown 与 Mermaid 都是普通文本。详见下方 [书写规范](#workflow-书写规范与建议) |
+| `task` | `str` / `list[str]` | 非空字符串或非空字符串列表 | 用户任务；列表逐项发送到同一个 Agent 会话 |
 
-#### `description` 与 `workflow` 的分工
+#### `description`、`system_prompt` 与 `task` 的分工
 
 | 字段 | 职责 | 写什么 | 不写什么 |
 |------|------|--------|----------|
 | `description` | **角色定位**（一两句话） | "作为 XX 智能体，你的核心职责是 YY" | 不写详细流程、不写具体步骤 |
-| `workflow` | **完整执行指令** | 背景、职责、流程图、各阶段说明、输出要求 | 不重复 description 已说的角色定位 |
+| `system_prompt` | **可选长期指令** | 角色、规则、工作方式；直写或 `{path: prompts/role.md}` | 本次任务 |
+| `task` | **必填用户任务** | 一条任务或按顺序执行的任务列表 | 工具输入参数 |
 
-`workflow` 只通过 Runtime instructions 通道发送一次。本轮 task 是独立的 user
-message；没有 task 时，AgentLoom 不会从 `description` 伪造输入。多阶段行为应写在
-指令文本或显式编排中。YAML list 非法，也不会暗中改变运行次数。
+`system_prompt` 进入 Runtime 的 system / instructions 通道；不配置时使用 runtime 默认行为。`task` 进入 user 通道；列表中的后一项在前一项完成后才发送，沿用同一 Agent 会话。CLI 和 Python 入口不接受额外任务文字。
 
 #### Goal Mode（仅 Supervisor）
 
@@ -207,16 +202,15 @@ goal:
 也可使用 `goal: true` / `goal: false`。Mapping 必须显式包含布尔 `enabled`。
 旧 `token_budget` 字段静默忽略。Worker YAML 不允许出现任何 `goal` key。
 
-Goal 开启时仍以单个 workflow 字符串作为 instructions，并保持 runtime task 独立。
+Goal 开启时，`task` 列表的每一项分别进入 Goal 模式，沿用同一 Agent 会话。
 普通 final 与 `max_steps` 只结束一个 continuation segment；根 Supervisor 必须调用
 `update_goal(complete, evidence)` 才会
 完成。普通模型用量仍保留在运行时审计中。配置、状态、恢复和可观测性详见
 [Goal Mode](goal_mode.md)。
 
-#### Workflow 书写规范与建议
+#### Prompt 与任务书写规范
 
-`workflow` 是 Agent 可复用的 system instructions；本轮 task 始终是独立 user
-input。一个结构清晰的 workflow 能显著提升 Agent 的执行质量。
+可复用的角色和约束写进 `system_prompt`；要执行的请求写进 `task`。两者都可以包含普通 Markdown 与 Mermaid 文本。
 
 **推荐结构（五段式）**：
 
@@ -230,7 +224,7 @@ input。一个结构清晰的 workflow 能显著提升 Agent 的执行质量。
 
 **① 背景与角色**
 
-在 workflow 开头建立专业上下文，让 LLM "进入角色"。角色越具体，输出的专业性越强。
+在 `system_prompt` 中建立专业上下文，让 LLM 理解角色；本次目标写在 `task` 中。
 
 **示例**：
 
@@ -337,7 +331,7 @@ flowchart TD
 #### 综合模板
 
 ````yaml
-workflow: |
+task: |
   # [任务名称]
 
   ## 背景
@@ -385,8 +379,8 @@ workflow: |
 
 #### 书写注意事项
 
-- **YAML 格式**：使用单个 `workflow: |` scalar 保留换行和缩进；list 非法。
-- **避免硬编码路径**：不要在 workflow 中写死文件路径，应通过工具（如 `get_module_context`）动态获取
+- **YAML 格式**：长任务可用 `task: |` 保留换行；`task: [第一项, 第二项]` 表示同一会话中依次发送两条用户消息。
+- **避免硬编码路径**：不要在长期指令中写死运行时文件路径，应通过工具（如 `get_module_context`）动态获取
 - **关键规则加粗**：对 LLM 必须遵守的规则使用 `**加粗**` 突出
 - **编号保证顺序**：多步骤流程使用编号列表（`1. 2. 3.`），不要用无序列表
 - **推断须标注**：要求 LLM 对不确定的内容标注【推断】，避免幻觉混入结论
@@ -424,7 +418,7 @@ workflow: |
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `input_schema` | Draft 2020-12 object schema | `{task: string}` | Worker Tool 参数。详见 [第 5 节](#5-worker-导出为可调用工具) |
+| `input_schema` | Draft 2020-12 object schema | 空参数对象 | Worker Tool 调用数据。详见 [第 5 节](#5-worker-导出为可调用工具) |
 | `output_schema` | Draft 2020-12 schema | 文本输出 | 可选的可执行 Agent 结果契约；允许任意 JSON 根类型 |
 
 > ⚠️ **Worker 配置隔离**：Worker 的最终生效配置来自全局 / 应用配置叠加，再加上 **Worker 自己的 YAML**。它**不会**继承调用它的 Supervisor 的权限覆盖项。如果 Worker 需要额外的文件系统或 Shell 权限，必须在 Worker YAML 中重复声明相应的白名单覆盖（例如 `tool_access_control.path_validation`）。
@@ -574,7 +568,7 @@ agent_runtime: "smolagents"
 model_type: "powerful"
 concurrency: auto          # 自动计算并发度
 
-workflow: |
+task: |
   ...
 ```
 
@@ -773,7 +767,7 @@ tools = YamlAgentFactory.create_agent_as_tool(
 
 **返回值说明**：
 - Tool 像普通 Python 函数一样调用，参数保持 `input_schema` 声明的 JSON 类型；
-  省略时接受必填 `task: string`。
+  省略时无参数。Worker 的任务始终来自它自己的 YAML `task`。
 - 未配置 `output_schema` 时返回文本；配置后返回经过校验的原生 JSON 值，不做字符串强转。
 - 每次调用都会创建全新的 Worker owner 与 Runtime，只复用模型配置等安全绑定。
 
@@ -781,7 +775,7 @@ tools = YamlAgentFactory.create_agent_as_tool(
 
 | 原则 | 说明 | 示例 |
 |------|------|------|
-| **① 懒加载单例** | Agent 工具只在首次调用时初始化，后续复用同一实例 | 全局变量 `_tool = None` + getter 函数 |
+| **① 复用工具定义** | 可缓存 Tool 包装函数；每次调用仍创建独立 Worker 会话 | 全局变量 `_tool = None` + getter 函数 |
 | **② 前后置分离** | 确定性操作（读文件、写文件、格式校验）在 Python 层完成，不浪费 LLM token | 读 index.md → Agent 分析 → 写 analysis.md |
 | **③ 错误隔离不中断** | 每个子任务用 try-except 包裹，单项失败记录错误后继续处理下一项 | `entry["error_msg"] = str(e)` |
 | **④ 立即持久化** | 每次迭代后立即写回进度文件，进程崩溃后可从断点恢复 | `_save_progress()` 在每次循环末尾调用 |
@@ -818,7 +812,7 @@ def analyze_with_context(file_path: str) -> str:
     """
     logger = get_logger(__name__)
 
-    # create_agent_as_tool 内置缓存，同一 YAML 只创建一次
+    # 可复用包装函数；每次调用会创建新的 Worker 会话
     tool = YamlAgentFactory.create_agent_as_tool(_AGENT_YAML)
     if tool is None:
         raise RuntimeError(f"Failed to create agent tool from {_AGENT_YAML}")
@@ -833,6 +827,7 @@ def analyze_with_context(file_path: str) -> str:
 
     # ── 调用 Agent（LLM 推理）──
     logger.info(f"Analyzing {file_path}")
+    # Worker YAML 须在 input_schema 中声明 content 字段
     result = tool(content=content)
 
     # ── 后置处理（确定性）──
@@ -901,7 +896,7 @@ def run_batch_analysis(progress_file: str, retry_failed: bool = False) -> str:
 
     logger = get_logger(__name__)
 
-    # create_agent_as_tool 内置缓存，同一 YAML 只创建一次
+    # 可复用包装函数；每次调用会创建新的 Worker 会话
     tool = YamlAgentFactory.create_agent_as_tool(_AGENT_YAML)
     if tool is None:
         raise RuntimeError(f"Failed to create agent tool from {_AGENT_YAML}")
@@ -919,6 +914,7 @@ def run_batch_analysis(progress_file: str, retry_failed: bool = False) -> str:
 
         try:
             # ── 调用 Agent ──
+            # Worker YAML 须在 input_schema 中声明 query 字段
             result = tool(query=entry["input"])
 
             # ── 后置处理 ──
@@ -951,7 +947,7 @@ def run_batch_analysis(progress_file: str, retry_failed: bool = False) -> str:
 name: "my_supervisor"
 agent_runtime: "smolagents"
 description: "编排多步骤分析流程"
-workflow: |
+task: |
   1. 调用 run_batch_analysis 批量分析所有子任务
   2. 根据返回的摘要判断是否需要重试
 
@@ -1022,12 +1018,12 @@ Tool。Worker 顶层 `name` 就是 Tool 名称，`description` 就是 Tool 说�
 放进目录不会授权或注册它。
 
 ```
-Supervisor → 调用 project_scan(task="检查 CAN 模块") → 新 Worker 执行 → 返回文本
+Supervisor → 调用 project_scan(target_path="CAN 模块") → 新 Worker 按 YAML task 执行 → 返回文本
 ```
 
 ### 5.2 可选 JSON Schema 契约
 
-省略两个 schema 时使用最简默认契约：一个必填 `task: string` Tool 参数和文本结果。
+省略两个 schema 时使用最简默认契约：Tool 无参数，Worker 执行 YAML `task` 并返回文本。
 只有真实需要类型化数据时才声明 Draft 2020-12 schema：
 
 ```yaml
@@ -1153,7 +1149,7 @@ worker_agents:
 |----------|------|
 | `Configuration is missing required field: name` | 添加 `name: "xxx"` |
 | `Configuration is missing required field: description` | 添加 `description: "xxx"` |
-| `workflow field must be a non-empty string` | 使用一个非空 `workflow: \|` scalar |
+| `task` 缺失或为空 | 使用非空 `task` 字符串或非空字符串列表 |
 
 ### 7.2 工具配置错误
 
@@ -1170,7 +1166,7 @@ worker_agents:
 | `worker_agents must be a list` | 改为列表格式 |
 | `uses unsupported field 'name'; use 'path' only` | 改为 `path` |
 | `does not exist` | 检查文件路径拼写 |
-| `has unsupported extension` | 使用 `.yaml`/`.yml`/`.md` |
+| `has unsupported extension` | 使用 `.yaml`/`.yml` |
 
 ### 7.4 其他错误
 
@@ -1199,7 +1195,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Repo Map 架构分析工作流
 
   ```mermaid
@@ -1242,7 +1238,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # 单目录架构分析
   基于传入的 index_content，分析代码结构，返回 Markdown 格式的架构分析文本。
   ## 分析维度
@@ -1269,7 +1265,7 @@ input_schema:
 name: "simple_reader"
 agent_runtime: "smolagents"
 description: "读取并分析指定文件内容的简单 Agent"
-workflow: |
+task: |
   1. 读取用户指定的文件
   2. 分析文件内容
   3. 输出分析结果
@@ -1277,33 +1273,20 @@ tools:
   - name: "read_file"
 ```
 
-### 8.3 Markdown (.md) 格式编写 Worker
+### 8.3 引用 Markdown 提示词正文
 
-在文件开头用 YAML 代码块写配置，剩余部分自动成为 `workflow`：
+Agent 定义仍是 YAML；普通 Markdown 文件可以作为长期指令引用：
 
-````markdown
 ```yaml
 name: "project_scan"
 agent_runtime: "smolagents"
 description: "项目结构扫描智能体"
-model_type: "powerful"
-tools:
-  - name: "read_file"
-input_schema:
-  type: object
-  properties:
-    param1:                          # 参数名自定义
-      type: string
-      description: "任务描述"
-  required: [param1]
-  additionalProperties: false
+system_prompt:
+  path: prompts/project_scan.md
+task: "扫描传入的目录并报告发现。"
 ```
 
-# 以下内容自动成为 workflow
-
-## 步骤 1：扫描文件
-...
-````
+`prompts/project_scan.md` 相对该 YAML 所在目录解析。Markdown 文件本身不能作为 Agent 定义。
 
 ---
 
@@ -1357,7 +1340,7 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 
 | 字段 | 处理方式 |
 |------|----------|
-| `name` / `description` / `workflow` | Agent 自身属性 |
+| `name` / `description` / `system_prompt` / `task` | Agent 自身属性 |
 | `tools`（`list[dict]`） | Agent 工具列表，与系统 `tools`（dict）不同 |
 | `worker_agents` / `input_schema` / `output_schema` | 角色专属契约 |
 | `skills` | 独立三层叠加加载（详见 [3.8](#38-skills--技能包配置)） |
@@ -1433,7 +1416,7 @@ shell_settings:
   allowed_operators: ["|", "&&"]
   block_destructive: true
 
-workflow: |
+task: |
   你是一个只读代码审计 Agent，只能查看文件内容，不能修改。
 ```
 
@@ -1460,7 +1443,7 @@ shell_settings:
   background_tasks:
     stall_threshold_seconds: 30     # 更快检测停滞
 
-workflow: |
+task: |
   你是一个开发 Agent，可以编写代码、运行构建和测试。
 ```
 
@@ -1478,7 +1461,7 @@ tools:
   - name: "read_file"
   - name: "grep_search"
 
-workflow: |
+task: |
   你是一个文本分析 Agent，只能读取和搜索文件。
 ```
 
@@ -1607,7 +1590,8 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `name` | ✅ | ✅ | ✅ | `str` | — |
 | `agent_runtime` | ✅ | ✅ | ✅ | `str` | 无默认；显式选择 `smolagents` / `pi` |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
-| `workflow` | ✅ | ✅ | ✅ | `str` | — |
+| `task` | ✅ | ✅ | ✅ | `str` / `list[str]` | — |
+| `system_prompt` | ❌ | ✅ | ✅ | `str` / `{path: str}` | Runtime 默认指令 |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
@@ -1620,5 +1604,5 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |
 | `runtime_options.max_consecutive_model_errors` | ❌ | ✅ | ✅ | `int` | `5` |
 | `runtime_options.max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
-| `input_schema` | ❌ | ❌ | ✅ | JSON Schema object | 默认必填 `task: string` |
+| `input_schema` | ❌ | ❌ | ✅ | JSON Schema object | 空参数对象 |
 | `output_schema` | ❌ | ✅ | ✅ | JSON Schema | 文本输出 |
