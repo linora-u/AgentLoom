@@ -119,7 +119,7 @@ const directory = process.argv[2];
 const scenario = process.argv[3];
 const calls = [];
 const model = {api: 'openai-completions', provider: 'agentloom', id: 'fixture-model'};
-const session = {agent: {streamFn: async (_model, _context, options) => {
+const session = {agent: {streamFunction: async (_model, _context, options) => {
   await options.onPayload({model: 'fixture-model', messages: [], tools: []}, model);
   if (scenario === 'transport_exception') throw new Error('fixture post-request transport exception');
   return {result: async () => ({role: 'assistant', content: [{type: 'text', text: 'provider success'}],
@@ -135,7 +135,7 @@ configureModel(session,
       throw new Error('fixture required response trace failed');
     return {method: 'model_trace', phase: payload.phase, attempt: payload.attempt, accepted: true};
   });
-const stream = await session.agent.streamFn(model, {messages: [], tools: []}, {});
+const stream = await session.agent.streamFunction(model, {messages: [], tools: []}, {});
 const result = await stream.result();
 const captured = JSON.parse(await readFile(join(directory, `model-${calls.at(-1).capture_id}.json`), 'utf8'));
 console.log(JSON.stringify({phases: calls.map(call => call.phase),

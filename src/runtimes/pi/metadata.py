@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 from agentloom.execution.agent_runtime import RuntimeCapabilities, RuntimeModelSelection
 
-SDK_VERSION = "0.79.4"
+SDK_VERSION = "0.87.1"
 BRIDGE_VERSION = 1
 CAPABILITIES = RuntimeCapabilities(
     True,
@@ -35,9 +35,10 @@ def validate_options(options: Mapping) -> None:
 
 
 def validate_model(model: RuntimeModelSelection) -> None:
-    if model.protocol not in {"openai_chat", "openai_responses"}:
+    if model.protocol not in {"openai_chat", "openai_responses", "openai_codex_responses"}:
         raise ValueError(f"Pi does not support model protocol {model.protocol!r}")
     settings = model.settings
+    codex = model.protocol == "openai_codex_responses"
     supported = {
         "model", "adapter", "api_key", "base_url", "temperature", "max_tokens",
         "max_output_tokens", "context_window", "input_token_limit", "timeout", "num_retries",
@@ -47,6 +48,8 @@ def validate_model(model: RuntimeModelSelection) -> None:
     }
     if set(settings) - supported:
         raise ValueError("Pi model profile contains unsupported settings")
+    if codex and (settings.get("api_key") or settings.get("base_url") or model.request_headers):
+        raise ValueError("Pi Codex requires Pi OAuth; API key, base URL and custom headers are unsupported")
     if settings.get("system_prompt_boundary"):
         raise ValueError("Pi does not support system_prompt_boundary")
     if type(settings.get("supports_structured_output")) is not bool:
@@ -68,10 +71,19 @@ def validate_model(model: RuntimeModelSelection) -> None:
         if not isinstance(settings.get(name), str):
             raise ValueError(f"Pi model {name} must be a string")
     extra = settings.get("extra_completion_params") or {}
-    if not isinstance(extra, Mapping) or set(extra) - {"extra_body", "tool_choice", "parallel_tool_calls", "top_p", "seed", "reasoning_effort"}:
+    if not isinstance(extra, Mapping) or set(extra) - {"extra_body", "tool_choice", "parallel_tool_calls", "top_p", "seed", "reasoning_effort", "web_search"}:
         raise ValueError("Pi model extra_completion_params contains unsupported parameters")
+    if not codex and "web_search" in extra:
+        raise ValueError("Pi native web_search requires openai_codex_responses")
     if extra.get("tool_choice", "auto") not in ("auto", "none") or type(extra.get("parallel_tool_calls", False)) is not bool:
         raise ValueError("Pi requires tool_choice auto/none and boolean parallel_tool_calls")
+    if codex:
+        if any(name in extra for name in ("extra_body", "tool_choice", "parallel_tool_calls", "top_p", "seed")):
+            raise ValueError("Pi Codex does not accept arbitrary completion overrides")
+        if extra.get("reasoning_effort", "xhigh") not in ("xhigh", "max"):
+            raise ValueError("Pi Codex reasoning_effort must be xhigh or max")
+        if extra.get("web_search", "auto") not in ("off", "auto", "required"):
+            raise ValueError("Pi Codex web_search must be off, auto or required")
     body = extra.get("extra_body") or {}
     protected = {"model", "messages", "input", "instructions", "tools", "tool_choice", "parallel_tool_calls",
                  "stream", "stream_options", "max_tokens", "max_completion_tokens", "max_output_tokens", "temperature"}

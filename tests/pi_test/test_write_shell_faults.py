@@ -42,7 +42,7 @@ for line in p.stdout:
   if ({boundary!r}=='before_dispatch' and method=='tool_dispatch') or ({boundary!r}=='before_settle' and method=='tool_settle'):
    stop(value);break
   if {boundary!r}=='missing_capture' and method=='tool_settle':
-   Path(sys.argv[-1], 'capture-'+value['payload']['outcome']['authorization_id']+'.json').unlink()
+   Path(sys.argv[-2], 'capture-'+value['payload']['outcome']['authorization_id']+'.json').unlink()
    Path({str(marker)!r}).write_text(json.dumps({{'pid':p.pid,'frame':value}}))
   if {boundary!r} in ('omitted_capture','null_capture') and method=='tool_settle':
    if {boundary!r}=='omitted_capture':value['payload'].pop('capture')

@@ -366,14 +366,12 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
 
 
 def test_shipped_llm_example_declares_adapter_for_every_model_type() -> None:
+    from agentloom.config.model_adapters import MODEL_ADAPTERS
+
     config = LLMConfig.load_from_yaml(PROJECT_ROOT / "config/llm.example.yaml")
 
     assert config.models
-    assert all(settings.adapter in {
-        "openai_chat",
-        "openai_responses",
-        "anthropic_messages",
-    } for settings in config.models.values())
+    assert all(settings.adapter in MODEL_ADAPTERS for settings in config.models.values())
 
 
 def test_smol_runtime_options_keep_explicit_layers_and_source(tmp_path):

@@ -6,7 +6,11 @@
 - 输出：Agent 的文本回答。
 - 分工：只有一个 Supervisor；使用 Pi 原生 `read` 读取相关文档，不调用 Worker，
   也不会修改文件。
-- 模型：使用项目根目录 `config/llm.yaml` 中的 `powerful` 配置。
+- 模型：使用项目根目录 `config/llm.yaml` 中的 `codex_luna` 配置，调用 Pi 的
+  `gpt-6-luna`，默认 `xhigh` 推理和 `auto` 原生搜索。先通过 Pi 登录一次。
+
+另有 `workflows/my_pi_search_agent.yaml`，选择 `codex_luna_search`，要求每次
+模型请求都完成 Pi 原生联网搜索，并把结构化来源显示为可点击链接。
 - 本应用关闭 checkpoint 和 self-learning；相关配置位于 `config/system.yaml`。
 
 其他环境首次运行前安装 Pi runtime（需要 Node.js 22.19+ 和 npm）：
@@ -28,7 +32,7 @@
   --app-root applications/my_pi_agent
 ```
 
-本工作区验证结果（2026-09-26）：定义校验通过。
-用上述问题进行真实运行，Run 状态为 `completed`；Pi 执行了 1 次 `read`，
-共 2 轮模型交互，回答引用了 `docs/cn/README.md`，未出现 DSML 伪工具调用。
-Run 记录确认 checkpoint 为关闭状态。
+本工作区的历史验证（2026-09-26，切换模型前）：定义校验通过；Pi 执行了
+1 次 `read`，共 2 轮模型交互。2026-09-27 的订阅验收使用 Pi 0.87.1 和
+`gpt-6-luna`：搜索工作流发出 1 次 `required` 请求，记录 4 次完成的原生搜索
+调用和 5 条结构化引用，答案提供可点击来源。

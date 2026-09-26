@@ -4,7 +4,7 @@ const INSTRUCTION_ONLY_TURN = "agentloom_instruction_only_turn";
 const OVERFLOW_RECOVERY_ATTEMPTED = "_overflowRecoveryAttempted";
 
 function beginInstructionOnlyTurn(session: AgentSession): void {
-  // Pi 0.79.4 normally opens a fresh overflow-recovery budget on user
+  // Pi normally opens a fresh overflow-recovery budget on user
   // message_start. Our model-invisible custom trigger is the equivalent turn
   // boundary, so mirror that one state transition in this pinned SDK adapter.
   if (!Reflect.has(session, OVERFLOW_RECOVERY_ATTEMPTED) ||
