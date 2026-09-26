@@ -21,34 +21,17 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from agentloom.app.runner import run_app
-
-
-DEFAULT_TASK = (
-    "Scrape the group-owner posts of the zsxq group "
-    "https://wx.zsxq.com/group/51111541884844 from the newest post back to "
-    "2024-01-01. Reuse the Chrome tab the user already has open. Drop comments. "
-    "Save CSV with columns 时间/内容/超链接 to the project root."
-)
+from agentloom.app.runner import run_app  # noqa: E402 - project root is added above
 
 
 def main(
-    user_request: str = DEFAULT_TASK,
     file_logging: bool | None = None,
     resume: str | None = None,
 ) -> str:
     """Run the zsxq owner-post scraper Agent."""
 
-    request = (user_request or "").strip() or DEFAULT_TASK
-    task = (
-        "User request:\n"
-        f"{request}\n\n"
-        "Follow the workflow exactly. Call browser_harness_doctor once, then "
-        "scrape_zsxq_owner_posts once with no overrides."
-    )
     result = run_app(
         "applications/browser_harness_probe/workflows/zsxq_scraper_agent.yaml",
-        task_override=task,
         file_logging=file_logging,
         resume_task_id=resume,
     )

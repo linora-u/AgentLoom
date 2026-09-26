@@ -6,7 +6,6 @@ runtime_options:
   max_steps: 8
   smart_summary: false
 toolsets: []
-skills: []
 
 tools:
   - name: "browser_harness_doctor"
