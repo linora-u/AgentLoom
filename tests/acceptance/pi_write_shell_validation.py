@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from tests.acceptance.pi_tool_validation import campaign, tool_records
 from tests.acceptance.platform_tool_validation import dump
+from agentloom.runtimes.pi.metadata import SDK_VERSION
 
 CASES = ('create', 'edit', 'overwrite', 'unread', 'excluded', 'transformed', 'stale',
          'shell_allowed', 'shell_denied', 'shell_error', 'shell_timeout', 'sandbox_required',
@@ -178,7 +179,7 @@ def child(case, workspace, profile):
     dump(workspace / 'tool-records.json', records)
     verify(case, workspace, target, original, records, entries, failed)
     dump(workspace / 'report.json', {'case': case, 'profile': profile, 'status': 'passed', 'revision': revision,
-        'dirty': dirty, 'runtime': 'pi', 'provider': 'real', 'sdk': '0.79.4', 'application_failed_as_expected': failed,
+        'dirty': dirty, 'runtime': 'pi', 'provider': 'real', 'sdk': SDK_VERSION, 'application_failed_as_expected': failed,
         'run_id': result.run.run_id if result else entries[0]['request']['identity']['run_id'],
         'journal_states': [e.get('state', 'rejected') for e in entries], 'native_records': len(entries)})
 

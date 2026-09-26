@@ -36,6 +36,10 @@ class Pending:
 
 class PiTransport:
     def __init__(self, instance_id: str):
+        # The child has a private HOME. Preserve only the path to Pi's own
+        # credential store so its SDK can read and refresh the saved login.
+        pi_agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or Path.home() / ".pi" / "agent").expanduser().resolve()
+        pi_auth_path = pi_agent_dir / "auth.json"
         env = build_subprocess_env()
         for name in list(env):
             if name.startswith(("PI_", "NODE_")):
@@ -64,7 +68,7 @@ class PiTransport:
         env.update(HOME=self._directory.name, XDG_CONFIG_HOME=self._directory.name, TMPDIR=self._directory.name)
         try:
             self.process = subprocess.Popen(
-                [node, str(entry), self._directory.name], stdin=subprocess.PIPE,
+                [node, str(entry), self._directory.name, str(pi_auth_path)], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
                 start_new_session=True, cwd=self._directory.name,
             )

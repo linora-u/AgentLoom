@@ -42,7 +42,7 @@ def edit(path: str, edits: list[dict[str, str]]):
 
 
 edit._agentloom_tool_definition = ToolDefinition(  # type: ignore[attr-defined]
-    name="edit", description="Edit a file with the official Pi SDK.", parameters={'type': 'object', 'required': ['path', 'edits'], 'properties': {'path': {'type': 'string', 'description': 'Path to the file to edit (relative or absolute)'}, 'edits': {'type': 'array', 'items': {'type': 'object', 'required': ['oldText', 'newText'], 'properties': {'oldText': {'type': 'string', 'description': 'Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.'}, 'newText': {'type': 'string', 'description': 'Replacement text for this targeted edit.'}}, 'additionalProperties': False}, 'description': 'One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.'}}, 'additionalProperties': False},
+    name="edit", description="Edit a file with the official Pi SDK.", parameters={'type': 'object', 'required': ['path', 'edits'], 'properties': {'path': {'type': 'string', 'description': 'Path to the file to edit (relative or absolute)'}, 'edits': {'type': 'array', 'items': {'type': 'object', 'required': ['oldText', 'newText'], 'properties': {'oldText': {'type': 'string', 'description': 'Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.'}, 'newText': {'type': 'string', 'description': 'Replacement text for this targeted edit.'}}}, 'description': 'One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.'}}, 'additionalProperties': False},
 )
 
 
@@ -51,5 +51,5 @@ def bash(command: str, timeout: float | None = None):
 
 
 bash._agentloom_tool_definition = ToolDefinition(  # type: ignore[attr-defined]
-    name="bash", description="Run a command with the official Pi SDK.", parameters={'type': 'object', 'required': ['command'], 'properties': {'command': {'type': 'string', 'description': 'Bash command to execute'}, 'timeout': {'type': 'number', 'description': 'Timeout in seconds (optional, no default timeout)'}}, 'additionalProperties': False},
+    name="bash", description="Run a command with the official Pi SDK.", parameters={'type': 'object', 'required': ['command'], 'properties': {'command': {'type': 'string', 'description': 'Shell command to execute'}, 'timeout': {'type': 'number', 'description': 'Timeout in seconds (optional, no default timeout)'}}, 'additionalProperties': False},
 )

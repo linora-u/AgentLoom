@@ -1,6 +1,6 @@
 # Pi runtime (tickets 07, 09, 10)
 
-This adapter runs real `@earendil-works/pi-coding-agent` **0.79.4** AgentSessions.
+This adapter runs real `@earendil-works/pi-coding-agent` **0.87.1** AgentSessions.
 Python owns Application identity, receipts, Hook Run/Stop and resource cleanup;
 Pi owns its in-memory conversation and native provider protocol. No smol model,
 Tool, Todo, final_answer implementation or message format is required.
@@ -16,7 +16,7 @@ uv run --locked loom runtime install pi
 
 This downloads the published SDK using `npm ci --ignore-scripts`, then builds
 AgentLoom's bridge and verifies its imports. `package.json` fixes the SDK at
-**0.79.4**; `package-lock.json` fixes transitive versions and integrity hashes.
+**0.87.1**; `package-lock.json` fixes transitive versions and integrity hashes.
 uv manages Python dependencies; npm installs this Node package. No SDK source
 checkout, global Pi command, or manual npm build is needed.
 
@@ -78,7 +78,7 @@ bounded display and a ContextRef when context storage is available. Select
 `loom_retrieve_context` when the agent needs to inspect those artifacts. Read
 offset/limit remain the original query boundary, not a license to reread the file.
 
-For Bash, the original **collected** stdout/stderr is preserved. SDK 0.79.4 does
+For Bash, the original **collected** stdout/stderr is preserved. The pinned SDK does
 not expose pipe EOF and may close a quiet pipe inherited by a background process.
 Its coverage is therefore `captured_stream`, completeness `unknown`, with an
 explicit limitation; exit 0 never establishes complete output or trusted memory
@@ -105,6 +105,38 @@ or protected Shell query mapping are rejected before execution.
 | `top_p`, `seed`, `reasoning_effort` | Explicit provider parameters; Responses maps reasoning effort into `reasoning.effort` |
 | `tool_choice: auto/none`, `parallel_tool_calls: false` | Compatible no-tool settings; no tool schema is emitted |
 
+For a personal ChatGPT subscription, log in once through Pi and select a Pi-only
+profile. AgentLoom passes the path to Pi's own `auth.json` into its isolated
+process; Pi reads it and refreshes OAuth credentials. The default location is
+`~/.pi/agent/auth.json`, or `PI_CODING_AGENT_DIR/auth.json` when set in the parent
+environment. Do not put a token in `llm.yaml`. A missing or expired login fails
+the Run; it never opens an interactive login or changes providers.
+
+```yaml
+model:
+  codex_luna:
+    adapter: openai_codex_responses
+    model: gpt-6-luna
+    context_window: 272000
+    max_output_tokens: 16384
+    timeout: 300
+    num_retries: 0
+    reasoning_effort: xhigh
+    web_search: auto
+```
+
+Set `model_type: codex_luna` on only the Pi Agents that should use the
+subscription. `web_search` is `off`, `auto`, or `required`. `required` requests
+Pi's native `web_search` on every Model request and fails a turn without a
+completed search call. The bridge records the completed call and structured URL
+citations in Model evidence and Run events, then appends clickable sources to a
+plain-text answer when citations exist. It does not infer citations from answer
+text. Luna reasoning defaults to `xhigh`; set `reasoning_effort: max` explicitly
+for the higher level. The Codex adapter rejects API keys, custom base URLs, and
+custom authorization headers. Pi's native function tools have optional fields;
+Codex requests mark those function schemas non-strict while AgentLoom continues
+to validate and authorize tool arguments before execution.
+
 Other protocols/settings fail explicitly. `system_prompt_boundary` is unsupported.
 Tool forcing/parallel tools are rejected. Provider error bodies are never exposed
 in public errors because they may echo credentials or prompts.
@@ -115,17 +147,19 @@ in public errors because they may echo credentials or prompts.
   checkpoint resume are enabled. Unselected tools fail immediately. Native
   grep/find/ls and optional professional writes remain unsupported; no implicit
   Markdown tools are injected.
-- No implicit built-in tools, extensions, skills, prompt templates, context files,
-  user settings, saved sessions or environment credentials are discovered.
+- No implicit local tools, extensions, skills, prompt templates, context files,
+  user settings or saved sessions are discovered. A selected Codex profile uses
+  Pi's saved OAuth credential file and its configured native web-search mode.
 - Stop uses the invocation's AgentLoom Hook Run. A block continues the same native
   in-memory session with the reason/context. `runtime_options.max_stop_attempts`
   bounds terminal-delivery attempts (default 3), including structured-output
   corrections; persistent rejection fails the Application.
 - Sequential workflow tasks may continue the current in-memory session.
-  Persisted resume restores an SDK 0.79.4 session only for the same Application,
+  Persisted resume restores an SDK 0.87.1 session only for the same Application,
   task, selected definition, bridge/state version and workspace. A resumed
   attempt uses a new Run while preserving the original call identities.
-  `additional_args` is explicitly unsupported.
+  Older Pi checkpoints are rejected; start a new Task. `additional_args` is
+  explicitly unsupported.
 - Bridge stdout contains only validated v2 frames. Application/CLI stdout follows
   its existing output contract. Cancellation, EOF, invalid frames and close settle
   pending requests and clean up the owned process group.

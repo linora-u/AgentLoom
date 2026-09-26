@@ -88,7 +88,7 @@ def campaign(destination: Path, source: Path, limit: int):
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         records = list(pool.map(run, jobs))
-    report = {"sdk": "0.79.4", "entry": "execute_app with real YAML and builtin registry",
+    report = {"sdk": "0.87.1", "entry": "execute_app with real YAML and builtin registry",
               "profile_overrides": {}, "cases": records, "passed": sum(r["passed"] for r in records), "total": len(records)}
     (destination / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
     return all(r["passed"] for r in records)

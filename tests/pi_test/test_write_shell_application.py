@@ -169,18 +169,21 @@ def test_cancelled_native_bash_reaps_managed_detached_descendants(tmp_path, faul
         assert events[-1]["event"] in {"run.interrupted", "run.failed"}
 
 
-def test_bash_without_an_exit_code_cannot_become_successful_evidence(tmp_path):
-    from agentloom.app.run import ApplicationRunError
+def test_signal_terminated_bash_is_recorded_as_error_not_successful_evidence(tmp_path):
     with model_service(turns=[[("killed-shell", "bash", {"command": "kill -KILL $$"})]]) as (url, requests):
         app = project(tmp_path, url)
         select(app, tools=[{"name": "bash"}], shell_settings={"allowed_commands": ["*"], "allowed_operators": ["*"], "sandbox": {"enabled": False}})
-        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError):
-            execute_app(app, file_logging=False)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
     entries = [json.loads(p.read_text()) for p in tmp_path.rglob("native-tools/**/*.json")]
     assert len(entries) == 1
-    assert entries[0]["state"] == "uncertain"
-    assert "record" not in entries[0]
-    assert len(requests) == 1
+    # Pi 0.87.1 reports SIGKILL as exit code 137. It is a known failed command,
+    # recorded as an error rather than successful Shell output.
+    assert entries[0]["state"] == "committed"
+    assert entries[0]["record"]["status"] == "error"
+    assert entries[0]["record"]["metadata"]["native"]["result_scope"]["source_completeness"] == "partial"
+    assert result.output == "Pi answer"
+    assert len(requests) == 2
 
 
 @pytest.mark.parametrize("scenario", ["unread", "excluded", "stale", "command_denied", "sandbox_required", "query_excluded"])

@@ -194,7 +194,7 @@ def test_incompatible_or_unaligned_recovery_stops_before_model_or_tools(tmp_path
             [(path, data)] = checkpoints(tmp_path)
             envelope = data['runtime_checkpoint']
             artifact = path.parent / 'pi/sessions' / (envelope['payload']['artifact'] + '.json')
-            if damage == 'sdk': envelope['runtime_version'] = '0.0.0'
+            if damage == 'sdk': envelope['runtime_version'] = '0.79.4'
             elif damage == 'runtime': envelope['runtime_id'] = 'smolagents'
             elif damage == 'bridge_version': envelope['payload']['bridge_version'] = 999
             elif damage == 'state_version': envelope['state_schema_version'] = 999
@@ -220,6 +220,8 @@ def test_incompatible_or_unaligned_recovery_stops_before_model_or_tools(tmp_path
             path.write_text(json.dumps(data))
             with pytest.raises(ApplicationRunError) as failure:
                 execute_app(app, resume_task_id=first.value.run.task_id, file_logging=False)
+            if damage == 'sdk':
+                assert 'start a new Task' in str(failure.value)
             assert len(requests) == 2
             assert (tmp_path / 'proof.txt').read_text() == 'unaltered-proof'
             assert [e['details']['state'] for e in audit(failure.value.run) if e['kind'] == 'terminal'] == ['failed']
