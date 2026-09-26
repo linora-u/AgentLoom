@@ -489,7 +489,7 @@ def validate_and_refine_generated_tests(target_root: str, file_paths: str) -> st
     return _json_dump({"results": results})
 
 
-def collect_generation_report(target_root: str, output_dir: str = "test/generated") -> str:
+def collect_generation_report(target_root: str, output_dir: str) -> str:
     """
     Build an English markdown report for generated artifacts.
 
