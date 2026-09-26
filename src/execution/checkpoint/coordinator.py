@@ -28,6 +28,7 @@ import threading
 from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
+from uuid import uuid4
 
 from agentloom.execution.agent_runtime import (
     JSONValue,
@@ -82,6 +83,10 @@ class CheckpointCoordinator:
         self._task_id = task_id
         self._task_text = task_text
         self._resume = resume
+        self._task_item_next_index = 0
+        self._task_item_commit_id: str | None = None
+        self._goal_phase_commit: dict[str, Any] | None = None
+        self._goal_active_phase: dict[str, Any] | None = None
         # Worker heartbeat writers — one per worker_name.
         self._worker_heartbeats: dict[str, WorkerHeartbeat] = {}
         self._worker_heartbeats_lock = threading.Lock()
@@ -214,16 +219,111 @@ class CheckpointCoordinator:
 
     # ── Supervisor ops ───────────────────────────────────────────────
 
+    @staticmethod
+    def _sequence_fields(
+        checkpoint: dict[str, Any] | None,
+    ) -> tuple[int, str | None, dict[str, Any] | None, dict[str, Any] | None]:
+        next_index = checkpoint.get("task_item_next_index", 0) if checkpoint else 0
+        if type(next_index) is not int or next_index < 0:
+            raise ValueError("Corrupt task sequence position in checkpoint")
+        commit_id = checkpoint.get("task_item_commit_id") if checkpoint else None
+        if commit_id is not None and (not isinstance(commit_id, str) or not commit_id):
+            raise ValueError("Corrupt task item commit identity in checkpoint")
+        commit = checkpoint.get("goal_phase_commit") if checkpoint else None
+        active = checkpoint.get("goal_active_phase") if checkpoint else None
+        if commit is not None and not isinstance(commit, dict):
+            raise ValueError("Corrupt Goal phase commit in checkpoint")
+        if active is not None and not isinstance(active, dict):
+            raise ValueError("Corrupt active Goal phase in checkpoint")
+        return next_index, commit_id, commit, active
+
+    @classmethod
+    def validate_goal_resume_boundary(
+        cls, checkpoint_manager: Any, task_id: str | None, goal: dict[str, Any],
+    ) -> None:
+        """Reject Goal state that cannot be paired with a committed Runtime boundary."""
+
+        checkpoint = checkpoint_manager.load_supervisor_checkpoint(task_id)
+        next_index, _, commit, active = cls._sequence_fields(checkpoint)
+        phase = goal["phase_index"]
+        expected_index = phase + (1 if goal["status"] == "complete" else 0)
+        if next_index != expected_index:
+            raise ValueError("Cannot safely resume Goal: phase and Runtime checkpoint disagree")
+        if expected_index > 0:
+            expected_phase = phase if goal["status"] == "complete" else phase - 1
+            if (
+                commit is None
+                or commit.get("status") != "complete"
+                or commit.get("phase_index") != expected_phase
+                or (goal["status"] == "complete" and commit.get("goal_id") != goal["goal_id"])
+            ):
+                raise ValueError("Cannot safely resume Goal: completion has no committed Runtime checkpoint")
+        if goal["status"] == "active" and goal["goal_started"]:
+            if (
+                active is None
+                or active.get("goal_id") != goal["goal_id"]
+                or active.get("phase_index") != phase
+            ):
+                raise ValueError("Cannot safely resume Goal: active phase has no Runtime checkpoint")
+
     def load_runtime_checkpoint(self) -> RuntimeCheckpointEnvelope | None:
         """Load the selected runtime's opaque supervisor checkpoint."""
 
         checkpoint = self._cm.load_supervisor_checkpoint(self._task_id)
         if checkpoint is None:
             return None
+        (
+            self._task_item_next_index,
+            self._task_item_commit_id,
+            self._goal_phase_commit,
+            self._goal_active_phase,
+        ) = self._sequence_fields(checkpoint)
         raw = checkpoint.get("runtime_checkpoint")
         if not isinstance(raw, dict):
+            if (
+                self._task_item_next_index > 0
+                or self._task_item_commit_id is not None
+                or self._goal_phase_commit is not None
+                or (
+                    self._goal_active_phase is not None
+                    and self._goal_active_phase.get("goal_started") is True
+                )
+            ):
+                raise ValueError(
+                    "Cannot safely resume: committed task position has no Runtime checkpoint"
+                )
             return None
         return RuntimeCheckpointEnvelope.from_dict(raw)
+
+    def load_task_item_next_index(self) -> int:
+        """Return the next committed YAML user turn for this root Task."""
+
+        checkpoint = self._cm.load_supervisor_checkpoint(self._task_id)
+        (
+            self._task_item_next_index,
+            self._task_item_commit_id,
+            self._goal_phase_commit,
+            self._goal_active_phase,
+        ) = self._sequence_fields(checkpoint)
+        return self._task_item_next_index
+
+    def committed_task_item(self) -> tuple[int, str, JSONValue] | None:
+        """Return the latest committed root item for trace reconciliation."""
+
+        if self._task_item_next_index == 0 or self._task_item_commit_id is None:
+            return None
+        return (
+            self._task_item_next_index - 1,
+            self._task_item_commit_id,
+            self.load_task_item_output(),
+        )
+
+    def load_task_item_output(self) -> JSONValue:
+        checkpoint = self._cm.load_supervisor_checkpoint(self._task_id)
+        return copy_json_value(
+            checkpoint.get("result") if checkpoint else None,
+            field_name="committed task item output",
+        )
 
     def save_runtime_checkpoint(
         self,
@@ -233,11 +333,34 @@ class CheckpointCoordinator:
         result: JSONValue = None,
         error: str | None = None,
         require_durable: bool = False,
-    ) -> None:
+        task_item_next_index: int | None = None,
+        goal_phase_commit: dict[str, Any] | None = None,
+        goal_active_phase: dict[str, Any] | None = None,
+    ) -> str | None:
         """Persist a runtime-owned state envelope without inspecting its payload."""
 
         try:
             checkpoint = self._with_storage_identity(checkpoint)
+            next_index = (
+                self._task_item_next_index
+                if task_item_next_index is None
+                else task_item_next_index
+            )
+            if isinstance(next_index, bool) or not isinstance(next_index, int) or next_index < 0:
+                raise ValueError("task_item_next_index must be a non-negative integer")
+            if next_index < self._task_item_next_index:
+                raise ValueError("task_item_next_index cannot move backward")
+            item_commit_id = (
+                uuid4().hex
+                if task_item_next_index is not None and next_index > self._task_item_next_index
+                else self._task_item_commit_id
+            )
+            phase_commit = (
+                self._goal_phase_commit if goal_phase_commit is None else goal_phase_commit
+            )
+            active_phase = (
+                self._goal_active_phase if goal_active_phase is None else goal_active_phase
+            )
             self._cm.save_supervisor_runtime_checkpoint(
                 self._task_id,
                 runtime_checkpoint=checkpoint.to_dict(),
@@ -250,7 +373,15 @@ class CheckpointCoordinator:
                     if self._context_engine
                     else None
                 ),
+                task_item_next_index=next_index,
+                task_item_commit_id=item_commit_id,
+                goal_phase_commit=phase_commit,
+                goal_active_phase=active_phase,
             )
+            self._task_item_next_index = next_index
+            self._task_item_commit_id = item_commit_id
+            self._goal_phase_commit = phase_commit
+            self._goal_active_phase = active_phase
             self._cm.record_task_status_changed(
                 self._task_id,
                 status,
@@ -271,7 +402,7 @@ class CheckpointCoordinator:
                 )
             if require_durable or status in _TERMINAL_CHECKPOINT_STATUSES:
                 raise
-            return
+            return None
 
         step_count = checkpoint.progress
         if self._supervisor_heartbeat is not None:
@@ -296,6 +427,7 @@ class CheckpointCoordinator:
             self._task_id,
             checkpoint.runtime_id,
         )
+        return item_commit_id if task_item_next_index is not None else None
 
     # ── Worker ops ───────────────────────────────────────────────────
 
@@ -397,6 +529,25 @@ class CheckpointCoordinator:
         raw = checkpoint.get("runtime_checkpoint")
         if not isinstance(raw, dict):
             return None
+        return RuntimeCheckpointEnvelope.from_dict(raw)
+
+    def load_completed_worker_checkpoint(
+        self,
+        agent_name: str,
+        call_index: int,
+    ) -> RuntimeCheckpointEnvelope | None:
+        """Restore the conversation after a cached YAML task item."""
+
+        checkpoint = self._cm.load_worker_checkpoint(
+            self._task_id,
+            agent_name,
+            call_index=call_index,
+        )
+        if not checkpoint or checkpoint.get("status") != "completed":
+            return None
+        raw = checkpoint.get("runtime_checkpoint")
+        if not isinstance(raw, dict):
+            raise ValueError("Completed Worker item has no restorable Runtime checkpoint")
         return RuntimeCheckpointEnvelope.from_dict(raw)
 
     def worker_checkpoint_sink(

@@ -93,7 +93,7 @@ export interface EffectiveAgentDetailDto {
   name: string
   description: string
   role: "supervisor" | "worker"
-  workflow: string
+  task: string
   model: { type: string; source: "global" | "agent" }
   tools: Array<{ name: string; source: "agent" }>
   skills: EffectiveSkillDto[]
@@ -232,7 +232,8 @@ export interface RuntimeSummaryDto {
 export interface AgentDefinitionDto {
   name: string
   description: string
-  workflow: string | string[]
+  task: string | string[]
+  system_prompt?: string | { path: string }
   model_type: string | null
   path: string
 }

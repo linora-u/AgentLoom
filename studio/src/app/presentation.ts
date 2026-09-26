@@ -108,8 +108,8 @@ export function effectiveAgentDetail(
         ],
       },
       {
-        title: "Workflow 摘要",
-        lines: [summarizeText(agent.workflow, 240) || "—"],
+        title: "任务摘要",
+        lines: [summarizeText(agent.task, 240) || "—"],
       },
       {
         title: `Tools · ${agent.tools.length}`,
@@ -516,9 +516,9 @@ function scheduleTriggerText(trigger: ScheduleTriggerDto): string {
 }
 
 export function systemDetailSections(detail: SystemDetailResultDto): DetailSection[] {
-  const workflow = Array.isArray(detail.definition.workflow)
-    ? detail.definition.workflow.join(" → ")
-    : detail.definition.workflow
+  const task = Array.isArray(detail.definition.task)
+    ? detail.definition.task.join(" → ")
+    : detail.definition.task
   const validation = detail.summary.validation.valid
     ? ["校验: 通过"]
     : ["校验: 失败", ...detail.summary.validation.errors.map((error) => `  ${error}`)]
@@ -538,7 +538,7 @@ export function systemDetailSections(detail: SystemDetailResultDto): DetailSecti
         `名称: ${detail.definition.name}`,
         `说明: ${detail.definition.description || "—"}`,
         `模型: ${detail.definition.model_type ?? "未指定"}`,
-        `工作流摘要: ${summarizeText(workflow || "", 240) || "—"}`,
+        `任务摘要: ${summarizeText(task || "", 240) || "—"}`,
         `路径: ${detail.definition.path}`,
         ...validation,
       ],

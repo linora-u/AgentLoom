@@ -31,13 +31,14 @@ success marker and can be retried with the same command. Install before starting
 Applications; Node/npm and network access are needed for the initial download.
 The equivalent Python entry point is `python -m agentloom.runtimes.pi.install`.
 
-Use the existing `config/llm.yaml`, then select Pi in an Application workflow:
+Use the existing `config/llm.yaml`, then select Pi in an Application YAML definition:
 
 ```yaml
 name: direct_answer
 agent_runtime: pi
 description: Answer the user's question directly.
-workflow: Give a concise answer.
+system_prompt: Give a concise answer.
+task: Explain what AgentLoom Applications do.
 tools: []
 toolsets: []
 ```

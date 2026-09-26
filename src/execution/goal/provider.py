@@ -57,7 +57,7 @@ class GoalStateProvider:
             if state.objective_fingerprint != objective_fingerprint:
                 raise ValueError(
                     "Cannot resume Goal mode because the objective changed; "
-                    "workflow and runtime task must match"
+                    "the YAML task must match"
                 )
         else:
             if raw is not None:
@@ -128,6 +128,22 @@ class GoalStateProvider:
             if previous_status == "active" and settlement_run_id is not None:
                 self._completion_settlement_run_id = settlement_run_id
                 self._completion_settlement_available = True
+            self._persist_locked()
+            return self._state
+
+    def advance_to(self, *, objective: str, objective_fingerprint: str) -> GoalState:
+        """Start the next configured task in the same Agent session."""
+
+        with self._lock:
+            if self._state.status != "complete":
+                raise ValueError("Cannot advance an active Goal")
+            self._state = GoalState.create(
+                objective=objective,
+                objective_fingerprint=objective_fingerprint,
+                phase_index=self._state.phase_index + 1,
+            )
+            self._completion_settlement_run_id = None
+            self._completion_settlement_available = False
             self._persist_locked()
             return self._state
 

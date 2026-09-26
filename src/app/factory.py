@@ -1,7 +1,6 @@
 import copy
 import hashlib
 import inspect
-import json
 import keyword
 from collections.abc import Callable
 from functools import wraps
@@ -9,8 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.app.agent import AgentRoleProfile, AgentType, RoleDrivenAgent
-from agentloom.app.definition import extract_markdown_definition, load_agent_definition
+from agentloom.app.definition import (
+    load_prepared_agent_definition,
+    prepare_agent_system_prompt,
+)
 from agentloom.app.imports.dynamic_import import load_function
+from agentloom.app.invocation import task_with_call_data
 from agentloom.app.validation import (
     AgentConfigNormalizer,
     NormalizedAgentConfig,
@@ -180,20 +183,6 @@ class YamlConfiguredAgent(RoleDrivenAgent):
                 logger=_shared_logger,
             )
 
-        def _build_user_input(input_payload: dict[str, Any]) -> str:
-            """Project validated Tool arguments into one Worker user message."""
-            if len(properties) == 1 and len(input_payload) == 1:
-                only_name = next(iter(properties))
-                only_value = input_payload.get(only_name)
-                if isinstance(only_value, str):
-                    return only_value
-            return json.dumps(
-                input_payload,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            )
-
         # Dynamically create the tool function (factory mode)
         def dynamic_agent_tool(*args, **kwargs):
             if len(args) > len(ordered_input_names):
@@ -221,11 +210,9 @@ class YamlConfiguredAgent(RoleDrivenAgent):
 
             assert normalized.input_validator is not None
             normalized.input_validator(input_payload)
-            user_input = _build_user_input(input_payload)
-
             # Factory mode: create a NEW agent for each call (thread-safe)
             agent = _create_fresh_agent()
-            return agent.run(user_input)
+            return agent.run(additional_args=input_payload)
 
         # ── Attach .batch() method for parallel execution ──
         def batch(tasks, concurrency=None, on_progress=None):
@@ -325,13 +312,17 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         dynamic_agent_tool._agentloom_input_object_schema = (  # type: ignore[attr-defined]
             object_schema
         )
-        dynamic_agent_tool._agentloom_recovery_descriptor = lambda arguments: {  # type: ignore[attr-defined]
-            "agent_name": function_name,
-            "input_hash": hashlib.sha256(
-                _build_user_input(dict(arguments)).encode()
-            ).hexdigest()[:16],
-            "task_input": _build_user_input(dict(arguments)),
-        }
+        def recovery_descriptor(arguments):
+            configured = _frozen_config["task"]
+            first_task = configured if isinstance(configured, str) else configured[0]
+            task_input = task_with_call_data(first_task, dict(arguments))
+            return {
+                "agent_name": function_name,
+                "input_hash": hashlib.sha256(task_input.encode()).hexdigest()[:16],
+                "task_input": task_input,
+            }
+
+        dynamic_agent_tool._agentloom_recovery_descriptor = recovery_descriptor  # type: ignore[attr-defined]
 
         # Fail fast through AgentLoom's runtime-neutral Tool schema seam.
         try:
@@ -548,7 +539,7 @@ class YamlAgentFactory:
     YAML agent factory class.
 
     Provides capabilities for creating agent tools from YAML configuration.
-    Supports loading from .yaml files and .md files that contain YAML code blocks.
+    Supports YAML Agent definitions.
     """
 
     @staticmethod
@@ -655,19 +646,6 @@ class YamlAgentFactory:
         return tools, mcp_manager
 
     @staticmethod
-    def _extract_yaml_from_markdown(content: str) -> tuple[dict, str]:
-        """
-        Extract YAML configuration and workflow content from Markdown.
-
-        Args:
-            content: Markdown file content.
-
-        Returns:
-            tuple: (yaml_config, workflow_content)
-        """
-        return extract_markdown_definition(content)
-
-    @staticmethod
     def _prepare_agent_config(
         config: dict,
         *,
@@ -680,21 +658,33 @@ class YamlAgentFactory:
         prepared = copy.deepcopy(config)
         if source_path is not None:
             prepared["_yaml_file_path"] = str(Path(source_path).resolve())
-            return prepared
-
-        raw_path = prepared.get("_yaml_file_path")
-        if isinstance(raw_path, str) and raw_path.strip():
-            prepared["_yaml_file_path"] = (
-                raw_path
-                if source_path_is_pinned
-                else str(Path(raw_path).expanduser().resolve())
-            )
+        else:
+            raw_path = prepared.get("_yaml_file_path")
+            if isinstance(raw_path, str) and raw_path.strip():
+                prepared["_yaml_file_path"] = (
+                    raw_path
+                    if source_path_is_pinned
+                    else str(Path(raw_path).expanduser().resolve())
+                )
+        yaml_path = prepared.get("_yaml_file_path")
+        path = Path(yaml_path) if isinstance(yaml_path, str) and yaml_path else None
+        prepare_agent_system_prompt(
+            prepared,
+            source_path=path,
+            project_root=YamlAgentFactory._definition_project_root(path) if path else None,
+            source_path_is_pinned=source_path_is_pinned,
+        )
         return prepared
+
+    @staticmethod
+    def _definition_project_root(path: Path) -> Path:
+        configured_root = Path(C.agent_root).expanduser().absolute()
+        return configured_root if path.is_relative_to(configured_root) else path.parent
 
     @staticmethod
     def _load_config_from_file(config_path: str | Path) -> dict:
         """
-        Load configuration from file, supporting .yaml and .md files.
+        Load a YAML Agent definition from file.
 
         Args:
             config_path: Configuration file path.
@@ -702,7 +692,10 @@ class YamlAgentFactory:
         Returns:
             dict: Parsed configuration dictionary.
         """
-        return load_agent_definition(config_path)
+        path = Path(config_path).expanduser().absolute()
+        return load_prepared_agent_definition(
+            path, project_root=YamlAgentFactory._definition_project_root(path)
+        )
 
     @staticmethod
     def create_agent_tool(config_path: str | Path | dict,
@@ -712,7 +705,7 @@ class YamlAgentFactory:
         Create an agent tool from YAML configuration.
 
         Args:
-            config_path: YAML/Markdown config file path or config dictionary.
+            config_path: YAML config file path or config dictionary.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
             model_binding: Optional resolved model binding.
 
@@ -750,13 +743,13 @@ class YamlAgentFactory:
 
         Returns a single callable tool function with a ``.batch()`` method
         for parallel execution, or ``None`` if the YAML has no
-        the Agent's input schema (or the default ``task`` schema).
+        the Agent's input schema (or an empty object schema).
 
         Each creation captures a fresh definition and configuration snapshot.
         The returned callable retains that snapshot for its lifetime.
 
         Args:
-            config_path: YAML/Markdown config file path or config dictionary.
+            config_path: YAML config file path or config dictionary.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
             model_binding: Optional resolved model binding.
             logger: Optional logger instance.
@@ -815,7 +808,7 @@ class YamlAgentFactory:
         on multiple inputs (e.g. analysing many directories in parallel).
 
         Args:
-            config_path: YAML/Markdown config file path or config dict.
+            config_path: YAML config file path or config dict.
             tasks: List of dicts, each passed as ``**kwargs`` to the agent tool.
             max_workers: Max parallel threads (default: auto from RPM).
             logger: Optional logger instance.
@@ -857,10 +850,10 @@ class YamlAgentFactory:
                                           **kwargs
                                           ) -> list:
         """
-        Load all YAML and Markdown files from a folder and create agent-as-tools.
+        Load all YAML Agent definitions from a folder and create agent-as-tools.
 
         Args:
-            folder_path: Folder path containing YAML/Markdown config files.
+            folder_path: Folder path containing YAML config files.
             agent_class: Optional custom agent class, defaults to YamlConfiguredAgent.
             model_binding: Optional resolved model binding.
             logger: Optional logger instance.
@@ -875,8 +868,8 @@ class YamlAgentFactory:
         if not folder_path.exists() or not folder_path.is_dir():
             return all_tools
 
-        # Iterate through all YAML and Markdown files in the folder
-        for config_file in list(folder_path.glob("*.yaml")) + list(folder_path.glob("*.yml")) + list(folder_path.glob("*.md")):
+        # Iterate through YAML Agent definitions in the folder.
+        for config_file in list(folder_path.glob("*.yaml")) + list(folder_path.glob("*.yml")):
             try:
                 agent_tool = YamlAgentFactory.create_agent_as_tool(
                     config_file,
@@ -909,7 +902,7 @@ class YamlAgentFactory:
         log = get_logger(None, __name__)
 
         # Iterate through all supported configuration file formats
-        for config_file in list(directory.glob("*.yaml")) + list(directory.glob("*.yml")) + list(directory.glob("*.md")):
+        for config_file in list(directory.glob("*.yaml")) + list(directory.glob("*.yml")):
             try:
                 tools = YamlAgentFactory.create_agent_tool(config_file, agent_class=agent_class)
                 # Read configuration to get the agent name

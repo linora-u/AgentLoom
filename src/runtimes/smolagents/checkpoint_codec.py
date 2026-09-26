@@ -135,9 +135,16 @@ def _canonical_entries_from_steps(
                 step.model_output_message
             )
             if step.model_output_message is not None and not model_items:
-                raise ValueError(
-                    f"PlanningStep {step_index} lacks canonical model items"
-                )
+                # smolagents constructs a new ChatMessage for PlanningStep and
+                # drops the model bridge's raw metadata. Its preserved content
+                # is the actual assistant plan shown to the next model turn.
+                message = step.model_output_message
+                role = getattr(message.role, "value", message.role)
+                if role != "assistant" or not isinstance(message.content, str) or not message.content:
+                    raise ValueError(
+                        f"PlanningStep {step_index} lacks canonical model items"
+                    )
+                model_items = (MessageItem(role="assistant", text=message.content),)
             items = (
                 *model_items,
                 MessageItem(role="user", text="Now proceed and carry out this plan."),

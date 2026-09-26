@@ -126,7 +126,7 @@ def _model_agent(agent: dict[str, Any]) -> dict[str, Any]:
         "name": str(agent.get("name") or ""),
         "description": _bounded_text(agent.get("description")),
         "role": str(agent.get("role") or ""),
-        "workflow_summary": _bounded_text(agent.get("workflow")),
+        "task_summary": _bounded_text(agent.get("task")),
         "model": agent.get("model") or {},
         "tool_names": [
             str(tool.get("name"))
@@ -259,7 +259,7 @@ def _run_application(
     action: str,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    allowed = {"application_id", "workflow_path", "task", "task_id"}
+    allowed = {"application_id", "workflow_path", "task_id"}
     if set(params) - allowed or not isinstance(params.get("application_id"), str):
         raise StudioServiceError("invalid_params", f"{action} requires application_id")
     application_id = str(params["application_id"])
@@ -282,9 +282,6 @@ def _run_application(
     else:
         raise StudioServiceError("invalid_params", "workflow_path is not a supervisor in this Application")
 
-    task = params.get("task")
-    if task is not None and (not isinstance(task, str) or len(task.encode("utf-8")) > 64 * 1024):
-        raise StudioServiceError("invalid_params", "task must be a string no larger than 64 KiB")
     resume_task_id = params.get("task_id") if action == "run.resume" else None
     if action == "run.resume" and not isinstance(resume_task_id, str):
         raise StudioServiceError("invalid_params", "run.resume requires task_id")
@@ -311,7 +308,6 @@ def _run_application(
         completed = execute_app(
             str(project_root / workflow),
             resume_task_id=resume_task_id,
-            task_override=task,
             event_sink=record,
         )
     except ApplicationRunInterrupted as error:

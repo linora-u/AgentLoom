@@ -195,6 +195,7 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
                 "yaml_path",
                 "agent_name",
                 "task_text",
+                "definition_revision",
                 "created_at",
                 "run_id",
                 "last_run_at",
@@ -222,6 +223,7 @@ def _apply_task_event(tree: dict | None, event: dict, fallback_task_id: str = ""
                 "yaml_path": event.get("yaml_path", tree.get("yaml_path", "")),
                 "agent_name": event.get("agent_name", tree.get("agent_name", "")),
                 "task_text": event.get("task_text", tree.get("task_text", "")),
+                "definition_revision": event.get("definition_revision", tree.get("definition_revision")),
                 "status": event.get("status", tree.get("status", "running")),
                 "created_at": event.get("created_at", timestamp),
             }
@@ -798,6 +800,7 @@ class CheckpointManager:
         agent_name: str,
         task_text: str,
         created_at: str,
+        definition_revision: str | None = None,
     ) -> dict:
         """Append a task creation event and refresh the task-tree projection."""
         with self._tree_lock:
@@ -809,6 +812,7 @@ class CheckpointManager:
                     "yaml_path": yaml_path,
                     "agent_name": agent_name,
                     "task_text": task_text,
+                    "definition_revision": definition_revision,
                     "created_at": created_at,
                 },
             )
@@ -1059,6 +1063,10 @@ class CheckpointManager:
         result: JSONValue = None,
         error: str | None = None,
         context_store: dict | None = None,
+        task_item_next_index: int = 0,
+        task_item_commit_id: str | None = None,
+        goal_phase_commit: dict[str, Any] | None = None,
+        goal_active_phase: dict[str, Any] | None = None,
     ) -> Path:
         """Save one runtime-neutral envelope plus task metadata."""
 
@@ -1072,11 +1080,14 @@ class CheckpointManager:
             "task_text": task_text,
             "status": status,
             "step_count": progress,
+            "task_item_next_index": task_item_next_index,
             "runtime_checkpoint": _jsonable(runtime_checkpoint),
             "saved_at": datetime.now().astimezone().isoformat(),
         }
         if self._run_id:
             data["run_id"] = self._run_id
+        if task_item_commit_id is not None:
+            data["task_item_commit_id"] = task_item_commit_id
         if config_snapshot:
             data["config_snapshot"] = config_snapshot
         if status == "completed" or result is not None:
@@ -1088,6 +1099,10 @@ class CheckpointManager:
             data["error"] = error
         if context_store is not None:
             data["context_store"] = context_store
+        if goal_phase_commit is not None:
+            data["goal_phase_commit"] = _jsonable(goal_phase_commit)
+        if goal_active_phase is not None:
+            data["goal_active_phase"] = _jsonable(goal_active_phase)
         path = self._supervisor_ckpt(task_id)
         self._write_json(path, data)
         return path

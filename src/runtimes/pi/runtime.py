@@ -55,6 +55,14 @@ class PiRuntime:
             validate_options(definition.runtime_options)
         except ValueError as exc:
             raise AgentRuntimeError(str(exc), category="configuration") from None
+        if (
+            definition.output_contract is not None
+            and definition.model_selection.settings.get("supports_structured_output") is not True
+        ):
+            raise AgentRuntimeError(
+                "Pi output_schema requires model supports_structured_output: true",
+                category="unsupported_capability",
+            )
         if any((tool.owner != "runtime" and tool.operation in {"write", "shell"}) or (tool.owner == "runtime" and (
                tool.provider != "pi" or (tool.visible_name, tool.operation) not in {("read", "read"), ("write", "write"), ("edit", "write"), ("bash", "shell")} or tool.fixed_arguments))
                for tool in definition.tool_manifest):
@@ -197,10 +205,12 @@ class PiRuntime:
                 remaining_terminal_attempts = max_stops - terminal_rejections
                 runtime_options = dict(definition.runtime_options)
                 runtime_options["max_stop_attempts"] = remaining_terminal_attempts
+                wire_settings = dict(selection.settings)
+                wire_settings.pop("supports_structured_output", None)
                 wire = Run(method="run", application_id=request.application_id or "standalone",
                     task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
-                        model_id=selection.model_id, protocol=selection.protocol, settings=dict(selection.settings),
+                        model_id=selection.model_id, protocol=selection.protocol, settings=wire_settings,
                         request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=runtime_options,
                     output_contract=wire_output_contract,
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
