@@ -39,7 +39,7 @@ def _retrieve_durable(ref: str, query: str, offset: int, limit: int) -> str:
                     f"total_bytes={page.total_bytes} next_offset={page.next_offset if page.next_offset is not None else 'none'}]\n"
                     + "\n".join(f"byte_offset={position} {excerpt}" for position, excerpt in page.matches)
                 )
-            page_limit = min(limit or 8192, _MAX_PAGE_BYTES)
+            page_limit = min(limit or _MAX_PAGE_BYTES, _MAX_PAGE_BYTES)
             page = trace.read_page(ref, offset=offset, limit=page_limit)
             data = page.data
             while data:
@@ -66,7 +66,7 @@ def loom_retrieve_context(
     ref: str,
     query: str = "",
     offset: int = 0,
-    limit: int = 200,
+    limit: int | None = None,
 ) -> str:
     """Retrieve retained content behind a ContextRef.
 
@@ -74,10 +74,13 @@ def loom_retrieve_context(
         ref: Context reference, for example ``ctx_0123abcd4567ef89``.
         query: Optional search query. A durable ref scans at most one page per call;
             follow ``next_offset`` until a match is found or it says ``none``.
-        offset: Byte offset for durable refs; line offset for older ContextEngine refs.
-        limit: For durable refs, maximum bytes or search matches per call, with a
-            hard cap; ``0`` selects a bounded default. For older refs, maximum
-            lines, where ``0`` returns all remaining lines.
+        offset: Byte offset for durable refs; line offset for older ContextEngine
+            refs. Repeat the same offset to reread a page; use ``next_offset``
+            from the result to continue.
+        limit: For durable refs, maximum bytes or search matches per call;
+            omitted or ``0`` reads up to 65536 bytes when not searching. For older
+            refs, maximum lines; omitted selects 200 and ``0`` returns all
+            remaining lines.
 
     Returns:
         Retained content or search excerpts with a continuation offset.
@@ -86,10 +89,12 @@ def loom_retrieve_context(
         raise ValueError("ref is required")
 
     safe_offset = max(0, int(offset or 0))
-    safe_limit = max(0, int(limit or 0))
+    requested_limit = None if limit is None else max(0, int(limit or 0))
     ref = str(ref).strip()
     if _DURABLE_REF.fullmatch(ref):
-        return _retrieve_durable(ref, str(query or ""), safe_offset, safe_limit)
+        return _retrieve_durable(ref, str(query or ""), safe_offset, requested_limit or 0)
+
+    safe_limit = 200 if requested_limit is None else requested_limit
 
     engine = get_active_context_engine()
     if engine is None:
