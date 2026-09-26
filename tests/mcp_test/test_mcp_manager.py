@@ -1,11 +1,17 @@
-"""Keep the MCP connection lifecycle's partial-failure contract observable."""
+"""Keep MCP partial-failure and real stdio reconnect behavior observable."""
 
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import psutil
+import pytest
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.tool_gateway import ToolBinding
+from agentloom.integrations.mcp.client import AgentLoomMCPClient
 from agentloom.integrations.mcp.config import McpServerConfig, McpSettings
 from agentloom.integrations.mcp.manager import McpManager
+from mcp import StdioServerParameters
 
 
 def test_partial_connection_preserves_tools_and_disconnect_is_idempotent():
@@ -39,3 +45,23 @@ def test_partial_connection_preserves_tools_and_disconnect_is_idempotent():
     manager.disconnect_all()
     good_client.disconnect.assert_called_once()
     assert manager.get_all_tools() == []
+
+    server = Path(__file__).parent / "fixtures" / "stdio_server.py"
+    client = AgentLoomMCPClient(
+        StdioServerParameters(command=sys.executable, args=[str(server)])
+    )
+    try:
+        first = next(item for item in client.get_tools() if item.definition.name == "lookup")
+        pid = first.forward(query="before disconnect")["pid"]
+        client.disconnect()
+        client.disconnect()
+        assert not psutil.pid_exists(pid)
+        with pytest.raises(ValueError, match="connect"):
+            client.get_tools()
+        client.connect()
+        fresh = next(item for item in client.get_tools() if item.definition.name == "lookup")
+        assert fresh.forward(query="after reconnect")["calls"] == 1
+        with pytest.raises(RuntimeError, match="closed"):
+            first.forward(query="stale binding")
+    finally:
+        client.disconnect()

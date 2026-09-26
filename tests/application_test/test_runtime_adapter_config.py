@@ -329,18 +329,18 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
         for path in sorted((*root.rglob("*.yaml"), *root.rglob("*.yml"))):
             if source_paths is not None and path not in source_paths:
                 continue
+            shipped_agent = root == PROJECT_ROOT / "applications" and "workflows" in path.parts
             try:
                 parsed = load_agent_definition(path)
             except ValueError:
+                if shipped_agent:
+                    raise
                 continue
-            if {"name", "description", "task"}.issubset(parsed):
+            if shipped_agent:
+                assert {"name", "description", "task"}.issubset(parsed), path
                 definitions.append((path, parsed))
-    yaml_worker = (
-        PROJECT_ROOT
-        / "applications/architecture_contract_validation/workflows/worker_agents/change_planner.yaml"
-    )
-    definitions.append((yaml_worker, load_agent_definition(yaml_worker)))
-
+            elif {"name", "description", "task"}.issubset(parsed):
+                definitions.append((path, parsed))
     assert definitions
     for path, definition in definitions:
         # Shipped mixed Applications can select either supported native runtime.
