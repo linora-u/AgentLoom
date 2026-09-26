@@ -62,6 +62,14 @@ immediately before the official SDK executor runs. Read an existing file first,
 then wait for that result before editing or overwriting it. File history and
 Shell command policies use the shared NativeToolHost; smol executors are not used.
 
+When a model makes a structured call to an unselected tool, Pi's own agent loop
+returns a `Tool <name> not found` error result to the model and continues. Repeated
+unknown calls are bounded by `runtime_options.max_stop_attempts`. Textual DSML
+tool-call markup has no Pi tool-call ID and is never executed. The bridge detects
+that markup and returns feedback through the same Pi session so the model
+can answer or explain the missing capability; repeated invalid output fails the
+Run with `output_validation` instead of being reported as a successful answer.
+
 Complete SDK results and first captured query output travel through private,
 digest-checked files. Missing captures fail the Application. The public journal
 persists the original before acknowledging a tool result; large results have a
