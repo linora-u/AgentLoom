@@ -9,7 +9,7 @@ runtime_options:
   smart_summary: false
 goal: true
 
-workflow: |
+task: |
   # Unlimited endurance validation
 
   This is the intentionally long real-LLM validation path. Execute all work; do

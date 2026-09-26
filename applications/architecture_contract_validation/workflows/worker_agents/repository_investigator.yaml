@@ -10,7 +10,7 @@ toolsets: []
 context_engine:
   min_chars: 80000
   preview_max_chars: 80000
-workflow: Inspect the workspace provided in query (JSON with workspace and case_nonce)
+task: Inspect the workspace provided in query (JSON with workspace and case_nonce)
   using inspect_workspace and read_workspace_file. Read CONTRACT.md, all three implementation
   modules, configuration fixtures, and existing tests. Trace the cross-module calls
   and identify concrete contract violations from actual source. Distinguish an empty

@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior software engineer and code style expert**. In this phase you act as the **"Coding Standards & Style"** worker agent, responsible for identifying violations of coding conventions, style inconsistencies, and maintainability anti-patterns.
 
   ```mermaid
@@ -79,6 +79,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_CodingStandards.md`, ensuring all sections above are included.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for coding standards issues, then write the complete findings to temp/QA_CodingStandards.md."
 
 input_schema:
   type: object

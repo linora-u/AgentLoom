@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior technical writer and documentation expert**. In this phase you act as the **"Documentation & Maintainability"** worker agent, responsible for assessing how well the codebase is documented and how easy it is for a new developer to understand and maintain.
 
   ```mermaid
@@ -109,6 +109,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_Documentation.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for documentation and maintainability issues, then write the complete findings to temp/QA_Documentation.md."
 
 input_schema:
   type: object

@@ -21,7 +21,7 @@ runtime_options:
   max_steps: 15
   smart_summary: false
 
-workflow: |
+system_prompt: |
   # 联网新闻热点搜索工作流
 
   ## 背景
@@ -121,3 +121,5 @@ workflow: |
   - 搜索无结果 → 建议用户换关键词重试
   - 工具调用失败 → 如实报告错误，建议稍后重试
   - extract 提取失败 → 使用搜索结果中的摘要信息
+
+task: 搜索今天人工智能领域的重要新闻，核对来源，并整理一份带来源链接的简明报告。

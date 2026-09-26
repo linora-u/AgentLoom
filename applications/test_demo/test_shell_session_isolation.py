@@ -10,7 +10,6 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
-from agentloom.execution.trace import generate_id
 
 
 def run_shell_session_isolation_test():
@@ -30,26 +29,13 @@ def run_shell_session_isolation_test():
     # 2. Initialize agent.
     supervisor = YamlConfiguredSupervisorAgent(config=config)
 
-    # 3. Build task.
-    task_content = """
-    请执行 shell 的 session 隔离和环境变量非持久化测试。
-    
-    步骤：
-    1. 你（主 agent）执行 `shell_tool("cd /tmp")`
-    2. 你执行 `shell_tool("export AGENTLOOM_SESSION_VAR=supervisor && echo $AGENTLOOM_SESSION_VAR")`
-    3. 你再次执行 `shell_tool("echo $AGENTLOOM_SESSION_VAR")`，确认变量不跨调用保留
-    4. 调度你的 worker (`shell_session_worker`) 执行 cd /var/log、inline export+echo、下一次 echo、pwd
-    5. 返回最终总结，主 agent 的 pwd 是什么，worker 的 pwd 是什么，env 是否只在同命令内可见。
-    """
-
-    task_id = generate_id(task_content, prefix="task")
-
+    # The complete task is defined in the Supervisor YAML.
     print("\n" + "="*80)
     print("Starting shell session isolation agent task...")
     print("="*80 + "\n")
     
     try:
-        result = supervisor.run(task_content, task_id=task_id)
+        result = supervisor.run()
         
         print("\n" + "="*80)
         print("Agent execution completed")

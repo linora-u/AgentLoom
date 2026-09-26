@@ -9,7 +9,7 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-from agentloom.app.factory import YamlAgentFactory, YamlConfiguredAgent
+from agentloom.app.runner import run_app
 
 def test_open_function():
     """Test whether the agent can use the `open` function."""
@@ -17,7 +17,7 @@ def test_open_function():
     # Set up logging.
     
     # Create temporary test file.
-    test_file_path = "/tmp/test_agent_open.txt"
+    test_file_path = "/private/tmp/agentloom_test_open.txt"
     test_content = "这是测试内容，用于验证 agent 可以使用 open 函数"
     
     # Create test file first.
@@ -32,31 +32,13 @@ def test_open_function():
         'applications/test_demo/workflows/test_open_agent.yaml'
     )
     
-    # Load config and create agent.
-    config = YamlAgentFactory._load_config_from_file(agent_config_path)
-    agent = YamlConfiguredAgent(config=config)
-    
-    print(f"✓ Agent 创建成功: {agent.name}")
-    
-    # Let the agent run a task that requires using `open`.
-    task = f"""
-请执行以下操作来测试 open 函数：
-
-1. 使用 open 函数读取文件 {test_file_path} 的内容
-2. 打印文件内容
-3. 修改内容，在末尾添加 "\\n测试 open 函数写入成功！"
-4. 使用 open 函数将修改后的内容写回文件
-5. 再次读取并打印文件内容以验证写入成功
-
-请直接使用 Python 的 open() 函数，不要使用其他工具。
-"""
-    
+    # The task is defined in the Agent YAML.
     print("\n" + "="*80)
     print("开始测试任务...")
     print("="*80 + "\n")
     
     try:
-        result = agent.run(task)
+        result = run_app(agent_config_path)
         print("\n" + "="*80)
         print("测试成功！Agent 能够正常使用 open 函数")
         print("="*80)

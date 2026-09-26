@@ -11,7 +11,7 @@ toolsets: []
 context_engine:
   min_chars: 80000
   preview_max_chars: 80000
-workflow: 'Use the exact JSON payload after "ACCEPTANCE_PAYLOAD=" in the task. You
+task: 'Use the exact JSON payload after "ACCEPTANCE_PAYLOAD=" in the task. You
   orchestrate four real typed Worker tools in this order: repository_investigator,
   change_planner, repair_implementer, independent_verifier. Pass query as a JSON string;
   each next query MUST contain the actual preceding Worker output, not your invented
@@ -25,7 +25,7 @@ workflow: 'Use the exact JSON payload after "ACCEPTANCE_PAYLOAD=" in the task. Y
   exact JSON report. Do not edit source or tests yourself.'
 worker_agents:
 - path: worker_agents/repository_investigator.yaml
-- path: worker_agents/change_planner.md
+- path: worker_agents/change_planner.yaml
 - path: worker_agents/repair_implementer.yaml
 - path: worker_agents/independent_verifier.yaml
 tools:

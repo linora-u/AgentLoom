@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal demo: only task_content + yaml config, then run."""
+"""Minimal demo: load the configured YAML task, then run."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgen
 
 
 DEFAULT_YAML_PATH = Path(__file__).parent / "workflows" / "test_agent.yaml"
-DEFAULT_TASK_CONTENT = "请用两句话介绍你自己，并说明当前是否使用了默认 logger。"
 
 
 def _extract_log_file_path() -> Path | None:
@@ -26,7 +25,7 @@ def _extract_log_file_path() -> Path | None:
     return Path(log_file_path) if log_file_path else None
 
 
-def run_demo(task_content: str, yaml_path: Path) -> None:
+def run_demo(yaml_path: Path) -> None:
 
     if not yaml_path.exists():
         raise FileNotFoundError(f"YAML not found: {yaml_path}")
@@ -46,10 +45,10 @@ def run_demo(task_content: str, yaml_path: Path) -> None:
         return
 
     print("skip run: false")
-    result = supervisor.run(task_content)
+    result = supervisor.run()
     print("run result:")
     print(result)
 
 
 if __name__ == "__main__":
-    run_demo(task_content=DEFAULT_TASK_CONTENT, yaml_path=DEFAULT_YAML_PATH.resolve())
+    run_demo(yaml_path=DEFAULT_YAML_PATH.resolve())

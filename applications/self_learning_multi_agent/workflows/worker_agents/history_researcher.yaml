@@ -28,7 +28,7 @@ input_schema:
   required:
   - query
   additionalProperties: false
-workflow: |
+task: |
   # History Research Worker
 
   Parse `query`, search real canonical session records, scroll around one hit, and

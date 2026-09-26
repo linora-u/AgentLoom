@@ -8,7 +8,7 @@ runtime_options:
   max_steps: 45
   smart_summary: false
 
-workflow: |
+system_prompt: |
   # 0) Structured Tool Execution Contract
   - Invoke tools through native structured tool calls. Do not replace calls with
     inferred outputs.
@@ -68,6 +68,8 @@ workflow: |
     - `output_dir`
     - `generated_files`
   - `generated_files` must be a non-empty list when at least one planned item is provided.
+
+task: "Generate pytest files for the supplied planned scenarios and return the generated file manifest."
 
 tools:
   - name: "build_pytest_template"

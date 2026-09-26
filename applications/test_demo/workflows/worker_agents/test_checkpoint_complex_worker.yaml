@@ -6,7 +6,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Artifact Worker
 
   Follow the query exactly. Work in these explicit steps. Use each command

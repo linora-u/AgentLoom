@@ -7,7 +7,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Directory Inspection Workflow
 
   ## 任务目标

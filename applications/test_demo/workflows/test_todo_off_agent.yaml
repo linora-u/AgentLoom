@@ -9,7 +9,7 @@ runtime_options:
   smart_summary: false
 
 
-workflow: |
+task: |
   Complete these steps internally: reverse the word loom, uppercase it, then
   append the number of letters in the original word. Return exactly:
   TODO_OFF_OK MOOL-4

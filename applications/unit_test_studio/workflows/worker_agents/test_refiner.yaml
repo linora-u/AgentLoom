@@ -8,7 +8,7 @@ runtime_options:
   max_steps: 30
   smart_summary: false
 
-workflow: |
+system_prompt: |
   # 0) Structured Tool Execution Contract
   - Invoke tools through native structured tool calls. Do not replace calls with
     inferred outputs.
@@ -56,6 +56,8 @@ workflow: |
     - `output_dir`
     - `generated_files`
     - `refinement`
+
+task: "Review and refine the generated tests described by the supplied query, then return the refinement result."
 
 tools:
   - name: "validate_and_refine_generated_tests"

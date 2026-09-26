@@ -9,10 +9,11 @@ mcp_servers: "applications/test_demo/config/.mcp.json"
 tools:
   - name: "read_file"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # MCP Integration Test
 
-  You are a testing agent. You have access to MCP tools from MiniMax.
+  You have access to MCP tools from MiniMax.
 
   ## Step 1: List available tools
   Print the names of all tools you have access to, especially any MCP tools.

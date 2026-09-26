@@ -17,6 +17,11 @@ when PR #68 shipped are recorded in [final validation](architecture-final-valida
 the later #69 fix is recorded in
 [nested workflow discovery validation](nested-workflow-discovery-validation.md).
 
+This is the historical package-migration contract. Its statements below about
+preserving Markdown Agent definitions, prompt semantics and CLI task arguments
+are superseded for future work by the
+[YAML Agent task specification](native-agent-prompts-and-structured-subagents.md).
+
 ## Implemented owners
 
 The first column records historical baseline imports only. It is not a set of

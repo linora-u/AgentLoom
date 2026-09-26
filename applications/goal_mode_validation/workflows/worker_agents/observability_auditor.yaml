@@ -7,7 +7,7 @@ runtime_options:
   smart_summary: false
 concurrency: 1
 
-workflow: |
+task: |
   Use only the EVIDENCE_BUNDLE embedded in the query. Audit one Goal observability
   surface end to end. Compare canonical state fields,
   statuses, errors, artifacts, and resume identity across the supplied Python and

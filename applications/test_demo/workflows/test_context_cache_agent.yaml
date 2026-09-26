@@ -4,10 +4,11 @@ description: "Validate that context_cache injection works correctly with the con
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # Context Cache Validation Workflow
 
-  You are a testing agent. Execute ALL steps below to validate that
+  Execute ALL steps below to validate that
   context_cache prompt caching is working correctly.
 
   ## Step 1: Verify environment

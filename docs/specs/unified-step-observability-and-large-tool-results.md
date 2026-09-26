@@ -31,7 +31,7 @@ pi 和 smolagents 在各自真实的模型、工具执行边界报告同一套�
 3. 作为终端用户，我希望普通工具结果直接完整打印，以便不必为常见结果另开文件。
 4. 作为终端用户，我希望大结果显示模型实际收到的预览和可用引用，以便日志可读且不会误以为模型读过全文。
 5. 作为终端用户，我希望失败、每步耗时及可得的 token 用量出现在对应 Step，以便定位问题和成本。
-6. 作为终端用户，我希望只看到一次通过 Stop 与输出校验的最终答案，以便续跑提案不会被误认为完成。
+6. 作为终端用户，我希望每个已完成任务项的实际最终答案只打印一次；未完成的 Goal 续跑提案和不存在的最终回复都不能被打印成答案。
 7. 作为终端用户，我希望关闭终端后仍能从 runtime.log 和 Run 的本地记录位置找到相同过程与完整内容。
 8. 作为机器输出的消费者，我希望 JSON/JSONL stdout 保持现有协议，不混入人读版 Step 文本。
 9. 作为 Application 作者，我希望一次模型轮次和它发起的工具批次构成一个 Step，并行工具按 call ID 区分。
@@ -56,8 +56,8 @@ pi 和 smolagents 在各自真实的模型、工具执行边界报告同一套�
 ### 1. 执行对象、Step 与模型边界
 
 - Application 定义负责选择模型与 runtime；构造时把模型绑定交给具体 Agent runtime。运行时由 pi 或 smolagents 的 Agent loop 决定何时向模型发请求、何时调用工具。观测只读取已发生的执行事实，不把模型接入误画成一个在 Agent loop 之前执行的步骤。
-- Task 是可跨 Run 的逻辑任务；Run 是一次执行尝试；Agent invocation 构成 Supervisor/Worker 父子树。一次模型轮次及其工具批次为一个 Step；Run 中面向用户的 Step 编号连续，事实同时保留 runtime 的 Agent 本地轮次，以便关联 checkpoint 和 Hook 上下文。并行工具是同一 Step 下按 call ID 区分的子项；模型传输重试是该 Step 的 attempt；输出纠错与 Stop 拒绝后的继续产生新 Step。全局事件提交序号用于稳定排序，不靠日志到达顺序推断因果。
-- 规范化事实至少携带版本、事件 ID、Task/Run/Agent/父 Agent 身份、Run Step 编号、Agent 本地轮次、attempt、call ID、时间、状态、错误和内容引用。runtime adapter 只把各自已发生的执行事实映射进这套语义；展示器、检查接口和将来的 exporter 从同一事实读取，不另建执行真相。
+- Task 是可跨 Run 的逻辑任务；Run 是一次执行尝试；Agent invocation 构成 Supervisor/Worker 父子树。YAML `task` 列表中的项目是同一 Agent invocation 内依次送入的用户轮次，不能与 Run 或 Step 混为一谈。一次模型轮次及其工具批次为一个 Step；Run 中面向用户的 Step 编号连续，事实同时保留 runtime 的 Agent 本地轮次，以便关联 checkpoint 和 Hook 上下文。并行工具是同一 Step 下按 call ID 区分的子项；模型传输重试是该 Step 的 attempt；输出纠错与 Stop 拒绝后的继续产生新 Step。全局事件提交序号用于稳定排序，不靠日志到达顺序推断因果。
+- 规范化事实至少携带版本、事件 ID、Task/Run/Agent/父 Agent 身份、当前任务项序号、Run Step 编号、Agent 本地轮次、attempt、call ID、时间、状态、错误和内容引用。启用 Goal 时还关联当前 Goal phase。runtime adapter 只把各自已发生的执行事实映射进这套语义；展示器、检查接口和将来的 exporter 从同一事实读取，不另建执行真相。
 - “实际模型请求”指经 AgentLoom 和 provider 适配层最终转换、送入可观察 provider 传输边界的消息和参数；响应或传输错误以同一个 model turn ID 配对。记录必须标明 capture boundary，并在落盘前统一脱敏，所以本地可复原的是该边界内容的脱敏版本。LiteLLM 输入、pi bridge 投影等上游对象只能按其真实边界命名，不能冒充网络实际发送内容；暂不能观测最终边界的 provider，须明确标为完整采集能力未满足。
 - 必需记录与用户 RuntimeEvent sink、Hook 诊断及 Post 观察者分开。模型请求/响应在模型出口记；工具终态在已提交的工具执行出口记；有效 PreToolUse/Stop 决策在门禁出口记。记录失败位于 Post 观察者的吞错范围之外，不能被当成普通日志失败忽略。
 
@@ -67,7 +67,7 @@ pi 和 smolagents 在各自真实的模型、工具执行边界报告同一套�
 | --- | --- | --- |
 | PreToolUse | Tool Gateway 和 pi 原生工具宿主；执行前转换或阻止输入 | 记录最终有效决策和参数；仍须经过严格解码及 CoreToolGuard |
 | PostToolUse / PostToolUseFailure | 同一工具执行出口；分别观察已完成和已执行失败的调用 | 关联终态 ToolCallRecord；每个适用调用只派发一次；可沿用现有后续上下文/用户消息能力，不改写工具终态 |
-| Stop / StopFailure | Agent 终止门禁及根运行失败观察 | 记录有效 Stop 决策；只有接受并完成输出校验才展示最终答案 |
+| Stop / StopFailure | Agent 终止门禁及根运行失败观察 | 记录有效 Stop 决策；只有任务项真正完成且通过输出校验，才展示其实际最终答案 |
 | SessionStart / SessionEnd | 根运行生命周期 | 保留现有派发时机，与 Run 身份关联 |
 | SubagentStart / SubagentStop | 父 Agent 拥有的 Worker 生命周期 | 保留父子身份，不复制到每个 Worker Step |
 | TaskCreated / TaskCompleted | 根 Task 生命周期 | 保留现有派发时机，与 Task 身份关联 |
@@ -81,7 +81,7 @@ pi 和 smolagents 在各自真实的模型、工具执行边界报告同一套�
 - 以当前 AgentLoom smolagents 的 INFO/DEBUG 输出为版式基准：New run 面板、Step 分隔、Calling tool 的最终参数、Observations、错误样式、Step 耗时、可得的累计/增量 token 和 Final answer。两种 runtime 的同类事实经同一个展示实现输出；pi 单独安装不依赖 smolagents 包。用相同场景的输出对照验收版式，不复制上游 logger 的整套内部实现。
 - Observations 的工具结果正文必须逐字等于**交给模型的工具结果正文**；展示层不能自行再截断或摘要。普通结果全文显示。大结果的模型可见结果包含尺寸、来源、预览、引用和读取说明，日志完整打印这份内容；未按长度截断的正文从持久内容查看。时间戳、Step 标题和本地检查位置属于展示元数据，不属于模型结果正文。
 - 模型回复正文按现有 smolagents 行为在 DEBUG 展示；实际请求与回复无论日志级别均进入必需本地记录。终端 text 与 runtime.log 保持语义及正文一致，Rich 颜色不要求写入文件。若活动日志会轮转，历史 Step 仍须能从持久事实重建或从保留的日志分段读取。
-- Stop 拒绝和输出校验失败显示为继续/失败过程，不打印为成功最终答案；接受后的答案只由一个出口打印一次。
+- Stop 拒绝和输出校验失败显示为继续/失败过程，不打印为成功最终答案。按[任务序列规格](native-agent-prompts-and-structured-subagents.md)运行时，一个 Run 可依次完成多个任务项；每项实际产生的合格最终回复只由一个出口打印一次。Goal 完成但 Agent 没有最终回复时，不用完成证据合成答案。
 
 ### 4. 大结果、引用与读取
 
@@ -101,11 +101,12 @@ pi 和 smolagents 在各自真实的模型、工具执行边界报告同一套�
 ## Testing Decisions（测试决策）
 
 - 主验收入口是 Application 公开运行接口及其 text CLI，以同一组外部可见场景覆盖 pi 与 smolagents；检查终端、runtime.log、Run receipt、Python 检查接口、取回能力和续跑结果。沿用现有 Application、pi 协议、checkpoint、Tool Gateway 与输出协议测试的 fixture 风格。测试行为和不变量，不断言私有回调顺序或具体磁盘文件名。
-- 对照现有 smolagents INFO/DEBUG 样例验证两 runtime 的 New run、Run 内连续 Step 编号、最终参数、Observations、错误、耗时/token 和一次最终答案；验证 Worker 父子关联、并行调用、重试 attempt、输出纠错及 Stop 续跑。JSON/JSONL stdout 不得混入人读版式；pi 单独安装可运行。
+- 对照现有 smolagents INFO/DEBUG 样例验证两 runtime 的 New run、Run 内连续 Step 编号、最终参数、Observations、错误、耗时/token 和每个已完成任务项至多一次实际最终答案；验证 Worker 父子关联、并行调用、重试 attempt、输出纠错及 Stop 续跑。JSON/JSONL stdout 不得混入人读版式；pi 单独安装可运行。
 - 用普通、小型和超过 bridge 帧上限的大型工具结果（包括多行文本及超长单行 JSON）验证：模型输入与 Observations 的结果正文逐字一致；分页可复原脱敏后的完整结果，搜索与分页不一次读入全文；缓存淘汰、成功 checkpoint 清理及跨 Run 续跑均不使新引用失效；父 Agent 可读 Worker 交回的引用、兄弟 Agent 不能互读；pi bridge 帧有界；工具只调用一次。
 - 验证模型请求包含当轮历史、工具定义和最终 provider 参数，并与回复/错误配对；同时断言记录的 capture boundary。先用可观察传输的确定性 provider fixture 验证边界，再经公开 Application 入口检查实际模型运行中的 Step、工具和 trace；若只捕获到上游适配层输入，测试须反映这一限制，不能宣称已采集网络实际请求。
 - 验证 PreToolUse 修改和阻止、完成/失败后对应 Post 只派发一次、blocked 无失败 Post、Stop 门禁、pi Hook 的真实 Step 编号。验证模型及 bridge 错误不派发工具失败 Hook，观察 Hook 故障不覆盖工具终态。
 - 故障注入覆盖本地记录写失败、内容损坏、引用越权、外部导出适配器失败和已提交工具后中断：本地故障使 Run 失败且不产生不可用引用；外部故障不影响 Run；提交状态不明时不自动重放。验证 Shell Post Hook 的完整 `tool_response` 契约。
+- 任务列表场景验证每条消息及其 Step 都有正确的任务项序号；同一个 Run 的 Step 编号不断开，已完成项的真实回复各打印一次，Goal 阶段中未完成的普通回复及缺失的最终回复不被合成为答案。
 
 ## Out of Scope（本轮不做）
 

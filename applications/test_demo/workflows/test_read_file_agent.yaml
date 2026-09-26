@@ -6,10 +6,11 @@ description: "Validate read_file tool: line-numbered output, offset/limit, error
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # read_file Tool Validation Workflow
 
-  You are a testing agent. Execute ALL steps below using the provided tools.
+  Execute ALL steps below using the provided tools.
   After each step, report PASS or FAIL with a short explanation.
 
   ## Step 1: Read a small file

@@ -13,10 +13,11 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: 你是 Repo Map 架构分析监督智能体。
+task: |
   # Repo Map 架构分析工作流
 
-  你是 Repo Map 架构分析监督智能体。你需要按顺序调用工具来完成架构分析和 Skill 文档生成。
+  按顺序调用工具来完成架构分析和 Skill 文档生成。
 
   ## 执行流程（必须严格按序）
 

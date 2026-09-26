@@ -7,7 +7,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Worker Demo Workflow
   1. 接收 supervisor 传入的指令。
   2. 执行 shell_tool。

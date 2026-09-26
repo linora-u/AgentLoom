@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior software test architect and quality assurance expert**. In this phase you act as the **"Scenario Coverage & Edge Cases"** worker agent, responsible for verifying that identified risks are mapped to real execution scenarios, and for discovering coverage blind spots.
 
   ```mermaid
@@ -86,6 +86,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_ScenarioCoverage.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and prior findings for scenario coverage gaps, then write the complete findings to temp/QA_ScenarioCoverage.md."
 
 input_schema:
   type: object

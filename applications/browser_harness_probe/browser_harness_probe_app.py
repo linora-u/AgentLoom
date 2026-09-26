@@ -14,24 +14,12 @@ from agentloom.app.runner import run_app
 
 
 def main(
-    user_request: str = "Run browser-harness doctor, then verify both isolated Chrome and real Chrome demo probes.",
     file_logging: bool | None = None,
     resume: str | None = None,
 ) -> str:
-    """Run the browser-harness AgentLoom probe application."""
-
-    request = user_request.strip()
-    if not request:
-        raise ValueError("user_request must be non-empty")
-
-    task = (
-        "User request:\n"
-        f"{request}\n\n"
-        "Follow the workflow exactly. For the default demo, use the fixed demo probe tools."
-    )
+    """Run the browser-harness task configured in its Agent YAML."""
     result = run_app(
         "applications/browser_harness_probe/workflows/browser_harness_probe_agent.yaml",
-        task_override=task,
         file_logging=file_logging,
         resume_task_id=resume,
     )

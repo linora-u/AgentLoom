@@ -17,9 +17,10 @@ goal: true
 旧 `token_budget` 无论取值都静默忽略，Goal 不再有成本/token 预算上限。
 Worker YAML 不能配置 Goal Mode。
 
-Goal objective 只记录必填的非空 `workflow` 字符串和可选的 runtime task。Agent
-`description` 仍是展示和 Tool 元数据，不进入执行输入。`workflow` 作为 Runtime
-instruction；提供 task 时，它作为独立 user message，省略时不会生成替代消息。
+Goal objective 是 Agent YAML 必填 `task` 中当前执行的一项。若 `task` 是列表，
+每项在同一 Agent 会话中分别建立一个 Goal；当前项显式调用
+`update_goal(status="complete")` 并提交后，才发送下一项。可选的
+`system_prompt` 作为 Runtime instruction；`description` 仍只用于展示和 Tool 元数据。
 
 ## 生命周期与工具
 
@@ -31,14 +32,17 @@ instruction；提供 task 时，它作为独立 user message，省略时不会�
 
 续跑使用同一个 runtime 和对话，后续提示只携带 Goal 身份、状态与继续指令，不重启已完成
 工作。显式完成后，根 Supervisor 可使用一次进程内请求提交最终回复，该请求只提供
-`final_answer`；planning 和 smart summary 不消耗这次许可。恢复已完成 Goal 时直接
-返回持久证据，不重新执行工作。
+`final_answer`；planning 和 smart summary 不消耗这次许可。完成证据属于 Goal 状态，
+Agent 没有最终回复时，不用证据合成回复。
 
 ## 恢复与可观测性
 
 启用 checkpoint 后，`<application_id>/<task_id>/goal.json` 保存身份、目标指纹、状态、
-`goal_started`、证据与时间戳。恢复保留 Goal，并校验 workflow 和 runtime task 一致。
+`goal_started`、证据与时间戳。恢复保留 Goal，并校验 YAML task 与定义一致。
 损坏状态或禁用活动 Goal 仍沿用原有错误语义。
+
+每项完成时，checkpoint 一起记录 Goal 阶段、下一任务序号与 Agent 会话状态。
+恢复从首个未提交的任务项继续，不重发已经提交的用户消息。
 
 旧 checkpoint 的预算和 Goal 用量字段静默忽略；旧 `budget_limited` Goal 按 `active`
 恢复，已完成 Goal 仍保持完成。无需提高预算或迁移配置。
