@@ -8,7 +8,7 @@ runtime_options:
   max_steps: 30
   smart_summary: false
 
-workflow: |
+system_prompt: |
   # 0) Structured Tool Execution Contract
   - Invoke tools through native structured tool calls. Do not replace calls with
     inferred outputs.
@@ -56,6 +56,8 @@ workflow: |
   - Output type: JSON string.
   - Required keys: `target_root`, `items`, `output_dir`.
   - `items` must preserve all valid target entries from parser output.
+
+task: "Parse the supplied query, resolve the function targets, and return the normalized JSON result."
 
 tools:
   - name: "resolve_function_targets"

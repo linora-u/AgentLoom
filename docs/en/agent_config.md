@@ -8,18 +8,12 @@
 > For `config/system.yaml`, see [System Configuration Reference](system_config.md).
 > For `config/llm.yaml`, see [LLM Configuration Reference](llm_config.md).
 
-Agent YAML is the configuration file in the AgentLoom framework that **defines the behavior of a single Agent**, controlling the Agent's role description, runtime, workflow instructions, available tools, model selection, skill packages, and more. Agents are divided into two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
+Agent YAML defines one Agent's optional long-lived instructions, required user task, tools, model, and Skills. Agents have two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
 The required `agent_runtime` field selects the Agent runtime; registered values
 are `smolagents` and `pi`. All Tools are invoked through native structured
 tool calls.
 
-Both roles support `.yaml`, `.yml`, and `.md` definitions. Markdown uses a fenced
-`yaml` configuration block; nonempty text outside that block becomes `workflow`.
-Application Studio, its catalog/details, validation, and schedule targets discover
-Markdown Supervisors in top-level or nested Application/workflow directories using
-the same definition reader as execution. Worker definitions stay under their
-Supervisor's references, and malformed Markdown or duplicate YAML keys produce
-the same validation diagnostics. Reading these views does not start a Run or model.
+Both roles use `.yaml` or `.yml` definitions. A Markdown file may supply the content of `system_prompt.path`, but is not an Agent definition. Studio, CLI, Schedule, and Python read the same YAML task.
 
 > ⚠️ **LLM Configuration Isolation**: `model`/`llm`/`langfuse` in Agent YAML are automatically filtered with a warning. LLM parameters can only be defined in `config/llm.yaml`; Agents select which predefined model type to use via the `model_type` field.
 
@@ -86,7 +80,7 @@ name: "my_check_agent"
 agent_runtime: "smolagents"
 description: |
   As the code review supervisor agent, your core responsibility is...
-workflow: |
+task: |
   # My Check Workflow
   ## Steps
   1. Call get_module_context to retrieve context
@@ -126,7 +120,7 @@ skills:
 name: "project_scan"
 agent_runtime: "smolagents"
 description: "Project structure scanning agent"
-workflow: |
+task: |
   You are a senior engineer responsible for...
   ## Output Requirements
   - A. File inventory and role classification
@@ -185,19 +179,17 @@ Supervisor and Worker share 4 required fields:
 | `name` | `str` | Non-empty string | Agent unique identifier. In Worker, also serves as the exported tool function name |
 | `agent_runtime` | `str` | Must be registered: `smolagents` / `pi` | Selects the complete Agent runtime. Missing and unknown values fail during preflight |
 | `description` | `str` | Non-empty string | Agent capability metadata; it becomes the Subagent Tool description and is never used as invocation input |
-| `workflow` | `str` | Non-empty string | Agent system instructions. Markdown and Mermaid are ordinary text. See [Writing Guidelines](#workflow-writing-guidelines-and-recommendations) below |
+| `task` | `str` / `list[str]` | Non-empty string or non-empty list of non-empty strings | User task; list items are sent in order in one Agent session |
 
-#### Division of `description` and `workflow`
+#### Division of `description`, `system_prompt`, and `task`
 
 | Field | Responsibility | What to Write | What NOT to Write |
 |------|------|--------|----------|
 | `description` | **Role positioning** (one or two sentences) | "As XX agent, your core responsibility is YY" | Don't write detailed processes or specific steps |
-| `workflow` | **Complete execution instructions** | Background, responsibilities, flowchart, stage descriptions, output requirements | Don't repeat the role positioning from description |
+| `system_prompt` | **Optional long-lived instructions** | Role, rules, and working style; inline or `{path: prompts/role.md}` | The current request |
+| `task` | **Required user task** | One request or an ordered list of requests | Tool call arguments |
 
-`workflow` is sent once through the Runtime instructions channel. A supplied task
-is a separate user message; when no task is supplied, AgentLoom does not invent
-one from `description`. Express multi-stage behavior inside the instruction text
-or explicit orchestration. A YAML list is invalid and does not control run count.
+`system_prompt` enters the Runtime system / instructions channel. When omitted, the runtime uses its default behavior. `task` enters the user channel. Each list item waits for the previous one to finish and shares the same Agent conversation. CLI and Python entry points do not accept extra task text.
 
 #### Goal Mode (Supervisor only)
 
@@ -210,17 +202,14 @@ goal:
 `enabled`. Legacy `token_budget` is silently ignored. Worker YAML must not contain
 any `goal` key.
 
-When enabled, Goal Mode still uses the single workflow string as instructions and
-keeps the runtime task separate. Normal final answers and `max_steps` end only one
+When enabled, each `task` list item enters Goal Mode in the same Agent session. Normal final answers and `max_steps` end only one
 continuation segment; the root Supervisor must call `update_goal(complete,
 evidence)`. Ordinary model usage remains in runtime audit records. See [Goal Mode](goal_mode.md)
 for lifecycle, resume, persistence, CLI, Studio, and schedule behavior.
 
-#### Workflow Writing Guidelines and Recommendations
+#### Prompt and Task Writing Guidelines
 
-`workflow` is the Agent's reusable system instruction. The current task remains a
-separate user input. A well-structured workflow can significantly improve Agent
-execution quality.
+Put reusable role and policy text in `system_prompt`, and the request to execute in `task`. Both accept ordinary Markdown and Mermaid text.
 
 **Recommended Structure (Five-Part)**:
 
@@ -234,7 +223,7 @@ execution quality.
 
 **① Background & Role**
 
-Establish professional context at the beginning of the workflow to let the LLM "get into character". The more specific the role, the more professional the output.
+Establish role and durable instructions in `system_prompt`; put the current request in `task`.
 
 **Example**:
 
@@ -342,7 +331,7 @@ Clearly define the format, required content, and prohibitions for final delivera
 #### Comprehensive Template
 
 ````yaml
-workflow: |
+task: |
   # [Task Name]
 
   ## Background
@@ -390,8 +379,8 @@ workflow: |
 
 #### Writing Notes
 
-- **YAML format**: use one `workflow: |` scalar to preserve newlines and indentation. Lists are invalid.
-- **Avoid hardcoded paths**: Don't hardcode file paths in workflow; get them dynamically via tools (e.g., `get_module_context`)
+- **YAML format**: use `task: |` for a long request; `task: [first request, second request]` sends two user turns in one session.
+- **Avoid hardcoded paths**: Do not hardcode runtime file paths in durable instructions; get them dynamically via tools (e.g., `get_module_context`)
 - **Bold critical rules**: Use `**bold**` to highlight rules the LLM must follow
 - **Numbered for ordering**: Use numbered lists (`1. 2. 3.`) for multi-step processes, not unordered lists
 - **Mark inferences**: Require the LLM to label uncertain content with 【Inference】 to avoid hallucinations mixing into conclusions
@@ -429,7 +418,7 @@ The `runtime_options.*` fields above belong to smol. `smart_summary` accepts a b
 
 | Field | Type | Default | Description |
 |------|------|--------|------|
-| `input_schema` | Draft 2020-12 object schema | `{task: string}` | Worker Tool arguments. See [Section 5](#5-worker-export-as-callable-tool) |
+| `input_schema` | Draft 2020-12 object schema | Empty argument object | Worker Tool call data. See [Section 5](#5-worker-export-as-callable-tool) |
 | `output_schema` | Draft 2020-12 schema | Text output | Optional executable Agent result contract; any JSON root type is allowed |
 
 > ⚠️ **Worker config isolation**: A Worker's effective configuration is resolved from global/app config plus the **Worker YAML itself**. It does **not** inherit permission overrides from the Supervisor that called it. If a Worker needs extra filesystem or shell permissions, repeat the relevant whitelisted overrides (for example `tool_access_control.path_validation`) in the Worker YAML.
@@ -586,7 +575,7 @@ agent_runtime: "smolagents"
 model_type: "powerful"
 concurrency: auto          # Auto-calculate concurrency
 
-workflow: |
+task: |
   ...
 ```
 
@@ -762,7 +751,7 @@ tools = YamlAgentFactory.create_agent_as_tool(
 
 **Return value notes**:
 - The Tool is called like a regular Python function with the JSON types declared by
-  `input_schema`; without one it accepts a required `task: string` argument.
+  `input_schema`; without one it takes no arguments. The Worker's task comes from its YAML.
 - Without `output_schema`, the return value is text. With `output_schema`, the
   validated JSON-compatible value is returned without string coercion.
 - Every invocation constructs a fresh Worker owner and Runtime while reusing safe
@@ -772,7 +761,7 @@ tools = YamlAgentFactory.create_agent_as_tool(
 
 | Principle | Description | Example |
 |------|------|------|
-| **① Lazy singleton** | Agent tool is only initialized on first call, reused afterwards | Global variable `_tool = None` + getter function |
+| **① Reuse the Tool wrapper** | A wrapper can be cached; every invocation still gets an isolated Worker session | Global variable `_tool = None` + getter function |
 | **② Separate pre/post** | Deterministic operations (read/write files, format validation) at Python layer, don't waste LLM tokens | Read index.md → Agent analysis → Write analysis.md |
 | **③ Error isolation** | Each subtask wrapped in try-except; single item failure records error then continues | `entry["error_msg"] = str(e)` |
 | **④ Immediate persistence** | Write back progress file immediately after each iteration; resume from checkpoint after crash | `_save_progress()` called at end of each loop |
@@ -809,7 +798,7 @@ def analyze_with_context(file_path: str) -> str:
     """
     logger = get_logger(__name__)
 
-    # create_agent_as_tool has built-in cache, same YAML only creates once
+    # The wrapper can be reused; each call creates a fresh Worker session
     tool = YamlAgentFactory.create_agent_as_tool(_AGENT_YAML)
     if tool is None:
         raise RuntimeError(f"Failed to create agent tool from {_AGENT_YAML}")
@@ -824,6 +813,7 @@ def analyze_with_context(file_path: str) -> str:
 
     # -- Call Agent (LLM reasoning) --
     logger.info(f"Analyzing {file_path}")
+    # The Worker YAML must declare content in input_schema
     result = tool(content=content)
 
     # -- Post-processing (deterministic) --
@@ -892,7 +882,7 @@ def run_batch_analysis(progress_file: str, retry_failed: bool = False) -> str:
 
     logger = get_logger(__name__)
 
-    # create_agent_as_tool has built-in cache, same YAML only creates once
+    # The wrapper can be reused; each call creates a fresh Worker session
     tool = YamlAgentFactory.create_agent_as_tool(_AGENT_YAML)
     if tool is None:
         raise RuntimeError(f"Failed to create agent tool from {_AGENT_YAML}")
@@ -910,6 +900,7 @@ def run_batch_analysis(progress_file: str, retry_failed: bool = False) -> str:
 
         try:
             # -- Call Agent --
+            # The Worker YAML must declare query in input_schema
             result = tool(query=entry["input"])
 
             # -- Post-processing --
@@ -942,7 +933,7 @@ Register the wrapped Python function in the Supervisor's `tools` field:
 name: "my_supervisor"
 agent_runtime: "smolagents"
 description: "Orchestrate multi-step analysis process"
-workflow: |
+task: |
   1. Call run_batch_analysis to batch analyze all subtasks
   2. Based on returned summary, determine if retry is needed
 
@@ -1014,13 +1005,13 @@ callable Tool. The Worker's top-level `name` is the Tool name and its
 not authorized or registered.
 
 ```
-Supervisor → calls project_scan(task="Check CAN module") → fresh Worker executes → returns text
+Supervisor → calls project_scan(target_path="CAN module") → fresh Worker executes its YAML task → returns text
 ```
 
 ### 5.2 Optional JSON Schema Contracts
 
-Omit both schemas for the concise default: one required `task: string` Tool
-argument and a text result. Use Draft 2020-12 schemas when the contract is truly
+Omit both schemas for the concise default: the Tool takes no arguments, the Worker
+executes its YAML `task`, and returns text. Use Draft 2020-12 schemas when the contract is truly
 typed:
 
 ```yaml
@@ -1147,7 +1138,7 @@ The system performs a full pre-check on **all** entries before loading (director
 |----------|------|
 | `Configuration is missing required field: name` | Add `name: "xxx"` |
 | `Configuration is missing required field: description` | Add `description: "xxx"` |
-| `workflow field must be a non-empty string` | Use one non-empty `workflow: \|` scalar |
+| `task` is missing or empty | Use a non-empty `task` string or list of non-empty strings |
 
 ### 7.2 Tool Configuration Errors
 
@@ -1164,7 +1155,7 @@ The system performs a full pre-check on **all** entries before loading (director
 | `worker_agents must be a list` | Change to list format |
 | `uses unsupported field 'name'; use 'path' only` | Change to `path` |
 | `does not exist` | Check file path spelling |
-| `has unsupported extension` | Use `.yaml`/`.yml`/`.md` |
+| `has unsupported extension` | Use `.yaml`/`.yml` |
 
 ### 7.4 Other Errors
 
@@ -1193,7 +1184,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Repo Map Architecture Analysis Workflow
 
   ## Execution Principles
@@ -1226,7 +1217,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Single Directory Architecture Analysis
   Based on the provided index_content, analyze code structure and return Markdown architecture analysis text.
   ## Analysis Dimensions
@@ -1253,7 +1244,7 @@ input_schema:
 name: "simple_reader"
 agent_runtime: "smolagents"
 description: "A simple Agent that reads and analyzes specified file content"
-workflow: |
+task: |
   1. Read the user-specified file
   2. Analyze the file content
   3. Output the analysis result
@@ -1261,33 +1252,20 @@ tools:
   - name: "read_file"
 ```
 
-### 8.3 Markdown (.md) Format for Writing Workers
+### 8.3 Referencing Markdown Prompt Content
 
-Write configuration in a YAML code block at the beginning of the file; the remaining content automatically becomes the `workflow`:
+The Agent definition stays in YAML. It can reference an ordinary Markdown file for durable instructions:
 
-````markdown
 ```yaml
 name: "project_scan"
 agent_runtime: "smolagents"
 description: "Project structure scanning agent"
-model_type: "powerful"
-tools:
-  - name: "read_file"
-input_schema:
-  type: object
-  properties:
-    param1:                          # Custom parameter name
-      type: string
-      description: "Task description"
-  required: [param1]
-  additionalProperties: false
+system_prompt:
+  path: prompts/project_scan.md
+task: "Scan the supplied directory and report findings."
 ```
 
-# The following content automatically becomes the workflow
-
-## Step 1: Scan Files
-...
-````
+`prompts/project_scan.md` is resolved relative to this YAML file. A Markdown file cannot itself define an Agent.
 
 ---
 
@@ -1341,7 +1319,7 @@ The following fields are processed independently as Agent properties and are not
 
 | Field | Processing |
 |------|----------|
-| `name` / `description` / `workflow` | Agent's own properties |
+| `name` / `description` / `system_prompt` / `task` | Agent's own properties |
 | `tools` (`list[dict]`) | Agent tool list, different from system `tools` (dict) |
 | `worker_agents` / `input_schema` / `output_schema` | Role-specific contracts |
 | `skills` | Independent three-layer stacking loading (see [3.8](#38-skills--skill-package-configuration)) |
@@ -1417,7 +1395,7 @@ shell_settings:
   allowed_operators: ["|", "&&"]
   block_destructive: true
 
-workflow: |
+task: |
   You are a read-only code audit agent. You can only view file contents, not modify them.
 ```
 
@@ -1444,7 +1422,7 @@ shell_settings:
   background_tasks:
     stall_threshold_seconds: 30     # Faster stall detection
 
-workflow: |
+task: |
   You are a development agent. You can write code, run builds and tests.
 ```
 
@@ -1462,7 +1440,7 @@ tools:
   - name: "read_file"
   - name: "grep_search"
 
-workflow: |
+task: |
   You are a text analysis agent. You can only read and search files.
 ```
 
@@ -1588,7 +1566,8 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `name` | ✅ | ✅ | ✅ | `str` | — |
 | `agent_runtime` | ✅ | ✅ | ✅ | `str` | None; select `smolagents` / `pi` explicitly |
 | `description` | ✅ | ✅ | ✅ | `str` | — |
-| `workflow` | ✅ | ✅ | ✅ | `str` | — |
+| `task` | ✅ | ✅ | ✅ | `str` / `list[str]` | — |
+| `system_prompt` | ❌ | ✅ | ✅ | `str` / `{path: str}` | Runtime default instructions |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
 | `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
@@ -1601,5 +1580,5 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |
 | `runtime_options.max_consecutive_model_errors` | ❌ | ✅ | ✅ | `int` | `5` |
 | `runtime_options.max_steps` | ❌ | ✅ | ✅ | `int` | `80` |
-| `input_schema` | ❌ | ❌ | ✅ | JSON Schema object | Default required `task: string` |
+| `input_schema` | ❌ | ❌ | ✅ | JSON Schema object | Empty argument object |
 | `output_schema` | ❌ | ✅ | ✅ | JSON Schema | Text output |

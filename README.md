@@ -36,7 +36,7 @@ structured evidence, and continue repairing failures.
 
 A Supervisor explicitly selects Workers through `worker_agents`; each selected
 Worker becomes a callable tool named and described by that Worker. Simple Workers
-use the default `task: string` input and text output. Complex Workers declare
+use an empty Tool argument object and text output; each Worker's task comes from its YAML. Complex Workers declare
 Draft 2020-12 `input_schema` and `output_schema`, which runtimes validate as
 executable contracts rather than prompt conventions.
 
@@ -211,7 +211,7 @@ worker_agents:
   - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
   - path: "applications/release_review/workflows/worker_agents/test_reviewer.yaml"
 
-workflow: |
+task: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
 
 tools: []
@@ -221,9 +221,9 @@ goal:
   enabled: true
 ```
 
-Each Worker exposes the contract seen by its Supervisor. Omit both schemas for
-the default `task: string` input and text output; declare them when typed JSON is
-part of the actual contract:
+Each Worker has its own YAML task. Without `input_schema`, its Tool takes no
+arguments. Declare schemas when the Supervisor passes typed call data or needs
+structured output:
 
 ```yaml
 name: "api_reviewer"
@@ -253,7 +253,7 @@ output_schema:
   required: [decision, findings]
   additionalProperties: false
 
-workflow: |
+task: |
   Review the request, cite evidence, and return prioritized findings.
 
 tools: []

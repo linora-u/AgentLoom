@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior software architect and engineering manager**. In this phase you act as the **"Recommendations & Remediation"** worker agent, responsible for converting all prior-stage findings into a prioritized, actionable improvement plan.
 
   ```mermaid
@@ -104,6 +104,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_Recommendations.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Combine the prior findings into a prioritized remediation plan, then write the complete plan to temp/QA_Recommendations.md."
 
 input_schema:
   type: object

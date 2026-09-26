@@ -1,6 +1,6 @@
 # AgentLoom 能力架构与开发顺序
 
-状态：架构分析稿。本文描述当前实现、目标职责和开发顺序；不代表功能已经实现。Step、执行详录和大工具结果的行为约束以 [统一 Step 观测 Spec](unified-step-observability-and-large-tool-results.md) 为准。
+状态：架构分析稿。本文描述职责和开发顺序，不作为实现进度报告。Step、执行详录和大工具结果的行为约束以 [统一 Step 观测 Spec](unified-step-observability-and-large-tool-results.md) 为准；YAML 任务与连续会话以 [Agent 任务 Spec](native-agent-prompts-and-structured-subagents.md) 为准。
 
 ## 1. 从用户任务出发
 
@@ -39,10 +39,10 @@ flowchart LR
 
 | 对象 | 含义及关系 | 所有权与寿命 |
 | --- | --- | --- |
-| Project / Application | Project 包含 Application；定义包含 Supervisor、Worker、模型、工具、Skill、Hook 和权限 | `config` + `app.definition`；一次 Run 固定定义修订版 |
+| Project / Application | Project 包含 Application；YAML 定义包含 Supervisor、Worker、各自任务、模型、工具、Skill、Hook 和权限 | `config` + `app.definition`；一个 Task 的续跑固定定义修订版 |
 | Task | 一次逻辑任务，可跨多次运行尝试 | Task ID 在续跑时不变；checkpoint、#79 内容引用和详录按 Task 关联 |
 | Run | 一次执行尝试 | 每次新建 Run ID；`app.lifecycle` 最终结算；manifest、日志和本次审计属 Run |
-| Agent invocation | Supervisor 或 Worker 的一次调用，形成父子树 | `app.invocation` 创建身份与上下文；每个调用有自己的局部 Step 序列 |
+| Agent invocation | Supervisor 或 Worker 的一次调用，形成父子树；YAML 任务列表在该 Agent 会话中逐项执行 | `app.invocation` 创建身份与上下文；每个调用有自己的局部 Step 序列及任务项进度 |
 | Step / Model turn / Tool call | 一次模型轮次及其工具批次为一个 Step；Run 内展示编号连续，Agent 本地轮次用于 Hook/checkpoint 关联；并行工具以 call ID 区分，传输重试为 attempt | runtime adapter 报告事实，#79 的共用观测模块规范化并存储 |
 | Tool result / payload reference | 工具原结果、模型可见结果及其关联；大结果通过不透明引用读取 | Tool Gateway 治理最终调用；#79 Task 范围内容存储保存完整内容，不借用 ContextStore |
 
@@ -104,7 +104,7 @@ flowchart LR
 | 0. 固定契约 | 明确对象身份、Step 语义、Tool 原文/模型投影、写入失败及保密规则；现有预检和 Run receipt 不变 | 同一 Application 可用两个 runtime 预检；失败不分配 Run；Run/Task ID 及终态只有一个解释。 |
 | 1. 建立执行事实与持久内容 | #79 的版本化事实、必需 recorder、Task 范围索引和不可变 payload；与 best-effort event sink 分离 | 用同一 call ID 查到最终参数、原结果、模型可见结果、所属 Step/Run；写失败使 Run 失败；无新 DB。 |
 | 2. 接入工具与模型边界 | 在 Tool Gateway/原生工具结果处完成落盘和投影；pi/smolagents 在各自真实模型出口采集请求与回复；提供有界取回 | 普通结果完整进入模型；超大多行和单行结果均能分页复原；pi bridge 不传回无上限原文；已提交工具只执行一次。 |
-| 3. 统一展示和检查 | 共用 smolagents 风格 presenter、Python Step 检查接口；CLI text 和 runtime.log 读取同一事实 | 两 runtime 与 Worker 均展示 New run、Step、Tool arguments、Observations、耗时/token、错误和一次最终答案；Observations 与模型可见结果按脱敏规则一致；JSON/JSONL 不混入人读文本。 |
+| 3. 统一展示和检查 | 共用 smolagents 风格 presenter、Python Step 检查接口；CLI text 和 runtime.log 读取同一事实 | 两 runtime 与 Worker 均展示 New run、Step、Tool arguments、Observations、耗时/token、错误；每个已完成任务项的实际最终答案至多展示一次，不合成缺失回复。Observations 与模型可见结果按脱敏规则一致；JSON/JSONL 不混入人读文本。 |
 | 4. 续跑与故障验证 | 将内容引用和已提交效果校验接进最近安全 checkpoint 恢复 | 新 Run ID 沿用 Task ID 和引用；缺失/损坏引用明确失败；中断与续跑不重复已提交副作用；成功清理 checkpoint 后仍可检查历史内容。 |
 | 5. 按证据整理代码 | 在上述接口稳定后收敛 `app` 内预检/构造/调用/终态的重叠、移除仅转发的层；预留 exporter adapter | 相同外部行为与验证继续通过；新增 runtime 或 exporter 不要求改 CLI、Studio 或 Hook 决策逻辑。 |
 

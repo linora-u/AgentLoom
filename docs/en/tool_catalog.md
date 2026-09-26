@@ -97,7 +97,7 @@ AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-markdown \
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-resolve \
   uv run loom run applications/test_demo/workflows/test_tool_resolve_agent.yaml
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-context \
-  uv run loom run applications/context_engine_text_retrieve_validation/workflows/context_engine_text_retrieve_validation_agent.yaml
+  uv run loom run applications/test_demo/workflows/test_tool_truncation_agent.yaml
 AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-catalog-self-learning \
   uv run loom run applications/self_learning_smoke/workflows/self_learning_smoke_agent.yaml
 ```

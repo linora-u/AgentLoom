@@ -18,10 +18,11 @@ Use `goal: false` or omit it to disable. Mapping form requires boolean `enabled`
 Legacy `token_budget` values are silently ignored; Goal has no cost/token ceiling.
 Worker YAML cannot define Goal Mode.
 
-The Goal objective tracks one required non-empty `workflow` string and an
-optional runtime task. The Agent `description` remains display and Tool metadata;
-it is not execution input. The `workflow` remains a Runtime instruction. A supplied
-task is a separate user message; an absent task creates no substitute message.
+The Goal objective is the current item in the Agent YAML's required `task`.
+For a task list, each item starts a separate Goal in the same Agent conversation.
+The next item is sent only after `update_goal(status="complete")` commits the
+current Goal. Optional `system_prompt` supplies Runtime instructions; the Agent
+`description` remains display and Tool metadata.
 
 ## Lifecycle and tools
 
@@ -35,15 +36,19 @@ the handlers. Todo completion does not change Goal state.
 Continuation uses the same runtime and conversation. Later prompts include Goal
 identity and state, without restarting completed work. After completion, the root
 may make one in-process request exposing only `final_answer` to deliver its reply.
-Planning and smart-summary calls cannot consume that allowance. A restored
-completed Goal returns its stored evidence without rerunning work.
+Planning and smart-summary calls cannot consume that allowance. Completion
+evidence is Goal state, not a substitute for an absent Agent final reply.
 
 ## Checkpoints and observability
 
 With checkpoints enabled, `<application_id>/<task_id>/goal.json` stores identity,
 objective fingerprint, state, `goal_started`, evidence, and timestamps. Resume
-preserves the Goal and checks that workflow and runtime task still match. Corrupt
+preserves the Goal and checks that the YAML task and definition still match. Corrupt
 Goal state or disabling an active Goal remains an error.
+
+At each completed task item, the checkpoint records the Goal phase and next task
+index together with the Agent session. Resume continues the first uncommitted
+item without resending a committed user turn.
 
 Old budget and usage fields in Goal checkpoints are silently ignored. A legacy
 `budget_limited` Goal resumes as `active`; an already completed Goal stays complete.

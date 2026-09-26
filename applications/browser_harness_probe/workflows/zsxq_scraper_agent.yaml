@@ -28,7 +28,7 @@ tools:
 
 worker_agents: []
 
-workflow: |
+task: |
   # ZSXQ Owner Post Scraper
 
   You scrape the group owner's (`楼主`) posts from a zsxq.com group by driving the

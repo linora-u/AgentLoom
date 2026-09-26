@@ -18,7 +18,7 @@ tools:
 
 worker_agents: []
 
-workflow: |
+task: |
   # Self-Learning Foundation Real-LLM Smoke
 
   Execute the following validation through native structured tool calls. Use

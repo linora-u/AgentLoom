@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior security engineer and application security expert**. In this phase you act as the **"Security & Vulnerability Scan"** worker agent, responsible for identifying security weaknesses, potential vulnerabilities, and unsafe coding patterns.
 
   ```mermaid
@@ -113,6 +113,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_Security.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for security weaknesses, then write the complete findings to temp/QA_Security.md."
 
 input_schema:
   type: object

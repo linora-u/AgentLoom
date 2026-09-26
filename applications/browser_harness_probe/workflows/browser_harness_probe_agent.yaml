@@ -36,7 +36,7 @@ tools:
 
 worker_agents: []
 
-workflow: |
+task: |
   # Browser Harness Probe
 
   You verify whether AgentLoom can call browser-harness through registered Python tools.
@@ -65,3 +65,6 @@ workflow: |
   - isolated mode status if run
   - real Chrome mode status if run
   - the concrete next step for any failing mode
+
+  Run browser-harness doctor, then verify both isolated Chrome and real Chrome
+  demo probes. Use the fixed demo probe tools.

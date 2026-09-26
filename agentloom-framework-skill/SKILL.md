@@ -104,7 +104,7 @@ Studio 检查和 Run 准备共用 `agentloom.app.definition` 的完整拓扑预�
 ## 定义发现
 
 结构扫描和 YAML 校验共用 `agentloom.app.definition` 的递归发现规则：
-`workflows/` 下所有 YAML/Markdown 定义都会被发现；相对路径中包含
+`workflows/` 下所有 YAML Agent 定义都会被发现；相对路径中包含
 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。
 发现过程不跟随 symlink。YAML 校验随后复用共享定义预检，覆盖嵌套 Supervisor、
 未引用 Worker 与完整 Worker 引用图。
@@ -122,7 +122,7 @@ git check-ignore -v config/llm.yaml || true
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
   --app-root applications/<app_name>
 
-# Application 结构扫描（复用共享 YAML/Markdown 解析器）
+# Application 结构扫描（复用共享 YAML 定义解析器）
 .venv/bin/python -c "
 import sys
 sys.path.insert(0, 'agentloom-framework-skill')

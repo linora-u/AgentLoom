@@ -11,7 +11,7 @@ description: |
 model_type: "powerful"
 concurrency: auto
 
-workflow: |
+task: |
   # 单目录架构分析（支持子目录分析复用）
 
   ```mermaid

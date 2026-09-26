@@ -18,7 +18,7 @@ shell_settings:
     - "wc"
   allowed_operators: ["|", "&&"]
 
-workflow: |
+task: |
   # Shell Allow-list Matrix Validation
 
   This Agent intentionally allows only cat, echo, grep, ls, printf, pwd, and

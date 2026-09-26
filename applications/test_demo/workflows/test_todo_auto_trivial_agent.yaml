@@ -9,7 +9,7 @@ runtime_options:
   smart_summary: false
 
 
-workflow: |
+task: |
   Return exactly: TODO_AUTO_TRIVIAL_OK
 
 tools: []

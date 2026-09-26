@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""
-Unit Test Studio demo entrypoint.
-
-Runs the supervisor workflow and returns an English report.
-"""
+"""Run the Unit Test Studio task declared in its Agent YAML."""
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -18,73 +13,30 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agentloom.execution.trace import generate_id
 from agentloom.app.workflows import get_supervisor_agent_yaml_path
-from agentloom.execution.logging import initialize_global_logger_once, resolve_logger
-from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgent
+from agentloom.app.runner import run_app
 
 
 def run_unit_test_studio(
-    target_path: str,
-    targets: str,
-    output_dir: str = "test/generated",
+    file_logging: bool | None = None,
+    resume: str | None = None,
 ) -> str:
-    """
-    Run the Unit Test Studio supervisor workflow.
-
-    Args:
-        target_path: Root path used to resolve relative module paths in targets.
-        targets: Comma-separated function targets, e.g. `src/a.py:foo,src/a.py:bar`.
-        output_dir: Output directory under target_path where generated tests are written.
-    """
-
-    target_root = Path(target_path).resolve()
-    if not target_root.exists() or not target_root.is_dir():
-        raise ValueError(f"target_path must be an existing directory: {target_root}")
-
+    """Use the YAML task and return the Agent's actual final reply."""
     yaml_path = get_supervisor_agent_yaml_path("unit_test_studio") / "unit_test_studio_agent.yaml"
-    if not yaml_path.exists():
-        raise FileNotFoundError(f"Supervisor YAML not found: {yaml_path}")
-
-    config = YamlAgentFactory._load_config_from_file(yaml_path)
-    logger = initialize_global_logger_once(config["name"])
-    log = resolve_logger(logger, __name__)
-
-    supervisor = YamlConfiguredSupervisorAgent(config=config, logger=logger)
-
-    payload = {
-        "target_root": str(target_root),
-        "targets": targets,
-        "output_dir": output_dir,
-    }
-
-    task_content = (
-        "Generate Python pytest tests using Unit Test Studio.\n"
-        "Use this JSON payload exactly:\n"
-        f"{json.dumps(payload, ensure_ascii=False)}"
+    result = run_app(
+        str(yaml_path),
+        file_logging=file_logging,
+        resume_task_id=resume,
     )
-    task_id = generate_id(task_content, prefix="task")
-    log.info("Running Unit Test Studio task_id=%s payload=%s", task_id, payload)
-
-    result = supervisor.run(task_content, task_id=task_id)
-    report = "" if result is None else str(result)
-    log.info("Unit Test Studio completed. report_length=%d", len(report))
-    return report
+    return "" if result is None else str(result)
 
 
 def cli_run(
-    target_path: str,
-    targets: str,
-    output_dir: str = "test/generated",
+    file_logging: bool | None = None,
+    resume: str | None = None,
 ):
-    """
-    CLI wrapper for Unit Test Studio demo.
-    """
-    report = run_unit_test_studio(
-        target_path=target_path,
-        targets=targets,
-        output_dir=output_dir,
-    )
+    """CLI wrapper for the configured Unit Test Studio task."""
+    report = run_unit_test_studio(file_logging=file_logging, resume=resume)
     print(report)
 
 

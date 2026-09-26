@@ -6,10 +6,11 @@ description: "Test tool_call mode: verify LLM can invoke tools via native functi
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # Tool Call Mode Verification Test
 
-  You are a testing agent. Execute ALL steps below to validate that tool_call mode
+  Execute ALL steps below to validate that tool_call mode
   works correctly with native function calling.
 
   ## Step 1: Read a file

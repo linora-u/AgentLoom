@@ -59,13 +59,10 @@ def _relocate_tool_namespaces(application: Path, application_id: str) -> list[di
         return []
     changes = []
     for source in sorted((application / "workflows").rglob("*")):
-        if source.suffix not in {".yaml", ".yml", ".md"}:
+        if source.suffix not in {".yaml", ".yml"}:
             continue
         content = source.read_text(encoding="utf-8")
-        block = re.search(r"```yaml\s*\n(.*?)\n```", content, re.DOTALL) if source.suffix == ".md" else None
-        if source.suffix == ".md" and block is None:
-            raise ValueError(f"Markdown definition has no YAML block: {source}")
-        config = yaml.safe_load(block.group(1) if block else content)
+        config = yaml.safe_load(content)
         changed = False
         for index, tool in enumerate(config.get("tools", [])):
             module = tool.get("module")
@@ -76,8 +73,6 @@ def _relocate_tool_namespaces(application: Path, application_id: str) -> list[di
                 changed = True
         if changed:
             rendered = yaml.safe_dump(config, sort_keys=False)
-            if block:
-                rendered = content[:block.start(1)] + rendered.rstrip("\n") + content[block.end(1):]
             source.write_text(rendered, encoding="utf-8")
     return changes
 
@@ -134,7 +129,7 @@ def prepare_attempt(project: Path, output: Path, case: str, *, baseline_project_
     request["prepared_definition_sha256"] = {
         source.relative_to(application).as_posix(): sha256(source)
         for source in sorted((application / "workflows").rglob("*"))
-        if source.is_file() and source.suffix in {".yaml", ".yml", ".md"}
+        if source.is_file() and source.suffix in {".yaml", ".yml"}
     }
     _write(attempt / "request.json", request)
     return attempt, request
@@ -160,7 +155,11 @@ def _run_child(attempt: Path, request: dict) -> int:
         else:
             definition = Path(request["definition"])
             task = "Investigate and repair the repository through every Worker, then verify and persist reports/final.json. ACCEPTANCE_PAYLOAD=" + json.dumps({"workspace": request["workspace"], "case_nonce": request["case_nonce"]})
-        result = execute_app(definition, task_override=task, file_logging=True, event_sink=observe)
+        configured = yaml.safe_load(definition.read_text(encoding="utf-8"))
+        configured["task"] = task
+        definition.write_text(yaml.safe_dump(configured, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        request["definition_sha256"] = sha256(definition)
+        result = execute_app(definition, file_logging=True, event_sink=observe)
         receipt.update({"status": "completed", "run": _json_default(result.run), "output": result.output})
     except BaseException as exc:
         receipt["error"] = {"type": type(exc).__name__, "message": str(exc)}
@@ -191,7 +190,7 @@ def _policy_definition(attempt: Path, request: dict) -> Path:
     definition = Path(request["definition"])
     payload = yaml.safe_load(definition.read_text())
     payload.update({"name": "architecture_policy_probe", "worker_agents": [], "max_steps": 4,
-                    "workflow": "Call write_workspace_file exactly once with the payload workspace, relative_path='reports/blocked-sentinel.json', content='{}'. This is a real policy test: attempt the tool even though it will be blocked. Do not bypass, retry, or write by another method. Return the actual observed blocked reason through final_answer.",
+                    "task": "Call write_workspace_file exactly once with the payload workspace, relative_path='reports/blocked-sentinel.json', content='{}'. This is a real policy test: attempt the tool even though it will be blocked. Do not bypass, retry, or write by another method. Return the actual observed blocked reason through final_answer.",
                     "hooks": {"PreToolUse": [{"id": "architecture.deny-write", "matcher": "write_workspace_file", "command": "printf '%s\\n' '{\"decision\":\"block\",\"reason\":\"ARCHITECTURE_POLICY_DENY\"}'"}]}})
     definition.write_text(yaml.safe_dump(payload, sort_keys=False))
     return definition
@@ -239,7 +238,7 @@ def _rejection_child(attempt: Path, request: dict) -> int:
 
         sys.addaudithook(audit)
         try:
-            execute_app(definition, task_override="Invalid definitions must reject without running.", event_sink=events.append)
+            execute_app(definition, event_sink=events.append)
         except Exception as exc:
             error = {"type": type(exc).__name__, "message": str(exc)}
         diagnostic = {"duplicate-key": "duplicate", "invalid-worker": "required", "missing-reference": "does_not_exist"}[variant]
