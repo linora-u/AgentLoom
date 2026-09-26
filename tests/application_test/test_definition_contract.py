@@ -472,6 +472,8 @@ def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
     assert first() == ("Run the task.", "Original instructions.")
     assert second() == ("Use new definition.", "Edited instructions.")
     assert first is not second
+    direct = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
+    assert direct() == ("Use new definition.", "Edited instructions.")
     with pytest.raises(ValueError, match="source YAML path"):
         YamlAgentFactory.create_agent_as_tool(
             {"name": "orphan", "task": "Inspect.", "system_prompt": {"path": "prompt.md"}},

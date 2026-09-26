@@ -679,7 +679,12 @@ class YamlAgentFactory:
     @staticmethod
     def _definition_project_root(path: Path) -> Path:
         configured_root = Path(C.agent_root).expanduser().absolute()
-        return configured_root if path.is_relative_to(configured_root) else path.parent
+        if path.is_relative_to(configured_root):
+            return configured_root
+        for parent in path.parents:
+            if parent.name == "applications":
+                return parent.parent
+        return path.parent
 
     @staticmethod
     def _load_config_from_file(config_path: str | Path) -> dict:
