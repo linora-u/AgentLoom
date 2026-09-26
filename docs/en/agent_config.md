@@ -186,10 +186,12 @@ Supervisor and Worker share 4 required fields:
 | Field | Responsibility | What to Write | What NOT to Write |
 |------|------|--------|----------|
 | `description` | **Role positioning** (one or two sentences) | "As XX agent, your core responsibility is YY" | Don't write detailed processes or specific steps |
-| `system_prompt` | **Optional long-lived instructions** | Role, rules, and working style; inline or `{path: prompts/role.md}` | The current request |
+| `system_prompt` | **Optional long-lived instructions** | Role, rules, and working style; inline or `{path: ../config/prompts/role.md}` | The current request |
 | `task` | **Required user task** | One request or an ordered list of requests | Tool call arguments |
 
 `system_prompt` enters the Runtime system / instructions channel. When omitted, the runtime uses its default behavior. `task` enters the user channel. Each list item waits for the previous one to finish and shares the same Agent conversation. CLI and Python entry points do not accept extra task text.
+
+`system_prompt.path` is relative to the defining Agent YAML. A YAML under `workflows/` can use `../config/prompts/role.md`; a Worker YAML under `workflows/worker_agents/` uses `../../config/prompts/role.md`. The `my_pi_agent` and code review Applications include examples under their own `config/prompts/` directories.
 
 #### Goal Mode (Supervisor only)
 
