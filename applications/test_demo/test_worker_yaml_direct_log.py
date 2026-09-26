@@ -100,8 +100,8 @@ def run_worker_direct_log_demo(worker_yaml: Path) -> None:
         "checkpoints": ["schema", "invoke", "output"],
     }
     print("\n--- Manual Runtime Log Checklist ---")
-    print("1) workflow is delivered through Runtime instructions")
-    print("2) Invocation arguments are the Worker user input")
+    print("1) system_prompt is delivered through Runtime instructions")
+    print("2) YAML task is the Worker user input; call data accompanies its first turn")
     print("3) No AgentLoom XML prompt wrapper is generated")
     print(f"Invocation input kwargs: {demo_inputs}")
     result = tool_fn(**demo_inputs)

@@ -1,5 +1,4 @@
 import pytest
-
 from agentloom.execution.checkpoint import CheckpointManager
 from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
 from agentloom.execution.goal import GoalConfig, GoalState, normalize_goal_config
@@ -29,7 +28,7 @@ def test_checkpoint_goal_state_roundtrip_and_corruption_is_fatal(tmp_path):
         manager.close()
 
 
-def test_provider_persists_start_and_idempotent_completion(tmp_path):
+def test_provider_persists_start_and_idempotent_completion(tmp_path, monkeypatch):
     manager = CheckpointManager("supervisor", checkpoints_root=tmp_path)
     coord = CheckpointCoordinator.activate(manager, "task-1", "task")
     try:
@@ -40,6 +39,18 @@ def test_provider_persists_start_and_idempotent_completion(tmp_path):
         provider.assert_request_allowed()
         provider.mark_started()
         assert manager.load_goal("task-1")["goal_started"] is True
+        save_goal = coord.save_goal
+
+        def fail_completion(state):
+            if state["status"] == "complete":
+                raise OSError("injected Goal state write interruption")
+            return save_goal(state)
+
+        monkeypatch.setattr(coord, "save_goal", fail_completion)
+        with pytest.raises(OSError, match="Goal state write interruption"):
+            provider.complete("Verified report.")
+        assert manager.load_goal("task-1")["status"] == "active"
+        monkeypatch.setattr(coord, "save_goal", save_goal)
         completed = provider.complete("Verified report.")
         assert provider.complete("Do not replace the first evidence.") == completed
         assert manager.load_goal("task-1") == completed.to_dict()

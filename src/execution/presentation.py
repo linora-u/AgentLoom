@@ -124,6 +124,8 @@ class StepPresenter:
         elif kind == "agent_end" and isinstance(agent_id, str):
             self._complete_step(agent_id)
         elif kind == "task_item_end":
+            if not isinstance(event.get("answer_ref"), str):
+                return
             answer = self.trace.read_text(event["answer_ref"])
             number = int(event["item_index"]) + 1
             count = int(event["item_count"])
@@ -141,6 +143,8 @@ class StepPresenter:
                     soft_wrap=True,
                 )
         elif kind == "final_answer":
+            if not isinstance(event.get("answer_ref"), str):
+                return
             answer = self.trace.read_text(event["answer_ref"])
             self.backend.log(Text(f"Final answer: {answer}", style="bold #d4b702"),
                              level=AgentLoomLogLevel.INFO)

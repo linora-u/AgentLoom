@@ -732,6 +732,7 @@ def _execute_app(
         ended_at=ended_at,
         goal=durable_manifest_updates.get("goal"),
         final_answer_presented=final_answer_presented,
+        answer_present=lifecycle.answer_present,
     )
     _emit_lifecycle_event(
         event_sink,
@@ -740,6 +741,7 @@ def _execute_app(
             run=public_run,
             occurred_at=ended_at,
             output=lifecycle.result,
+            answer_present=lifecycle.answer_present,
             goal=durable_manifest_updates.get("goal"),
         ),
     )

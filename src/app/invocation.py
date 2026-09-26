@@ -79,6 +79,7 @@ class AgentInvocation:
     resume: bool = False
     additional_args: dict[str, Any] | None = None
     owns_root_run: bool = False
+    answer_present: bool = False
 
     def run(self) -> JSONValue:
         from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
@@ -427,6 +428,7 @@ class AgentInvocation:
 
         def record_task_item(
             index: int, output: JSONValue, *, commit_id: str | None = None,
+            answer_present: bool = True,
         ) -> None:
             from agentloom.execution.observability import get_current_trace_recorder
 
@@ -437,6 +439,7 @@ class AgentInvocation:
                     item_count=len(transformed_tasks),
                     output=output,
                     commit_id=commit_id,
+                    answer_present=answer_present,
                 )
 
         def validate_goal_terminal_output(output: JSONValue) -> JSONValue:
@@ -498,9 +501,12 @@ class AgentInvocation:
             committed_item = coordinator.committed_task_item()
             recorder = get_current_trace_recorder()
             if committed_item is not None and recorder is not None:
-                prior_index, prior_commit_id, prior_output = committed_item
+                prior_index, prior_commit_id, prior_output, prior_answer_present = committed_item
                 if not recorder.has_task_item_commit(prior_commit_id):
-                    record_task_item(prior_index, prior_output, commit_id=prior_commit_id)
+                    record_task_item(
+                        prior_index, prior_output, commit_id=prior_commit_id,
+                        answer_present=prior_answer_present,
+                    )
 
         if goal_provider is None:
             result = None
@@ -512,6 +518,7 @@ class AgentInvocation:
             if next_index > len(transformed_tasks):
                 raise ValueError("Checkpoint task position exceeds the YAML task list")
             if next_index == len(transformed_tasks):
+                self.answer_present = coordinator.load_task_item_answer_present()
                 return coordinator.load_task_item_output(), None
             for task_index in range(next_index, len(transformed_tasks)):
                 current_task = transformed_tasks[task_index]
@@ -549,6 +556,7 @@ class AgentInvocation:
                     error_prefix="Agent run did not complete successfully",
                 )
                 result = run_result.output
+                self.answer_present = True
                 commit_id = None
                 if coordinator is not None and self.checkpoint_manager is not None:
                     committed_checkpoint = run_result.checkpoint or runtime_agent.snapshot()
@@ -558,6 +566,7 @@ class AgentInvocation:
                         result=result,
                         require_durable=True,
                         task_item_next_index=task_index + 1,
+                        task_item_answer_present=True,
                     )
                 record_task_item(task_index, result, commit_id=commit_id)
             return result, run_result
@@ -572,7 +581,9 @@ class AgentInvocation:
             if state.status == "complete":
                 if phase_index == len(transformed_tasks) - 1:
                     if coordinator is not None and self.checkpoint_manager is not None:
+                        self.answer_present = coordinator.load_task_item_answer_present()
                         return coordinator.load_task_item_output(), None
+                    self.answer_present = False
                     return None, None
                 next_task = lifecycle_tasks[phase_index + 1] or ""
                 goal_provider.advance_to(
@@ -637,11 +648,15 @@ class AgentInvocation:
                             result=None,
                             require_durable=True,
                             task_item_next_index=phase_index + 1,
+                            task_item_answer_present=False,
                             goal_phase_commit=terminal_state.to_dict(),
                             goal_active_phase=terminal_state.to_dict(),
                         )
-                    record_task_item(phase_index, None, commit_id=commit_id)
+                    record_task_item(
+                        phase_index, None, commit_id=commit_id, answer_present=False,
+                    )
                     if phase_index == len(transformed_tasks) - 1:
+                        self.answer_present = False
                         return None, None
                     continue
                 raise
@@ -650,11 +665,14 @@ class AgentInvocation:
                 allowed_states={"success", "max_steps_error"},
                 error_prefix="Agent Goal segment failed",
             )
-            segment_output = run_result.output
+            segment_output = (
+                None if run_result.state == "max_steps_error" else run_result.output
+            )
             segment_index += 1
             total_segments += 1
             state = goal_provider.snapshot()
             if state.status == "complete":
+                answer_present = run_result.state == "success"
                 segment_output = validate_goal_terminal_output(segment_output)
                 commit_id = None
                 if coordinator is not None and self.checkpoint_manager is not None:
@@ -664,11 +682,16 @@ class AgentInvocation:
                         result=segment_output,
                         require_durable=True,
                         task_item_next_index=phase_index + 1,
+                        task_item_answer_present=answer_present,
                         goal_phase_commit=state.to_dict(),
                         goal_active_phase=state.to_dict(),
                     )
-                record_task_item(phase_index, segment_output, commit_id=commit_id)
+                record_task_item(
+                    phase_index, segment_output, commit_id=commit_id,
+                    answer_present=answer_present,
+                )
                 if phase_index == len(transformed_tasks) - 1:
+                    self.answer_present = answer_present
                     return segment_output, run_result
                 continue
             goal_provider.assert_request_allowed()
@@ -697,6 +720,7 @@ class AgentInvocation:
                         coordinator=coordinator,
                         runtime_result=runtime_result,
                         result=session_result,
+                        answer_present=self.answer_present,
                         error=session_error,
                         goal=goal_snapshot,
                     )

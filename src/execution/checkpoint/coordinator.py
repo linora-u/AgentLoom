@@ -85,6 +85,7 @@ class CheckpointCoordinator:
         self._resume = resume
         self._task_item_next_index = 0
         self._task_item_commit_id: str | None = None
+        self._task_item_answer_present = False
         self._goal_phase_commit: dict[str, Any] | None = None
         self._goal_active_phase: dict[str, Any] | None = None
         # Worker heartbeat writers — one per worker_name.
@@ -222,20 +223,23 @@ class CheckpointCoordinator:
     @staticmethod
     def _sequence_fields(
         checkpoint: dict[str, Any] | None,
-    ) -> tuple[int, str | None, dict[str, Any] | None, dict[str, Any] | None]:
+    ) -> tuple[int, str | None, bool, dict[str, Any] | None, dict[str, Any] | None]:
         next_index = checkpoint.get("task_item_next_index", 0) if checkpoint else 0
         if type(next_index) is not int or next_index < 0:
             raise ValueError("Corrupt task sequence position in checkpoint")
         commit_id = checkpoint.get("task_item_commit_id") if checkpoint else None
         if commit_id is not None and (not isinstance(commit_id, str) or not commit_id):
             raise ValueError("Corrupt task item commit identity in checkpoint")
+        answer_present = checkpoint.get("task_item_answer_present", False) if checkpoint else False
+        if type(answer_present) is not bool:
+            raise ValueError("Corrupt task item answer presence in checkpoint")
         commit = checkpoint.get("goal_phase_commit") if checkpoint else None
         active = checkpoint.get("goal_active_phase") if checkpoint else None
         if commit is not None and not isinstance(commit, dict):
             raise ValueError("Corrupt Goal phase commit in checkpoint")
         if active is not None and not isinstance(active, dict):
             raise ValueError("Corrupt active Goal phase in checkpoint")
-        return next_index, commit_id, commit, active
+        return next_index, commit_id, answer_present, commit, active
 
     @classmethod
     def validate_goal_resume_boundary(
@@ -244,7 +248,7 @@ class CheckpointCoordinator:
         """Reject Goal state that cannot be paired with a committed Runtime boundary."""
 
         checkpoint = checkpoint_manager.load_supervisor_checkpoint(task_id)
-        next_index, _, commit, active = cls._sequence_fields(checkpoint)
+        next_index, _, _, commit, active = cls._sequence_fields(checkpoint)
         phase = goal["phase_index"]
         expected_index = phase + (1 if goal["status"] == "complete" else 0)
         if next_index != expected_index:
@@ -275,6 +279,7 @@ class CheckpointCoordinator:
         (
             self._task_item_next_index,
             self._task_item_commit_id,
+            self._task_item_answer_present,
             self._goal_phase_commit,
             self._goal_active_phase,
         ) = self._sequence_fields(checkpoint)
@@ -302,12 +307,13 @@ class CheckpointCoordinator:
         (
             self._task_item_next_index,
             self._task_item_commit_id,
+            self._task_item_answer_present,
             self._goal_phase_commit,
             self._goal_active_phase,
         ) = self._sequence_fields(checkpoint)
         return self._task_item_next_index
 
-    def committed_task_item(self) -> tuple[int, str, JSONValue] | None:
+    def committed_task_item(self) -> tuple[int, str, JSONValue, bool] | None:
         """Return the latest committed root item for trace reconciliation."""
 
         if self._task_item_next_index == 0 or self._task_item_commit_id is None:
@@ -316,7 +322,11 @@ class CheckpointCoordinator:
             self._task_item_next_index - 1,
             self._task_item_commit_id,
             self.load_task_item_output(),
+            self._task_item_answer_present,
         )
+
+    def load_task_item_answer_present(self) -> bool:
+        return self._task_item_answer_present
 
     def load_task_item_output(self) -> JSONValue:
         checkpoint = self._cm.load_supervisor_checkpoint(self._task_id)
@@ -334,6 +344,7 @@ class CheckpointCoordinator:
         error: str | None = None,
         require_durable: bool = False,
         task_item_next_index: int | None = None,
+        task_item_answer_present: bool | None = None,
         goal_phase_commit: dict[str, Any] | None = None,
         goal_active_phase: dict[str, Any] | None = None,
     ) -> str | None:
@@ -355,6 +366,14 @@ class CheckpointCoordinator:
                 if task_item_next_index is not None and next_index > self._task_item_next_index
                 else self._task_item_commit_id
             )
+            if task_item_answer_present is not None:
+                answer_present = task_item_answer_present
+            elif task_item_next_index is not None and next_index > self._task_item_next_index:
+                answer_present = result is not None
+            else:
+                answer_present = self._task_item_answer_present
+            if type(answer_present) is not bool:
+                raise ValueError("task_item_answer_present must be a boolean")
             phase_commit = (
                 self._goal_phase_commit if goal_phase_commit is None else goal_phase_commit
             )
@@ -375,11 +394,13 @@ class CheckpointCoordinator:
                 ),
                 task_item_next_index=next_index,
                 task_item_commit_id=item_commit_id,
+                task_item_answer_present=answer_present,
                 goal_phase_commit=phase_commit,
                 goal_active_phase=active_phase,
             )
             self._task_item_next_index = next_index
             self._task_item_commit_id = item_commit_id
+            self._task_item_answer_present = answer_present
             self._goal_phase_commit = phase_commit
             self._goal_active_phase = active_phase
             self._cm.record_task_status_changed(

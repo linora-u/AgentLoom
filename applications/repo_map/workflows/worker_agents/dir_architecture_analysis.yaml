@@ -11,7 +11,7 @@ description: |
 model_type: "powerful"
 concurrency: auto
 
-task: |
+system_prompt: |
   # 单目录架构分析（支持子目录分析复用）
 
   ```mermaid
@@ -144,6 +144,8 @@ task: |
   - 保持客观，基于 index_content 和 children_analyses 实际内容，不过度推断
   - **不要逐个列出所有定义**，只提取有结构意义的关键符号
   - 分析使用中文，但代码符号（文件名、函数名、类型名）保持原文（英文）
+
+task: 基于本次传入的 dir_path、index_content 和 children_analyses 分析目录架构，按上述格式返回 Markdown。
 
 tools: []
 

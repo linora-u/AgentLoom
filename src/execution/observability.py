@@ -272,17 +272,19 @@ class TraceRecorder:
 
     def record_task_item_end(
         self, *, item_index: int, item_count: int, output: Any,
-        commit_id: str | None = None,
+        commit_id: str | None = None, answer_present: bool = True,
     ) -> None:
         """Keep each configured user turn's actual result, including null."""
 
         execution = capture_explicit_execution_context()
         try:
             output_ref = self._payload(output, content_type="application/json")
-            rendered = output if isinstance(output, str) else json.dumps(
-                redact_value(output), ensure_ascii=False, indent=2, default=str
-            )
-            answer_ref = self._payload(rendered, content_type="text/plain")
+            answer_ref = None
+            if answer_present:
+                rendered = output if isinstance(output, str) else json.dumps(
+                    redact_value(output), ensure_ascii=False, indent=2, default=str
+                )
+                answer_ref = self._payload(rendered, content_type="text/plain")
             self._append({
                 "kind": "task_item_end",
                 "agent_id": execution.local_run_id,

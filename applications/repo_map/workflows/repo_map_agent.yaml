@@ -13,8 +13,8 @@ description: |
 
 model_type: "powerful"
 
-system_prompt: 你是 Repo Map 架构分析监督智能体。
-task: |
+system_prompt: |
+  你是 Repo Map 架构分析监督智能体。
   # Repo Map 架构分析工作流
 
   按顺序调用工具来完成架构分析和 Skill 文档生成。
@@ -43,7 +43,7 @@ task: |
 
   ## 执行步骤
 
-  你必须按以下顺序逐个调用工具。所有工具都需要 `output_dir` 参数，其值在 task 描述中以 `output_dir=xxx` 格式给出。
+  你必须按以下顺序逐个调用工具。所有工具都需要 `output_dir` 参数，其值应由本次 task 明确给出；缺失时不要猜测路径。
 
   1. **调用 `run_analysis_loop(output_dir=<output_dir>)`**
      - 逐目录调用 dir_architecture_analysis 子 Agent 进行 LLM 架构分析
@@ -70,6 +70,8 @@ task: |
   - **所有步骤必须按顺序执行**，不允许跳过任何工具调用
   - run_analysis_loop 可能耗时较长，耐心等待
   - 不要在调用完所有工具之前就调用 final_answer
+
+task: 按上述流程处理 output_dir=.repo_map 中由扫描阶段生成的索引，完成 Repo Map 架构分析与 Skill 文档生成。
 
 tools:
   - name: "run_analysis_loop"
