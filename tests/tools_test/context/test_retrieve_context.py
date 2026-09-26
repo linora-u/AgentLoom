@@ -51,6 +51,10 @@ def test_loom_retrieve_context_paginates_full_original_content(tmp_path):
         assert "line-14 with enough filler to require context storage" in result
         assert "line-11" not in result
         assert "line-15" not in result
+
+        default_page = loom_retrieve_context(ref=ref)
+        assert "line-199 with enough filler to require context storage" in default_page
+        assert "line-200 with enough filler to require context storage" not in default_page
     finally:
         clear_current_context_engine(engine)
 
