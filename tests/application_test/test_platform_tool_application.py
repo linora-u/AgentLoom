@@ -810,7 +810,13 @@ def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(plat
 
 
 def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project):
-    _, _, programs, _, run = platform_project
+    root, _, programs, _, run = platform_project
+    llm_path = root / "config/llm.yaml"
+    llm_config = yaml.safe_load(llm_path.read_text(encoding="utf-8"))
+    for model in llm_config["model"].values():
+        if isinstance(model, dict):
+            model.update(context_window=4096, max_output_tokens=1024)
+    llm_path.write_text(yaml.safe_dump(llm_config), encoding="utf-8")
     payload = "汉字🙂" * 450
 
     def execute(definition, _request):
@@ -824,7 +830,7 @@ def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project
         while True:
             retrieved = definition.tool_gateway.invoke(
                 call_id=f"page-{offset}", tool_name="loom_retrieve_context",
-                arguments={"ref": match.group(1), "offset": offset, "limit": 127},
+                arguments={"ref": match.group(1), "offset": offset},
             )
             assert retrieved.status == "completed"
             header, body = retrieved.output.split("\n", 1)
@@ -834,6 +840,7 @@ def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project
             if next_match.group(1) == "none":
                 break
             offset = int(next_match.group(1))
+        assert len(pieces) > 1
         return "".join(pieces)
 
     programs["platform"] = execute
