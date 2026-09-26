@@ -550,8 +550,10 @@ class _StageAgentYamlTool:
     name = "stage_agent_yaml"
     description = (
         "Create or replace one Agent YAML file in the in-memory draft. "
-        "The complete YAML must contain non-empty top-level name, description, workflow, "
-        "model_type, and tool_call_type fields. Behavioral instructions belong in workflow. "
+        "The complete YAML must contain non-empty top-level name, description, task, "
+        "model_type, and tool_call_type fields. task is one user message or an ordered "
+        "list of user messages. Optional system_prompt contains instructions, either "
+        "inline or as a path mapping. "
         "This never writes to disk; the user must explicitly apply the draft."
     )
     inputs = {

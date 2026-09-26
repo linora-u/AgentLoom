@@ -448,7 +448,7 @@ class RoleDrivenAgent(BaseAgent):
     Unifies worker/supervisor behavior through role profile and hooks.
     """
 
-    COMMON_REQUIRED_FIELDS: tuple[str, ...] = ("name", "description", "workflow")
+    COMMON_REQUIRED_FIELDS: tuple[str, ...] = ("name", "description", "task")
     REQUIRED_CONFIG_FIELDS: tuple[str, ...] = ()
     def __init__(
         self,
@@ -614,9 +614,10 @@ class RoleDrivenAgent(BaseAgent):
         return task
 
     def _transform_tasks(self, task: str | None) -> list[str | None]:
-        """Transform a caller task into one or more runtime tasks."""
-        transformed_task = self._transform_task(task)
-        return [transformed_task]
+        """Send the YAML task sequence as consecutive turns in this session."""
+        configured = self._config["task"]
+        items = [configured] if isinstance(configured, str) else configured
+        return [self._transform_task(item) for item in items]
 
     def _extra_telemetry_kwargs(self) -> dict:
         """Extra telemetry parameters (kept for subclass compatibility)."""
@@ -669,7 +670,7 @@ class RoleDrivenAgent(BaseAgent):
         )
 
     def _build_runtime_instructions(self, gateway: AgentLoomToolGateway) -> str:
-        sections = [str(self._config["workflow"]).strip(), get_agent_environment_prompt()]
+        sections = [str(self._config.get("_resolved_system_prompt") or self._config.get("system_prompt") or "").strip(), get_agent_environment_prompt()]
         if any(item.name == "skill" for item in gateway.definitions):
             if self._skill_catalog is None:
                 raise RuntimeError("Skill Tool requires a resolved Skill catalog")
@@ -744,7 +745,7 @@ class RoleDrivenAgent(BaseAgent):
 
     def run(
         self,
-        task: str | None = None,
+        *,
         task_id: str | None = None,
         run_id: str | None = None,
         checkpoint_manager: Any | None = None,
@@ -762,6 +763,8 @@ class RoleDrivenAgent(BaseAgent):
         def _run_once() -> JSONValue:
             from agentloom.app.invocation import AgentInvocation
 
+            configured_task = self._config["task"]
+            first_task = configured_task if isinstance(configured_task, str) else configured_task[0]
             # Every invocation gets a fresh local id. The outermost invocation
             # also owns it as the root; delegated workers keep their own local id.
             local_run_id = run_id or str(uuid.uuid4())
@@ -769,7 +772,7 @@ class RoleDrivenAgent(BaseAgent):
                 with bind_root_run(local_run_id) as owns_root_run:
                     return AgentInvocation(
                         self,
-                        task=task,
+                        task=first_task,
                         task_id=task_id,
                         checkpoint_manager=checkpoint_manager,
                         application_lifecycle=application_lifecycle,
@@ -803,6 +806,7 @@ class SubTaskTrackedAgent:
         self._agent_name = agent_name
         self._instance_id = instance_id
         self._log = get_logger(getattr(runtime, "logger", None), __name__)
+        self._resume_sequence_checkpoint: RuntimeCheckpointEnvelope | None = None
 
     @property
     def runtime_id(self) -> str:
@@ -883,8 +887,8 @@ class SubTaskTrackedAgent:
             )
 
             coord = CheckpointCoordinator.current()
-            input_hash = self._compute_input_hash(request.task)
-            task_text = request.task or ""
+            task_text = request.recovery_task_input or request.task or ""
+            input_hash = self._compute_input_hash(task_text)
 
             # Claim/allocate exactly one logical call before side effects.  The
             # explicit outcome distinguishes a cached ``None``/empty result
@@ -896,6 +900,11 @@ class SubTaskTrackedAgent:
                     task_text,
                 )
                 if not preparation.should_execute:
+                    if request.has_more_task_items:
+                        self._resume_sequence_checkpoint = coord.load_completed_worker_checkpoint(
+                            self._agent_name,
+                            preparation.call_index,
+                        )
                     self._log.info(
                         "Skipping completed worker %s (input_hash=%s)",
                         self._agent_name,
@@ -948,6 +957,9 @@ class SubTaskTrackedAgent:
                 if coord is not None
                 else None
             )
+            if checkpoint is None and self._resume_sequence_checkpoint is not None:
+                checkpoint = self._resume_sequence_checkpoint
+            self._resume_sequence_checkpoint = None
             checkpoint_sink = (
                 coord.worker_checkpoint_sink(
                     self._agent_name,

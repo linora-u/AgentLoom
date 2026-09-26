@@ -24,6 +24,7 @@ class StepPresenter:
         self._step_usage: dict[int, tuple[int, int]] = {}
         self._input_total = 0
         self._output_total = 0
+        self._root_agent_id: str | None = None
 
     def _complete_step(self, agent_id: str) -> None:
         active = self._active_steps.pop(agent_id, None)
@@ -47,13 +48,16 @@ class StepPresenter:
         kind = event.get("kind")
         agent_id = event.get("agent_id")
         if kind == "agent_start":
+            continuing = isinstance(agent_id, str) and agent_id in self._agents
             if isinstance(agent_id, str):
                 self._agents.add(agent_id)
+                if event.get("parent_agent_id") is None:
+                    self._root_agent_id = agent_id
             task = self.trace.read_text(event["task_ref"])
             self.backend.log(
                 Panel(
                     Text("\n" + task + "\n", style="bold"),
-                    title="New run - " + str(event["agent_name"]),
+                    title=("Next task - " if continuing else "New run - ") + str(event["agent_name"]),
                     subtitle=str(event["runtime"]),
                     border_style="#d4b702",
                     subtitle_align="left",
@@ -119,6 +123,15 @@ class StepPresenter:
                 )
         elif kind == "agent_end" and isinstance(agent_id, str):
             self._complete_step(agent_id)
+        elif kind == "task_item_end":
+            answer = self.trace.read_text(event["answer_ref"])
+            number = int(event["item_index"]) + 1
+            count = int(event["item_count"])
+            if (event.get("root_agent") is True or agent_id == self._root_agent_id) and number == count:
+                return
+            label = "Final answer" if count == 1 else f"Task {number} answer"
+            self.backend.log(Text(f"{label}: {answer}", style="bold #d4b702"),
+                             level=AgentLoomLogLevel.INFO, soft_wrap=True)
         elif kind == "hook_decision" and event.get("event") == "Stop":
             decision = json.loads(self.trace.read_text(event["decision_ref"]))["result"]
             if decision.get("decision") == "block":

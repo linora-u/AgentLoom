@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import nullcontext
 from contextvars import ContextVar
 from copy import deepcopy
@@ -18,8 +19,8 @@ from agentloom.execution.agent_runtime import (
     RuntimeEventSink,
     require_runtime_state,
 )
-from agentloom.execution.goal import goal_completion_output as _goal_completion_output
 from agentloom.execution.goal import goal_continuation_prompt as _goal_continuation_prompt
+from agentloom.execution.goal import goal_objective_fingerprint as _goal_objective_fingerprint
 from agentloom.execution.hooks import HookEvent, HookRun
 from agentloom.execution.trace import (
     bind_explicit_execution_context,
@@ -37,6 +38,14 @@ _RUNTIME_EVENT_SINK: ContextVar[RuntimeEventSink | None] = ContextVar(
     "agentloom_runtime_event_sink",
     default=None,
 )
+
+
+def task_with_call_data(task: str, call_data: dict[str, Any] | None) -> str:
+    """Project schema-declared Worker data into its first configured user turn."""
+    if not call_data:
+        return task
+    data = json.dumps(call_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"{task}\n\nInput data (JSON):\n{data}"
 
 
 def _merge_runtime_events(
@@ -84,6 +93,8 @@ class AgentInvocation:
         lifecycle_tasks = owner._transform_tasks(self.task)
         if not lifecycle_tasks:
             raise ValueError("Agent task transformation produced no tasks")
+        if self.additional_args:
+            lifecycle_tasks[0] = task_with_call_data(lifecycle_tasks[0] or "", self.additional_args)
         # Memory is model context, not newly supplied task/evidence. Recording
         # its trusted wrapper in lifecycle events would make the untrusted
         # history sanitizer correctly treat the wrapper as a forged fence.
@@ -101,13 +112,21 @@ class AgentInvocation:
         if goal_config.enabled:
             if not self.owns_root_run:
                 raise ValueError("Goal mode can only be configured by the root Supervisor Agent")
+            phase_index = 0
+            if self.resume and self.checkpoint_manager is not None:
+                persisted_goal = self.checkpoint_manager.load_goal(self.task_id)
+                if persisted_goal is not None:
+                    CheckpointCoordinator.validate_goal_resume_boundary(
+                        self.checkpoint_manager, self.task_id, persisted_goal
+                    )
+                    phase_index = persisted_goal.get("phase_index", 0)
+            if phase_index >= len(lifecycle_tasks):
+                raise ValueError("Cannot resume Goal mode: task phase is out of range")
             goal_objective = build_goal_objective(
-                workflow=owner._config["workflow"],
-                task=self.task,
+                task=lifecycle_tasks[phase_index] or "",
             )
             goal_fingerprint = goal_objective_fingerprint(
-                workflow=owner._config["workflow"],
-                task=self.task,
+                task=lifecycle_tasks[phase_index] or "",
             )
 
         parent_context = capture_explicit_execution_context()
@@ -246,7 +265,7 @@ class AgentInvocation:
                 session_started = True
 
             runtime_checkpoint, checkpoint_sink = self._prepare_checkpoint(
-                coordinator
+                coordinator, goal_provider
             )
             result, runtime_result = self._run_runtime(
                 runtime_agent,
@@ -256,6 +275,7 @@ class AgentInvocation:
                 lifecycle=lifecycle,
                 runtime_checkpoint=runtime_checkpoint,
                 checkpoint_sink=checkpoint_sink,
+                coordinator=coordinator,
             )
             owner._emit_task_lifecycle_event(
                 HookEvent.TASK_COMPLETED,
@@ -325,7 +345,7 @@ class AgentInvocation:
                         f"{type(lifecycle_error).__name__}: {lifecycle_error}"
                     )
 
-    def _prepare_checkpoint(self, coordinator: Any) -> tuple[Any, Any]:
+    def _prepare_checkpoint(self, coordinator: Any, goal_provider: Any) -> tuple[Any, Any]:
         if coordinator is None:
             return None, None
         runtime_checkpoint = None
@@ -335,7 +355,14 @@ class AgentInvocation:
         checkpoint_sink = None
         if self.checkpoint_manager is not None:
             def save_running_checkpoint(checkpoint: Any) -> None:
-                coordinator.save_runtime_checkpoint(checkpoint, "running", require_durable=True)
+                active_phase = (
+                    goal_provider.snapshot().to_dict()
+                    if goal_provider is not None else None
+                )
+                coordinator.save_runtime_checkpoint(
+                    checkpoint, "running", require_durable=True,
+                    goal_active_phase=active_phase,
+                )
 
             checkpoint_sink = save_running_checkpoint
         return runtime_checkpoint, checkpoint_sink
@@ -350,6 +377,7 @@ class AgentInvocation:
         lifecycle: ApplicationRunLifecycle | None,
         runtime_checkpoint: Any = None,
         checkpoint_sink: Any = None,
+        coordinator: Any = None,
     ) -> tuple[Any, Any]:
         runtime_context = get_current_run_context()
         execution_context = capture_explicit_execution_context()
@@ -397,6 +425,35 @@ class AgentInvocation:
             elif parent_event_sink is not None:
                 parent_event_sink(event)
 
+        def record_task_item(
+            index: int, output: JSONValue, *, commit_id: str | None = None,
+        ) -> None:
+            from agentloom.execution.observability import get_current_trace_recorder
+
+            recorder = get_current_trace_recorder()
+            if recorder is not None:
+                recorder.record_task_item_end(
+                    item_index=index,
+                    item_count=len(transformed_tasks),
+                    output=output,
+                    commit_id=commit_id,
+                )
+
+        def validate_goal_terminal_output(output: JSONValue) -> JSONValue:
+            output_contract = getattr(self.owner._ensure_normalized(), "output_contract", None)
+            if output_contract is None:
+                return output
+            from agentloom.execution.agent_runtime import AgentRuntimeError
+
+            try:
+                return output_contract.validate(output)
+            except ValueError as validation_error:
+                raise AgentRuntimeError(
+                    "Goal completed without an output accepted by output_schema",
+                    category="output_validation",
+                    cause=validation_error,
+                ) from validation_error
+
         def invoke_runtime(request: AgentRuntimeRequest) -> AgentRuntimeResult:
             start = len(runtime_events)
             token = _RUNTIME_EVENT_SINK.set(observe_runtime_event)
@@ -435,9 +492,29 @@ class AgentInvocation:
             finally:
                 _RUNTIME_EVENT_SINK.reset(token)
 
+        if self.resume and self.owns_root_run and coordinator is not None:
+            from agentloom.execution.observability import get_current_trace_recorder
+
+            committed_item = coordinator.committed_task_item()
+            recorder = get_current_trace_recorder()
+            if committed_item is not None and recorder is not None:
+                prior_index, prior_commit_id, prior_output = committed_item
+                if not recorder.has_task_item_commit(prior_commit_id):
+                    record_task_item(prior_index, prior_output, commit_id=prior_commit_id)
+
         if goal_provider is None:
             result = None
-            for task_index, current_task in enumerate(transformed_tasks):
+            next_index = (
+                coordinator.load_task_item_next_index()
+                if self.resume and coordinator is not None and self.checkpoint_manager is not None
+                else 0
+            )
+            if next_index > len(transformed_tasks):
+                raise ValueError("Checkpoint task position exceeds the YAML task list")
+            if next_index == len(transformed_tasks):
+                return coordinator.load_task_item_output(), None
+            for task_index in range(next_index, len(transformed_tasks)):
+                current_task = transformed_tasks[task_index]
                 self.owner._emit_task_start(
                     runtime_agent,
                     lifecycle_tasks[task_index] or "",
@@ -447,13 +524,15 @@ class AgentInvocation:
                 run_result = invoke_runtime(
                     AgentRuntimeRequest(
                         task=current_task,
+                        recovery_task_input=lifecycle_tasks[task_index],
                         **request_identity,
                         event_sink=observe_runtime_event,
                         continue_session=self.resume or task_index > 0,
                         record_task=task_index > 0,
-                        additional_args=self.additional_args or {},
+                        has_more_task_items=task_index < len(transformed_tasks) - 1,
+                        additional_args={},
                         checkpoint=(
-                            runtime_checkpoint if task_index == 0 else None
+                            runtime_checkpoint if task_index == next_index else None
                         ),
                         checkpoint_sink=checkpoint_sink,
                     )
@@ -470,25 +549,49 @@ class AgentInvocation:
                     error_prefix="Agent run did not complete successfully",
                 )
                 result = run_result.output
+                commit_id = None
+                if coordinator is not None and self.checkpoint_manager is not None:
+                    committed_checkpoint = run_result.checkpoint or runtime_agent.snapshot()
+                    commit_id = coordinator.save_runtime_checkpoint(
+                        committed_checkpoint,
+                        "running",
+                        result=result,
+                        require_durable=True,
+                        task_item_next_index=task_index + 1,
+                    )
+                record_task_item(task_index, result, commit_id=commit_id)
             return result, run_result
 
-        initial_state = goal_provider.snapshot()
         segment_index = 0
+        total_segments = 0
         while True:
             state = goal_provider.snapshot()
+            phase_index = state.phase_index
+            if phase_index >= len(transformed_tasks):
+                raise ValueError("Goal phase exceeds the configured task list")
             if state.status == "complete":
-                return state.evidence, None
+                if phase_index == len(transformed_tasks) - 1:
+                    if coordinator is not None and self.checkpoint_manager is not None:
+                        return coordinator.load_task_item_output(), None
+                    return None, None
+                next_task = lifecycle_tasks[phase_index + 1] or ""
+                goal_provider.advance_to(
+                    objective=next_task.strip(),
+                    objective_fingerprint=_goal_objective_fingerprint(task=next_task),
+                )
+                segment_index = 0
+                continue
             goal_provider.assert_request_allowed()
-            use_initial_context = segment_index == 0 and not initial_state.goal_started
+            use_initial_context = segment_index == 0 and not state.goal_started
             current_task = (
-                transformed_tasks[0]
+                transformed_tasks[phase_index]
                 if use_initial_context
                 else _goal_continuation_prompt(state)
             )
             try:
                 self.owner._emit_task_start(
                     runtime_agent,
-                    (lifecycle_tasks[0] if use_initial_context else current_task)
+                    (lifecycle_tasks[phase_index] if use_initial_context else current_task)
                     or "",
                     additional_args=self.additional_args or {},
                 )
@@ -500,13 +603,14 @@ class AgentInvocation:
                         event_sink=observe_runtime_event,
                         continue_session=(
                             self.resume
-                            or segment_index > 0
+                            or total_segments > 0
+                            or phase_index > 0
                             or not use_initial_context
                         ),
-                        record_task=not use_initial_context,
-                        additional_args=self.additional_args or {},
+                        record_task=phase_index > 0 or not use_initial_context,
+                        additional_args={},
                         checkpoint=(
-                            runtime_checkpoint if segment_index == 0 else None
+                            runtime_checkpoint if total_segments == 0 else None
                         ),
                         checkpoint_sink=checkpoint_sink,
                     )
@@ -524,7 +628,22 @@ class AgentInvocation:
                 # A completion commit does not authorize hiding a rejected Stop
                 # gate, failed tool settlement, or another runtime failure.
                 if isinstance(exc, GoalCompleteError):
-                    return terminal_state.evidence, None
+                    validate_goal_terminal_output(None)
+                    commit_id = None
+                    if coordinator is not None and self.checkpoint_manager is not None:
+                        commit_id = coordinator.save_runtime_checkpoint(
+                            runtime_agent.snapshot(),
+                            "running",
+                            result=None,
+                            require_durable=True,
+                            task_item_next_index=phase_index + 1,
+                            goal_phase_commit=terminal_state.to_dict(),
+                            goal_active_phase=terminal_state.to_dict(),
+                        )
+                    record_task_item(phase_index, None, commit_id=commit_id)
+                    if phase_index == len(transformed_tasks) - 1:
+                        return None, None
+                    continue
                 raise
             require_runtime_state(
                 run_result,
@@ -533,9 +652,25 @@ class AgentInvocation:
             )
             segment_output = run_result.output
             segment_index += 1
+            total_segments += 1
             state = goal_provider.snapshot()
             if state.status == "complete":
-                return _goal_completion_output(segment_output, state.evidence), run_result
+                segment_output = validate_goal_terminal_output(segment_output)
+                commit_id = None
+                if coordinator is not None and self.checkpoint_manager is not None:
+                    commit_id = coordinator.save_runtime_checkpoint(
+                        run_result.checkpoint or runtime_agent.snapshot(),
+                        "running",
+                        result=segment_output,
+                        require_durable=True,
+                        task_item_next_index=phase_index + 1,
+                        goal_phase_commit=state.to_dict(),
+                        goal_active_phase=state.to_dict(),
+                    )
+                record_task_item(phase_index, segment_output, commit_id=commit_id)
+                if phase_index == len(transformed_tasks) - 1:
+                    return segment_output, run_result
+                continue
             goal_provider.assert_request_allowed()
 
     def _finalize(

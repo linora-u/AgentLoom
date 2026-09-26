@@ -44,24 +44,16 @@ def normalize_goal_config(config: dict[str, Any], *, source: str) -> GoalConfig:
 
 def build_goal_objective(
     *,
-    workflow: str,
-    task: str | None,
+    task: str,
 ) -> str:
-    parts = [f"Workflow:\n{workflow.strip()}"]
-    if task is not None and task.strip():
-        parts.append(f"Runtime request:\n{task.strip()}")
-    return "\n\n".join(parts)
+    return task.strip()
 
 
 def goal_objective_fingerprint(
     *,
-    workflow: str,
-    task: str | None,
+    task: str,
 ) -> str:
-    payload = {
-        "workflow": workflow.strip(),
-        "task": task.strip() if task is not None else "",
-    }
+    payload = {"task": task.strip()}
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -75,6 +67,7 @@ class GoalState:
     goal_id: str
     objective: str
     objective_fingerprint: str
+    phase_index: int = 0
     status: GoalStatus = "active"
     evidence: str | None = None
     goal_started: bool = False
@@ -89,12 +82,14 @@ class GoalState:
         *,
         objective: str,
         objective_fingerprint: str,
+        phase_index: int = 0,
     ) -> GoalState:
         now = _now()
         return cls(
             goal_id=f"goal_{uuid.uuid4().hex}",
             objective=objective,
             objective_fingerprint=objective_fingerprint,
+            phase_index=phase_index,
             created_at=now,
             updated_at=now,
         )
@@ -131,6 +126,7 @@ def validate_goal_state(raw: Any) -> GoalState:
         "goal_id",
         "objective",
         "objective_fingerprint",
+        "phase_index",
         "status",
         "token_budget",
         "prompt_tokens",
@@ -158,6 +154,9 @@ def validate_goal_state(raw: Any) -> GoalState:
         if not isinstance(raw.get(field), str) or not raw[field].strip():
             raise ValueError(f"Goal state {field} must be a non-empty string")
     status = raw.get("status")
+    phase_index = raw.get("phase_index", 0)
+    if isinstance(phase_index, bool) or not isinstance(phase_index, int) or phase_index < 0:
+        raise ValueError("Goal state phase_index must be a non-negative integer")
     # Old budget stops resume as active Goals; budget metadata is ignored.
     if status == "budget_limited":
         status = "active"
@@ -180,6 +179,7 @@ def validate_goal_state(raw: Any) -> GoalState:
         goal_id=raw["goal_id"],
         objective=raw["objective"],
         objective_fingerprint=raw["objective_fingerprint"],
+        phase_index=phase_index,
         status=status,
         evidence=evidence,
         goal_started=raw["goal_started"],
@@ -187,7 +187,6 @@ def validate_goal_state(raw: Any) -> GoalState:
         updated_at=raw["updated_at"],
         completed_at=completed_at,
     )
-
 
 def goal_continuation_prompt(state: Any) -> str:
     """Render the runtime-neutral continuation request for an active Goal."""
@@ -204,17 +203,3 @@ def goal_continuation_prompt(state: Any) -> str:
         "objective is delivered and verified, call update_goal with status="
         "'complete' and concise evidence."
     )
-
-
-def goal_completion_output(
-    segment_output: Any,
-    evidence: str | None,
-) -> Any:
-    """Choose the canonical final output after a Goal completion commit."""
-
-    if (
-        isinstance(segment_output, str)
-        and segment_output.startswith("Error in generating final LLM output:")
-    ):
-        return evidence
-    return segment_output if segment_output is not None else evidence

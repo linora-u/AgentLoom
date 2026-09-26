@@ -14,7 +14,7 @@ from agentloom.app.validation import (
 )
 from agentloom.execution.goal import normalize_goal_config
 
-REQUIRED_YAML_FIELDS = ("name", "agent_runtime", "workflow", "description")
+REQUIRED_YAML_FIELDS = ("name", "agent_runtime", "task", "description")
 
 
 def validate_required_yaml_fields(config: dict, yaml_path: Path | str) -> None:
@@ -27,12 +27,12 @@ def validate_required_yaml_fields(config: dict, yaml_path: Path | str) -> None:
         elif not isinstance(value, str):
             invalid.append(f"{field} must be a non-empty string")
 
-    workflow = config.get("workflow")
-    if workflow is None:
-        missing.append("workflow")
+    task = config.get("task")
+    if task is None:
+        missing.append("task")
     else:
         try:
-            AgentConfigNormalizer.validate_workflow_config(config)
+            AgentConfigNormalizer.validate_task_config(config)
         except ValueError as error:
             invalid.append(str(error))
 
@@ -65,7 +65,7 @@ def validate_runtime_agent_config(
     normalize_runtime_options(config, agent_root=agent_root)
     validate_required_yaml_fields(config, yaml_path)
     AgentConfigNormalizer.validate_runtime_tool_references(config)
-    AgentConfigNormalizer.validate_workflow_config(config)
+    AgentConfigNormalizer.validate_task_config(config)
     AgentConfigNormalizer.validate_skills_config(config)
     AgentConfigNormalizer.validate_agent_schemas(
         config,

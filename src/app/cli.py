@@ -197,7 +197,6 @@ Examples:
   loom run applications/test_demo/workflows/test_agent.yaml
   loom run applications/test_demo/workflows/test_agent.yaml --no-file-log
   loom run applications/test_demo/workflows/test_agent.yaml --resume task_xxx
-  loom run applications/test_demo/workflows/test_agent.yaml --task "Inspect this repository"
   loom run applications/test_demo/workflows/test_agent.yaml --output-format json
   loom run applications/test_demo/workflows/test_agent.yaml --output-format jsonl
 """
@@ -212,7 +211,6 @@ Examples:
     help="Disable this run's file log (configuration is used by default).",
 )
 @click.option("--resume", "resume_task_id", default=None, help="Resume from a checkpoint task ID.")
-@click.option("--task", "task_override", default=None, help="Override the task from the application YAML.")
 @click.option(
     "--output-format",
     type=click.Choice(("text", "json", "jsonl"), case_sensitive=False),
@@ -229,7 +227,6 @@ def run(
     yaml_path: str,
     no_file_log: bool,
     resume_task_id: str | None,
-    task_override: str | None,
     output_format: str,
     require_valid_supervisor_target: bool,
 ) -> None:
@@ -270,7 +267,6 @@ def run(
                     yaml_path,
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
-                    task_override=task_override,
                     event_sink=emit_event,
                     require_valid_supervisor_target=require_valid_supervisor_target,
                 )
@@ -279,7 +275,6 @@ def run(
                     yaml_path,
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
-                    task_override=task_override,
                     require_valid_supervisor_target=require_valid_supervisor_target,
                 )
                 rendered_output = (
