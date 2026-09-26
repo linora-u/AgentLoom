@@ -165,8 +165,8 @@ class TraceRecorder:
             raise TraceStorageError(f"Could not persist large Tool result for {call_id}: {exc}") from exc
         heading = (
             f"[ContextRef {reference} source={tool_name} size_bytes={size}]\n"
-            f'Use loom_retrieve_context(ref="{reference}", offset=0, limit=8192) '
-            "to read more bytes.\n\n"
+            f'Use loom_retrieve_context(ref="{reference}") to read up to 65536 bytes. '
+            "If next_offset is not none, pass offset=next_offset to read the next page.\n\n"
         )
         preview = safe_text[:max(1, preview_limit)]
         if input_limit is not None:

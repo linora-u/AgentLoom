@@ -726,7 +726,7 @@ def test_large_tool_reference_survives_context_cache_eviction(platform_project):
     def execute(definition, _request):
         first = definition.tool_gateway.invoke(
             call_id="first-large", tool_name="trace_payload",
-            arguments={"value": "FIRST-RECORD-8426\n" + "a" * 5000},
+            arguments={"value": "FIRST-RECORD-8426\n" + "a" * 40000},
         )
         second = definition.tool_gateway.invoke(
             call_id="second-large", tool_name="trace_payload",
@@ -737,7 +737,7 @@ def test_large_tool_reference_survives_context_cache_eviction(platform_project):
         assert match is not None
         retrieved = definition.tool_gateway.invoke(
             call_id="fetch-first", tool_name="loom_retrieve_context",
-            arguments={"ref": match.group(1), "offset": 0, "limit": 4096},
+            arguments={"ref": match.group(1)},
         )
         assert retrieved.status == "completed"
         return retrieved.model_content()
@@ -752,6 +752,7 @@ def test_large_tool_reference_survives_context_cache_eviction(platform_project):
                         "store": {"max_entries": 1}},
     )
     assert "FIRST-RECORD-8426" in result.output
+    assert "a" * 40000 in result.output
 
 
 @pytest.mark.parametrize("damage", ["corrupt", "late_corrupt", "delete"])
