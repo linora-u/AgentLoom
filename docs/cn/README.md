@@ -172,9 +172,11 @@ applications/release_review/
 │   └── worker_agents/
 │       ├── api_reviewer.yaml
 │       └── test_reviewer.yaml
-├── config/system.yaml          # 可选的 Application 覆盖配置
+├── config/
+│   ├── system.yaml             # 可选的 Application 覆盖配置
+│   └── prompts/reviewer.md     # 可选的 Agent system prompt 正文
 ├── skills/                     # 可选的私有 Skill
-└── sysprompt/                  # 可选的提示词模板
+└── sysprompt/                  # 可选的 runtime 提示词模板
 ```
 
 Supervisor 引用 Worker 定义：
@@ -186,6 +188,8 @@ name: "release_review"
 agent_runtime: "smolagents"
 description: "Review an API release and its test evidence."
 model_type: "powerful"
+system_prompt:
+  path: ../config/prompts/reviewer.md
 
 worker_agents:
   - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
