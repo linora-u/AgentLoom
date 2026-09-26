@@ -299,8 +299,8 @@ uv run loom run applications/ai_quality_analysis/workflows/code_review_agent.yam
 其他程序负责调度时，使用机器可读的生命周期事件：
 
 ```bash
-uv run loom run <workflow> --output-format json
-uv run loom run <workflow> --output-format jsonl
+uv run --locked --extra smol --extra code loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml --output-format json
+uv run --locked --extra smol --extra code loom run applications/ai_quality_analysis/workflows/code_review_agent.yaml --output-format jsonl
 ```
 
 在 Python 中调用 `execute_app()`，会返回包含输出、时间、结构化 Goal 状态和
