@@ -439,6 +439,7 @@ def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(
 
 def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
     from agentloom.app.factory import YamlAgentFactory
+    from agentloom.config.config import bind_config
 
     class DefinitionTool:
         def __init__(self, config, **kwargs):
@@ -451,19 +452,23 @@ def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
 
             return work
 
-    prompt = write(tmp_path / "prompts/instructions.md", "Original instructions.")
+    prompt = write(
+        tmp_path / "applications/demo/config/prompts/instructions.md",
+        "Original instructions.",
+    )
     path = write(
-        tmp_path / "worker.yaml",
-        BASE + "system_prompt:\n  path: prompts/instructions.md\n",
+        tmp_path / "applications/demo/workflows/worker_agents/worker.yaml",
+        BASE + "system_prompt:\n  path: ../../config/prompts/instructions.md\n",
     )
-    first = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
-    write(prompt, "Edited instructions.")
-    write(
-        path,
-        BASE.replace("Run the task.", "Use new definition.")
-        + "system_prompt:\n  path: prompts/instructions.md\n",
-    )
-    second = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
+    with bind_config(project_config(tmp_path)):
+        first = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
+        write(prompt, "Edited instructions.")
+        write(
+            path,
+            BASE.replace("Run the task.", "Use new definition.")
+            + "system_prompt:\n  path: ../../config/prompts/instructions.md\n",
+        )
+        second = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
     assert first() == ("Run the task.", "Original instructions.")
     assert second() == ("Use new definition.", "Edited instructions.")
     assert first is not second
