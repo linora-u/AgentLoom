@@ -26,7 +26,7 @@ def _write(path: Path, content: str) -> Path:
 def _workflow(project_root: Path, application_id: str = "reports") -> Path:
     return _write(
         project_root / f"applications/{application_id}/workflows/report.yaml",
-        "name: report\ndescription: report agent\nworkflow: write a report\n",
+        "name: report\ndescription: report agent\ntask: write a report\n",
     )
 
 
@@ -152,7 +152,7 @@ def test_catalog_preserves_same_id_unlinked_runs_from_different_applications(
         )
         _write(
             tmp_path / f"applications/{application_id}/workflows/second.yaml",
-            "name: second\ndescription: second candidate\nworkflow: answer\n",
+            "name: second\ndescription: second candidate\ntask: answer\n",
         )
 
     bridge = StudioQueryService(tmp_path)
@@ -1053,7 +1053,7 @@ def test_system_state_is_running_when_any_linked_run_is_active(tmp_path: Path) -
 def test_system_catalog_rejects_symlinked_yaml_files(tmp_path: Path) -> None:
     external = _write(
         tmp_path / "outside/secret.yaml",
-        "name: secret\ndescription: outside project\nworkflow: exfiltrate\n",
+        "name: secret\ndescription: outside project\ntask: exfiltrate\n",
     )
     linked = tmp_path / "project/applications/linked/workflows/linked.yaml"
     linked.parent.mkdir(parents=True)
@@ -1068,7 +1068,7 @@ def test_system_catalog_rejects_symlinked_applications_root(tmp_path: Path) -> N
     external_root = tmp_path / "outside/applications"
     _write(
         external_root / "secret/workflows/secret.yaml",
-        "name: secret\ndescription: outside project\nworkflow: exfiltrate\n",
+        "name: secret\ndescription: outside project\ntask: exfiltrate\n",
     )
     project_root = tmp_path / "project"
     project_root.mkdir()

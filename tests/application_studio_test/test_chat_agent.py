@@ -296,8 +296,7 @@ name: report_agent
 agent_runtime: smolagents
 description: Build a report.
 model_type: powerful
-workflow: |
-  Return a concise report.
+task: Return a concise report.
 """
     arguments = json.dumps(
         {

@@ -10,7 +10,7 @@ def test_run_detail_uses_durable_events_after_success_checkpoint_cleanup(tmp_pat
     workflow = tmp_path / "applications/reports/workflows/report.yaml"
     workflow.parent.mkdir(parents=True)
     workflow.write_text(
-        "name: report\ndescription: report\nworkflow: write a report\n",
+        "name: report\ndescription: report\ntask: write a report\n",
         encoding="utf-8",
     )
     run_dir = tmp_path / ".agentloom/runs/reports/run-1"

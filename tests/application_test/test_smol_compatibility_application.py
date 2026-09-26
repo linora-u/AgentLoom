@@ -132,7 +132,7 @@ def test_smol_runtime_options_execute_tools_todo_and_goal_through_application(
                 "name": "smol_compatibility",
                 "agent_runtime": "smolagents",
                 "description": "Write the receipt, track a pending Todo, and finish.",
-                "workflow": "Use the supplied tools to complete the requested task.",
+                "task": "Use the supplied tools to complete the requested task.",
                 "model_type": "compatibility",
                 "runtime_options": {"max_steps": 8, "smart_summary": False, "todo_mode": "auto"},
                 "goal": goal,

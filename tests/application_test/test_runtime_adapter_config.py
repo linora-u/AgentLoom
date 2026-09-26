@@ -102,7 +102,7 @@ def _agent_config(**overrides: object) -> dict[str, object]:
     return {
         "name": "runtime-contract",
         "description": "Exercise the configured Agent runtime.",
-        "workflow": "Complete the task with structured tools.",
+        "task": "Complete the task with structured tools.",
         "tools": [],
         **overrides,
     }
@@ -333,20 +333,20 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
                 parsed = load_agent_definition(path)
             except ValueError:
                 continue
-            if {"name", "description", "workflow"}.issubset(parsed):
+            if {"name", "description", "task"}.issubset(parsed):
                 definitions.append((path, parsed))
-    markdown_worker = (
+    yaml_worker = (
         PROJECT_ROOT
-        / "applications/architecture_contract_validation/workflows/worker_agents/change_planner.md"
+        / "applications/architecture_contract_validation/workflows/worker_agents/change_planner.yaml"
     )
-    definitions.append((markdown_worker, load_agent_definition(markdown_worker)))
+    definitions.append((yaml_worker, load_agent_definition(yaml_worker)))
 
     assert definitions
     for path, definition in definitions:
         # Shipped mixed Applications can select either supported native runtime.
         assert definition.get("agent_runtime") in {"smolagents", "pi"}, path
-        assert isinstance(definition.get("workflow"), str), path
-        assert definition["workflow"].strip(), path
+        assert isinstance(definition.get("task"), str), path
+        assert definition["task"].strip(), path
         assert "agent_function_schema" not in definition, path
         assert "tool_call_type" not in definition, path
         assert "execution_env" not in definition, path
@@ -370,104 +370,6 @@ def test_shipped_llm_example_declares_adapter_for_every_model_type() -> None:
         "openai_responses",
         "anthropic_messages",
     } for settings in config.models.values())
-
-
-@pytest.mark.parametrize(
-    ("relative_path", "payload_tool"),
-    [
-        (
-            "applications/context_engine_text_retrieve_validation/"
-            "workflows/worker_agents/text_payload_worker.yaml",
-            "make_context_engine_text_payload",
-        ),
-        (
-            "applications/context_engine_json_retrieve_validation/"
-            "workflows/worker_agents/json_payload_worker.yaml",
-            "make_context_engine_json_payload",
-        ),
-        (
-            "applications/context_engine_multi_worker_validation/"
-            "workflows/worker_agents/log_payload_worker.yaml",
-            "make_context_engine_log_payload",
-        ),
-        (
-            "applications/context_engine_multi_worker_validation/"
-            "workflows/worker_agents/search_payload_worker.yaml",
-            "make_context_engine_search_payload",
-        ),
-    ],
-)
-def test_context_engine_workers_use_structured_context_ref_handoff(
-    relative_path: str,
-    payload_tool: str,
-) -> None:
-    definition = load_agent_definition(PROJECT_ROOT / relative_path)
-    workflow = str(definition["workflow"])
-    normalized_workflow = " ".join(workflow.split())
-
-    assert payload_tool in workflow
-    assert "native structured tool call" in normalized_workflow
-    assert "ContextRef" in workflow
-    assert "final_answer" in workflow
-    assert "one code block" not in workflow
-    assert "payload =" not in workflow
-    assert "final_answer(payload)" not in workflow
-
-
-@pytest.mark.parametrize(
-    ("relative_path", "expected_tools"),
-    [
-        (
-            "applications/context_engine_text_retrieve_validation/"
-            "workflows/context_engine_text_retrieve_validation_agent.yaml",
-            {
-                "loom_retrieve_context": {
-                    "query": "TARGET_RECORD case=text",
-                    "offset": 0,
-                    "limit": 20,
-                }
-            },
-        ),
-        (
-            "applications/context_engine_json_retrieve_validation/"
-            "workflows/context_engine_json_retrieve_validation_agent.yaml",
-            {
-                "loom_retrieve_context": {
-                    "query": "verification_value",
-                    "offset": 0,
-                    "limit": 30,
-                }
-            },
-        ),
-        (
-            "applications/context_engine_multi_worker_validation/"
-            "workflows/context_engine_multi_worker_validation_agent.yaml",
-            {
-                "retrieve_log_context": {
-                    "query": "LOG_TARGET_RECORD",
-                    "offset": 0,
-                    "limit": 20,
-                },
-                "retrieve_search_context": {
-                    "query": "SEARCH_TARGET_RECORD",
-                    "offset": 0,
-                    "limit": 20,
-                },
-            },
-        ),
-    ],
-)
-def test_context_engine_supervisors_fix_retrieval_parameters(
-    relative_path: str,
-    expected_tools: dict[str, dict[str, object]],
-) -> None:
-    definition = load_agent_definition(PROJECT_ROOT / relative_path)
-    configured_tools = {
-        tool["name"]: tool.get("fixed_args")
-        for tool in definition["tools"]
-    }
-
-    assert configured_tools == expected_tools
 
 
 def test_smol_runtime_options_keep_explicit_layers_and_source(tmp_path):

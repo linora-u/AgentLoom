@@ -18,7 +18,7 @@ def _config(**overrides):
         "name": "goal-test",
         "agent_runtime": "smolagents",
         "description": "Finish the requested work.",
-        "workflow": "Inspect, implement, and verify.",
+        "task": "Inspect, implement, and verify.",
         "tools": [],
         **overrides,
     }
@@ -29,13 +29,7 @@ def test_goal_contract_has_no_list_workflow_normalizer():
 
 
 def test_goal_objective_excludes_agent_description_metadata():
-    assert build_goal_objective(
-        workflow="Inspect, implement, and verify.",
-        task="Repair the release.",
-    ) == (
-        "Workflow:\nInspect, implement, and verify.\n\n"
-        "Runtime request:\nRepair the release."
-    )
+    assert build_goal_objective(task="Repair the release.") == "Repair the release."
 
 
 @pytest.mark.parametrize(

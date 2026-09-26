@@ -48,20 +48,20 @@ def _make_worker(config: dict) -> YamlConfiguredAgent:
             self._config = config
             self._normalized = None
 
-        def run(self, query, additional_args=None):
-            return f"RUN::{query}"
+        def run(self, *, additional_args=None):
+            return "RUN::" + json.dumps(additional_args or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
     return WorkerFixture(config)
 
 
-def test_agent_as_tool_uses_default_task_schema_and_plain_user_input():
+def test_agent_as_tool_uses_zero_argument_schema_without_input_schema():
     worker = _make_worker(
         {
             "name": "demo_worker",
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo task",
         }
     )
 
@@ -73,16 +73,10 @@ def test_agent_as_tool_uses_default_task_schema_and_plain_user_input():
     assert binding.definition.description == "worker desc"
     assert binding.definition.parameters == {
         "type": "object",
-        "properties": {
-            "task": {
-                "type": "string",
-                "description": "Task for this Agent.",
-            },
-        },
-        "required": ["task"],
+        "properties": {},
         "additionalProperties": False,
     }
-    assert tool("hello") == "RUN::hello"
+    assert tool() == "RUN::{}"
 
 
 def test_agent_as_tool_preserves_typed_multi_field_input_as_bare_json():
@@ -92,7 +86,7 @@ def test_agent_as_tool_preserves_typed_multi_field_input_as_bare_json():
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -123,7 +117,7 @@ def test_agent_as_tool_allows_schema_valid_additional_properties():
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "input_schema": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -150,7 +144,7 @@ def test_agent_as_tool_accepts_json_property_names_that_are_not_python_identifie
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "input_schema": {
                 "type": "object",
                 "properties": {"user-id": {"type": "string"}},
@@ -164,7 +158,7 @@ def test_agent_as_tool_accepts_json_property_names_that_are_not_python_identifie
     tool = worker.agent_as_tool()
 
     assert bind_tool(tool).definition.parameters == worker._config["input_schema"]
-    assert tool(**{"user-id": "alice"}) == "RUN::alice"
+    assert tool(**{"user-id": "alice"}) == 'RUN::{"user-id":"alice"}'
 
 
 def test_agent_as_tool_accepts_required_fields_defined_by_additional_properties():
@@ -174,7 +168,7 @@ def test_agent_as_tool_accepts_required_fields_defined_by_additional_properties(
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "input_schema": {
                 "type": "object",
                 "required": ["query"],
@@ -216,7 +210,7 @@ def test_agent_as_tool_supports_an_object_root_local_reference(
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "input_schema": input_schema,
         }
     )
@@ -235,7 +229,7 @@ def test_agent_as_tool_allows_reference_shaped_instance_data_in_schema():
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -264,32 +258,32 @@ def test_agent_as_tool_preserves_structured_result():
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
         }
     )
-    type(worker).run = lambda self, _query, additional_args=None: {
+    type(worker).run = lambda self, *, additional_args=None: {
         "answer": '用户说"拍照"，工具返回成功。',
     }
     worker._validate_config()
 
-    assert worker.agent_as_tool()("hello") == {
+    assert worker.agent_as_tool()() == {
         "answer": '用户说"拍照"，工具返回成功。',
     }
 
 
-def test_mermaid_workflow_is_not_added_to_worker_user_input():
+def test_mermaid_task_is_not_added_to_worker_input_data():
     worker = _make_worker(
         {
             "name": "demo_worker",
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "```mermaid\nflowchart TD\nA-->B\n```",
+            "task": "```mermaid\nflowchart TD\nA-->B\n```",
         }
     )
     worker._validate_config()
 
-    assert worker.agent_as_tool()("hello") == "RUN::hello"
+    assert worker.agent_as_tool()() == "RUN::{}"
 
 
 def test_removed_agent_function_schema_is_rejected():
@@ -299,7 +293,7 @@ def test_removed_agent_function_schema_is_rejected():
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "agent_function_schema": {},
         }
     )
@@ -315,7 +309,7 @@ def test_factory_always_exports_a_worker_tool():
             "agent_runtime": "smolagents",
             "description": "worker desc",
             "tools": [],
-            "workflow": "demo workflow",
+            "task": "demo workflow",
         },
         model_binding=make_test_model_binding(),
     )
@@ -330,7 +324,7 @@ def test_supervisor_respects_empty_toolsets():
             "name": "demo",
             "agent_runtime": "smolagents",
             "description": "demo supervisor",
-            "workflow": "demo workflow",
+            "task": "demo workflow",
             "tools": [],
             "worker_agents": [],
             "toolsets": [],
@@ -352,7 +346,7 @@ def test_multi_field_projection_is_stable_json():
         "name": "stable_json",
         "agent_runtime": "smolagents",
         "description": "stable",
-        "workflow": "workflow",
+        "task": "workflow",
         "tools": [],
         "input_schema": {
             "type": "object",

@@ -43,7 +43,7 @@ model:
 name: {name}
 agent_runtime: smolagents
 description: A scheduled supervisor.
-workflow: |
+task: |
   Complete the scheduled task.
 """.strip(),
         encoding="utf-8",

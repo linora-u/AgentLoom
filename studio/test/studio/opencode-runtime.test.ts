@@ -331,7 +331,7 @@ describe("bundled OpenCode Runtime", () => {
       "description: Deterministic OpenCode Runtime integration fixture",
       "model_type: powerful",
       "tool_call_type: code_act",
-      "workflow: Validate the Application without changing files.",
+      "task: Validate the Application without changing files.",
       "tools: []",
       "worker_agents: []",
       "execution_env:",
@@ -486,7 +486,7 @@ describe("bundled OpenCode Runtime", () => {
     await writeFile(workflowPath, [
       "name: edit_demo_agent",
       "description: Before the Studio edit",
-      "workflow: Answer clearly.",
+      "task: Answer clearly.",
       "worker_agents: []",
     ].join("\n") + "\n", "utf8")
     const llm = new DeterministicEditServer("applications/edit_demo/workflows/demo.yaml")

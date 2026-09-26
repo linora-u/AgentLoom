@@ -17,7 +17,7 @@ def _make_minimal_config(concurrency=None):
     config = {
         "name": "test_worker",
         "description": "Test worker agent",
-        "workflow": "Analyze the input and return a result.",
+        "task": "Analyze the supplied query and return a result.",
         "model_type": "powerful",
         "agent_runtime": "smolagents",
         "input_schema": {
@@ -51,7 +51,7 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
     class FakeAgent:
         """Lightweight fake that mimics YamlConfiguredAgent enough for agent_as_tool."""
 
-        REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
+        REQUIRED_CONFIG_FIELDS = ["name", "description", "task"]
 
         def __init__(self, config, model_binding=None, logger=None, **kw):
             self._config = config
@@ -71,8 +71,8 @@ def _create_tool_with_mock_agent(config=None, agent_instances=None):
         def process_tool_query(self, query):
             return query
 
-        def run(self, formatted_query, additional_args=None):
-            self.task = formatted_query
+        def run(self, *, additional_args=None):
+            self.task = self._config["task"]
             self.additional_args = additional_args
             return f"result_from_{self._id}"
 
@@ -121,16 +121,15 @@ class TestFactoryMode:
         call_agents = instances[1:]
         assert call_agents[0]._model_binding is call_agents[1]._model_binding
 
-    def test_tool_inputs_are_passed_once_as_the_worker_user_task(self):
-        """A single string argument becomes the Worker user message."""
+    def test_tool_inputs_remain_data_and_do_not_replace_worker_task(self):
         instances = []
         tool, _, _ = _create_tool_with_mock_agent(agent_instances=instances)
 
         tool(query="payload")
 
         call_agent = instances[1]
-        assert call_agent.task == "payload"
-        assert call_agent.additional_args is None
+        assert call_agent.task == "Analyze the supplied query and return a result."
+        assert call_agent.additional_args == {"query": "payload"}
 
     def test_concurrent_calls_no_memory_crosstalk(self):
         """Concurrent calls should each get their own Agent (no shared state)."""
@@ -168,7 +167,7 @@ class TestFactoryMode:
         config = _make_minimal_config()
 
         class FailOnSecond:
-            REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
+            REQUIRED_CONFIG_FIELDS = ["name", "description", "task"]
 
             def __init__(self, config, **kw):
                 self._config = config
@@ -186,7 +185,7 @@ class TestFactoryMode:
             def process_tool_query(self, q):
                 return q
 
-            def run(self, q, additional_args=None):
+            def run(self, *, additional_args=None):
                 with lock:
                     call_count["n"] += 1
                     n = call_count["n"]
@@ -229,7 +228,7 @@ class TestFactoryMode:
         config = _make_minimal_config()
 
         class LargeResultAgent:
-            REQUIRED_CONFIG_FIELDS = ["name", "description", "workflow"]
+            REQUIRED_CONFIG_FIELDS = ["name", "description", "task"]
 
             def __init__(self, config, model_binding=None, logger=None, **kw):
                 self._config = config
@@ -247,7 +246,7 @@ class TestFactoryMode:
                     self._config, agent_root=".", source_name="test",
                 )
 
-            def run(self, formatted_query, additional_args=None):
+            def run(self, *, additional_args=None):
                 return "worker payload\n" * 80
 
             def agent_as_tool(self):

@@ -126,21 +126,21 @@ def test_bootstrap_parses_each_agent_definition_once_and_keeps_shared_worker_tre
         alpha: """\
 name: alpha
 description: alpha supervisor
-workflow: delegate alpha
+task: delegate alpha
 worker_agents:
   - path: shared.yaml
 """,
         beta: """\
 name: beta
 description: beta supervisor
-workflow: delegate beta
+task: delegate beta
 worker_agents:
   - path: shared.yaml
 """,
         worker: """\
 name: shared
 description: shared worker
-workflow: do shared work
+task: do shared work
 """,
     }
     for relative, payload in definitions.items():

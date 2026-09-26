@@ -33,7 +33,7 @@ name: demo
 description: Live refresh index fixture
 model_type: test
 worker_agents: []
-workflow: Run the task.
+task: Run the task.
 """,
     )
     return StudioQueryService(tmp_path)
@@ -244,7 +244,7 @@ name: nested
 description: Nested application fixture
 model_type: test
 worker_agents: []
-workflow: Run nested task.
+task: Run nested task.
 """,
     )
     bootstrap = bridge.bootstrap()

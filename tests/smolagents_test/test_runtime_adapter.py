@@ -56,7 +56,7 @@ from smolagents.agents import (
     AgentToolCallError,
     AgentToolExecutionError,
 )
-from smolagents.memory import ActionStep, TaskStep, ToolCall
+from smolagents.memory import ActionStep, PlanningStep, TaskStep, ToolCall
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import Timing
 
@@ -765,6 +765,30 @@ def test_resume_replays_canonical_items_through_the_next_model_turn() -> None:
             status="completed",
             replay_payload={"record": tool_record.to_dict()},
         ),
+    )
+
+    # smolagents rebuilds PlanningStep's ChatMessage without the bridge's raw
+    # metadata. Its actual plan text must still survive a checkpoint roundtrip.
+    planning = PlanningStep(
+        model_input_messages=[],
+        model_output_message=ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="Inspect the repository before editing.",
+        ),
+        plan="Inspect the repository before editing.",
+        timing=Timing(start_time=0.0),
+    )
+    planning_items = SmolagentsCheckpointCodec.serialize_canonical_model_items(
+        [planning]
+    )
+    restored_planning = SmolagentsCheckpointCodec.deserialize_memory_steps(
+        SmolagentsCheckpointCodec.serialize_memory_steps([planning])
+    )
+    SmolagentsCheckpointCodec.restore_canonical_model_items(
+        restored_planning, planning_items
+    )
+    assert restored_planning[0].model_output_message.content == (
+        "Inspect the repository before editing."
     )
 
 
