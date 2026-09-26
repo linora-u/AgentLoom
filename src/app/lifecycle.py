@@ -39,6 +39,7 @@ class _AgentInvocation:
     coordinator: Any | None
     runtime_result: AgentRuntimeResult | None
     result: JSONValue
+    answer_present: bool
     error: BaseException | None
 
 
@@ -106,6 +107,12 @@ class ApplicationRunLifecycle:
         return copy_json_value(self._result, field_name="application result")
 
     @property
+    def answer_present(self) -> bool:
+        if self._invocation is not None:
+            return self._invocation.answer_present
+        return self._result is not None
+
+    @property
     def error(self) -> BaseException | None:
         return self._error
 
@@ -148,6 +155,7 @@ class ApplicationRunLifecycle:
         coordinator: Any | None,
         runtime_result: AgentRuntimeResult | None,
         result: object | None,
+        answer_present: bool,
         error: BaseException | None,
         goal: Mapping[str, object] | None,
     ) -> None:
@@ -159,6 +167,7 @@ class ApplicationRunLifecycle:
             coordinator=coordinator,
             runtime_result=runtime_result,
             result=copy_json_value(result, field_name="application result"),
+            answer_present=answer_present,
             error=error,
         )
         if runtime_result is not None:
@@ -323,7 +332,7 @@ class ApplicationRunLifecycle:
                     exc,
                 )
 
-            if self.outcome == "completed" and finalization.record_final_answer is not None:
+            if self.outcome == "completed" and self.answer_present and finalization.record_final_answer is not None:
                 finalization.record_final_answer(self.result)
 
             if (

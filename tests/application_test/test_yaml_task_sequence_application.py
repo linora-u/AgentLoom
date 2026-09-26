@@ -155,7 +155,7 @@ def test_application_execution_has_no_task_override_argument():
 
 
 @pytest.mark.parametrize("runtime", ["pi", "smolagents"])
-def test_goal_list_completes_each_yaml_task_in_one_conversation(tmp_path, runtime):
+def test_goal_list_completes_each_yaml_task_in_one_conversation(tmp_path, runtime, monkeypatch):
     def program(request):
         visible = "\n".join(str(message.get("content")) for message in request["messages"])
         completed = visible.count('"status":"complete"') + visible.count("'status': 'complete'")
@@ -208,6 +208,159 @@ def test_goal_list_completes_each_yaml_task_in_one_conversation(tmp_path, runtim
     with bind_config(load_project_config(tmp_path)):
         with pytest.raises(ApplicationRunError, match="Cannot safely resume Goal"):
             execute_app(definition, file_logging=False, resume_task_id=result.run.task_id)
+
+    def explicit_null_program(request):
+        names = {tool["function"]["name"] for tool in request.get("tools", [])}
+        if "final_answer" in names:
+            return [("explicit-null-284", "final_answer", {"answer": None})]
+        return "null"
+
+    with model_service(explicit_null_program) as (url, _requests):
+        root = tmp_path / f"explicit_null_{runtime}"
+        definition = project(root, url, supervisor=runtime, worker=runtime)
+        agent = yaml.safe_load(definition.read_text(encoding="utf-8"))
+        agent["worker_agents"] = []
+        agent["task"] = "RETURN-EXPLICIT-NULL-284"
+        agent["output_schema"] = {"type": "null"}
+        write_yaml(definition, agent)
+        system = root / "config/system.yaml"
+        system_config = yaml.safe_load(system.read_text(encoding="utf-8"))
+        system_config["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+        write_yaml(system, system_config)
+        explicit_events = []
+        with bind_config(load_project_config(root)):
+            explicit_null = execute_app(
+                definition, file_logging=False, event_sink=explicit_events.append,
+            )
+        assert explicit_null.output is None
+        assert explicit_null.answer_present is True
+        assert next(event for event in explicit_events if event.event == "run.completed").answer_present is True
+        with inspect_run(explicit_null.run) as trace:
+            events = trace.events()
+            items = [event for event in events if event["kind"] == "task_item_end"]
+            assert len(items) == 1
+            assert trace.read_text(items[0]["answer_ref"]) == "null"
+            assert [trace.read_text(event["answer_ref"]) for event in events
+                    if event["kind"] == "final_answer"] == ["null"]
+        checkpoint_path = root / "runtime/checkpoints/mixed" / explicit_null.run.task_id / "checkpoint.json"
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        assert checkpoint["task_item_answer_present"] is True
+        manager = CheckpointManager("mixed", checkpoint_dir=checkpoint_path.parent)
+        manager.record_task_status_changed(explicit_null.run.task_id, "failed", error="injected tail")
+        with bind_config(load_project_config(root)):
+            resumed_null = execute_app(
+                definition, file_logging=False, resume_task_id=explicit_null.run.task_id,
+            )
+        assert resumed_null.output is None
+        assert resumed_null.answer_present is True
+
+    if runtime == "smolagents":
+        def complete_without_reply(_request):
+            return [("complete-null-284", "update_goal", {
+                "status": "complete", "evidence": "Verified without a final reply",
+            })]
+
+        with model_service(complete_without_reply) as (url, _requests):
+            for requires_reply in (False, True):
+                root = tmp_path / ("schema_null" if requires_reply else "plain_null")
+                definition = project(root, url, supervisor=runtime, worker=runtime)
+                agent = yaml.safe_load(definition.read_text(encoding="utf-8"))
+                agent["worker_agents"] = []
+                agent["task"] = "GOAL-WITHOUT-REPLY-284"
+                agent["goal"] = True
+                agent["runtime_options"] = {"max_steps": 1, "smart_summary": False}
+                if requires_reply:
+                    agent["output_schema"] = {"type": "string"}
+                write_yaml(definition, agent)
+                with bind_config(load_project_config(root)):
+                    if requires_reply:
+                        with pytest.raises(ApplicationRunError, match="output_schema"):
+                            execute_app(definition, file_logging=False)
+                    else:
+                        no_reply_events = []
+                        no_reply = execute_app(
+                            definition, file_logging=False, event_sink=no_reply_events.append,
+                        )
+                        assert no_reply.output is None
+                        assert no_reply.answer_present is False
+                        assert next(event for event in no_reply_events
+                                    if event.event == "run.completed").answer_present is False
+                        with inspect_run(no_reply.run) as trace:
+                            events = trace.events()
+                            items = [event for event in events if event["kind"] == "task_item_end"]
+                            assert len(items) == 1
+                            assert trace.read_text(items[0]["output_ref"]) == "null"
+                            assert items[0]["answer_ref"] is None
+                            assert not any(event["kind"] == "final_answer" for event in events)
+
+        from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
+        from agentloom.execution.goal.provider import GoalStateProvider
+        from agentloom.execution.observability import TraceRecorder
+
+        def complete_phase(request):
+            visible = "\n".join(str(message.get("content")) for message in request["messages"])
+            phase = "second" if "FAULT-SECOND-284" in visible else "first"
+            return [(f"complete-{phase}-284", "update_goal", {
+                "status": "complete", "evidence": f"{phase} phase verified",
+            })]
+
+        for fault in ("checkpoint", "advance", "trace"):
+            with model_service(complete_phase) as (url, requests):
+                root = tmp_path / f"fault_{fault}"
+                definition = project(root, url, supervisor=runtime, worker=runtime)
+                agent = yaml.safe_load(definition.read_text(encoding="utf-8"))
+                agent["worker_agents"] = []
+                agent["task"] = ["FAULT-FIRST-284", "FAULT-SECOND-284"]
+                agent["goal"] = True
+                agent["runtime_options"] = {"max_steps": 1, "smart_summary": False}
+                write_yaml(definition, agent)
+                system = root / "config/system.yaml"
+                system_config = yaml.safe_load(system.read_text(encoding="utf-8"))
+                system_config["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+                write_yaml(system, system_config)
+
+                observed = []
+                with monkeypatch.context() as patch:
+                    if fault == "checkpoint":
+                        original = CheckpointCoordinator.save_runtime_checkpoint
+
+                        def fail_checkpoint(coordinator, *args, _original=original, **kwargs):
+                            if kwargs.get("task_item_next_index") == 1:
+                                raise OSError("injected Goal checkpoint interruption")
+                            return _original(coordinator, *args, **kwargs)
+
+                        patch.setattr(CheckpointCoordinator, "save_runtime_checkpoint", fail_checkpoint)
+                    elif fault == "advance":
+                        def fail_advance(*_args, **_kwargs):
+                            raise OSError("injected Goal phase advance interruption")
+
+                        patch.setattr(GoalStateProvider, "advance_to", fail_advance)
+                    else:
+                        original = TraceRecorder._append
+
+                        def fail_trace(recorder, event, _original=original):
+                            if event["kind"] == "task_item_end" and event["item_index"] == 0:
+                                raise OSError("injected Goal trace interruption")
+                            return _original(recorder, event)
+
+                        patch.setattr(TraceRecorder, "_append", fail_trace)
+
+                    with bind_config(load_project_config(root)):
+                        with pytest.raises(ApplicationRunError, match="injected Goal"):
+                            execute_app(definition, file_logging=False, event_sink=observed.append)
+
+                task_ids = {event.run.task_id for event in observed if event.run is not None}
+                assert len(task_ids) == 1
+                task_id = task_ids.pop()
+                assert not any("FAULT-SECOND-284" in str(request["messages"]) for request in requests)
+                with bind_config(load_project_config(root)):
+                    if fault == "checkpoint":
+                        with pytest.raises(ApplicationRunError, match="Cannot safely resume Goal"):
+                            execute_app(definition, file_logging=False, resume_task_id=task_id)
+                    else:
+                        resumed = execute_app(definition, file_logging=False, resume_task_id=task_id)
+                        assert resumed.output is None
+                        assert any("FAULT-SECOND-284" in str(request["messages"]) for request in requests)
 
 
 @pytest.mark.parametrize("runtime", ["pi", "smolagents"])

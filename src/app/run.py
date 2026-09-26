@@ -71,6 +71,7 @@ class ApplicationRunResult:
     ended_at: datetime
     goal: GoalSnapshot | None = None
     final_answer_presented: bool = False
+    answer_present: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -79,6 +80,8 @@ class ApplicationRunResult:
             copy_json_value(self.output, field_name="application result output"),
         )
         object.__setattr__(self, "goal", _goal_snapshot(self.goal))
+        if not isinstance(self.answer_present, bool):
+            raise TypeError("answer_present must be a boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +92,7 @@ class RunLifecycleEvent:
     run: RunInfo
     occurred_at: datetime
     output: JSONValue = None
+    answer_present: bool | None = None
     error: str | None = None
     phase: RunPhase | None = None
     goal: GoalSnapshot | None = None
@@ -101,6 +105,8 @@ class RunLifecycleEvent:
             copy_json_value(self.output, field_name="run lifecycle event output"),
         )
         object.__setattr__(self, "goal", _goal_snapshot(self.goal))
+        if self.answer_present is not None and not isinstance(self.answer_present, bool):
+            raise TypeError("answer_present must be a boolean when provided")
 
 
 @dataclass(frozen=True, slots=True)

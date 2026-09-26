@@ -46,10 +46,13 @@ def _run_event_payload(event: Any) -> dict[str, object]:
         "occurred_at": occurred_at.isoformat(),
         "run": _run_info_payload(event.run),
     }
-    for field in ("output", "error", "phase", "goal"):
+    for field in ("output", "answer_present", "error", "phase", "goal"):
         value = getattr(event, field, None)
         if field == "output" and event.event == "run.completed":
             payload[field] = value
+        elif field == "answer_present":
+            if event.event == "run.completed" and value is not None:
+                payload[field] = value
         elif value is not None:
             payload[field] = dict(value) if field == "goal" else value
     return payload
@@ -282,7 +285,10 @@ def run(
                     if isinstance(completed.output, str)
                     else json.dumps(completed.output, ensure_ascii=False, indent=2)
                 )
-                if not getattr(completed, "final_answer_presented", False):
+                answer_present = getattr(
+                    completed, "answer_present", completed.output is not None,
+                )
+                if answer_present and not getattr(completed, "final_answer_presented", False):
                     click.echo(rendered_output)
                 completed_goal = getattr(completed, "goal", None)
                 if isinstance(completed_goal, Mapping):
