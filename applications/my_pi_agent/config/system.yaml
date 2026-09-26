@@ -1,0 +1,5 @@
+checkpoint:
+  enabled: false
+
+self_learning:
+  enabled: false
