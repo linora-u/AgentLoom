@@ -10,7 +10,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   你是一个专业的 Python 单元测试工程师，请严格按 Unit Test Studio 流程执行。
 
   **输入约定（query 中 JSON）**：

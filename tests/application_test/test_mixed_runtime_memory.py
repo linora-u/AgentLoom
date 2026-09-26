@@ -63,7 +63,7 @@ def configure_memory(root: Path, workflow: Path):
     definition.pop('worker_agents')
     definition.update(tools=[{'name': 'read_file'}, {'name': 'read_release_policy',
         'module': POLICY_MODULE, 'function': 'read_release_policy'}],
-        workflow='Read the release policy file and verify its export format using read_release_policy.')
+        task='Read the release policy file and verify its export format using read_release_policy.')
     write_yaml(workflow, definition)
     return policy
 
@@ -136,7 +136,7 @@ def test_smol_evidence_is_reviewed_then_used_by_a_new_pi_run(tmp_path, approval_
             definition = yaml.safe_load(workflow.read_text())
             if approval_timing == 'during_next_root':
                 definition.update(agent_runtime='pi', tools=[], worker_agents=[{'path': 'inspect.yaml'}],
-                                  workflow='Ask the Worker to inspect only the inherited snapshot.')
+                                  task='Ask the Worker to inspect only the inherited snapshot.')
                 write_yaml(workflow, definition)
                 worker_path = workflow.parent / 'worker_agents/inspect.yaml'
                 worker_definition = yaml.safe_load(worker_path.read_text())
@@ -147,7 +147,7 @@ def test_smol_evidence_is_reviewed_then_used_by_a_new_pi_run(tmp_path, approval_
                 assert frozen.output == 'Frozen snapshot retained'
                 definition.pop('worker_agents')
             definition.update(agent_runtime='pi', tools=[{'name': 'memory'}],
-                              workflow='Use the approved memory to report the release export format.')
+                              task='Use the approved memory to report the release export format.')
             write_yaml(workflow, definition)
             phase = 'recall'
             second = execute_app(workflow, file_logging=True)
@@ -157,7 +157,7 @@ def test_smol_evidence_is_reviewed_then_used_by_a_new_pi_run(tmp_path, approval_
                        for row in recalled['tool_results']), 'Injected memory must not taint the next Run ledger'
 
             other = tmp_path / 'applications/other/workflows/root.yaml'
-            write_yaml(other, {**definition, 'name': 'other', 'workflow': 'Inspect both memory scopes.'})
+            write_yaml(other, {**definition, 'name': 'other', 'task': 'Inspect both memory scopes.'})
             phase = 'other_before_promotion'
             assert execute_app(other, file_logging=True).output == 'Scope checked'
             assert store.list('app', scope_id='other') == []

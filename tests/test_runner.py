@@ -26,10 +26,11 @@ _SAMPLE_YAML = textwrap.dedent("""\
     description: |
       这是一个测试 agent 的描述，用于验证默认任务提取。
     model_type: "powerful"
-    workflow: |
+    system_prompt: |
       # Test Workflow
       ## 概述
       这是一个测试 workflow。
+    task: Run the sample task.
     tools: []
     worker_agents: []
 """)
@@ -39,8 +40,7 @@ _SAMPLE_YAML_NO_DESC = textwrap.dedent("""\
     agent_runtime: "smolagents"
     description: ""
     model_type: "powerful"
-    workflow: |
-      # Test Workflow
+    task: Run the sample task.
     tools: []
     worker_agents: []
 """)
@@ -49,8 +49,7 @@ _SAMPLE_YAML_NO_NAME = textwrap.dedent("""\
     agent_runtime: "smolagents"
     description: "A test description"
     model_type: "powerful"
-    workflow: |
-      # Test Workflow
+    task: Run the sample task.
     tools: []
     worker_agents: []
 """)
@@ -60,7 +59,7 @@ _SAMPLE_YAML_NO_WORKFLOW = textwrap.dedent("""\
     agent_runtime: "smolagents"
     description: "A test description"
     model_type: "powerful"
-    workflow: ""
+    task: ""
     tools: []
     worker_agents: []
 """)
@@ -207,7 +206,7 @@ class TestRunApp:
     """Tests for run_app (agent execution is mocked)."""
 
     @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
-    def test_omits_task_when_no_override_is_supplied(self, mock_cls, fake_yaml: Path):
+    def test_uses_yaml_task_without_runtime_argument(self, mock_cls, fake_yaml: Path):
         from agentloom.app.runner import run_app
 
         mock_agent = MagicMock()
@@ -216,8 +215,8 @@ class TestRunApp:
 
         result = run_app(str(fake_yaml))
 
-        called_task = mock_agent.run.call_args[0][0]
-        assert called_task is None
+        assert mock_agent.run.call_args.args == ()
+        assert mock_cls.call_args.kwargs["config"]["task"] == "Run the sample task."
         assert result == "ok"
 
     @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
@@ -228,7 +227,7 @@ class TestRunApp:
         observed = {}
         mock_agent = MagicMock()
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             observed["context"] = context
             observed["kwargs"] = kwargs
@@ -277,7 +276,7 @@ class TestRunApp:
             effective_config,
         )
 
-        def run_without_checkpoint(_task, **kwargs):
+        def run_without_checkpoint(**kwargs):
             observed["context"] = get_current_run_context(required=True)
             assert kwargs["checkpoint_manager"] is None
             return "ok"
@@ -307,7 +306,7 @@ class TestRunApp:
 
         observed = {}
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             manager = kwargs["checkpoint_manager"]
             with manager._tree_lock:
@@ -367,7 +366,7 @@ class TestRunApp:
 
         observed = {}
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             lifecycle = kwargs["application_lifecycle"]
             lifecycle.observe_runtime_event(
@@ -439,7 +438,7 @@ class TestRunApp:
 
         observed = {}
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["checkpoint_manager"].record_task_status_changed(
                 context.task_id,
@@ -480,7 +479,7 @@ class TestRunApp:
 
         observed = {}
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["checkpoint_manager"].save_task_tree(
                 context.task_id,
@@ -519,7 +518,7 @@ class TestRunApp:
 
         observed = {"manifest_updates": 0}
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["checkpoint_manager"].record_task_status_changed(
                 context.task_id,
@@ -575,7 +574,7 @@ class TestRunApp:
 
         observed = {"manifest_updates": 0}
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["checkpoint_manager"].record_task_status_changed(
                 context.task_id,
@@ -619,7 +618,7 @@ class TestRunApp:
         observed: dict[str, object] = {"failed_once": False}
         marker = OSError("manifest commit failed once")
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["checkpoint_manager"].record_task_status_changed(
                 context.task_id,
@@ -679,7 +678,7 @@ class TestRunApp:
         observed = {}
         mock_agent = MagicMock()
 
-        def _run(_task, **_kwargs):
+        def _run(**_kwargs):
             context = get_current_run_context(required=True)
             set_current_agent_id("runner-cleanup-agent")
             ShellProcessRegistry.get_instance().get_or_create(
@@ -809,7 +808,7 @@ class TestRunApp:
             def __init__(self, config, logger):
                 self.config = config
 
-            def run(self, _task, **_kwargs):
+            def run(self, **_kwargs):
                 context = get_current_run_context(required=True)
                 marker = f"only-{context.task_id}"
                 barrier.wait(timeout=10)
@@ -847,7 +846,7 @@ class TestRunApp:
         attempts = []
         mock_agent = MagicMock()
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             attempts.append((get_current_run_context(required=True), kwargs))
             if len(attempts) == 1:
                 raise RuntimeError("preserve the first attempt for resume")
@@ -1001,7 +1000,7 @@ class TestRunApp:
         entered = threading.Event()
         release = threading.Event()
 
-        def blocking_resume(_task, **_kwargs):
+        def blocking_resume(**_kwargs):
             entered.set()
             assert release.wait(timeout=10)
             return "resumed"
@@ -1128,10 +1127,10 @@ class TestRunApp:
         with pytest.raises(ValueError, match="缺少必填字段.*name"):
             run_app(str(fake_yaml_no_name))
 
-    def test_empty_workflow_raises(self, fake_yaml_no_workflow: Path):
+    def test_empty_task_raises(self, fake_yaml_no_workflow: Path):
         from agentloom.app.runner import run_app
 
-        with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
+        with pytest.raises(ValueError, match="task must be a non-empty string"):
             run_app(str(fake_yaml_no_workflow))
 
     @patch("agentloom.app.runner.YamlConfiguredSupervisorAgent")
@@ -1146,7 +1145,7 @@ class TestRunApp:
             "name: test_agent\n"
             "agent_runtime: smolagents\n"
             "description: 123\n"
-            "workflow: do the task\n",
+            "task: do the task\n",
             encoding="utf-8",
         )
 
@@ -1183,7 +1182,7 @@ class TestRunApp:
             "name: test_agent\n"
             "agent_runtime: smolagents\n"
             "description: test\n"
-            "workflow: do the task\n"
+            "task: do the task\n"
             + invalid_config,
             encoding="utf-8",
         )
@@ -1206,7 +1205,7 @@ class TestRunApp:
 name: test_agent
 agent_runtime: smolagents
 description: test
-workflow: do the task
+task: do the task
 tools:
   - name: external_tool
     module: package_that_does_not_exist
@@ -1443,7 +1442,7 @@ class TestExecuteApp:
             objective_fingerprint="fingerprint",
         )
 
-        def _limit(_task, **kwargs):
+        def _limit(**kwargs):
             manager = kwargs["checkpoint_manager"]
             manager.save_goal(kwargs["task_id"], state.to_dict())
             manager.record_task_status_changed(kwargs["task_id"], "interrupted")
@@ -1479,7 +1478,7 @@ class TestExecuteApp:
             objective_fingerprint="fingerprint",
         ).with_completion("Delivered and verified.")
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             manager = kwargs["checkpoint_manager"]
             manager.save_goal(kwargs["task_id"], state.to_dict())
             manager.record_task_status_changed(
@@ -1629,7 +1628,7 @@ class TestExecuteApp:
             objective_fingerprint="fingerprint",
         )
 
-        def _fail(_task, **kwargs):
+        def _fail(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["application_lifecycle"].observe_runtime_event(
                 RuntimeEvent(
@@ -1703,7 +1702,7 @@ class TestExecuteApp:
             objective_fingerprint="fingerprint",
         )
 
-        def _interrupt(_task, **kwargs):
+        def _interrupt(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["application_lifecycle"].observe_runtime_event(
                 RuntimeEvent(
@@ -1968,7 +1967,7 @@ class TestExecuteApp:
 
         observed = {}
 
-        def _run(_task, **kwargs):
+        def _run(**kwargs):
             context = get_current_run_context(required=True)
             kwargs["checkpoint_manager"].record_task_status_changed(
                 context.task_id,

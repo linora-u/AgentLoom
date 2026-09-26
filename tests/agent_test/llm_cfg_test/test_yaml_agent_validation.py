@@ -40,7 +40,7 @@ def _worker_config() -> dict:
         "agent_runtime": "smolagents",
         "description": "worker",
         "tools": [],
-        "workflow": "wf",
+        "task": "Run the configured worker task.",
     }
 
 
@@ -50,7 +50,7 @@ def _supervisor_config() -> dict:
         "agent_runtime": "smolagents",
         "description": "supervisor",
         "tools": [],
-        "workflow": "wf",
+        "task": "Run the configured supervisor task.",
         "worker_agents": [],
     }
 
@@ -67,14 +67,7 @@ def test_build_worker_normalized_config_defaults(tmp_path: Path):
     assert isinstance(normalized, NormalizedAgentConfig)
     assert not hasattr(normalized, "prompt_template_path")
     assert normalized.input_schema == {
-        "type": "object",
-        "properties": {
-            "task": {
-                "type": "string",
-                "description": "Task for this Agent.",
-            },
-        },
-        "required": ["task"],
+        "type": "object", "properties": {},
         "additionalProperties": False,
     }
     assert normalized.output_contract is None
@@ -216,7 +209,7 @@ def test_ensure_normalized_autobuilds():
     worker._config = _worker_config()
     worker._normalized = None
     normalized = worker._ensure_normalized()
-    assert normalized.input_schema["required"] == ["task"]
+    assert normalized.input_schema.get("required", []) == []
     assert worker._normalized is not None
 
     supervisor = object.__new__(YamlConfiguredSupervisorAgent)
@@ -267,9 +260,9 @@ def test_common_validate_config_rejects_unpaired_dynamic_tool_fields(maker, conf
     (_make_worker, _worker_config),
     (_make_supervisor, _supervisor_config),
 ])
-def test_common_validate_config_accepts_string_workflow(maker, config_builder):
+def test_common_validate_config_accepts_string_task(maker, config_builder):
     agent = maker(config_builder())
-    agent._config["workflow"] = "Run this workflow."
+    agent._config["task"] = "Run this task."
 
     assert agent._validate_config() is not None
 
@@ -278,19 +271,18 @@ def test_common_validate_config_accepts_string_workflow(maker, config_builder):
     (_make_worker, _worker_config),
     (_make_supervisor, _supervisor_config),
 ])
-def test_common_validate_config_rejects_list_workflow(maker, config_builder):
+def test_common_validate_config_accepts_task_list(maker, config_builder):
     agent = maker(config_builder())
-    agent._config["workflow"] = [
-        "First workflow item.",
-        "Second workflow item.",
+    agent._config["task"] = [
+        "First task item.",
+        "Second task item.",
     ]
 
-    with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
-        agent._validate_config()
+    assert agent._validate_config() is not None
 
 
 @pytest.mark.parametrize(
-    "workflow_value",
+    "task_value",
     [
         "",
         "   ",
@@ -304,11 +296,11 @@ def test_common_validate_config_rejects_list_workflow(maker, config_builder):
     (_make_worker, _worker_config),
     (_make_supervisor, _supervisor_config),
 ])
-def test_common_validate_config_rejects_invalid_workflow_values(maker, config_builder, workflow_value):
+def test_common_validate_config_rejects_invalid_task_values(maker, config_builder, task_value):
     agent = maker(config_builder())
-    agent._config["workflow"] = workflow_value
+    agent._config["task"] = task_value
 
-    with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
+    with pytest.raises(ValueError, match="task must be a non-empty string"):
         agent._validate_config()
 
 
@@ -316,11 +308,11 @@ def test_common_validate_config_rejects_invalid_workflow_values(maker, config_bu
     (_make_worker, _worker_config),
     (_make_supervisor, _supervisor_config),
 ])
-def test_common_validate_config_rejects_dict_workflow(maker, config_builder):
+def test_common_validate_config_rejects_dict_task(maker, config_builder):
     agent = maker(config_builder())
-    agent._config["workflow"] = {"bad": True}
+    agent._config["task"] = {"bad": True}
 
-    with pytest.raises(ValueError, match="workflow field must be a non-empty string"):
+    with pytest.raises(ValueError, match="task must be a non-empty string"):
         agent._validate_config()
 
 
@@ -367,7 +359,7 @@ def _worker_config_without_tools() -> dict:
         "name": "worker_no_tools",
         "agent_runtime": "smolagents",
         "description": "worker without tools field",
-        "workflow": "wf",
+        "task": "Run the configured worker task.",
     }
 
 
@@ -377,7 +369,7 @@ def _supervisor_config_without_tools() -> dict:
         "name": "supervisor_no_tools",
         "agent_runtime": "smolagents",
         "description": "supervisor without tools field",
-        "workflow": "wf",
+        "task": "Run the configured supervisor task.",
         "worker_agents": [],
     }
 

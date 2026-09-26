@@ -61,7 +61,7 @@ const systemDetail: SystemDetailResultDto = {
   definition: {
     name: "new_agent",
     description: "not run",
-    workflow: "answer",
+    task: "answer",
     model_type: "powerful",
     path: "applications/new/workflows/new.yaml",
   },

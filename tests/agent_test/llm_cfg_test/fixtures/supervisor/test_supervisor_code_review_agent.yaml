@@ -8,7 +8,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Universal Code Review Workflow (Standard Operating Procedure)
   ## Overview
 

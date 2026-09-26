@@ -204,7 +204,7 @@ def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_p
         worker = app.parent / 'worker_agents/probe.yaml'
         worker.parent.mkdir()
         worker.write_text(yaml.safe_dump({'name': 'probe', 'agent_runtime': 'pi', 'model_type': 'worker',
-            'description': 'Verify permissions.', 'workflow': 'Verify the Goal boundary.', 'toolsets': [],
+            'description': 'Verify permissions.', 'task': 'Verify the Goal boundary.', 'toolsets': [],
             'tools': [{'name': 'update_goal', 'module': 'agentloom.tools.goal', 'function': 'update_goal'}],
             'input_schema': {'type': 'object', 'properties': {
                 'query': {'type': 'string', 'description': 'Request.'}},

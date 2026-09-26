@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import textwrap
 from pathlib import Path
 
 import pytest
-
 from agentloom.integrations.mcp.config import (
     McpServerConfig,
     McpSettings,
@@ -19,7 +17,6 @@ from agentloom.integrations.mcp.config import (
     sanitize_server_name,
     to_mcp_client_params,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -77,19 +74,16 @@ def http_mcp_json(tmp_path):
 
 class TestResolveMcpJsonPath:
 
-    def test_relative_path(self, agent_root):
-        result = resolve_mcp_json_path("config/.mcp.json", agent_root)
-        expected = (agent_root / "config" / ".mcp.json").resolve()
-        assert result == expected
-
-    def test_absolute_path(self, agent_root):
-        abs_path = "/opt/mcp/config.json"
-        result = resolve_mcp_json_path(abs_path, agent_root)
-        assert result == Path(abs_path)
-
-    def test_tilde_expansion(self, agent_root):
-        result = resolve_mcp_json_path("~/mcp/config.json", agent_root)
-        assert result == Path.home() / "mcp" / "config.json"
+    def test_relative_absolute_and_home_paths(self, agent_root):
+        assert resolve_mcp_json_path("config/.mcp.json", agent_root) == (
+            agent_root / "config" / ".mcp.json"
+        ).resolve()
+        assert resolve_mcp_json_path("/opt/mcp/config.json", agent_root) == Path(
+            "/opt/mcp/config.json"
+        )
+        assert resolve_mcp_json_path("~/mcp/config.json", agent_root) == (
+            Path.home() / "mcp" / "config.json"
+        )
 
 
 # ---------------------------------------------------------------------------

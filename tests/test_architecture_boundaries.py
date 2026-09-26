@@ -121,7 +121,10 @@ def test_tracked_python_sources_do_not_import_retired_package_names() -> None:
         if not raw_path:
             continue
         relative_path = raw_path.decode()
-        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        source_path = ROOT / relative_path
+        if not source_path.is_file():
+            continue  # Tracked deletion not staged yet in the working tree.
+        source = source_path.read_text(encoding="utf-8")
         path = Path(relative_path)
         package = None
         if path.parts[0] == "src":

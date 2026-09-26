@@ -56,23 +56,14 @@ def _event(
     )
 
 
-def test_run_accepts_task_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    observed: dict[str, object] = {}
-
-    def succeed(*_args, **kwargs):
-        observed.update(kwargs)
-        return SimpleNamespace(output="completed")
-
-    monkeypatch.setattr("agentloom.app.runner.execute_app", succeed)
-
+def test_run_rejects_task_override() -> None:
     result = CliRunner().invoke(
         main,
         ["run", "unused.yaml", "--task", "inspect this repository"],
     )
 
-    assert result.exit_code == 0
-    assert result.stdout == "completed\n"
-    assert observed["task_override"] == "inspect this repository"
+    assert result.exit_code == 2
+    assert "No such option: --task" in result.output
 
 
 def test_text_run_displays_goal_status(monkeypatch: pytest.MonkeyPatch) -> None:

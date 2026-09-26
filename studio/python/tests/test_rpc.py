@@ -60,7 +60,7 @@ description: A system that has never run.
 model_type: powerful
 worker_agents:
   - path: applications/never_run/workflows/worker_agents/researcher.yaml
-workflow: |
+task: |
   Ask the researcher for evidence, then summarize it.
 """.strip(),
     )
@@ -71,7 +71,7 @@ workflow: |
 name: researcher
 agent_runtime: smolagents
 description: Finds evidence.
-workflow: |
+task: |
   Research the supplied task.
 """.strip(),
     )
@@ -181,7 +181,8 @@ def test_system_detail_exposes_definition_files_topology_and_never_run_state(
     assert result["definition"] == {
         "name": "never_run_agent",
         "description": "A system that has never run.",
-        "workflow": "Ask the researcher for evidence, then summarize it.",
+        "system_prompt": None,
+        "task": "Ask the researcher for evidence, then summarize it.",
         "model_type": "powerful",
         "path": system_id,
     }
@@ -252,7 +253,7 @@ agent_runtime: smolagents
 description: {application_id} system
 model_type: powerful
 worker_agents: []
-workflow: |
+task: |
   Execute the {application_id} task.
 """.strip(),
         )

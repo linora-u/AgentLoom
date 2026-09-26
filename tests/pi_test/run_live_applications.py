@@ -55,7 +55,7 @@ def campaign(destination: Path, source: Path, limit: int):
         app = root / "applications/live/workflows/root.yaml"
         app.parent.mkdir(parents=True, exist_ok=True)
         app.write_text(yaml.safe_dump({"name": case, "agent_runtime": "pi", "model_type": profile,
-            "description": task, "workflow": task, "tools": [], "toolsets": []}, allow_unicode=True))
+            "description": "Execute the configured task.", "task": task, "tools": [], "toolsets": []}, allow_unicode=True))
         receipt = root / "result.json"
         started = time.monotonic()
         with (root / "execution.log").open("w") as log:

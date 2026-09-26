@@ -12,7 +12,7 @@ from threading import Barrier
 import psutil
 import pytest
 import yaml
-from agentloom.app.run import ApplicationRunInterrupted
+from agentloom.app.run import ApplicationRunError, ApplicationRunInterrupted
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, RuntimeCheckpointEnvelope
@@ -37,7 +37,7 @@ def platform_project(tmp_path, monkeypatch):
     definition = {
         "name": "platform", "agent_runtime": "platform-fixture",
         "description": "Execute the selected platform tools.",
-        "workflow": "Use the selected tools.", "tools": [], "toolsets": [],
+        "task": "Use the selected tools.", "tools": [], "toolsets": [],
     }
     workflow.write_text(yaml.safe_dump(definition))
     programs = {}
@@ -94,7 +94,7 @@ def test_parallel_worker_applications_own_mcp_connections_and_run_context(platfo
     worker.parent.mkdir()
     worker.write_text(yaml.safe_dump({
         "name": "probe", "agent_runtime": "platform-fixture",
-        "description": "Look up one fact.", "workflow": "Use the fact service.",
+        "description": "Look up one fact.", "task": "Use the fact service.",
         "tools": [], "toolsets": [], "mcp_servers": str(config),
         "input_schema": {
             "type": "object",
@@ -216,6 +216,49 @@ def test_memory_and_history_tools_use_existing_application_scope(platform_projec
     assert run(tools=[{"name": "memory"}, {"name": "session_search"}], self_learning={"enabled": True}).output == "memory and history scope retained"
 
 
+@pytest.mark.parametrize("changed_source", ["agent", "worker", "prompt"])
+def test_resume_rejects_changed_agent_definition_content(platform_project, changed_source):
+    root, workflow, programs, _, run = platform_project
+    system_path = root / "config" / "system.yaml"
+    system = yaml.safe_load(system_path.read_text(encoding="utf-8"))
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system_path.write_text(yaml.safe_dump(system), encoding="utf-8")
+
+    worker = workflow.parent / "worker_agents" / "helper.yaml"
+    worker.parent.mkdir()
+    worker.write_text(yaml.safe_dump({
+        "name": "helper", "agent_runtime": "platform-fixture",
+        "description": "Help with the task.", "task": "Original worker task.",
+        "tools": [], "toolsets": [],
+    }), encoding="utf-8")
+    prompt = workflow.parent / "prompts" / "instructions.md"
+    prompt.parent.mkdir()
+    prompt.write_text("Original instructions.", encoding="utf-8")
+    updates = {
+        "worker_agents": [{"path": "helper.yaml"}],
+        "system_prompt": {"path": "prompts/instructions.md"},
+    }
+
+    def interrupt(_definition, _request):
+        raise KeyboardInterrupt("simulate interruption before completion")
+
+    programs["platform"] = interrupt
+    with pytest.raises(ApplicationRunInterrupted) as interrupted:
+        run(**updates)
+
+    if changed_source == "agent":
+        updates["description"] = "Changed Agent description."
+    elif changed_source == "worker":
+        worker_config = yaml.safe_load(worker.read_text(encoding="utf-8"))
+        worker_config["task"] = "Changed worker task."
+        worker.write_text(yaml.safe_dump(worker_config), encoding="utf-8")
+    else:
+        prompt.write_text("Changed instructions.", encoding="utf-8")
+
+    with pytest.raises(ApplicationRunError, match="definition or referenced prompt changed"):
+        run(resume_task_id=interrupted.value.run.task_id, **updates)
+
+
 def test_application_uses_one_canonical_runtime_home(platform_project):
     root, workflow, programs, _, run = platform_project
     runtime_root = root / "state" / "runtime"
@@ -275,7 +318,7 @@ json.dump({"decision": "allow"}, sys.stdout)
                 "name": "storage_worker",
                 "agent_runtime": "platform-fixture",
                 "description": "Read Application memory in an isolated Worker.",
-                "workflow": "List Application memory and return.",
+                "task": "List Application memory and return.",
                 "tools": [{"name": "memory"}],
                 "toolsets": [],
                 "input_schema": {
