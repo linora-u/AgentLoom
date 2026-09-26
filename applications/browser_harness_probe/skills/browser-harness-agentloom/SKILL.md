@@ -41,7 +41,7 @@ cp /Users/bytedance/code/data_clear/AgentLoom/config/llm.yaml \
    /Users/bytedance/code/data_clear/AgentLoom-config-env/config/llm.yaml
 ```
 
-- Keep `applications/browser_harness_probe/config/system.yaml` with `skills: []` so unrelated global Skills do not interfere with this probe.
+- `applications/browser_harness_probe/config/system.yaml` uses `skills.paths: []` to add no extra Skill directories; project and Application Skill discovery still apply.
 
 ## Validation Order
 

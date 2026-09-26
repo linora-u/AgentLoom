@@ -10,7 +10,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 输入 | 用户要求验证 isolated Chrome、real Chrome 或两者都验证 |
+| 输入 | Agent YAML 的 `task`；探针默认依次验证 isolated Chrome 和 real Chrome |
 | 输出 | Markdown 总结，包含 `browser-harness --doctor`、隔离 Chrome demo、真实 Chrome demo 的 JSON 结果 |
 
 ## 组织结构
@@ -48,7 +48,7 @@ applications/browser_harness_probe/
 | `scrape_zsxq_owner_posts` Tool | 在用户真实 Chrome 中定位/激活 zsxq 标签，从最新滚到 `since_date`，展开折叠内容，按楼主过滤并写 CSV |
 | `browser-harness-agentloom` Skill | 沉淀后续 Agent 做 browser-harness + AgentLoom 集成/排障时应复用的执行经验 |
 
-`config/system.yaml` 写 `skills: []`，用于关闭全局 Skill 发现，避免 probe 运行时被无关 Skill 或缺失工具校验干扰。Hook 是独立顶层配置，不由 Skill 发现触发。
+`config/system.yaml` 的 `skills.paths: []` 表示不增加额外 Skill 路径；它不会关闭项目级和 Application 级 Skill 发现。Hook 是独立顶层配置，不由 Skill 发现触发。
 
 README 记录本次验收事实；`skills/browser-harness-agentloom/SKILL.md` 记录后续执行手册。后续遇到 browser-harness doctor、isolated/real Chrome、`config/llm.yaml`、Tool 注册等问题时，优先读取该 Skill。
 
@@ -75,9 +75,9 @@ command -v browser-harness
 .venv/bin/loom run applications/browser_harness_probe/workflows/browser_harness_probe_agent.yaml
 ```
 
-`loom run` 会使用 YAML 的 `description` 作为任务；本 Application 的默认任务是先跑 doctor，再按 isolated -> real 的顺序验证两个 demo。
+`loom run` 使用 YAML 的 `task` 作为任务；这里先跑 doctor，再按 isolated -> real 的顺序验证两个 demo。`description` 只描述 Agent 能力。
 
-`browser_harness_probe_app.py` 不是运行所必需。当前保留它只做便利 wrapper：当需要传入自定义自然语言请求、`file_logging` 或 `resume` 时，它会调用 `run_app(..., task_override=...)`。`file_logging=None` 遵循全局配置，`False` 只关闭当前 attempt 的文件 runtime log。
+`browser_harness_probe_app.py` 不是运行所必需。它只提供 `file_logging` 和 `resume` 参数；任务始终来自 YAML。`file_logging=None` 遵循全局配置，`False` 只关闭当前 attempt 的文件 runtime log。
 
 通过 wrapper 默认同时验证 isolated Chrome 和 real Chrome：
 
@@ -85,19 +85,7 @@ command -v browser-harness
 .venv/bin/python applications/browser_harness_probe/browser_harness_probe_app.py
 ```
 
-只验证隔离 Chrome：
-
-```bash
-.venv/bin/python applications/browser_harness_probe/browser_harness_probe_app.py \
-  "Run browser-harness doctor and verify isolated Chrome only."
-```
-
-只验证真实 Chrome：
-
-```bash
-.venv/bin/python applications/browser_harness_probe/browser_harness_probe_app.py \
-  "Run browser-harness doctor and verify real Chrome only."
-```
+若要改变验证内容，编辑 YAML 的 `task`，再执行同一入口。
 
 ## 抓取知识星球楼主帖（zsxq scraper）
 
@@ -115,7 +103,7 @@ command -v browser-harness
 # 直接运行 Agent YAML（推荐）
 .venv/bin/loom run applications/browser_harness_probe/workflows/zsxq_scraper_agent.yaml
 
-# 或通过 wrapper 传自定义自然语言请求 / log / resume
+# 或通过 wrapper 设置 log / resume
 .venv/bin/python applications/browser_harness_probe/zsxq_scraper_app.py
 ```
 
