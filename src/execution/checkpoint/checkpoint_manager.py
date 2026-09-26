@@ -1065,6 +1065,7 @@ class CheckpointManager:
         context_store: dict | None = None,
         task_item_next_index: int = 0,
         task_item_commit_id: str | None = None,
+        task_item_answer_present: bool = False,
         goal_phase_commit: dict[str, Any] | None = None,
         goal_active_phase: dict[str, Any] | None = None,
     ) -> Path:
@@ -1081,6 +1082,7 @@ class CheckpointManager:
             "status": status,
             "step_count": progress,
             "task_item_next_index": task_item_next_index,
+            "task_item_answer_present": task_item_answer_present,
             "runtime_checkpoint": _jsonable(runtime_checkpoint),
             "saved_at": datetime.now().astimezone().isoformat(),
         }
