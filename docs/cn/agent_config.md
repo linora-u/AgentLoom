@@ -187,10 +187,12 @@ Supervisor 和 Worker 共有 4 个必填字段：
 | 字段 | 职责 | 写什么 | 不写什么 |
 |------|------|--------|----------|
 | `description` | **角色定位**（一两句话） | "作为 XX 智能体，你的核心职责是 YY" | 不写详细流程、不写具体步骤 |
-| `system_prompt` | **可选长期指令** | 角色、规则、工作方式；直写或 `{path: prompts/role.md}` | 本次任务 |
+| `system_prompt` | **可选长期指令** | 角色、规则、工作方式；直写或 `{path: ../config/prompts/role.md}` | 本次任务 |
 | `task` | **必填用户任务** | 一条任务或按顺序执行的任务列表 | 工具输入参数 |
 
 `system_prompt` 进入 Runtime 的 system / instructions 通道；不配置时使用 runtime 默认行为。`task` 进入 user 通道；列表中的后一项在前一项完成后才发送，沿用同一 Agent 会话。CLI 和 Python 入口不接受额外任务文字。
+
+`system_prompt.path` 相对于定义该 Agent 的 YAML 文件。若 YAML 位于 `workflows/`，可写 `../config/prompts/role.md`；若 Worker YAML 位于 `workflows/worker_agents/`，则写 `../../config/prompts/role.md`。例如 `my_pi_agent` 和代码审查 Application 已将部分长期指令放在各自的 `config/prompts/` 中。
 
 #### Goal Mode（仅 Supervisor）
 
