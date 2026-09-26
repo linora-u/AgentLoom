@@ -143,7 +143,7 @@ def _agent_detail(root, path, definition, *, role, inspection, catalog, errors, 
         "name": str(definition.get("name") or path.stem),
         "description": str(definition.get("description") or ""),
         "role": role,
-        "workflow": _workflow_summary(definition.get("workflow")),
+        "task": _task_summary(definition.get("task")),
         "model": {"type": model, "source": "agent" if str(definition.get("model_type") or "").strip() else "global"},
         "tools": [
             {"name": str(tool["name"]), "source": sources.get("tools", {}).get("source", "agent")}
@@ -169,7 +169,9 @@ def _sourced(value, source):
     }
 
 
-def _workflow_summary(value: Any) -> str:
+def _task_summary(value: Any) -> str:
+    if isinstance(value, list):
+        value = " → ".join(item for item in value if isinstance(item, str))
     text = " ".join(value.split()) if isinstance(value, str) else ""
     return text[:500]
 

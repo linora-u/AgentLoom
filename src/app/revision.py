@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 MAX_REVISION_FILES = 4096
 MAX_REVISION_BYTES = 64 * 1024 * 1024
@@ -34,4 +37,33 @@ def application_revision(application_root: Path) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
-__all__ = ["application_revision"]
+def agent_definition_revision(definition: Mapping[str, Any]) -> str:
+    """Fingerprint the prepared Agent topology, excluding generated Run files.
+
+    Preparation has already resolved each referenced system prompt and Worker.
+    Keep those resolved contents in the revision so a resume cannot silently
+    switch instructions while outputs and other Application data may change.
+    """
+
+    def snapshot(node: Mapping[str, Any]) -> dict[str, Any]:
+        original = {key: value for key, value in node.items() if not key.startswith("_")}
+        workers = node.get("_worker_definitions", {})
+        return {
+            "definition": original,
+            "resolved_system_prompt": node.get("_resolved_system_prompt"),
+            "workers": {
+                path: snapshot(worker)
+                for path, worker in sorted(workers.items())
+            },
+        }
+
+    payload = json.dumps(
+        snapshot(definition),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+__all__ = ["agent_definition_revision", "application_revision"]

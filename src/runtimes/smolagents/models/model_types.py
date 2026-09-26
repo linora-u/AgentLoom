@@ -4,7 +4,7 @@ Model type definitions and configuration.
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from agentloom.config import C
 from agentloom.config.defaults import (
@@ -70,7 +70,7 @@ class ModelConfig:
     system_prompt_boundary: str | None = None
     requests_per_minute: int = DEFAULT_MODEL_REQUESTS_PER_MINUTE
     # Whether the model supports provider-native structured output.
-    supports_structured_output: str = "false"
+    supports_structured_output: bool = False
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body for provider-specific features like DeepSeek thinking mode).
     extra_completion_params: dict[str, Any] | None = None
@@ -84,6 +84,11 @@ class ModelType:
     """
     Dynamic model type.
     """
+
+    POWERFUL: ClassVar["ModelType"]
+    FAST: ClassVar["ModelType"]
+    SUMMARY: ClassVar["ModelType"]
+    CUSTOM: ClassVar["ModelType"]
 
     def __init__(self, type_name: str):
         self._name = type_name.lower().strip()
@@ -127,6 +132,7 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
 
     # Parse extra_headers: accept dict or JSON string.
     raw_headers = resolved.extra_headers
+    extra_headers: dict[str, Any] | None
     if isinstance(raw_headers, dict):
         extra_headers = raw_headers
     elif isinstance(raw_headers, str) and raw_headers.strip():
@@ -157,7 +163,7 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
         context_cache=bool(resolved.context_cache),
         system_prompt_boundary=getattr(resolved, 'system_prompt_boundary', None),
         requests_per_minute=int(resolved.requests_per_minute),
-        supports_structured_output=getattr(resolved, 'supports_structured_output', 'false'),
+        supports_structured_output=resolved.supports_structured_output,
         extra_completion_params=getattr(resolved, 'extra_completion_params', None),
     )
 

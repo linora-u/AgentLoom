@@ -9,12 +9,11 @@ from __future__ import annotations
 import copy
 import hashlib
 import os
-import re
 import stat
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import yaml
 from agentloom.app.readiness import (
@@ -35,8 +34,7 @@ from pydantic import ValidationError
 if TYPE_CHECKING:
     from agentloom.execution.skills.catalog import SkillCatalog
 
-_MARKDOWN_YAML = re.compile(r"```yaml\s*\n(.*?)\n```", re.DOTALL)
-_AGENT_DEFINITION_EXTENSIONS = frozenset({".yaml", ".yml", ".md"})
+_AGENT_DEFINITION_EXTENSIONS = frozenset({".yaml", ".yml"})
 _AGENT_DEFINITION_MAX_BYTES = 1024 * 1024
 
 
@@ -333,9 +331,7 @@ def _definition_from_bytes(path: Path, payload: bytes) -> dict[str, object]:
         content = payload.decode("utf-8")
     except UnicodeError as exc:
         raise ValueError(f"Agent definition must be valid UTF-8: {path}") from exc
-    if path.suffix.lower() == ".md":
-        raw, _ = extract_markdown_definition(content)
-    elif path.suffix.lower() in {".yaml", ".yml"}:
+    if path.suffix.lower() in {".yaml", ".yml"}:
         raw = load_unique_yaml(content)
     else:
         raise ValueError(f"Unsupported file format: {path.suffix}")
@@ -343,6 +339,97 @@ def _definition_from_bytes(path: Path, payload: bytes) -> dict[str, object]:
         raise ValueError("Agent configuration must be a mapping")
     prepared = copy.deepcopy(raw)
     prepared["_yaml_file_path"] = str(path)
+    return prepared
+
+
+def _resolve_system_prompt(
+    config: dict[str, object],
+    *,
+    path: Path,
+    project_root: Path,
+    snapshot_session: _DefinitionSnapshotSession | None,
+) -> None:
+    raw = config.get("system_prompt")
+    if raw is None:
+        return
+    if isinstance(raw, str):
+        if not raw.strip():
+            raise ValueError("system_prompt must be non-empty when provided")
+        config["_resolved_system_prompt"] = raw
+        return
+    if not isinstance(raw, dict) or set(raw) != {"path"}:
+        raise ValueError("system_prompt must be a string or a mapping containing only path")
+    source = raw["path"]
+    if not isinstance(source, str) or not source.strip() or Path(source).is_absolute():
+        raise ValueError("system_prompt.path must be a non-empty relative path")
+    target = Path(os.path.normpath(path.parent / source))
+    try:
+        relative = target.relative_to(project_root)
+    except ValueError as exc:
+        raise ValueError("system_prompt.path must stay inside the project") from exc
+    if snapshot_session is not None:
+        source_snapshot = snapshot_session.read(relative)
+        assert source_snapshot is not None
+        payload = source_snapshot[1]
+    else:
+        payload = target.read_bytes()
+    if len(payload) > _AGENT_DEFINITION_MAX_BYTES:
+        raise ValueError("system_prompt.path content is too large")
+    try:
+        content = payload.decode("utf-8")
+    except UnicodeError as exc:
+        raise ValueError("system_prompt.path must contain UTF-8 text") from exc
+    if not content.strip():
+        raise ValueError("system_prompt.path content must be non-empty")
+    config["_resolved_system_prompt"] = content
+    config["_system_prompt_source"] = str(target)
+
+
+def prepare_agent_system_prompt(
+    config: dict[str, object],
+    *,
+    source_path: Path | None,
+    project_root: Path | None = None,
+    source_path_is_pinned: bool = False,
+) -> None:
+    """Resolve instructions for direct factory callers using inspection semantics."""
+
+    if "system_prompt" not in config:
+        return
+    if source_path_is_pinned and isinstance(config.get("_resolved_system_prompt"), str):
+        return
+    raw = config["system_prompt"]
+    if isinstance(raw, dict) and source_path is None:
+        raise ValueError("system_prompt.path requires a source YAML path")
+    if source_path is None:
+        _resolve_system_prompt(
+            config, path=Path("."), project_root=Path("."), snapshot_session=None
+        )
+        return
+    root = project_root or source_path.parent
+    with _DefinitionSnapshotSession(root) as session:
+        _resolve_system_prompt(
+            config, path=source_path, project_root=root, snapshot_session=session
+        )
+        session.verify()
+
+
+def load_prepared_agent_definition(
+    path: Path | str, *, project_root: Path | None = None
+) -> dict[str, object]:
+    """Read a direct YAML definition and referenced instructions as one snapshot."""
+
+    source_path = Path(path).expanduser().absolute()
+    root = project_root or source_path.parent
+    relative = source_path.relative_to(root)
+    with _DefinitionSnapshotSession(root) as session:
+        source = session.read(relative)
+        assert source is not None
+        prepared = _definition_from_bytes(source_path, source[1])
+        _resolve_system_prompt(
+            prepared, path=source_path, project_root=root, snapshot_session=session
+        )
+        session.verify()
     return prepared
 
 
@@ -456,7 +543,7 @@ def resolve_valid_supervisor_definition(
 def discover_application_definition_files(
     workflows_dir: Path | str,
 ) -> tuple[DiscoveredAgentDefinition, ...]:
-    """Recursively find YAML/Markdown definitions without following symlinks.
+    """Recursively find YAML definitions without following symlinks.
 
     A definition below any ``worker_agents`` directory is a Worker. Every other
     definition below ``workflows`` is a Supervisor, including definitions in
@@ -494,25 +581,10 @@ def discover_application_definition_files(
     return tuple(definitions)
 
 
-def extract_markdown_definition(content: str) -> tuple[dict[str, Any], str]:
-    match = _MARKDOWN_YAML.search(content)
-    if match is None:
-        raise ValueError("No YAML code block found in markdown file")
-    raw = load_unique_yaml(match.group(1))
-    if not isinstance(raw, dict):
-        raise ValueError("Agent configuration must be a mapping")
-    workflow = _MARKDOWN_YAML.sub("", content).strip()
-    if workflow:
-        raw["workflow"] = workflow
-    return raw, workflow
-
-
 def load_agent_definition(path: Path | str) -> dict[str, object]:
     path = Path(path)
     content = path.read_text(encoding="utf-8")
-    if path.suffix.lower() == ".md":
-        raw, _ = extract_markdown_definition(content)
-    elif path.suffix.lower() in {".yaml", ".yml"}:
+    if path.suffix.lower() in {".yaml", ".yml"}:
         raw = load_unique_yaml(content)
     else:
         raise ValueError(f"Unsupported file format: {path.suffix}")
@@ -652,6 +724,15 @@ def _walk_definitions(
         active.append(path)
         error_start = len(errors)
         try:
+            try:
+                _resolve_system_prompt(
+                    config,
+                    path=path,
+                    project_root=project_root,
+                    snapshot_session=snapshot_session,
+                )
+            except (OSError, UnicodeError, TypeError, ValueError) as exc:
+                errors.append(f"{path}: {definition_error(exc)}")
             validator = validate_runtime_worker_config if worker else validate_runtime_agent_config
             try:
                 validator(config, path, agent_root=project_root)
@@ -708,7 +789,7 @@ def _walk_definitions(
                 AgentConfigNormalizer.validate_worker_agents_config(raw_workers)
             except ValueError:
                 return  # Reported by the schema validator above.
-            for item in raw_workers:
+            for item in cast(list[dict[str, Any]], raw_workers):
                 reference = item["path"]
                 try:
                     if root_path_is_pinned:
@@ -724,7 +805,7 @@ def _walk_definitions(
                             path,
                             reference,
                         )
-                    if candidate.suffix.lower() not in {".yaml", ".yml", ".md"}:
+                    if candidate.suffix.lower() not in {".yaml", ".yml"}:
                         raise ValueError(f"unsupported extension: {candidate.suffix}")
                     try:
                         relative = candidate.relative_to(project_root).as_posix()
@@ -916,7 +997,7 @@ def _prepare_inspected_definition(
         config["_skill_catalog_snapshot"] = skill_catalog(snapshots[path])
         workers: dict[str, dict[str, object]] = {}
         worker_paths: dict[str, str] = {}
-        for item in config.get("worker_agents", []):
+        for item in cast(list[dict[str, Any]], config.get("worker_agents", [])):
             from agentloom.app.paths import worker_reference_candidate
 
             candidate = worker_reference_candidate(

@@ -61,7 +61,8 @@ class TraceRecorder:
         self.context = context
         self.storage = SecureDirectory(context.prepare_trace())
         self._lock = threading.RLock()
-        self._run_steps: dict[tuple[str, int], int] = {}
+        self._run_steps: dict[tuple[str, int, int], int] = {}
+        self._agent_segments: dict[str, int] = {}
         self._model_steps: dict[str, int | None] = {}
         self._model_input_limits: dict[str, int] = {}
         self._next_run_step = 1
@@ -210,8 +211,8 @@ class TraceRecorder:
     ) -> int | None:
         if not agent_id or not isinstance(agent_step_number, int) or agent_step_number < 1:
             return None
-        key = (agent_id, agent_step_number)
         with self._lock:
+            key = (agent_id, self._agent_segments.get(agent_id, 0), agent_step_number)
             if key not in self._run_steps and create:
                 self._run_steps[key] = self._next_run_step
                 self._next_run_step += 1
@@ -222,13 +223,17 @@ class TraceRecorder:
         """Mark one Agent invocation before its runtime starts its first turn."""
 
         execution = capture_explicit_execution_context()
+        agent_id = execution.local_run_id
+        if agent_id is not None:
+            with self._lock:
+                self._agent_segments[agent_id] = self._agent_segments.get(agent_id, 0) + 1
         if isinstance(input_token_limit, int) and not isinstance(input_token_limit, bool) and input_token_limit > 0:
-            self._model_input_limits[execution.local_run_id or ""] = input_token_limit
+            self._model_input_limits[agent_id or ""] = input_token_limit
         try:
             task_ref = self._payload(task or "", content_type="text/plain")
             self._append({
                 "kind": "agent_start",
-                "agent_id": execution.local_run_id,
+                "agent_id": agent_id,
                 "parent_agent_id": execution.hook_run.parent.local_run_id
                 if execution.hook_run is not None and execution.hook_run.parent is not None else None,
                 "agent_name": agent_name,
@@ -264,6 +269,53 @@ class TraceRecorder:
             self._append({"kind": "final_answer", "answer_ref": answer_ref})
         except Exception as exc:
             raise TraceStorageError(f"Could not persist final answer trace: {exc}") from exc
+
+    def record_task_item_end(
+        self, *, item_index: int, item_count: int, output: Any,
+        commit_id: str | None = None,
+    ) -> None:
+        """Keep each configured user turn's actual result, including null."""
+
+        execution = capture_explicit_execution_context()
+        try:
+            output_ref = self._payload(output, content_type="application/json")
+            rendered = output if isinstance(output, str) else json.dumps(
+                redact_value(output), ensure_ascii=False, indent=2, default=str
+            )
+            answer_ref = self._payload(rendered, content_type="text/plain")
+            self._append({
+                "kind": "task_item_end",
+                "agent_id": execution.local_run_id,
+                "root_agent": execution.hook_run is not None and execution.hook_run.parent is None,
+                "item_index": item_index,
+                "item_count": item_count,
+                "state": "committed" if commit_id is not None else "observed",
+                "commit_id": commit_id,
+                "output_ref": output_ref,
+                "answer_ref": answer_ref,
+            })
+        except Exception as exc:
+            raise TraceStorageError(f"Could not persist task item result: {exc}") from exc
+
+    def has_task_item_commit(self, commit_id: str) -> bool:
+        """Find a prior Run's committed item before reconciling a resume gap."""
+
+        events_dir = self.storage.path / "events"
+        if not events_dir.is_dir():
+            return False
+        try:
+            for run_dir in sorted(events_dir.iterdir()):
+                if not run_dir.is_dir() or not _RUN_DIR_RE.fullmatch(run_dir.name):
+                    continue
+                for event_path in sorted(run_dir.glob("*.json")):
+                    event = json.loads(self.storage.read_bytes(
+                        f"events/{run_dir.name}/{event_path.name}"
+                    ))
+                    if event.get("kind") == "task_item_end" and event.get("commit_id") == commit_id:
+                        return True
+        except Exception as exc:
+            raise TraceStorageError(f"Could not inspect committed task item trace: {exc}") from exc
+        return False
 
     def record_tool(self, record: ToolCallRecord, *, original_output: Any = _UNSET) -> None:
         execution = capture_explicit_execution_context()

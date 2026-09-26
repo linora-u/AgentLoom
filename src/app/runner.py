@@ -17,6 +17,7 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,7 @@ from agentloom.app.readiness import (
     validate_required_yaml_fields,  # noqa: F401 - public compatibility re-export
     validate_runtime_agent_config,  # noqa: F401 - public compatibility re-export
 )
-from agentloom.app.revision import application_revision
+from agentloom.app.revision import agent_definition_revision, application_revision
 from agentloom.app.run import (
     ApplicationRunError,
     ApplicationRunInterrupted,
@@ -216,7 +217,6 @@ def _resolve_yaml_path(yaml_path: str | Path) -> Path:
 def execute_app(
     yaml_path: str | Path,
     resume_task_id: str | None = None,
-    task_override: str | None = None,
     file_logging: bool | None = None,
     *,
     event_sink: RunEventSink | None = None,
@@ -233,7 +233,6 @@ def execute_app(
         return _execute_app(
             yaml_path,
             resume_task_id,
-            task_override,
             file_logging,
             event_sink=event_sink,
             trace_exporter=trace_exporter,
@@ -244,7 +243,6 @@ def execute_app(
 def _execute_app(
     yaml_path: str | Path,
     resume_task_id: str | None = None,
-    task_override: str | None = None,
     file_logging: bool | None = None,
     *,
     event_sink: RunEventSink | None = None,
@@ -303,7 +301,13 @@ def _execute_app(
         )
 
         agent_name = config["name"]
-        effective_task = task_override.strip() if task_override else None
+        configured_task = config["task"]
+        effective_task = configured_task if isinstance(configured_task, str) else configured_task[0]
+        task_text = (
+            configured_task
+            if isinstance(configured_task, str)
+            else json.dumps(configured_task, ensure_ascii=False, separators=(",", ":"))
+        )
         application_id = validated_application_id or resolve_application_id(
             config,
             resolved_path,
@@ -312,6 +316,7 @@ def _execute_app(
         running_revision = application_revision(
             Path(C.agent_root) / "applications" / Path(*application_id.split("/"))
         )
+        task_definition_revision = definition_snapshot_revision or agent_definition_revision(config)
         runtime_home = resolve_runtime_home(effective_config, agent_root=C.agent_root)
         is_resume = resume_task_id is not None
         task_id = resume_task_id or generate_runtime_id("task")
@@ -512,10 +517,11 @@ def _execute_app(
                                 "Cannot resume: checkpoint contains an active Goal but "
                                 "Goal mode is disabled in YAML"
                             )
-                        if task_override is None:
-                            persisted_task = tree.get("task_text")
-                            if isinstance(persisted_task, str):
-                                effective_task = persisted_task or None
+                        persisted_task = tree.get("task_text")
+                        if persisted_task != task_text:
+                            raise ValueError("Cannot resume: YAML task changed since the checkpoint")
+                        if tree.get("definition_revision") != task_definition_revision:
+                            raise ValueError("Cannot resume: Agent definition or referenced prompt changed")
                         checkpoint_mgr.record_run_resumed(task_id)
                         log.info(
                             "Resuming task %s (status=%s)",
@@ -527,7 +533,8 @@ def _execute_app(
                             task_id,
                             yaml_path=str(resolved_path),
                             agent_name=agent_name,
-                            task_text=effective_task or "",
+                            task_text=task_text,
+                            definition_revision=task_definition_revision,
                             created_at=datetime.now().astimezone().isoformat(),
                         )
                         checkpoint_mgr.record_run_started(task_id)
@@ -588,7 +595,6 @@ def _execute_app(
                     log.info("=" * 70)
 
                     agent_result = supervisor.run(
-                        effective_task,
                         task_id=task_id,
                         run_id=run_id,
                         checkpoint_manager=checkpoint_mgr,
@@ -743,7 +749,6 @@ def _execute_app(
 def run_app(
     yaml_path: str | Path,
     resume_task_id: str | None = None,
-    task_override: str | None = None,
     file_logging: bool | None = None,
 ) -> JSONValue:
     """Run one Application and return only its final JSON-compatible output.
@@ -756,7 +761,6 @@ def run_app(
         return execute_app(
             yaml_path,
             resume_task_id=resume_task_id,
-            task_override=task_override,
             file_logging=file_logging,
         ).output
     except ApplicationRunInterrupted as exc:

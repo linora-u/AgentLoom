@@ -43,11 +43,14 @@ def validate_model(model: RuntimeModelSelection) -> None:
         "max_output_tokens", "context_window", "input_token_limit", "timeout", "num_retries",
         "retry_delay", "max_retry_delay", "extra_headers", "context_cache",
         "system_prompt_boundary", "description", "requests_per_minute", "extra_completion_params",
+        "supports_structured_output",
     }
     if set(settings) - supported:
         raise ValueError("Pi model profile contains unsupported settings")
     if settings.get("system_prompt_boundary"):
         raise ValueError("Pi does not support system_prompt_boundary")
+    if type(settings.get("supports_structured_output")) is not bool:
+        raise ValueError("Pi model supports_structured_output must be a boolean")
     for name in ("timeout", "context_window", "max_output_tokens", "requests_per_minute"):
         value = settings.get(name)
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
