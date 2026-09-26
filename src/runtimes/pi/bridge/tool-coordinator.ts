@@ -42,6 +42,10 @@ export class BridgeToolCoordinator {
     return this.serial.has(entry.visible_name);
   }
 
+  hasSelectedTool(name: string) {
+    return this.selected.has(name);
+  }
+
   executionMode(entry: Obj) {
     return this.isSerial(entry) ? "sequential" as const : "parallel" as const;
   }
@@ -84,9 +88,12 @@ export class BridgeToolCoordinator {
     const batch = new Set<string>();
     for (const part of content) {
       if (part.type !== "toolCall") continue;
+      // Pi's own loop returns an isError toolResult for an unknown tool.
+      // There is nothing to authorize or dispatch for that call.
+      if (!this.selected.has(part.name)) continue;
       const key = this.callKey(parentId, part.id);
       if (!this.options.canUseTools() || this.seen.has(key) || batch.has(part.id)
-          || this.active.has(part.id) || !this.selected.has(part.name)) {
+          || this.active.has(part.id)) {
         this.permits.clear();
         this.active.clear();
         throw new Error("Unselected or duplicate tool call");

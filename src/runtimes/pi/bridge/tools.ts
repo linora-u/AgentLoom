@@ -92,7 +92,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
       const parallel: Promise<void>[] = [];
       for (const part of replacement.content) {
         if (part.type !== "toolCall") continue;
-        if (!deferBatch) parallel.push(context.prepare(part, parentId));
+        if (!deferBatch && context.hasSelectedTool(part.name)) parallel.push(context.prepare(part, parentId));
       }
       await Promise.all(parallel);
       return {message: replacement};

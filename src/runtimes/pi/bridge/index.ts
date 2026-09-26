@@ -37,6 +37,11 @@ const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + "
 const response = (frame: Frame, payload: Obj) => write({version: 2, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload, error: null});
 const failure = (frame: Frame, category: string, message: string) => write({version: 2, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload: null, error: {category, message, retryable: false}});
 
+function textualToolCallName(text: string): string | null {
+  if (!/<[｜|]DSML[｜|]tool_calls>/.test(text)) return null;
+  return /<[｜|]DSML[｜|]invoke\s+name="([A-Za-z_][\w.-]{0,79})"/.exec(text)?.[1] ?? null;
+}
+
 function invoke(payload: Obj): Promise<Obj> {
   const active = current;
   if (!active || active.abort.signal.aborted) return Promise.reject(new Error("Inactive Pi run"));
@@ -83,7 +88,9 @@ async function createSession(p: Obj): Promise<AgentSession> {
   const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    systemPrompt: p.instructions, extensionFactories: [selected.extension]});
+    systemPrompt: p.tools.length ? p.instructions :
+      `${p.instructions}\n\nNo tools are available in this run. Do not call or simulate tools. If the task needs unavailable information, explain the limitation.`,
+    extensionFactories: [selected.extension]});
   await loader.reload();
   const {session: created} = await createAgentSession({cwd: p.cwd, agentDir, authStorage: auth, modelRegistry: registry,
     model: registry.find("agentloom", modelId), thinkingLevel: "off", tools: selected.tools.map(tool => tool.name),
@@ -151,6 +158,7 @@ async function run(frame: Frame, abort: AbortController) {
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
+  let unavailableToolTurns = 0;
   let outputBudgetExhausted = false;
   let terminalRejections = 0;
   let unsubscribe: (() => void) | undefined;
@@ -177,8 +185,11 @@ async function run(frame: Frame, abort: AbortController) {
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
         if (e.message.content.some(block => block.type === "toolCall" && !p.tools.some((tool: Obj) => tool.visible_name === block.name))) {
-          unavailableTool = true;
-          session!.agent.abort();
+          unavailableToolTurns += 1;
+          if (unavailableToolTurns >= (p.runtime_options.max_stop_attempts || 3)) {
+            unavailableTool = true;
+            session!.agent.abort();
+          }
         }
         const u = e.message.usage;
         usage.input_tokens += u.input + u.cacheRead + u.cacheWrite;
@@ -209,8 +220,9 @@ async function run(frame: Frame, abort: AbortController) {
       }, {triggerTurn: true});
     } else await trigger(p.task);
     let last = session.messages.at(-1);
-    const correctOutput = async (message: string): Promise<boolean> => {
-      outputCorrection = true;
+    let outputValidationReason = "invalid structured output";
+    const correctOutput = async (message: string, disableTools = true): Promise<boolean> => {
+      if (disableTools) outputCorrection = true;
       terminalRejections += 1;
       if (last?.role === "assistant" && (last.stopReason === "length" ||
           terminalRejections >= (p.runtime_options.max_stop_attempts || 3))) {
@@ -221,8 +233,24 @@ async function run(frame: Frame, abort: AbortController) {
       last = session!.messages.at(-1);
       return true;
     };
-    while (outputValidator && last?.role === "assistant" && last.stopReason !== "error") {
+    while (last?.role === "assistant" && last.stopReason !== "error") {
       const text = last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("");
+      const textualTool = textualToolCallName(text);
+      if (textualTool) {
+        outputValidationReason = "textual tool call was not executed";
+        const available = p.tools.map((tool: Obj) => tool.visible_name);
+        const availability = available.length ? `Available tools: ${available.join(", ")}.` : "No tools are available.";
+        const selected = available.includes(textualTool);
+        if (!await correctOutput(
+          `Your previous response contained a textual call to ${textualTool}, which was not executed. ` +
+          `${selected ? "That tool requires a real structured call." : "That tool is not available in this run."} ${availability} ` +
+          "Use only actual structured tool calls for available tools. Otherwise answer with the information you have or explain the limitation.",
+          false,
+        )) break;
+        continue;
+      }
+      if (!outputValidator) break;
+      outputValidationReason = "invalid structured output";
       let parsed: unknown;
       try {
         parsed = JSON.parse(text);
@@ -254,12 +282,12 @@ async function run(frame: Frame, abort: AbortController) {
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
       error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
-        outputBudgetExhausted ? {category: "output_validation", message: "Agent exhausted its execution budget with an invalid structured output", retryable: true} : null});
+        outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch {
     const interrupted = abort.signal.aborted;
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
       output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: {category: interrupted ? "interrupted" : nativeIncomplete ? "tool" : "provider", message: nativeIncomplete ? "Pi native execution could not be durably completed" : unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
+      error: {category: interrupted ? "interrupted" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
   } finally {
     rejectCallbacks();
     unsubscribe?.();
