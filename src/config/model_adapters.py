@@ -7,6 +7,7 @@ from typing import Literal, get_args
 type AdapterKind = Literal[
     "openai_chat",
     "openai_responses",
+    "openai_codex_responses",
     "anthropic_messages",
 ]
 

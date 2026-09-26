@@ -803,7 +803,7 @@ _ADAPTER_TYPES: dict[AdapterKind, type[ModelTurnAdapter]] = {
     "openai_responses": OpenAIResponsesModelTurnAdapter,
     "anthropic_messages": AnthropicMessagesModelTurnAdapter,
 }
-assert set(_ADAPTER_TYPES) == set(MODEL_ADAPTERS)
+assert set(_ADAPTER_TYPES) == set(MODEL_ADAPTERS) - {"openai_codex_responses"}
 
 
 def create_model_turn_adapter(
@@ -817,6 +817,8 @@ def create_model_turn_adapter(
 
     adapter_type = _ADAPTER_TYPES.get(adapter_id)
     if adapter_type is None:
+        if adapter_id == "openai_codex_responses":
+            raise ValueError("openai_codex_responses requires agent_runtime: pi")
         raise ValueError(
             f"unknown model adapter {adapter_id!r}; "
             f"expected {', '.join(MODEL_ADAPTERS)}"

@@ -40,10 +40,12 @@ export function capturedExecutor(name: string, cwd: string, args: Obj) {
       try {
         const result = await local.exec(command, directory,
           {...options, onData: data => {chunks.push(Buffer.from(data)); options.onData(data);}});
-        if (result.exitCode === null) {uncertain = true; throw new Error("Shell exit status is unknown");}
+        if (!Number.isInteger(result.exitCode)) {uncertain = true; throw new Error("Shell exit status is unknown");}
         return result;
       } catch (error) {
-        if (error instanceof Error && (error.message === "aborted" || error.message.startsWith("timeout:"))) uncertain = true;
+        // Without a returned integer exit code the effect may have happened,
+        // even when the SDK reports the process failure as an exception.
+        uncertain = true;
         throw error;
       }
     }}});
