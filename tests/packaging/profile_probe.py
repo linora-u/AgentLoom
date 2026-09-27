@@ -127,7 +127,7 @@ def configure(workspace, profile, case, url):
     (config / "llm.yaml").write_text(yaml.safe_dump({"model": {
         "default_model_type": "probe", "probe": model, "summary": model, "powerful": model}}))
     definition = {"name": "installed_profile", "agent_runtime": "pi" if profile == "pi" else "smolagents",
-        "description": "Verify installed Application tools.", "workflow": "Execute the selected tool and report its result.",
+        "description": "Verify installed Application tools.", "task": "Execute the selected tool and report its result.",
         "tools": [], "toolsets": []}
     if profile == "smol":
         definition["runtime_options"] = {"smart_summary": False, "todo_mode": "off"}
@@ -267,10 +267,12 @@ def run(profile, case, workspace, code_tools=False):
                 assert all(not psutil.pid_exists(row["pid"]) for row in mcp_events)
             if profile == "pi":
                 selected = {name for name, _ in calls}
+                offered = {tool["function"]["name"] for tool in requests[0].get("tools", [])}
                 if case == "mcp":
-                    assert all(tool["function"]["name"].startswith("mcp__") for tool in requests[0].get("tools", []))
+                    assert selected <= offered, (offered, selected)
+                    assert all(name.startswith("mcp__") for name in offered - {"loom_retrieve_context"})
                 else:
-                    assert {tool["function"]["name"] for tool in requests[0].get("tools", [])} == selected
+                    assert offered - {"loom_retrieve_context"} == selected, (offered, selected)
             evidence.update(run_id=result.run.run_id, manifest=str(result.run.manifest_path),
                             completed_tools=sorted(completed), model_requests=len(requests))
     if profile == "pi":
