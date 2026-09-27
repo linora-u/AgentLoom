@@ -1,0 +1,8 @@
+name: my_pi_search_agent
+agent_runtime: pi
+model_type: codex_luna_search
+description: 使用 Pi Codex 原生联网搜索回答问题。
+system_prompt: 搜索最新资料，核对来源，再给出简明回答。引用搜索结果中的来源链接。
+task: 搜索今天人工智能领域的重要新闻，并给出带来源链接的摘要。
+tools: []
+toolsets: []

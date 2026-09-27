@@ -34,6 +34,7 @@ from agentloom.runtimes.pi.protocol import (
 from agentloom.execution.subprocess_env import build_subprocess_env
 
 SDK_PACKAGE = "@earendil-works/pi-coding-agent"
+SDK_AI_PACKAGE = "@earendil-works/pi-ai"
 READY_MANIFEST = "ready.json"
 MAX_FRAME_BYTES = 8 * 1024 * 1024
 
@@ -53,10 +54,11 @@ def pi_runtime_root() -> Path:
 def _fingerprint(bridge: Path) -> str:
     manifest = json.loads((bridge / "package.json").read_text())
     lock = json.loads((bridge / "package-lock.json").read_text())
-    if (manifest["dependencies"][SDK_PACKAGE] != SDK_VERSION
-            or lock["packages"][""]["dependencies"][SDK_PACKAGE] != SDK_VERSION
-            or lock["packages"]["node_modules/" + SDK_PACKAGE]["version"] != SDK_VERSION):
-        raise RuntimeError("Pi SDK version and its committed dependency lock do not match.")
+    for package in (SDK_PACKAGE, SDK_AI_PACKAGE):
+        if (manifest["dependencies"][package] != SDK_VERSION
+                or lock["packages"][""]["dependencies"][package] != SDK_VERSION
+                or lock["packages"]["node_modules/" + package]["version"] != SDK_VERSION):
+            raise RuntimeError("Pi SDK version and its committed dependency lock do not match.")
     inputs = [bridge / name for name in ("package.json", "package-lock.json", "tsconfig.json")]
     # Include every owned bridge source, excluding downloaded and built code.
     inputs.extend(sorted(path for path in bridge.rglob("*.ts")
@@ -105,11 +107,12 @@ def _ready(runtime_root: Path, identity: dict[str, str]) -> bool:
     try:
         manifest = json.loads((runtime_root / READY_MANIFEST).read_text())
         bridge = runtime_root / "bridge"
-        package = json.loads((bridge / "node_modules" / SDK_PACKAGE / "package.json").read_text())
+        packages = [json.loads((bridge / "node_modules" / name / "package.json").read_text())
+                    for name in (SDK_PACKAGE, SDK_AI_PACKAGE)]
         return (
             manifest.get("identity") == identity
             and manifest.get("entry") == "bridge/dist/index.js"
-            and package["version"] == SDK_VERSION
+            and all(package["version"] == SDK_VERSION for package in packages)
             and all((bridge / "dist" / source.with_suffix(".js").name).is_file()
                     for source in bridge.glob("*.ts"))
         )

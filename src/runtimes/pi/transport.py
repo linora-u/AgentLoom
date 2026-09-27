@@ -36,6 +36,10 @@ class Pending:
 
 class PiTransport:
     def __init__(self, instance_id: str):
+        # The child has a private HOME. Preserve only the path to Pi's own
+        # credential store so its SDK can read and refresh the saved login.
+        pi_agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or Path.home() / ".pi" / "agent").expanduser().resolve()
+        pi_auth_path = pi_agent_dir / "auth.json"
         env = build_subprocess_env()
         for name in list(env):
             if name.startswith(("PI_", "NODE_")):
@@ -64,7 +68,7 @@ class PiTransport:
         env.update(HOME=self._directory.name, XDG_CONFIG_HOME=self._directory.name, TMPDIR=self._directory.name)
         try:
             self.process = subprocess.Popen(
-                [node, str(entry), self._directory.name], stdin=subprocess.PIPE,
+                [node, str(entry), self._directory.name, str(pi_auth_path)], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
                 start_new_session=True, cwd=self._directory.name,
             )
@@ -109,7 +113,7 @@ class PiTransport:
                         raise ValueError()
                     if isinstance(message, Request):
                         if (not message.request_id.startswith("pi:") or message.request_id in self._callbacks or message.payload.method not in
-                            {"tool_prepare", "tool_dispatch", "tool_settle", "platform_invoke", "platform_prepare", "model_prepare", "session_checkpoint"} or not any(
+                            {"tool_prepare", "tool_dispatch", "tool_settle", "platform_invoke", "platform_prepare", "model_prepare", "model_trace", "session_checkpoint"} or not any(
                                 item.request.run_id == message.run_id and item.request.payload.method == "run"
                                 for item in self._pending.values())):
                             raise ValueError()
@@ -161,10 +165,15 @@ class PiTransport:
                     run_id=message.run_id, request_id=message.request_id, payload=result)
                 pending.queue.put((message, response))
             except BaseException as error:
-                category = "protocol" if isinstance(error, AgentRuntimeError) and error.category == "internal" else "tool"
+                from agentloom.execution.observability import TraceStorageError
+
+                trace_failure = isinstance(error, TraceStorageError)
+                category = "internal" if trace_failure else (
+                    "protocol" if isinstance(error, AgentRuntimeError) and error.category == "internal" else "tool"
+                )
                 pending.queue.put((message, Response(version=2, kind="response", instance_id=self.instance_id,
                     run_id=message.run_id, request_id=message.request_id,
-                    error=BridgeError(category=category, message="Pi tool callback failed"))))
+                    error=BridgeError(category=category, message=str(error) if trace_failure else "Pi tool callback failed"))))
 
         try:
             while True:
@@ -175,7 +184,11 @@ class PiTransport:
                 if isinstance(message, tuple):
                     self._write(message[1])
                     if message[1].error:
-                        self._fail("Pi bridge protocol failure" if message[1].error.category == "protocol" else "Pi tool callback failed")
+                        self._fail(
+                            message[1].error.message if message[1].error.category == "internal" else
+                            "Pi bridge protocol failure" if message[1].error.category == "protocol" else
+                            "Pi tool callback failed"
+                        )
                         self._terminate()
                     continue
                 if isinstance(message, Request):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -27,7 +28,42 @@ from agentloom.execution.native_tools import (
 from agentloom.execution.tool_protocol import ToolErrorRecord
 
 from tests.application_test.native_read_support import READ
-from tests.lib_test.execution.test_native_write_shell_host import shell_manifest, write_manifest
+
+
+def write_manifest():
+    return replace(
+        READ,
+        logical_name="write_file",
+        visible_name="native_write",
+        provider="external-test-reader",
+        capability="file.write",
+        operation="write",
+        parameters={
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+    )
+
+
+def shell_manifest():
+    return replace(
+        READ,
+        logical_name="shell_tool",
+        visible_name="bash",
+        provider="external-test-reader",
+        capability="shell.execute",
+        operation="shell",
+        path_parameters=(),
+        command_parameter="command",
+        parameters={
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    )
 
 WRITE = write_manifest()
 SHELL = shell_manifest()
@@ -145,7 +181,7 @@ def write_application(root: Path, name: str, profile: str, scenario: str, *, smo
     plan = planned_calls(cwd, scenario, marker)
     config = {
         "name": name, "description": "Native write/Shell governance acceptance",
-        "workflow": "Execute this exact sequence of tools, once each, in order: " + json.dumps(plan) + ". Then report DONE or the refusal/error label; do not retry.",
+        "task": "Execute this exact sequence of tools, once each, in order: " + json.dumps(plan) + ". Then report DONE or the refusal/error label; do not retry.",
         "agent_runtime": "native-write-acceptance", "model_type": profile,
         "tools": [], "toolsets": [],
         "runtime_options": {"scenario": scenario, "cwd": str(cwd)},

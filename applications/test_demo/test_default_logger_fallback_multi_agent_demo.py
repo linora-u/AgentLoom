@@ -16,10 +16,6 @@ from agentloom.app.factory import YamlAgentFactory, YamlConfiguredSupervisorAgen
 
 
 DEFAULT_YAML_PATH = Path(__file__).parent / "workflows" / "test_default_logger_fallback_multi_supervisor.yaml"
-DEFAULT_TASK_CONTENT = (
-    "请按 workflow 执行：先由主 agent 执行一次 shell_tool，再调度子 agent 执行一次 shell_tool，"
-    "最后返回两边的执行结果。"
-)
 
 
 def _extract_log_file_path() -> Path | None:
@@ -29,7 +25,7 @@ def _extract_log_file_path() -> Path | None:
     return Path(log_file_path) if log_file_path else None
 
 
-def run_demo(task_content: str, yaml_path: Path) -> None:
+def run_demo(yaml_path: Path) -> None:
     if not yaml_path.exists():
         raise FileNotFoundError(f"YAML not found: {yaml_path}")
 
@@ -47,10 +43,10 @@ def run_demo(task_content: str, yaml_path: Path) -> None:
         return
 
     print("skip run: false")
-    result = supervisor.run(task_content)
+    result = supervisor.run()
     print("run result:")
     print(result)
 
 
 if __name__ == "__main__":
-    run_demo(task_content=DEFAULT_TASK_CONTENT, yaml_path=DEFAULT_YAML_PATH.resolve())
+    run_demo(yaml_path=DEFAULT_YAML_PATH.resolve())

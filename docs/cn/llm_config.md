@@ -184,6 +184,7 @@ model:
 |------|------|--------|------|------|
 | `adapter` | `str` | — | ❗ **必填** | Wire protocol：`openai_chat`、`openai_responses` 或 `anthropic_messages`。未配置或未知值会在加载时失败 |
 | `model` | `str` | — | ❗ **必填** | 传给 LiteLLM 的不透明模型名。AgentLoom 不从它的内容或前缀推断 adapter。未配置会在加载时直接报错 |
+| `supports_structured_output` | `bool` | `false` | ❌ 否 | 仅当该 Pi 模型及 Provider 支持原生 JSON Schema 响应格式时设为 `true`。Pi Agent 配置 `output_schema` 时会在模型调用前检查此项；smolagents 使用终态 Tool 契约，不依赖该标记。 |
 | `base_url` | `str` | `""` | ❌ 否 | API 网关地址。每个模型类型独立配置。**注意：字段名是 `base_url`，不是 `api_base`** |
 | `api_key` | `str` | `""` | ❌ 否 | API 认证密钥。每个模型类型独立配置 |
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ 否 | 模型的人类可读描述。用于日志和文档 |

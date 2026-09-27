@@ -3,13 +3,12 @@ import json
 import sys
 from threading import Barrier
 
-import yaml
 import pytest
-
+import yaml
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
-from tests.pi_test.test_application import model_service, project
 
+from tests.pi_test.test_application import model_service, project
 
 _batch_gate = None
 
@@ -38,6 +37,7 @@ def wait_for_cleanup(marker: str) -> str:
     """
     from pathlib import Path
     from threading import Event
+
     from agentloom.execution.resources import register_resource
     released = Event()
 
@@ -73,7 +73,7 @@ def test_selected_official_read_commits_before_model_continues(tmp_path):
             result = execute_app(app, file_logging=False)
     assert result.output == "Pi answer"
     assert len(requests) == 2
-    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['read']
+    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['read', 'loom_retrieve_context']
     tool_messages = [message for message in requests[1][1]['messages'] if message['role'] == 'tool']
     assert len(tool_messages) == 1
     assert 'saffron-19' in tool_messages[0]['content']
@@ -101,7 +101,7 @@ def test_platform_tool_repairs_raw_input_and_returns_to_same_pi_application(tmp_
             result = execute_app(app, file_logging=False)
     assert result.output == 'Pi answer'
     assert len(requests) == 2
-    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['file_probe']
+    assert [tool['function']['name'] for tool in requests[0][1]['tools']] == ['file_probe', 'loom_retrieve_context']
     messages = requests[1][1]['messages']
     assert 'saffron_entrypoint' in next(message['content'] for message in messages if message['role'] == 'tool')
     call = next(message['tool_calls'][0] for message in messages if message.get('tool_calls'))
@@ -195,7 +195,7 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
         worker = app.parent / 'worker_agents/probe.yaml'
         worker.parent.mkdir()
         worker.write_text(yaml.safe_dump({'name': 'probe', 'agent_runtime': 'pi', 'model_type': 'worker',
-            'description': 'Read the requested fact.', 'workflow': 'Call parallel_probe then return the fact.',
+            'description': 'Read the requested fact.', 'task': 'Call parallel_probe then return the fact.',
             'tools': [{'name': 'parallel_probe', 'module': __name__, 'function': 'parallel_probe'}], 'toolsets': [],
             'input_schema': {'type': 'object', 'properties': {
                 'query': {'type': 'string', 'description': 'Requested fact.'}},
@@ -234,8 +234,9 @@ def test_completed_goal_cannot_hide_stop_rejection(tmp_path):
 @pytest.mark.parametrize('fault', ['keyboard', 'bridge_exit'])
 def test_application_cancels_and_reaps_a_pending_platform_callback(tmp_path, fault):
     import os
-    from pathlib import Path
     import signal
+    from pathlib import Path
+
     from tests.pi_test.test_process_lifecycle import assert_gone, node_launcher, start_cli, until
     marker = tmp_path / 'callback-started'
     with model_service(turns=[[('pending-platform', 'wait_for_cleanup', {'marker': str(marker)})]]) as (url, requests):
@@ -332,6 +333,7 @@ def test_model_timeout_excludes_platform_callback_time(tmp_path):
 
 def test_profile_request_rate_applies_between_internal_pi_model_turns(tmp_path):
     import time
+
     from tests.pi_test.test_application import change_model
     times = []
     (tmp_path / 'note.txt').write_text('Read before next paced model call')

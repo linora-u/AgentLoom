@@ -1,6 +1,6 @@
 # 结构化 Run API 与可观测性
 
-当外部程序需要可靠跟踪 AgentLoom 执行时，应使用结构化接口。它提供不可变的 run receipt、分配运行目录后的 typed errors，以及有版本的生命周期事件流；`run_app()` 继续作为返回字符串的兼容接口。
+当外部程序需要可靠跟踪 AgentLoom 执行时，应使用结构化接口。它提供不可变的 run receipt、分配运行目录后的 typed errors，以及有版本的生命周期事件流；`run_app()` 只返回 Agent 的最终 JSON 兼容结果。
 
 ## Python API
 
@@ -10,7 +10,6 @@ from agentloom.app.runner import execute_app
 events = []
 result = execute_app(
     "applications/example/workflows/supervisor.yaml",
-    task_override="概括这个仓库",
     event_sink=events.append,
 )
 
@@ -19,7 +18,7 @@ print(result.run.run_id, result.run.manifest_path, result.run.log_path)
 print([event.event for event in events])
 ```
 
-`execute_app(...) -> ApplicationRunResult` 支持与 `run_app()` 相同的 `resume_task_id`、`task_override`、`file_logging`，并额外接受同步 `event_sink`。结果包含 `output`、`started_at`、`ended_at`、可选结构化 `goal`，以及 `RunInfo` receipt：`application_id`、`task_id`、`run_id`、`run_dir`、`manifest_path`、`log_path`。
+Agent 的用户任务来自 YAML 的 `task` 字段。`execute_app(...) -> ApplicationRunResult` 支持与 `run_app()` 相同的 `resume_task_id`、`file_logging`，并额外接受同步 `event_sink`。结果包含 `output`、`started_at`、`ended_at`、可选结构化 `goal`，以及 `RunInfo` receipt：`application_id`、`task_id`、`run_id`、`run_dir`、`manifest_path`、`log_path`。
 
 配置在 preflight 被拒绝时尚未分配存储：Python 抛出原配置异常，sink 只收到一个包含 typed `RunRejection` 的 `run.rejected`，没有 `run` receipt。分配成功后，事件序列是 `run.started` 加且仅加一个终态：
 

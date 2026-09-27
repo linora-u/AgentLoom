@@ -44,35 +44,28 @@ def _event(
     error: str | None = None,
     phase: str | None = None,
     goal: dict | None = None,
+    answer_present: bool | None = None,
 ) -> RunLifecycleEvent:
     return RunLifecycleEvent(
         event=event,
         run=_run_info(),
         occurred_at=datetime(2026, 7, 18, 1, 2, 3, tzinfo=UTC),
         output=output,
+        answer_present=answer_present,
         error=error,
         phase=phase,
         goal=goal,
     )
 
 
-def test_run_accepts_task_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    observed: dict[str, object] = {}
-
-    def succeed(*_args, **kwargs):
-        observed.update(kwargs)
-        return SimpleNamespace(output="completed")
-
-    monkeypatch.setattr("agentloom.app.runner.execute_app", succeed)
-
+def test_run_rejects_task_override() -> None:
     result = CliRunner().invoke(
         main,
         ["run", "unused.yaml", "--task", "inspect this repository"],
     )
 
-    assert result.exit_code == 0
-    assert result.stdout == "completed\n"
-    assert observed["task_override"] == "inspect this repository"
+    assert result.exit_code == 2
+    assert "No such option: --task" in result.output
 
 
 def test_text_run_displays_goal_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,6 +83,26 @@ def test_text_run_displays_goal_status(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 0
     assert result.stdout == "completed\nGoal: complete\n"
+
+    monkeypatch.setattr(
+        "agentloom.app.runner.execute_app",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            output=None, goal={"status": "complete"}
+        ),
+    )
+    no_reply = CliRunner().invoke(main, ["run", "unused.yaml"])
+    assert no_reply.exit_code == 0
+    assert no_reply.stdout == "Goal: complete\n"
+
+    monkeypatch.setattr(
+        "agentloom.app.runner.execute_app",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            output=None, goal=None, answer_present=True,
+        ),
+    )
+    explicit_null = CliRunner().invoke(main, ["run", "unused.yaml"])
+    assert explicit_null.exit_code == 0
+    assert explicit_null.stdout == "null\n"
 
 
 def test_text_run_pretty_prints_structured_output(
@@ -197,9 +210,11 @@ def test_json_run_preserves_structured_output(
 def test_json_run_preserves_explicit_null_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    reply_present = True
+
     def execute(*_args, event_sink=None, **_kwargs):
         event_sink(_event("run.started"))
-        event_sink(_event("run.completed", output=None))
+        event_sink(_event("run.completed", output=None, answer_present=reply_present))
         return SimpleNamespace(output=None, goal=None)
 
     monkeypatch.setattr(
@@ -215,6 +230,15 @@ def test_json_run_preserves_explicit_null_output(
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["output"] is None
+    assert json.loads(result.stdout)["answer_present"] is True
+
+    reply_present = False
+    no_reply = CliRunner().invoke(
+        main, ["run", "unused.yaml", "--output-format", "json"],
+    )
+    assert no_reply.exit_code == 0
+    assert json.loads(no_reply.stdout)["output"] is None
+    assert json.loads(no_reply.stdout)["answer_present"] is False
 
 
 def test_jsonl_run_emits_only_lifecycle_events_on_stdout(

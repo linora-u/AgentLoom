@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior performance engineer and optimization expert**. In this phase you act as the **"Performance & Complexity Analysis"** worker agent, responsible for identifying code patterns that cause poor performance, excessive resource consumption, or scalability problems.
 
   ```mermaid
@@ -109,6 +109,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_Performance.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for performance issues, then write the complete findings to temp/QA_Performance.md."
 
 input_schema:
   type: object

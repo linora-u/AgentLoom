@@ -4,14 +4,15 @@ import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
-import { configureModel } from "./model.js";
+import { configureModel, type SearchEvidence } from "./model.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
 import { restoreSession, SessionPersistence } from "./checkpoint.js";
 import { enableInstructionOnlyTurns, runInstructionOnlyTurn } from "./session.js";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
-  AuthStorage, ModelRegistry, SettingsManager, SessionManager, DefaultResourceLoader,
+  ModelRuntime, SettingsManager, SessionManager, DefaultResourceLoader,
   createAgentSession, type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 
@@ -21,6 +22,7 @@ const sdkPackage = new URL("../package.json", import.meta.resolve("@earendil-wor
 const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as string;
 const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: true, subagents: true, goal: true, stop_hooks: true, structured_output: true};
 const agentDir = process.argv[2];
+const piAuthPath = process.argv[3];
 let instance: string | undefined;
 let session: AgentSession | undefined;
 let persistence: SessionPersistence | undefined;
@@ -28,14 +30,20 @@ let restoredPhase: string | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
 let nativeIncomplete = false;
-let modelFailure = {timedOut: false, status: 0};
+let modelFailure = {timedOut: false, status: 0, reason: ""};
 let reportRetry: ((attempt: number) => void) | undefined;
+let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
 let outputCorrection = false;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
 const response = (frame: Frame, payload: Obj) => write({version: 2, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload, error: null});
 const failure = (frame: Frame, category: string, message: string) => write({version: 2, kind: "response", instance_id: frame.instance_id, run_id: frame.run_id, request_id: frame.request_id, payload: null, error: {category, message, retryable: false}});
+
+function textualToolCallName(text: string): string | null {
+  if (!/<[｜|]DSML[｜|]tool_calls>/.test(text)) return null;
+  return /<[｜|]DSML[｜|]invoke\s+name="([A-Za-z_][\w.-]{0,79})"/.exec(text)?.[1] ?? null;
+}
 
 function invoke(payload: Obj): Promise<Obj> {
   const active = current;
@@ -56,17 +64,32 @@ async function createSession(p: Obj): Promise<AgentSession> {
   nativeIncomplete = false;
   outputCorrection = false;
   const s = p.model.settings;
-  const auth = AuthStorage.inMemory();
-  auth.setRuntimeApiKey("agentloom", s.api_key || "no-key");
-  const registry = ModelRegistry.inMemory(auth);
-  const api = p.model.protocol === "openai_chat" ? "openai-completions" : "openai-responses";
-  const modelId = p.model.model_id.replace(/^(openai|gemini)\//, "");
-  registry.registerProvider("agentloom", {
-    api, baseUrl: s.base_url || "https://api.openai.com/v1", apiKey: "agentloom-runtime-key",
-    models: [{id: modelId, name: modelId, reasoning: false, input: ["text"],
-      cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: s.context_window,
-      maxTokens: s.max_output_tokens, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
+  const codex = p.model.protocol === "openai_codex_responses";
+  if (codex && !piAuthPath) throw new Error("Pi Codex credential path is unavailable");
+  const runtime = await ModelRuntime.create({
+    authPath: codex ? piAuthPath : join(agentDir, "auth.json"),
+    modelsPath: null, refreshOnCreate: false,
   });
+  const api = codex ? "openai-codex-responses" :
+    p.model.protocol === "openai_chat" ? "openai-completions" : "openai-responses";
+  const modelId = codex ? p.model.model_id : p.model.model_id.replace(/^(openai|gemini)\//, "");
+  if (!codex) {
+    runtime.registerProvider("agentloom", {
+      api, baseUrl: s.base_url || "https://api.openai.com/v1", apiKey: "agentloom-runtime-key",
+      models: [{id: modelId, name: modelId, reasoning: false, input: ["text"],
+        cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: s.context_window,
+        maxTokens: s.max_output_tokens, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
+    });
+    await runtime.setRuntimeApiKey("agentloom", s.api_key || "no-key");
+  }
+  const model = runtime.getModel(codex ? "openai-codex" : "agentloom", modelId);
+  if (!model) throw new Error(codex ? `Pi Codex model ${modelId} is unavailable` : `Pi model ${modelId} is unavailable`);
+  if (codex) {
+    let auth;
+    try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
+    catch {throw new Error("Pi Codex credential refresh failed; check the connection or log in through Pi again");}
+    if (!auth) throw new Error("Pi Codex login is missing; log in through Pi before running this Agent");
+  }
   // Adapter-controlled, bounded retry waits; no hidden SDK retry multiplier.
   const settings = SettingsManager.inMemory({retry: {enabled: false, provider: {maxRetries: 0, timeoutMs: s.timeout * 1000}},
     compaction: {enabled: false, ...p.runtime_options.compaction}, enableAnalytics: false, enableInstallTelemetry: false, packages: []});
@@ -81,12 +104,18 @@ async function createSession(p: Obj): Promise<AgentSession> {
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
   const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
+  const extra = s.extra_completion_params || {};
+  const searchMode = codex ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    systemPrompt: p.instructions, extensionFactories: [selected.extension]});
+    systemPrompt: codex && searchMode !== "off" ?
+      `${p.instructions}\n\nNative web search is available. Use it for current information and cite the sources you use.` :
+      p.tools.length ? p.instructions :
+      `${p.instructions}\n\nNo tools are available in this run. Do not call or simulate tools. If the task needs unavailable information, explain the limitation.`,
+    extensionFactories: [selected.extension]});
   await loader.reload();
-  const {session: created} = await createAgentSession({cwd: p.cwd, agentDir, authStorage: auth, modelRegistry: registry,
-    model: registry.find("agentloom", modelId), thinkingLevel: "off", tools: selected.tools.map(tool => tool.name),
+  const {session: created} = await createAgentSession({cwd: p.cwd, agentDir, modelRuntime: runtime,
+    model, thinkingLevel: codex ? (extra.reasoning_effort || "xhigh") : "off", tools: selected.tools.map(tool => tool.name),
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   enableInstructionOnlyTurns(created);
@@ -97,8 +126,9 @@ async function createSession(p: Obj): Promise<AgentSession> {
     const permit = await invoke({method: "model_prepare", identity: requestIdentity});
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
     finalDelivery = permit.state === "final";
-    return {state: permit.state, agent_context: permit.agent_context};
-  }, attempt => reportRetry?.(attempt));
+    return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
+  }, attempt => reportRetry?.(attempt), agentDir, invoke, codex,
+  (identity, attempt, result) => reportSearch?.(identity, attempt, result));
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
@@ -106,7 +136,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
     for (const key of ["top_p", "seed"]) if (extra[key] !== undefined) result[key] = extra[key];
     if (p.tools.length) for (const key of ["tool_choice", "parallel_tool_calls"])
       if (extra[key] !== undefined) result[key] = extra[key];
-    if (extra.reasoning_effort !== undefined) {
+    if (extra.reasoning_effort !== undefined && !codex) {
       if (api === "openai-responses") result.reasoning = {effort: extra.reasoning_effort};
       else result.reasoning_effort = extra.reasoning_effort;
     }
@@ -116,17 +146,25 @@ async function createSession(p: Obj): Promise<AgentSession> {
       const name = tool.function?.name ?? tool.name;
       const parameters = publicSchemas.get(name);
       if (!parameters) return tool;
+      // Pi's native schemas include optional fields. Codex rejects strict
+      // function schemas unless every field is required; AgentLoom still
+      // validates and authorizes the selected tool arguments before execution.
+      const strict = codex ? false : tool.strict;
       return tool.function
-        ? {...tool, function: {...tool.function, parameters}}
-        : {...tool, parameters};
+        ? {...tool, strict, function: {...tool.function, parameters}}
+        : {...tool, strict, parameters};
     });
     if (finalDelivery || outputCorrection) {
       delete projected.tools;
       delete projected.tool_choice;
       delete projected.parallel_tool_calls;
     }
+    if (codex && searchMode !== "off") {
+      projected.tools = [...(projected.tools || []), {type: "web_search"}];
+      if (searchMode === "required") projected.tool_choice = {type: "web_search"};
+    }
     if (p.output_contract) {
-      if (api === "openai-responses") {
+      if (api === "openai-responses" || codex) {
         projected.text = {...(projected.text || {}), format: {
           type: "json_schema", name: p.output_contract.name,
           schema: p.output_contract.schema, strict: true,
@@ -146,11 +184,19 @@ async function createSession(p: Obj): Promise<AgentSession> {
 async function run(frame: Frame, abort: AbortController) {
   const p = frame.payload;
   outputCorrection = false;
+  modelFailure = {timedOut: false, status: 0, reason: ""};
   let seq = 0;
   const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
+  const sources = new Map<string, string>();
+  reportSearch = (identity, attempt, result) => {
+    for (const citation of result.citations) sources.set(citation.url, citation.title);
+    event("model", {phase: "web_search", call_id: identity.call_id, attempt,
+      completed_calls: result.calls, citations: result.citations});
+  };
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
+  let unavailableToolTurns = 0;
   let outputBudgetExhausted = false;
   let terminalRejections = 0;
   let unsubscribe: (() => void) | undefined;
@@ -177,8 +223,11 @@ async function run(frame: Frame, abort: AbortController) {
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
         if (e.message.content.some(block => block.type === "toolCall" && !p.tools.some((tool: Obj) => tool.visible_name === block.name))) {
-          unavailableTool = true;
-          session!.agent.abort();
+          unavailableToolTurns += 1;
+          if (unavailableToolTurns >= (p.runtime_options.max_stop_attempts || 3)) {
+            unavailableTool = true;
+            session!.agent.abort();
+          }
         }
         const u = e.message.usage;
         usage.input_tokens += u.input + u.cacheRead + u.cacheWrite;
@@ -209,8 +258,9 @@ async function run(frame: Frame, abort: AbortController) {
       }, {triggerTurn: true});
     } else await trigger(p.task);
     let last = session.messages.at(-1);
-    const correctOutput = async (message: string): Promise<boolean> => {
-      outputCorrection = true;
+    let outputValidationReason = "invalid structured output";
+    const correctOutput = async (message: string, disableTools = true): Promise<boolean> => {
+      if (disableTools) outputCorrection = true;
       terminalRejections += 1;
       if (last?.role === "assistant" && (last.stopReason === "length" ||
           terminalRejections >= (p.runtime_options.max_stop_attempts || 3))) {
@@ -221,8 +271,24 @@ async function run(frame: Frame, abort: AbortController) {
       last = session!.messages.at(-1);
       return true;
     };
-    while (outputValidator && last?.role === "assistant" && last.stopReason !== "error") {
+    while (last?.role === "assistant" && last.stopReason !== "error") {
       const text = last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("");
+      const textualTool = textualToolCallName(text);
+      if (textualTool) {
+        outputValidationReason = "textual tool call was not executed";
+        const available = p.tools.map((tool: Obj) => tool.visible_name);
+        const availability = available.length ? `Available tools: ${available.join(", ")}.` : "No tools are available.";
+        const selected = available.includes(textualTool);
+        if (!await correctOutput(
+          `Your previous response contained a textual call to ${textualTool}, which was not executed. ` +
+          `${selected ? "That tool requires a real structured call." : "That tool is not available in this run."} ${availability} ` +
+          "Use only actual structured tool calls for available tools. Otherwise answer with the information you have or explain the limitation.",
+          false,
+        )) break;
+        continue;
+      }
+      if (!outputValidator) break;
+      outputValidationReason = "invalid structured output";
       let parsed: unknown;
       try {
         parsed = JSON.parse(text);
@@ -247,24 +313,30 @@ async function run(frame: Frame, abort: AbortController) {
       outputBudgetExhausted ? "max_steps_error" :
       last.stopReason === "length" ? "max_steps_error" : "success";
     const outputText = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
-    const output = outputValidator && state === "success" ? JSON.parse(outputText) : outputText;
+    const citedText = state === "success" && sources.size && !outputValidator ? outputText + "\n\nSources:\n" +
+      [...sources].map(([url, title]) => `- [${title.replace(/[\[\]\r\n]/g, " ")}](<${url}>)`).join("\n") : outputText;
+    const output = outputValidator && state === "success" ? JSON.parse(outputText) : citedText;
     if (state === "success") await persistence!.save("complete");
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
-        outputBudgetExhausted ? {category: "output_validation", message: "Agent exhausted its execution budget with an invalid structured output", retryable: true} : null});
-  } catch {
+      error: state === "failed" ? {category: "provider", message: modelFailure.reason || "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
+        outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
+  } catch (error) {
     const interrupted = abort.signal.aborted;
+    const detail = error instanceof Error ? error.message : "";
+    const safeDetail = detail.startsWith("Pi Codex ") || detail.startsWith("Incompatible Pi native checkpoint")
+      ? detail.slice(0, 240) : "";
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
       output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: {category: interrupted ? "interrupted" : nativeIncomplete ? "tool" : "provider", message: nativeIncomplete ? "Pi native execution could not be durably completed" : unavailableTool ? "Pi model requested an unavailable tool" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : "Pi model request failed", retryable: modelFailure.timedOut}});
+      error: {category: interrupted ? "interrupted" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : safeDetail || modelFailure.reason || "Pi model request failed", retryable: modelFailure.timedOut}});
   } finally {
     rejectCallbacks();
     unsubscribe?.();
     current = undefined;
     reportRetry = undefined;
+    reportSearch = undefined;
   }
 }
 

@@ -5,7 +5,7 @@ runtime_options:
 description: |
   一个工作 agent，负责演示 shell 的持久性和独立性。
 model_type: "powerful"
-workflow: |
+task: |
   # Shell Worker Workflow
   1. 接收 supervisor 的指令
   2. 使用 bash/shell 工具执行对应的 cd, pwd 等命令

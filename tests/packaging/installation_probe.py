@@ -158,7 +158,7 @@ def probe(workspace: Path) -> dict:
           - name: write_probe
             module: applications.nested.probe.tools
             function: write_probe
-        workflow: Call write_probe with external-tool-ok, then finish.
+        task: Call write_probe with external-tool-ok, then finish.
     '''))
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)

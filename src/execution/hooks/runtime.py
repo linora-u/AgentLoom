@@ -480,6 +480,14 @@ class HookRun:
                 tool_response=response,
             )
             self.flush_user_messages()
+            from agentloom.execution.observability import get_current_trace_recorder
+
+            recorder = get_current_trace_recorder()
+            if recorder is not None:
+                recorder.record_hook_decision(
+                    event="Stop", subject="final_answer",
+                    input_value={"final_answer": final_answer}, decision=result,
+                )
             if result.should_block():
                 raise AssertionError(result.get_blocked_response())
             return True

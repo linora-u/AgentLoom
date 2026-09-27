@@ -23,6 +23,8 @@ def model_service(
         [dict[str, Any]],
         str | ModelReply | list[tuple[str, str, dict]],
     ],
+    *,
+    fail_requests: set[int] | None = None,
 ):
     requests: list[dict[str, Any]] = []
     errors: list[Exception] = []
@@ -36,11 +38,35 @@ def model_service(
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             with lock:
                 requests.append(request)
+                number = len(requests)
+            if number in (fail_requests or set()):
+                self.send_error(500, 'Fixture provider failure')
+                return
             try:
                 answer = program(request)
                 finish_override = None
                 if isinstance(answer, ModelReply):
                     answer, finish_override = answer
+                if self.path.endswith('/responses'):
+                    output = ([
+                        {'type': 'function_call', 'id': f'fc_{index}', 'call_id': call_id,
+                         'name': name, 'arguments': json.dumps(arguments), 'status': 'completed'}
+                        for index, (call_id, name, arguments) in enumerate(answer)
+                    ] if isinstance(answer, list) else [
+                        {'type': 'message', 'id': 'msg_1', 'role': 'assistant',
+                         'status': 'completed', 'content': [
+                             {'type': 'output_text', 'text': answer, 'annotations': []},
+                         ]},
+                    ])
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'id': 'resp_fixture', 'object': 'response', 'created_at': 1,
+                        'model': request['model'], 'status': 'completed', 'output': output,
+                        'usage': {'input_tokens': 50, 'output_tokens': 20, 'total_tokens': 70},
+                    }).encode())
+                    return
                 message: dict[str, Any] = {'role': 'assistant', 'content': answer if isinstance(answer, str) else None}
                 if isinstance(answer, list):
                     message['tool_calls'] = [
@@ -100,16 +126,17 @@ def project(root: Path, url: str, *, supervisor: str, worker: str) -> Path:
     })
     model = {'adapter': 'openai_chat', 'base_url': url, 'api_key': 'fixture-key',
              'context_window': 32768, 'max_output_tokens': 1000, 'num_retries': 0,
-             'timeout': 15, 'requests_per_minute': 2000000}
+             'timeout': 15, 'requests_per_minute': 2000000,
+             'supports_structured_output': True}
     write_yaml(root / 'config/llm.yaml', {'model': {'default_model_type': 'supervisor',
         **{role: {**model, 'model': f'openai/{role}'} for role in ['supervisor', 'worker', 'summary']}}})
     workflow = root / 'applications/mixed/workflows/root.yaml'
     write_yaml(workflow, {'name': 'mixed', 'agent_runtime': supervisor, 'model_type': 'supervisor',
-        'description': 'Verify repository facts with a Worker.', 'workflow': 'Ask inspect_note to read note.txt and return its token.',
+        'description': 'Verify repository facts with a Worker.', 'task': 'Ask inspect_note to read note.txt and return its token.',
         'tools': [], 'toolsets': [], 'worker_agents': [{'path': 'inspect.yaml'}], 'concurrency': 3})
     write_yaml(workflow.parent / 'worker_agents/inspect.yaml', {
         'name': 'inspect_note', 'agent_runtime': worker, 'model_type': 'worker',
-        'description': 'Read one requested file.', 'workflow': 'Read the file named in query and return its exact token.',
+        'description': 'Read one requested file.', 'task': 'Read the file named in query and return its exact token.',
         'tools': [{'name': 'read' if worker == 'pi' else 'read_file'}], 'toolsets': [],
         'input_schema': {
             'type': 'object',

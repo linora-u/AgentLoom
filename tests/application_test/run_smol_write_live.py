@@ -50,7 +50,7 @@ def main():
             names = {"create": ["write_file"], "overwrite": ["read_file", "write_file"], "command_denied": ["shell_tool"], "search_excluded": ["grep_search"]}[scenario]
             workflow = app / "workflows" / "root.yaml"
             workflow.parent.mkdir()
-            workflow.write_text(yaml.safe_dump({"name": name, "description": "Real smol shared-policy control", "workflow": task, "agent_runtime": "smolagents", "model_type": profile, "max_steps": 5, "smart_summary": False, "todo": {"mode": "off"}, "toolsets": [], "tools": [{"name": name} for name in names], "shell_settings": {"allowed_commands": ["printf"], "sandbox": {"enabled": False}}, "tool_access_control": {"path_validation": [{"tools": ["grep_search"], "exclude_paths": [str(files / "secrets")]}]}}))
+            workflow.write_text(yaml.safe_dump({"name": name, "description": "Real smol shared-policy control", "task": task, "agent_runtime": "smolagents", "model_type": profile, "max_steps": 5, "smart_summary": False, "todo": {"mode": "off"}, "toolsets": [], "tools": [{"name": name} for name in names], "shell_settings": {"allowed_commands": ["printf"], "sandbox": {"enabled": False}}, "tool_access_control": {"path_validation": [{"tools": ["grep_search"], "exclude_paths": [str(files / "secrets")]}]}}))
             cases.append((name, workflow, target, marker, scenario))
     configuration = load_project_config(root)
     def run(case):

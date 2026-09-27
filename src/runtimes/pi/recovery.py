@@ -1,16 +1,19 @@
 """Validate Pi/host alignment before the SDK appends any recovered result."""
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 from agentloom.execution.agent_runtime import AgentRuntimeError
 from agentloom.execution.native_journal import snapshot
 from agentloom.execution.native_tools import NativeCallIdentity
+from agentloom.execution.observability import RunTrace, get_current_trace_recorder
+from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord
+from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 
 
 def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, Any]:
+    content: list[dict[str, Any]]
+    details: Any
     if record is None:
         # Only an authoritative prepared/authorized/cancelled state permits
         # this result. A missing journal or executing call is never sufficient.
@@ -18,7 +21,7 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
         details = {"agentloom_recovery": {"state": "not_executed"}}
         error = True
     elif record["status"] != "completed":
-        content = [{"type": "text", "text": (record.get("error") or {}).get("message", "AgentLoom tool did not complete")}]
+        content = [{"type": "text", "text": ToolCallRecord.from_dict(record).model_content()}]
         # The SDK projects both blocked calls and thrown execution errors with
         # empty details, unlike successful platform results.
         details = {}
@@ -29,10 +32,13 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
             raise ValueError("Committed Pi output is not an SDK tool result")
         content, details, error = output["content"], output.get("details"), False
     else:
-        output = record["output"]
-        content = [{"type": "text", "text": output if isinstance(output, str)
-                    else json.dumps(output, ensure_ascii=False, separators=(",", ":"))}]
-        details, error = {"agentloom": record}, False
+        projection = ToolCallRecord.from_dict(record).model_content()
+        content = [{"type": "text", "text": projection}]
+        wire_record = (
+            {**record, "output": None}
+            if MODEL_OUTPUT_METADATA_KEY in record.get("metadata", {}) else record
+        )
+        details, error = {"agentloom": wire_record}, False
     result = {"role": "toolResult", "toolCallId": call["identity"]["call_id"],
               "toolName": call["tool_name"], "content": content, "isError": error}
     if details is not None:
@@ -42,6 +48,8 @@ def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, An
 
 def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any]:
     """Produce an all-checked append plan; never invoke an executor here."""
+    recorder = get_current_trace_recorder()
+    trace = RunTrace(recorder.storage, recorder.context.run_id) if recorder is not None else None
     entries = bundle["session"]["entries"]
     calls = {(call["identity"]["native_parent_id"], call["identity"]["call_id"]): call
              for call in bundle["calls"]}
@@ -76,10 +84,10 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
                 assistants[key] = entry
         elif message.get("role") == "toolResult":
             call_id = message["toolCallId"]
-            key = active.pop(call_id, None)
-            if key is None or key in results:
+            result_key = active.pop(call_id) if call_id in active else None
+            if result_key is None or result_key in results:
                 raise ValueError("Pi session has an unmatched or duplicate tool result")
-            results[key] = message
+            results[result_key] = message
     if set(calls) != observed:
         raise ValueError("Pi checkpoint contains calls outside its native session")
 
@@ -122,6 +130,12 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
         if record is not None and (record["call_id"] != call_id or record["tool_name"] != call["tool_name"]):
             raise ValueError("Pi committed result identity mismatch")
         expected = _result(call, record)
+        if trace is not None:
+            # A native journal can commit before its required Tool trace event.
+            # Check its Model-visible references before restoring the SDK result.
+            for part in expected["content"]:
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    trace.verify_model_content_refs(part["text"])
         existing = results.get(key)
         if existing is not None:
             if existing.get("toolName") != call["tool_name"] or existing.get("isError") != expected["isError"]:

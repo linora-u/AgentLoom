@@ -24,6 +24,8 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_contract", "goal_parallel")
@@ -131,13 +133,17 @@ def metadata(workflow: Path) -> dict:
 def execute(workflow: Path, workspace: Path, *, task: str | None = None, resume: str | None = None, attempt="run") -> dict:
     from agentloom.app.runner import execute_app
     lifecycle = []
+    if task is not None:
+        configured = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        configured["task"] = task
+        workflow.write_text(yaml.safe_dump(configured, allow_unicode=True, sort_keys=False), encoding="utf-8")
     meta = metadata(workflow)
     meta["started_at"] = datetime.now(UTC).isoformat()
     def observe(event):
         from dataclasses import asdict
         lifecycle.append(asdict(event))
     try:
-        result = execute_app(workflow, task_override=task, resume_task_id=resume, file_logging=True, event_sink=observe)
+        result = execute_app(workflow, resume_task_id=resume, file_logging=True, event_sink=observe)
         meta.update(status="completed", run_id=result.run.run_id, task_id=result.run.task_id,
                     manifest=str(result.run.manifest_path), output=result.output, goal=dict(result.goal) if result.goal else None)
     finally:
@@ -327,7 +333,8 @@ def child(case: str, workspace: Path) -> dict:
         target = workspace / "fixture"
         shutil.copytree(ROOT / "applications/unit_test_studio/test/fixtures/sample_project", target)
         payload = {"target_root": str(target), "targets": "src/text_pipeline.py:normalize_user_message,src/text_pipeline.py:extract_keywords", "output_dir": "test/generated"}
-        execute(ROOT / "applications/unit_test_studio/workflows/unit_test_studio_agent.yaml", workspace,
+        unit_workflow = copied_workflow("unit_test_studio", "unit_test_studio_agent.yaml", workspace, {})
+        execute(unit_workflow, workspace,
                 task="Generate Python pytest tests using Unit Test Studio.\nUse this JSON payload exactly:\n" + json.dumps(payload))
         return verify_unit(workspace)
     if case.startswith("context_"):
@@ -366,7 +373,8 @@ def child(case: str, workspace: Path) -> dict:
         repo_fixture(workspace / "repository")
         scan_and_rank(str(workspace / "repository"), str(workspace / "repo_output"), incremental=False)
         generate_markdown_map(str(workspace / "repo_output"))
-        execute(ROOT / "applications/repo_map/workflows/repo_map_agent.yaml", workspace,
+        repo_workflow = copied_workflow("repo_map", "repo_map_agent.yaml", workspace, {})
+        execute(repo_workflow, workspace,
                 task=f"Complete all Repo Map architecture analysis and Skill steps. output_dir={workspace / 'repo_output'}")
         return verify_repo(workspace)
     contract_case = case == "goal_contract"

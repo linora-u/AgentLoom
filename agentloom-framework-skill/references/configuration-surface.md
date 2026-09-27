@@ -24,7 +24,7 @@
 | 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、skills、checkpoint 等系统行为 | `runtime`/`logging` 只在此处生效；其他字段参与 deep merge；列表整段替换 |
 | 本地模型配置 | `config/llm.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立加载，不被 app/Agent YAML 覆盖；通常被 `.gitignore` 忽略 |
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
-| Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的角色、workflow、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
+| Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的可选长期指令、必填任务、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
 | Worker YAML | `applications/<app>/workflows/worker_agents/*.yaml` | 被 Supervisor 调用的 Agent 工具 | 仅被 `worker_agents` 显式引用时注册；Tool 复用 Worker 的 `name` 和 `description` |
 | Skill 包 | `applications/<app>/skills/<name>/SKILL.md` 或 `skills/<name>/SKILL.md` | 可按需加载的长期能力、脚本和资源 | `SKILL.md`/`skill.md` 入口；不得声明 Hook |
 | Hook Bundle | `applications/<app>/hooks/<name>/HOOK.yaml` 或 `hooks/<name>/HOOK.yaml` | 显式授权的确定性事件行为 | 只由顶层 `hooks.bundles` 引用；永不自动发现 |
@@ -48,8 +48,8 @@ LLM 配置不参与这个链条。`model`、`llm`、`langfuse` 写进 `system.ya
 name: "<agent_name>"
 agent_runtime: "smolagents"
 description: "<一两句话角色定位>"
-workflow: |
-  <完整执行协议>
+task: |
+  <本次用户任务>
 ```
 
 通用可选字段：
@@ -57,6 +57,8 @@ workflow: |
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `agent_runtime` | `smolagents` / `pi` | 必填。选择完整 Agent runtime；缺失或未注册值在预检阶段失败 |
+| `system_prompt` | `str` / `{path: str}` | 可选长期指令；路径相对当前 YAML |
+| `task` | `str` / `list[str]` | 必填；列表项在同一 Agent 会话中依次发送 |
 | `tools` | `list[dict]` | Agent 额外工具列表；预定义工具只写 `name`，动态工具写 `name/module/function` |
 | `model_type` | `str` | 选择 `config/llm.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
 | `runtime_options.smart_summary` | `bool` | smol 智能摘要；默认 `true` |
@@ -68,7 +70,7 @@ workflow: |
 | `runtime_options.prompt_template_path` | 非空字符串 | smol 系统 prompt 模板路径；不接受 mapping |
 | `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
 | `goal` | `bool` 或 `{enabled: bool}` | 仅顶层 Supervisor；开启 continuation 和显式完成 |
-| `input_schema` | JSON Schema object | 仅 Worker；省略时使用必填 `task: string` Tool 参数 |
+| `input_schema` | JSON Schema object | 仅 Worker；省略时 Tool 使用空参数对象 |
 | `output_schema` | JSON Schema | 任意 Agent；省略时返回普通文本，可描述任意 JSON 根值 |
 
 后端参数仅解释 `runtime_options`；旧顶层 smol 参数静默忽略，不转换、不拒绝。生成应用必须使用上面的 canonical 参数，`on` / `off` 必须加引号，`prompt_template_path` 必须是字符串。smol 专属参数不要复制到 Pi。
@@ -86,8 +88,8 @@ worker_agents:
 规则：`worker_agents` item 只支持 `path`，不支持 `name`。路径可以是绝对路径、项目根相对路径、`worker_agents/` 下的文件名，或不带后缀的 worker 名。
 
 Supervisor 还可配置 `goal: true/false`，或显式 mapping。Goal mapping 不做类型宽松
-转换；旧 `token_budget` 静默忽略。`workflow` 在任何模式下都必须是单个非空
-字符串，list 会在预检阶段失败。Goal 提供仅根 Supervisor 可见的 `get_goal` /
+转换；旧 `token_budget` 静默忽略。`task` 列表的每项分别进入 Goal 模式，
+显式完成后才发送下一项。Goal 提供仅根 Supervisor 可见的 `get_goal` /
 `update_goal`。Schedule 可以使用同一 YAML。
 
 Worker 专属：
@@ -110,7 +112,7 @@ output_schema:
 ```
 
 规则：Worker 的 Tool 名称和说明来自顶层 `name` 与 `description`。省略
-`input_schema` 时使用必填 `task: string`；省略 `output_schema` 时返回文本。
+`input_schema` 时 Tool 参数为空对象；省略 `output_schema` 时返回文本。
 `input_schema` 必须是 Draft 2020-12 object schema，参数保持原始 JSON 类型；
 `output_schema` 可使用任意 JSON 根类型。本地引用可用，远程引用会被拒绝。
 结构化输出必须由所选 Runtime/Provider 原生支持并在终态校验，不提供 prompt fallback。
@@ -136,7 +138,7 @@ skills, tool_metadata, tool_output_limits
 - `context_engine` 可以在 Agent YAML 覆盖，用于按应用或 Agent 调整可逆上下文压缩。
 - `self_learning` 和显式 `hooks` bundle 可以在应用或 Agent YAML 覆盖；reviewer 必须从当前 root 的最终生效配置读取，不能使用进程全局回退。
 - `mcp_servers` 可以在 Agent YAML 覆盖，并支持 string/list/dict；`null` 表示空配置。
-- `runtime`、`logging`、`checkpoint` 不在 Agent YAML 白名单；不要把存储 root、日志策略或 resume 生命周期塞进 Agent workflow。
+- `runtime`、`logging`、`checkpoint` 不在 Agent YAML 白名单；不要把存储 root、日志策略或 resume 生命周期塞进 Agent `task`。
 - Worker 的有效配置由全局、应用级、Worker YAML 自己重建；不会继承 Supervisor 的运行时覆盖。Worker 需要同样权限时必须自己写。
 
 ## system.yaml 配置面

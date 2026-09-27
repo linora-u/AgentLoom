@@ -7,7 +7,7 @@ runtime_options:
   max_steps: 5
   smart_summary: false
 
-workflow: |
+task: |
   # Tool Resolution Validation
 
   Use native structured tool calls:

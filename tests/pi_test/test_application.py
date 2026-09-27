@@ -118,11 +118,12 @@ def project(root: Path, url: str):
     model = {"model": "openai/fixture-model", "adapter": "openai_chat", "base_url": url,
              "api_key": "fixture-secret", "temperature": 0.25, "context_window": 8192,
              "max_output_tokens": 100, "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000,
+             "supports_structured_output": True,
              "extra_headers": {"X-Fixture": "selected-profile"}}
     (root / "config/llm.yaml").write_text(yaml.safe_dump({"model": {"default_model_type": "test", "test": model, "summary": model}}))
     app = root / "applications/pi/workflows/root.yaml"
     app.parent.mkdir(parents=True)
-    app.write_text("name: pi\nagent_runtime: pi\ndescription: Answer directly.\nworkflow: Say Pi answer.\ntools: []\ntoolsets: []\n")
+    app.write_text("name: pi\nagent_runtime: pi\ndescription: Answer directly.\nsystem_prompt: Say Pi answer.\ntask: Answer the configured request.\ntools: []\ntoolsets: []\n")
     return app
 
 
@@ -144,7 +145,10 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
         message["role"] == "system" and "Say Pi answer." in message["content"]
         for message in messages
     )
-    assert not any(message["role"] == "user" for message in messages)
+    assert any(
+        message["role"] == "user" and "Answer the configured request." in json.dumps(message["content"])
+        for message in messages
+    )
     assert headers["X-Fixture"] == "selected-profile"
     assert "todo_write" not in json.dumps(payload)
     assert "final_answer" not in json.dumps(payload)
@@ -153,6 +157,47 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
     events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
     assert [e["details"]["state"] for e in events if e["kind"] == "terminal"] == ["success"]
     assert [e["details"]["total_tokens"] for e in events if e["kind"] == "usage"] == [15]
+
+
+def test_textual_tool_call_without_tools_gets_feedback_and_continues(tmp_path):
+    pseudo_call = (
+        'I will inspect the project.\n<｜DSML｜tool_calls>\n'
+        '<｜DSML｜invoke name="list_directory">\n'
+        '<｜DSML｜parameter name="path" string="true">.</｜DSML｜parameter>\n'
+        '</｜DSML｜invoke>\n</｜DSML｜tool_calls>'
+    )
+    with model_service(outputs=[pseudo_call, "I cannot inspect files without a tool."]) as (url, requests):
+        app = project(tmp_path, url)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+
+    assert result.output == "I cannot inspect files without a tool."
+    assert len(requests) == 2
+    assert not requests[0][1].get("tools")
+    assert not requests[1][1].get("tools")
+    assert "No tools are available in this run" in json.dumps(requests[0][1])
+    feedback = json.dumps(requests[1][1], ensure_ascii=False)
+    assert "list_directory" in feedback
+    assert "not available" in feedback
+
+
+def test_repeated_textual_tool_call_without_tools_fails_instead_of_completing(tmp_path):
+    from agentloom.app.run import ApplicationRunError
+
+    pseudo_call = '<｜DSML｜tool_calls>\n<｜DSML｜invoke name="list_directory">'
+    with model_service(outputs=[pseudo_call, pseudo_call]) as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["runtime_options"] = {"max_stop_attempts": 2}
+        app.write_text(yaml.safe_dump(config))
+        with (
+            bind_config(load_project_config(tmp_path)),
+            pytest.raises(ApplicationRunError) as captured,
+        ):
+            execute_app(app, file_logging=False)
+
+    assert captured.value.original_error.category == "output_validation"
+    assert len(requests) == 2
 
 
 def change_model(root, **changes):
@@ -210,8 +255,14 @@ def test_structured_output_uses_native_wire_and_validates_json(
             change_model(tmp_path, adapter="openai_responses")
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
+        change_model(tmp_path, supports_structured_output=False)
+        with bind_config(load_project_config(tmp_path)), pytest.raises(
+            (ValueError, RuntimeError), match="supports_structured_output"
+        ):
+            execute_app(app, file_logging=False)
 
     assert result.run.manifest_path.is_file()
+    assert len(requests) == 1
     path, payload, _ = requests[0]
     assert path == expected_path
     if responses:
@@ -498,14 +549,45 @@ def test_project_pi_extensions_skills_and_context_files_are_not_discovered(tmp_p
     assert "UNSELECTED_CONTEXT" not in json.dumps(requests[0][1])
 
 
-@pytest.mark.parametrize("finish,match", [("length", "max_steps_error"), ("tool_calls", "unavailable tool")])
-def test_incomplete_or_unselected_tool_turn_does_not_report_success(tmp_path, finish, match):
+def test_incomplete_turn_does_not_report_success(tmp_path):
     from agentloom.app.run import ApplicationRunError
-    with model_service(finish=finish) as (url, requests):
+    with model_service(finish="length") as (url, requests):
         app = project(tmp_path, url)
-        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match=match):
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match="max_steps_error"):
             execute_app(app, file_logging=False)
     assert len(requests) == 1
+    assert not (tmp_path / "should-not-exist").exists()
+
+
+def test_unselected_structured_tool_uses_pi_error_result_and_continues(tmp_path):
+    with model_service(finish="tool_calls") as (url, requests):
+        app = project(tmp_path, url)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+
+    assert result.output == "Pi answer"
+    assert len(requests) == 2
+    assert not (tmp_path / "should-not-exist").exists()
+    tool_results = [m for m in requests[1][1]["messages"] if m["role"] == "tool"]
+    assert len(tool_results) == 1
+    assert "Tool write not found" in tool_results[0]["content"]
+
+
+def test_repeated_unselected_structured_tool_is_bounded(tmp_path):
+    from agentloom.app.run import ApplicationRunError
+
+    def call(call_id):
+        return [(call_id, "write", {"path": "should-not-exist", "content": "bad"})]
+    with model_service(turns=[call("unknown_1"), call("unknown_2")]) as (url, requests):
+        app = project(tmp_path, url)
+        config = yaml.safe_load(app.read_text())
+        config["runtime_options"] = {"max_stop_attempts": 2}
+        app.write_text(yaml.safe_dump(config))
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as captured:
+            execute_app(app, file_logging=False)
+
+    assert captured.value.original_error.category == "output_validation"
+    assert len(requests) == 2
     assert not (tmp_path / "should-not-exist").exists()
 
 

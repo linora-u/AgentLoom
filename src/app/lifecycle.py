@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
@@ -39,6 +39,7 @@ class _AgentInvocation:
     coordinator: Any | None
     runtime_result: AgentRuntimeResult | None
     result: JSONValue
+    answer_present: bool
     error: BaseException | None
 
 
@@ -54,6 +55,7 @@ class ApplicationRunFinalization:
     cleanup_on_success: bool
     log: Any
     task_tree_cleanup_max_bytes: int = 1024 * 1024
+    record_final_answer: Callable[[JSONValue], None] | None = None
 
 
 @dataclass(slots=True)
@@ -105,6 +107,12 @@ class ApplicationRunLifecycle:
         return copy_json_value(self._result, field_name="application result")
 
     @property
+    def answer_present(self) -> bool:
+        if self._invocation is not None:
+            return self._invocation.answer_present
+        return self._result is not None
+
+    @property
     def error(self) -> BaseException | None:
         return self._error
 
@@ -147,6 +155,7 @@ class ApplicationRunLifecycle:
         coordinator: Any | None,
         runtime_result: AgentRuntimeResult | None,
         result: object | None,
+        answer_present: bool,
         error: BaseException | None,
         goal: Mapping[str, object] | None,
     ) -> None:
@@ -158,6 +167,7 @@ class ApplicationRunLifecycle:
             coordinator=coordinator,
             runtime_result=runtime_result,
             result=copy_json_value(result, field_name="application result"),
+            answer_present=answer_present,
             error=error,
         )
         if runtime_result is not None:
@@ -321,6 +331,9 @@ class ApplicationRunLifecycle:
                     "Failed to persist terminal manifest: %s",
                     exc,
                 )
+
+            if self.outcome == "completed" and self.answer_present and finalization.record_final_answer is not None:
+                finalization.record_final_answer(self.result)
 
             if (
                 self.outcome == "completed"

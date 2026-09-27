@@ -8,7 +8,7 @@ runtime_options:
   max_steps: 20
   smart_summary: false
 
-workflow: |
+system_prompt: |
   # 0) Structured Tool Execution Contract
   - Invoke tools through native structured tool calls. Do not replace calls with
     inferred outputs.
@@ -49,6 +49,8 @@ workflow: |
   - Output type: English markdown string.
   - Output source: `collect_generation_report(...)` return value only.
   - No prefixes, suffixes, or JSON wrappers.
+
+task: "Collect the supplied generation results and return the final report."
 
 tools:
   - name: "collect_generation_report"

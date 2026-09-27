@@ -918,8 +918,17 @@ def _blocked_tool_input(hook_run: Any, **kwargs: Any) -> ToolCallRecord:
         input=kwargs.pop("arguments"), ended_at=time.time(),
         kind=kwargs.pop("kind", "invalid_arguments"), **kwargs,
     )
-    hook_run.record_tool_outcome(record)
+    _record_tool_outcome(hook_run, record)
     return record
+
+
+def _record_tool_outcome(hook_run: Any, record: ToolCallRecord) -> None:
+    from agentloom.execution.observability import get_current_trace_recorder
+
+    recorder = get_current_trace_recorder()
+    if recorder is not None:
+        recorder.record_tool(record)
+    hook_run.record_tool_outcome(record)
 
 
 def _transform_tool_input(
@@ -982,6 +991,14 @@ def _transform_tool_input(
             stage="pre_tool_use",
             kind="policy_blocked",
             started_at=started_at,
+        )
+    from agentloom.execution.observability import get_current_trace_recorder
+
+    recorder = get_current_trace_recorder()
+    if recorder is not None:
+        recorder.record_hook_decision(
+            event="PreToolUse", subject=tool_name,
+            input_value=tool_input, decision=pre_result, call_id=call_id,
         )
     candidate_input = (
         deepcopy(pre_result.modified_input)
@@ -1210,7 +1227,7 @@ class AgentLoomToolGateway:
         hook_run: Any,
         record: ToolCallRecord,
     ) -> ToolCallRecord:
-        hook_run.record_tool_outcome(record)
+        _record_tool_outcome(hook_run, record)
         return record
 
     def _blocked(
@@ -1426,16 +1443,26 @@ class AgentLoomToolGateway:
         )
         if projection_text is not None:
             try:
-                model_output = _compress_tool_result(
-                    tool_name=tool_name,
-                    source=(
-                        binding.compression_source
-                        or f"tool_result:{tool_name}"
-                    ),
-                    result=projection_text,
+                from agentloom.execution.observability import (
+                    TraceStorageError,
+                    get_current_trace_recorder,
                 )
+
+                source = binding.compression_source or f"tool_result:{tool_name}"
+                recorder = get_current_trace_recorder()
+                if recorder is not None:
+                    model_output = recorder.project_tool_result(
+                        projection_text, tool_name=tool_name,
+                        source=source, call_id=call_id,
+                    )
+                else:
+                    model_output = _compress_tool_result(
+                        tool_name=tool_name, source=source, result=projection_text,
+                    )
                 if model_output != projection_text:
                     metadata[MODEL_OUTPUT_METADATA_KEY] = model_output
+            except TraceStorageError:
+                raise
             except Exception as processing_error:
                 logger.warning(
                     "Context compression failed open for tool %s; "

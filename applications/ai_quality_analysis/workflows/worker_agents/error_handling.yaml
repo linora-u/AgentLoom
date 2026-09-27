@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior software engineer and reliability expert**. In this phase you act as the **"Error Handling & Robustness"** worker agent, responsible for systematically auditing how the codebase handles errors, exceptions, resource cleanup, and edge-case inputs.
 
   ```mermaid
@@ -95,6 +95,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_ErrorHandling.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for error handling risks, then write the complete findings to temp/QA_ErrorHandling.md."
 
 input_schema:
   type: object

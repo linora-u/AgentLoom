@@ -46,10 +46,13 @@ def _run_event_payload(event: Any) -> dict[str, object]:
         "occurred_at": occurred_at.isoformat(),
         "run": _run_info_payload(event.run),
     }
-    for field in ("output", "error", "phase", "goal"):
+    for field in ("output", "answer_present", "error", "phase", "goal"):
         value = getattr(event, field, None)
         if field == "output" and event.event == "run.completed":
             payload[field] = value
+        elif field == "answer_present":
+            if event.event == "run.completed" and value is not None:
+                payload[field] = value
         elif value is not None:
             payload[field] = dict(value) if field == "goal" else value
     return payload
@@ -197,7 +200,6 @@ Examples:
   loom run applications/test_demo/workflows/test_agent.yaml
   loom run applications/test_demo/workflows/test_agent.yaml --no-file-log
   loom run applications/test_demo/workflows/test_agent.yaml --resume task_xxx
-  loom run applications/test_demo/workflows/test_agent.yaml --task "Inspect this repository"
   loom run applications/test_demo/workflows/test_agent.yaml --output-format json
   loom run applications/test_demo/workflows/test_agent.yaml --output-format jsonl
 """
@@ -212,7 +214,6 @@ Examples:
     help="Disable this run's file log (configuration is used by default).",
 )
 @click.option("--resume", "resume_task_id", default=None, help="Resume from a checkpoint task ID.")
-@click.option("--task", "task_override", default=None, help="Override the task from the application YAML.")
 @click.option(
     "--output-format",
     type=click.Choice(("text", "json", "jsonl"), case_sensitive=False),
@@ -229,7 +230,6 @@ def run(
     yaml_path: str,
     no_file_log: bool,
     resume_task_id: str | None,
-    task_override: str | None,
     output_format: str,
     require_valid_supervisor_target: bool,
 ) -> None:
@@ -270,7 +270,6 @@ def run(
                     yaml_path,
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
-                    task_override=task_override,
                     event_sink=emit_event,
                     require_valid_supervisor_target=require_valid_supervisor_target,
                 )
@@ -279,7 +278,6 @@ def run(
                     yaml_path,
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
-                    task_override=task_override,
                     require_valid_supervisor_target=require_valid_supervisor_target,
                 )
                 rendered_output = (
@@ -287,7 +285,11 @@ def run(
                     if isinstance(completed.output, str)
                     else json.dumps(completed.output, ensure_ascii=False, indent=2)
                 )
-                click.echo(rendered_output)
+                answer_present = getattr(
+                    completed, "answer_present", completed.output is not None,
+                )
+                if answer_present and not getattr(completed, "final_answer_presented", False):
+                    click.echo(rendered_output)
                 completed_goal = getattr(completed, "goal", None)
                 if isinstance(completed_goal, Mapping):
                     click.echo(_goal_text(completed_goal))

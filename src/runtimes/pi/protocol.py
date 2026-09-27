@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model
 
 PI_BRIDGE_PROTOCOL_VERSION = 2
 NonEmpty = Annotated[str, Field(min_length=1)]
-Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare", "session_checkpoint"]
+Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare", "model_trace", "session_checkpoint"]
 
 
 class WireValue(BaseModel):
@@ -113,6 +113,16 @@ class ModelPrepare(WireValue):
     identity: NativeCallIdentity
 
 
+class ModelTrace(WireValue):
+    method: Literal["model_trace"]
+    identity: NativeCallIdentity
+    attempt: Annotated[int, Field(ge=0)]
+    phase: Literal["request", "response"]
+    boundary: Literal["pi_payload", "openai_http_request"] | None = None
+    capture_id: Annotated[str, Field(pattern="^[0-9a-f]{32}$")]
+    sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
+
+
 class PlatformInvoke(WireValue):
     method: Literal["platform_invoke"]
     identity: NativeCallIdentity
@@ -128,7 +138,7 @@ class PlatformPrepare(WireValue):
 
 
 RequestPayload = Annotated[
-    Handshake | Run | Snapshot | Cancel | Close | Prepare | Dispatch | Settle | PlatformInvoke | PlatformPrepare | ModelPrepare | SessionCheckpoint, Field(discriminator="method")
+    Handshake | Run | Snapshot | Cancel | Close | Prepare | Dispatch | Settle | PlatformInvoke | PlatformPrepare | ModelPrepare | ModelTrace | SessionCheckpoint, Field(discriminator="method")
 ]
 
 
@@ -148,6 +158,7 @@ class TerminalRecord(WireValue):
     status: Literal["completed", "error", "blocked"]
     output: JsonValue = Field(default=None, repr=False)
     error: ToolErrorRecord | None = None
+    model_content: str | None = Field(default=None, exclude_if=lambda value: value is None, repr=False)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     started_at: float | None = None
     ended_at: float | None = None
@@ -244,6 +255,14 @@ class ModelPermit(WireValue):
     agent_context: list[str] = Field(default_factory=list, repr=False)
 
 
+class ModelTraceResult(WireValue):
+    method: Literal["model_trace"]
+    identity: NativeCallIdentity
+    attempt: int
+    phase: Literal["request", "response"]
+    accepted: Literal[True]
+
+
 class PlatformResult(WireValue):
     method: Literal["platform_invoke"]
     record: TerminalRecord = Field(repr=False)
@@ -257,7 +276,7 @@ class PlatformPrepared(WireValue):
 
 
 ResultPayload = Annotated[
-    HandshakeResult | RunResult | SnapshotResult | ControlResult | PrepareResult | SettleResult | PlatformResult | PlatformPrepared | ModelPermit | SessionCheckpointResult,
+    HandshakeResult | RunResult | SnapshotResult | ControlResult | PrepareResult | SettleResult | PlatformResult | PlatformPrepared | ModelPermit | ModelTraceResult | SessionCheckpointResult,
     Field(discriminator="method"),
 ]
 
@@ -285,7 +304,7 @@ class Request(Envelope):
             else self.payload.outcome.identity
             if isinstance(self.payload, Settle)
             else self.payload.identity
-            if isinstance(self.payload, (PlatformInvoke, PlatformPrepare, ModelPrepare))
+            if isinstance(self.payload, (PlatformInvoke, PlatformPrepare, ModelPrepare, ModelTrace))
             else None
         )
         if identity is not None and (identity.run_id != self.run_id or identity.instance_id != self.instance_id):
@@ -309,7 +328,7 @@ class Response(Envelope):
                 raise ValueError("Run-scoped response requires run_id")
             identity = (
                 self.payload.identity
-                if isinstance(self.payload, (SettleResult, ModelPermit))
+                if isinstance(self.payload, (SettleResult, ModelPermit, ModelTraceResult))
                 else self.payload.authorization.identity
                 if isinstance(self.payload, PrepareResult) and self.payload.authorization is not None
                 else None
@@ -366,6 +385,7 @@ def encode_message(message: Request | Response | Event) -> str:
                     getattr(value, name)
                 )
                 for name, field in type(value).model_fields.items()
+                if field.exclude_if is None or not field.exclude_if(getattr(value, name))
             }
         if is_dataclass(value) and not isinstance(value, type):
             return {item.name: wire(getattr(value, item.name)) for item in fields(value)}

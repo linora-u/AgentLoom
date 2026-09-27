@@ -29,18 +29,8 @@ class NormalizedAgentConfig:
     goal: GoalConfig = dataclass_field(default_factory=GoalConfig)
 
 
-_WORKFLOW_VALIDATION_ERROR = "workflow field must be a non-empty string"
-_DEFAULT_WORKER_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "task": {
-            "type": "string",
-            "description": "Task for this Agent.",
-        },
-    },
-    "required": ["task"],
-    "additionalProperties": False,
-}
+_TASK_VALIDATION_ERROR = "task must be a non-empty string or a non-empty list of non-empty strings"
+_DEFAULT_WORKER_INPUT_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
 
 
 def resolve_input_schema_object(schema: dict[str, Any]) -> dict[str, Any]:
@@ -262,13 +252,13 @@ class AgentConfigNormalizer:
             raise ValueError(f"Unknown fixed_args for tool '{tool_name}': {joined_args}")
 
     @staticmethod
-    def validate_workflow_config(config: dict) -> None:
-        workflow = config.get("workflow")
-        if workflow is None:
+    def validate_task_config(config: dict) -> None:
+        task = config.get("task")
+        if isinstance(task, str) and task.strip():
             return
-        if isinstance(workflow, str) and workflow.strip():
+        if isinstance(task, list) and task and all(isinstance(item, str) and item.strip() for item in task):
             return
-        raise ValueError(_WORKFLOW_VALIDATION_ERROR)
+        raise ValueError(_TASK_VALIDATION_ERROR)
 
     @staticmethod
     def validate_skills_config(config: dict) -> None:
@@ -284,6 +274,8 @@ class AgentConfigNormalizer:
     @staticmethod
     def validate_removed_fields(config: dict) -> None:
         """Keep removed-field rejection identical in preflight and construction."""
+        if "workflow" in config or "tasks" in config:
+            raise ValueError("Configuration error: workflow and tasks were removed; use task")
         if "tools_mapping" in config:
             raise ValueError(
                 "Configuration error: tools_mapping was removed; Skills do not grant tools"
@@ -307,7 +299,7 @@ class AgentConfigNormalizer:
         if required_fields:
             AgentConfigNormalizer.validate_required_fields(config, list(required_fields))
             AgentConfigNormalizer.validate_tools_config(config)
-            AgentConfigNormalizer.validate_workflow_config(config)
+            AgentConfigNormalizer.validate_task_config(config)
             AgentConfigNormalizer.validate_skills_config(config)
 
         normalized = build_normalized()
@@ -409,7 +401,7 @@ class AgentConfigNormalizer:
                 )
                 continue
 
-            if resolved_path.suffix.lower() not in (".yaml", ".yml", ".md"):
+            if resolved_path.suffix.lower() not in (".yaml", ".yml"):
                 errors.append(
                     f"worker_agents[{idx}] path '{configured_path}' resolved to '{resolved_path}' has unsupported extension"
                 )

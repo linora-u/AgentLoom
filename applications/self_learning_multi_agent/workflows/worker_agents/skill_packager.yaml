@@ -27,7 +27,7 @@ input_schema:
   required:
   - query
   additionalProperties: false
-workflow: |
+task: |
   # Skill Packager Worker
 
   Parse `query`, create one skill proposal package, write an evidence file, read

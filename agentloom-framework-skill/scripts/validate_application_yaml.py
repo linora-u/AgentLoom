@@ -93,7 +93,7 @@ def main() -> int:
     config_files_checked = int((app_root / "config/system.yaml").is_file())
     if not files:
         _emit(app_root, [_error(
-            workflows_dir, "workflows 中没有 Agent YAML/Markdown 定义", root=project_root,
+            workflows_dir, "workflows 中没有 Agent YAML 定义", root=project_root,
             field="workflows", rule="definition_required",
         )], config_files_checked=config_files_checked)
         return 1

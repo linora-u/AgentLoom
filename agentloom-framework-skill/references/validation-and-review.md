@@ -19,7 +19,7 @@ git check-ignore -v config/llm.yaml || true
 
 通过标准：`summary.valid == true` 且 `error_count == 0`。
 
-此脚本是 `agentloom.app.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML/Markdown 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
+此脚本是 `agentloom.app.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML Agent 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
 
 输出保留 `summary` 与 `errors` envelope；共享诊断使用 `field: definition`、`rule: shared_definition`，`message` 保留 canonical 原因。目录缺失、没有定义等 authoring 结构错误使用独立规则，不保证旧脚本的字段级 rule 名称。
 
@@ -32,20 +32,20 @@ print(scan_app_structure('applications/<app_name>'))
 "
 ```
 
-结构扫描与校验共用相同的递归、角色感知定义发现器，并通过 `load_agent_definition` 读取 YAML/Markdown，拒绝重复 YAML key，采用同一 Markdown workflow 规则。扫描只提取事实，不代替有效配置预检；两者都不构造模型、导入工具实现、连接 MCP 或执行 Hook。
+结构扫描与校验共用相同的递归、角色感知定义发现器，并通过 `load_agent_definition` 读取 YAML，拒绝重复 YAML key。普通 Markdown 只能通过 `system_prompt.path` 引用。扫描只提取事实，不代替有效配置预检；两者都不构造模型、导入工具实现、连接 MCP 或执行 Hook。
 
 检查点：
 
 - 是否有 Supervisor。
 - Worker 数量是否符合设计。
-- Worker 是否正确依赖默认 `task: string`/文本契约，或声明有效的
+- Worker 是否正确依赖默认空参数/文本契约，或声明有效的
   `input_schema` / `output_schema`。
-- `tools` 是否与 workflow 动作匹配。
+- `tools` 是否与 YAML `task` 动作匹配。
 - `agent_runtime`、`model_type`、所选基座的 `runtime_options` 是否合理。
 - Agent YAML 是否误写 LLM 参数、无效 `runtime_options.planning_interval` / `runtime_options.todo_mode` / `concurrency`、非字符串 `runtime_options.prompt_template_path`、错误 `fixed_args` 或 `mcp_servers`。
 - 生成器不得输出旧顶层 smol 参数：运行时会静默忽略，不会替作者转换或拒绝。`todo_mode` 的 `"on"` / `"off"` 必须加引号。
 - Goal mapping 是否显式配置 `enabled`、Worker 是否错误配置 Goal；所有
-  `workflow` 是否都是单个非空字符串。
+  `task` 是否都是非空字符串或非空字符串列表。
 
 ```bash
 .venv/bin/python -m py_compile applications/<app_name>/<app_name>_app.py
@@ -90,12 +90,12 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 
 | 改动类型 | 至少跑的 Application |
 |---|---|
-| 默认工具 / ToolSpec / toolsets / implementation loader | `applications/tool_registry_core_validation`、`applications/tool_registry_markdown_validation`、`applications/test_demo/workflows/test_tool_resolve_agent.yaml`、`applications/context_engine_text_retrieve_validation`、`applications/self_learning_smoke`；catalog/loader 改动五条都跑 |
+| 默认工具 / ToolSpec / toolsets / implementation loader | `applications/tool_registry_core_validation`、`applications/tool_registry_markdown_validation`、`applications/test_demo/workflows/test_tool_resolve_agent.yaml`、`applications/test_demo/workflows/test_tool_truncation_agent.yaml`、`applications/self_learning_smoke`；catalog/loader 改动五条都跑 |
 | 文件工具 / checkpoint file history | `applications/test_demo/workflows/test_edit_file_agent.yaml`、`test_file_rewind_agent.yaml`、`test_checkpoint_agent.yaml` |
 | 搜索 | `applications/tool_registry_core_validation`，必须验证 `grep_search` 与 `glob_search` 的真实调用和结果 |
-| ContextEngine / 压缩 | `applications/context_engine_*_retrieve_validation` 三个应用 |
+| ContextEngine / 压缩 | `applications/test_demo/workflows/test_tool_truncation_agent.yaml` 与 ContextRef Application 测试 |
 | shell 权限 / audit | `applications/test_shell_audit/*`、`applications/test_shell_allowlist_matrix/*` |
-| 多 Worker 调度 | `applications/context_engine_multi_worker_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
+| 多 Worker 调度 | `applications/mixed_runtime_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
 
 `applications/architecture_contract_validation` 通过原生结构化工具调用验证嵌套 Application 与拒绝场景。保留九类具名回归，包括区分空购物车与零金额非空购物车的 `zero_price`；50 项独立 oracle 不随生成结果放宽。最终 `test_report` 必须是最后一次 verifier 的真实 pytest 报告相对路径，写入前检查类型、当前身份和 JSON/JUnit/调用证据。多次调用同名 Worker 时，按当前任务的 call index、开始/完成事件和实际输入输出关联，并按 runtime 的 SHA-256 前缀规则重算 checkpoint 中 task_input 的哈希，不能只比较几个哈希字段；允许验证失败后的修复循环，不能固定选第一次调用，也不能用未来或其他任务的结果补齐证据。
 
@@ -121,7 +121,7 @@ export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 
 必须验证的证据：
 
-- `loom run <workflow.yaml> "<task>"` 能同时创建 `.agentloom/runs/<application_id>/<run_id>/manifest.json` 与 `.agentloom/checkpoints/<application_id>/<task_id>/`（使用自定义 root 时替换 `.agentloom`）。
+- `loom run <agent.yaml>` 从 YAML 读取任务，能同时创建 `.agentloom/runs/<application_id>/<run_id>/manifest.json` 与 `.agentloom/checkpoints/<application_id>/<task_id>/`（使用自定义 root 时替换 `.agentloom`）。
 - Manifest 必须记录 `application_id`、`task_id`、`run_id` 和最终状态；`logs/runtime.log`、`audit/shell.jsonl`、`artifacts/{shell,background,skills}` 只能写进当前 run。
 - 新 checkpoint 有 `task_events.jsonl`；`task_tree.json` 只是投影且能被 `loom list-tasks --detail` 展示。
 - 多 Worker 或重复 Worker 调用场景下，`workers/<worker>/calls/<call_index>/checkpoint.json` 存在，`call_index` 不互相覆盖。
@@ -229,7 +229,7 @@ rg -n "mcp_servers|parse_mcp_servers_yaml_value" src tests docs/en agentloom-fra
 
 - `workflows/<app>_agent.yaml` 有 `worker_agents`，数量 >= 2。
 - `workflows/worker_agents/*.yaml` 文件存在。
-- Worker 使用默认 `task: string`/文本契约，或有合法的 `input_schema` /
+- Worker 使用默认空参数/文本契约，或有合法的 `input_schema` /
   `output_schema`；结构化输出所选 Runtime/Provider 必须支持。
 - 结构扫描能列出 Worker Agents。
 - README 写清 Supervisor/Worker 分工。

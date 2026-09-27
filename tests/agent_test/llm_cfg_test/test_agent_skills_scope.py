@@ -58,6 +58,7 @@ def test_base_agent_run_binds_agent_scoped_catalogue():
         config={
             "name": "minimal_agent",
             "agent_runtime": "smolagents",
+            "task": "demo-task",
         },
         model_binding=ModelTurnBinding(
             model_type="test",
@@ -72,7 +73,7 @@ def test_base_agent_run_binds_agent_scoped_catalogue():
     agent._effective_agent_config = {"tool_access_control": {}}
     agent.build_runtime = lambda: _DummyRuntimeAgent()
 
-    result = agent.run("demo-task")
+    result = agent.run()
 
     assert result["task"] == "demo-task"
     assert result["skill_catalog_identity"] == id(custom_catalog)

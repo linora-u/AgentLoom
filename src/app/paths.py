@@ -25,7 +25,7 @@ def worker_reference_candidate(
     else:
         raise ValueError(
             f"worker_agents path '{value}' is missing a file extension; "
-            f"must end with .yaml, .yml, or .md (e.g. '{value}.yaml')"
+            f"must end with .yaml or .yml (e.g. '{value}.yaml')"
         )
     return candidate.absolute()
 

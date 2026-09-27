@@ -12,7 +12,7 @@ from threading import Barrier
 import psutil
 import pytest
 import yaml
-from agentloom.app.run import ApplicationRunInterrupted
+from agentloom.app.run import ApplicationRunError, ApplicationRunInterrupted
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
 from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, RuntimeCheckpointEnvelope
@@ -37,7 +37,7 @@ def platform_project(tmp_path, monkeypatch):
     definition = {
         "name": "platform", "agent_runtime": "platform-fixture",
         "description": "Execute the selected platform tools.",
-        "workflow": "Use the selected tools.", "tools": [], "toolsets": [],
+        "task": "Use the selected tools.", "tools": [], "toolsets": [],
     }
     workflow.write_text(yaml.safe_dump(definition))
     programs = {}
@@ -69,13 +69,14 @@ def platform_project(tmp_path, monkeypatch):
     monkeypatch.setattr("agentloom.app.validation.build_builtin_runtime_registry", lambda: registry)
     monkeypatch.setattr("agentloom.app.agent.build_builtin_runtime_registry", lambda: registry)
 
-    def run(*, resume_task_id=None, **updates):
+    def run(*, resume_task_id=None, trace_exporter=None, **updates):
         workflow.write_text(yaml.safe_dump({**definition, **updates}))
         with bind_config(load_project_config(tmp_path)):
             return execute_app(
                 workflow,
                 file_logging=False,
                 resume_task_id=resume_task_id,
+                trace_exporter=trace_exporter,
             )
 
     return tmp_path, workflow, programs, definitions, run
@@ -93,7 +94,7 @@ def test_parallel_worker_applications_own_mcp_connections_and_run_context(platfo
     worker.parent.mkdir()
     worker.write_text(yaml.safe_dump({
         "name": "probe", "agent_runtime": "platform-fixture",
-        "description": "Look up one fact.", "workflow": "Use the fact service.",
+        "description": "Look up one fact.", "task": "Use the fact service.",
         "tools": [], "toolsets": [], "mcp_servers": str(config),
         "input_schema": {
             "type": "object",
@@ -215,6 +216,49 @@ def test_memory_and_history_tools_use_existing_application_scope(platform_projec
     assert run(tools=[{"name": "memory"}, {"name": "session_search"}], self_learning={"enabled": True}).output == "memory and history scope retained"
 
 
+@pytest.mark.parametrize("changed_source", ["agent", "worker", "prompt"])
+def test_resume_rejects_changed_agent_definition_content(platform_project, changed_source):
+    root, workflow, programs, _, run = platform_project
+    system_path = root / "config" / "system.yaml"
+    system = yaml.safe_load(system_path.read_text(encoding="utf-8"))
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system_path.write_text(yaml.safe_dump(system), encoding="utf-8")
+
+    worker = workflow.parent / "worker_agents" / "helper.yaml"
+    worker.parent.mkdir()
+    worker.write_text(yaml.safe_dump({
+        "name": "helper", "agent_runtime": "platform-fixture",
+        "description": "Help with the task.", "task": "Original worker task.",
+        "tools": [], "toolsets": [],
+    }), encoding="utf-8")
+    prompt = workflow.parent / "prompts" / "instructions.md"
+    prompt.parent.mkdir()
+    prompt.write_text("Original instructions.", encoding="utf-8")
+    updates = {
+        "worker_agents": [{"path": "helper.yaml"}],
+        "system_prompt": {"path": "prompts/instructions.md"},
+    }
+
+    def interrupt(_definition, _request):
+        raise KeyboardInterrupt("simulate interruption before completion")
+
+    programs["platform"] = interrupt
+    with pytest.raises(ApplicationRunInterrupted) as interrupted:
+        run(**updates)
+
+    if changed_source == "agent":
+        updates["description"] = "Changed Agent description."
+    elif changed_source == "worker":
+        worker_config = yaml.safe_load(worker.read_text(encoding="utf-8"))
+        worker_config["task"] = "Changed worker task."
+        worker.write_text(yaml.safe_dump(worker_config), encoding="utf-8")
+    else:
+        prompt.write_text("Changed instructions.", encoding="utf-8")
+
+    with pytest.raises(ApplicationRunError, match="definition or referenced prompt changed"):
+        run(resume_task_id=interrupted.value.run.task_id, **updates)
+
+
 def test_application_uses_one_canonical_runtime_home(platform_project):
     root, workflow, programs, _, run = platform_project
     runtime_root = root / "state" / "runtime"
@@ -274,7 +318,7 @@ json.dump({"decision": "allow"}, sys.stdout)
                 "name": "storage_worker",
                 "agent_runtime": "platform-fixture",
                 "description": "Read Application memory in an isolated Worker.",
-                "workflow": "List Application memory and return.",
+                "task": "List Application memory and return.",
                 "tools": [{"name": "memory"}],
                 "toolsets": [],
                 "input_schema": {
@@ -454,3 +498,357 @@ def test_native_application_retrieves_original_mcp_content_with_context_ref(plat
         tools=[{"name": "loom_retrieve_context"}], mcp_servers=str(config),
         context_engine={"min_chars": 1000, "preview_max_chars": 300},
     ).output == "original artifact retrieved"
+
+
+def trace_payload(value: str) -> str:
+    """Return the exact text supplied by an Application Tool call."""
+    return value
+
+
+def fail_with_secret(value: str) -> str:
+    _ = value
+    raise RuntimeError("api_key=fixture-secret")
+
+
+def test_application_tool_outcome_has_durable_inspectable_payload(platform_project):
+    from agentloom.execution.observability import inspect_run
+
+    _, _, programs, _, run = platform_project
+    payload = "application-trace-8426\n" * 1000
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="trace-call", tool_name="trace_payload", arguments={"value": payload},
+        )
+        assert record.status == "completed"
+        return "trace complete"
+
+    programs["platform"] = execute
+    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+
+    with inspect_run(result.run) as trace:
+        events = trace.events()
+        assert len({event["event_id"] for event in events}) == len(events)
+        assert all(event["event_id"] == f"{result.run.run_id}:{event['sequence']}" for event in events)
+        calls = [event for event in events if event["kind"] == "tool"]
+        assert len(calls) == 1
+        assert calls[0]["call_id"] == "trace-call"
+        assert calls[0]["status"] == "completed"
+        assert json.loads(trace.read_text(calls[0]["input_ref"])) == {"value": payload}
+        assert json.loads(trace.read_text(calls[0]["output_ref"])) == payload
+        model_visible = trace.read_text(calls[0]["model_ref"])
+        match = re.search(r"\[ContextRef (ctx_[0-9a-f]{32})", model_visible)
+        assert match is not None
+        assert trace.read_text(match.group(1)) == payload
+        pages = []
+        offset = 0
+        while True:
+            page = trace.read_page(calls[0]["model_ref"], offset=offset, limit=1024)
+            pages.append(page.data)
+            if page.next_offset is None:
+                break
+            offset = page.next_offset
+        assert b"".join(pages).decode() == model_visible
+
+
+def test_multimegabyte_single_line_tool_result_remains_pageable(platform_project):
+    from agentloom.execution.observability import TraceStorageError, inspect_run
+
+    _, _, programs, _, run = platform_project
+    payload = "A" * 4_000_000 + "终"
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="long-line", tool_name="trace_payload", arguments={"value": payload},
+        )
+        assert "[ContextRef " in record.model_content()
+        return "retained"
+
+    programs["platform"] = execute
+    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event["kind"] == "tool")
+        ref = re.search(r"ctx_[0-9a-f]{32}", trace.read_text(tool["model_ref"])).group()
+        metadata = trace.reference_metadata(ref)
+        size = metadata["size"]
+        assert size == len(payload.encode("utf-8"))
+        assert len(metadata["chunk_sha256"]) == 4
+        assert trace.read_page(ref, offset=size - len("终".encode()), limit=16).data.decode() == "终"
+        content_path = result.run.trace_dir / "payloads" / f"{metadata['sha256']}.blob"
+        with content_path.open("r+b") as stream:
+            stream.seek(size - 1)
+            stream.write(b"X")
+        with pytest.raises(TraceStorageError, match="integrity check failed"):
+            trace.read_page(ref, offset=size - len("终".encode()), limit=16)
+
+
+def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder
+
+    _, _, programs, _, run = platform_project
+    def execute(definition, _request):
+        definition.tool_gateway.invoke(
+            call_id="trace-failure", tool_name="trace_payload", arguments={"value": "committed"},
+        )
+        return "must not succeed"
+
+    original_append = TraceRecorder._append
+
+    def fail_write(recorder, event):
+        if event["kind"] == "tool":
+            raise OSError("fixture disk full")
+        return original_append(recorder, event)
+
+    programs["platform"] = execute
+    monkeypatch.setattr(TraceRecorder, "_append", fail_write)
+    with pytest.raises(ApplicationRunError, match="Could not persist Tool trace"):
+        run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+
+
+def test_final_answer_trace_failure_preserves_failed_checkpoint(platform_project, monkeypatch):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder, TraceStorageError
+
+    root, _, programs, _, run = platform_project
+    programs["platform"] = lambda _definition, _request: "accepted answer"
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": True}
+    system_path.write_text(yaml.safe_dump(system))
+
+    def fail_final_answer(_recorder, _output):
+        raise TraceStorageError("fixture final answer write failed")
+
+    monkeypatch.setattr(TraceRecorder, "record_final_answer", fail_final_answer)
+    with pytest.raises(ApplicationRunError, match="fixture final answer write failed") as failed:
+        run()
+    checkpoint = root / "state/runtime/checkpoints/platform" / failed.value.run.task_id
+    assert checkpoint.is_dir()
+    assert json.loads((checkpoint / "task_tree.json").read_text())["status"] == "failed"
+
+
+def test_final_answer_is_not_printed_before_success_manifest_commits(platform_project, monkeypatch, capsys):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.context import RuntimeContext
+
+    root, _, programs, _, run = platform_project
+    programs["platform"] = lambda _definition, _request: "accepted answer"
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["logging"]["console_enabled"] = True
+    system_path.write_text(yaml.safe_dump(system))
+    original_update = RuntimeContext.update_manifest
+
+    def fail_success_manifest(context, **updates):
+        if updates.get("status") == "completed":
+            raise OSError("fixture success manifest write failed")
+        return original_update(context, **updates)
+
+    monkeypatch.setattr(RuntimeContext, "update_manifest", fail_success_manifest)
+    with pytest.raises(ApplicationRunError, match="fixture success manifest write failed") as failed:
+        run()
+    assert "Final answer: accepted answer" not in capsys.readouterr().out
+    assert json.loads(failed.value.run.manifest_path.read_text())["status"] == "failed"
+
+
+def test_exporter_failure_is_diagnostic_and_does_not_hold_application_result(platform_project):
+    from threading import Event
+    from time import monotonic, sleep
+
+    _, _, programs, _, run = platform_project
+    programs["platform"] = lambda _definition, _request: "ready"
+    entered = Event()
+    release = Event()
+    submitted = []
+
+    class SlowExporter:
+        def export(self, event, *, trace_dir):
+            assert trace_dir.is_dir()
+            submitted.append((event["event_id"], trace_dir))
+            entered.set()
+            release.wait(10)
+            raise RuntimeError("late exporter failure")
+
+    try:
+        started = monotonic()
+        result = run(trace_exporter=SlowExporter())
+        assert result.output == "ready"
+        assert monotonic() - started < 5
+        assert entered.wait(2)
+        assert submitted
+        assert all(directory == result.run.trace_dir for _, directory in submitted)
+    finally:
+        release.set()
+    deadline = monotonic() + 3
+    diagnostics_path = result.run.trace_dir / "exporter/diagnostics.jsonl"
+    while monotonic() < deadline:
+        if diagnostics_path.exists() and "late exporter failure" in diagnostics_path.read_text():
+            break
+        sleep(0.02)
+    assert "late exporter failure" in diagnostics_path.read_text()
+
+
+def test_application_trace_records_effective_pre_tool_decision(platform_project):
+    from agentloom.execution.observability import inspect_run
+
+    root, _, programs, _, run = platform_project
+    hook = root / "modify_tool.py"
+    hook.write_text('import json\nprint(json.dumps({"decision":"modify","modified_input":{"value":"after"}}))\n')
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="modified-call", tool_name="trace_payload", arguments={"value": "before"},
+        )
+        assert record.status == "completed"
+        return record.output
+
+    programs["platform"] = execute
+    result = run(
+        tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}],
+        hooks={"PreToolUse": [{"id": "modify", "matcher": "trace_payload",
+                               "command": shlex.join([sys.executable, str(hook)])}]},
+    )
+    assert result.output == "after"
+    with inspect_run(result.run) as trace:
+        decisions = [event for event in trace.events() if event["kind"] == "hook_decision"]
+        assert len(decisions) == 1
+        assert decisions[0]["event"] == "PreToolUse"
+        assert decisions[0]["call_id"] == "modified-call"
+        detail = json.loads(trace.read_text(decisions[0]["decision_ref"]))
+        assert detail["result"]["decision"] == "modify"
+        assert detail["result"]["modified_input"] == {"value": "after"}
+
+
+def test_large_tool_reference_survives_context_cache_eviction(platform_project):
+    _, _, programs, _, run = platform_project
+
+    def execute(definition, _request):
+        first = definition.tool_gateway.invoke(
+            call_id="first-large", tool_name="trace_payload",
+            arguments={"value": "FIRST-RECORD-8426\n" + "a" * 40000},
+        )
+        second = definition.tool_gateway.invoke(
+            call_id="second-large", tool_name="trace_payload",
+            arguments={"value": "SECOND-RECORD-8426\n" + "b" * 5000},
+        )
+        assert second.status == "completed"
+        match = re.search(r"\[ContextRef (ctx_[0-9a-f]+)", first.model_content())
+        assert match is not None
+        retrieved = definition.tool_gateway.invoke(
+            call_id="fetch-first", tool_name="loom_retrieve_context",
+            arguments={"ref": match.group(1)},
+        )
+        assert retrieved.status == "completed"
+        return retrieved.model_content()
+
+    programs["platform"] = execute
+    result = run(
+        tools=[
+            {"name": "trace_payload", "module": __name__, "function": "trace_payload"},
+            {"name": "loom_retrieve_context"},
+        ],
+        context_engine={"min_chars": 1000, "preview_max_chars": 100,
+                        "store": {"max_entries": 1}},
+    )
+    assert "FIRST-RECORD-8426" in result.output
+    assert "a" * 40000 in result.output
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "late_corrupt", "delete"])
+def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(platform_project, damage):
+    from agentloom.execution.observability import inspect_run
+
+    root, _, programs, _, run = platform_project
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system_path.write_text(yaml.safe_dump(system))
+    calls = []
+    references = []
+
+    def execute(definition, request):
+        calls.append(request.run_id)
+        if request.checkpoint is None:
+            created = definition.tool_gateway.invoke(
+                call_id="large-before-interrupt", tool_name="trace_payload",
+                arguments={"value": "RETAINED-BEFORE-RESUME\n" + "z" * (
+                    2_200_000 if damage == "late_corrupt" else 5000
+                )},
+            )
+            references.append(re.search(r"ctx_[0-9a-f]{32}", created.model_content()).group())
+            request.checkpoint_sink(RuntimeCheckpointEnvelope(
+                runtime_id="platform-fixture", runtime_version="fixture",
+                state_schema_version=1, payload={"phase": "paused"},
+                task_id=request.task_id, run_id=request.run_id, progress=1,
+            ))
+            raise KeyboardInterrupt("pause after retaining result")
+        return "should not run with a broken reference"
+
+    programs["platform"] = execute
+    options = {
+        "tools": [{"name": "trace_payload", "module": __name__, "function": "trace_payload"}],
+        "context_engine": {"min_chars": 1000, "preview_max_chars": 100},
+    }
+    with pytest.raises(ApplicationRunInterrupted) as interrupted:
+        run(**options)
+    with inspect_run(interrupted.value.run) as trace:
+        digest = trace.reference_metadata(references[0])["sha256"]
+        payload_path = trace.storage.path / "payloads" / f"{digest}.blob"
+        if damage == "corrupt":
+            payload_path.write_bytes(b"corrupted")
+        elif damage == "late_corrupt":
+            with payload_path.open("r+b") as stream:
+                stream.seek(payload_path.stat().st_size - 1)
+                stream.write(b"X")
+        else:
+            payload_path.unlink()
+
+    with pytest.raises(Exception, match="Trace payload integrity check failed|Committed Tool reference is unavailable"):
+        run(resume_task_id=interrupted.value.run.task_id, **options)
+    assert len(calls) == 1
+
+
+def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project):
+    root, _, programs, _, run = platform_project
+    llm_path = root / "config/llm.yaml"
+    llm_config = yaml.safe_load(llm_path.read_text(encoding="utf-8"))
+    for model in llm_config["model"].values():
+        if isinstance(model, dict):
+            model.update(context_window=4096, max_output_tokens=1024)
+    llm_path.write_text(yaml.safe_dump(llm_config), encoding="utf-8")
+    payload = "汉字🙂" * 450
+
+    def execute(definition, _request):
+        created = definition.tool_gateway.invoke(
+            call_id="utf8-large", tool_name="trace_payload", arguments={"value": payload},
+        )
+        match = re.search(r"\[ContextRef (ctx_[0-9a-f]{32})", created.model_content())
+        assert match is not None
+        offset = 0
+        pieces = []
+        while True:
+            retrieved = definition.tool_gateway.invoke(
+                call_id=f"page-{offset}", tool_name="loom_retrieve_context",
+                arguments={"ref": match.group(1), "offset": offset},
+            )
+            assert retrieved.status == "completed"
+            header, body = retrieved.output.split("\n", 1)
+            pieces.append(body)
+            next_match = re.search(r"next_offset=(\d+|none)", header)
+            assert next_match is not None
+            if next_match.group(1) == "none":
+                break
+            offset = int(next_match.group(1))
+        assert len(pieces) > 1
+        return "".join(pieces)
+
+    programs["platform"] = execute
+    result = run(
+        tools=[
+            {"name": "trace_payload", "module": __name__, "function": "trace_payload"},
+            {"name": "loom_retrieve_context"},
+        ],
+        context_engine={"min_chars": 1000, "preview_max_chars": 100},
+    )
+    assert result.output == payload

@@ -4,10 +4,11 @@ description: "Validate pipe redirect normalization: piped commands should execut
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # Pipe Redirect Normalization Validation Workflow
 
-  You are a testing agent. Execute ALL steps below using shell_tool.
+  Execute ALL steps below using shell_tool.
   After each step, report PASS or FAIL with a short explanation.
 
   ## Step 1: Simple piped command

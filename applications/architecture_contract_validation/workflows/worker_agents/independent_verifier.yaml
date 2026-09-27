@@ -10,7 +10,7 @@ toolsets: []
 context_engine:
   min_chars: 80000
   preview_max_chars: 80000
-workflow: Parse query as the repair_implementer result. Independently read CONTRACT.md,
+task: Parse query as the repair_implementer result. Independently read CONTRACT.md,
   all changed source files and every generated test via read_workspace_file. Check
   the implementation against the contract, including bool rejection, empty override,
   unknown/non-mapping config, quantity bounds, inclusive shipping threshold, integer

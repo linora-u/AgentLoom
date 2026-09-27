@@ -7,7 +7,7 @@ model_type: "powerful"
 tools:
   - name: "shell_tool"
 
-workflow: |
+task: |
   # Shell Policy Snapshot Audit Validation
 
   This workflow intentionally uses the default global shell policy, where

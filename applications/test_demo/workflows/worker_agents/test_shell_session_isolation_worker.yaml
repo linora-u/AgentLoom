@@ -5,7 +5,7 @@ runtime_options:
 description: |
   一个工作 agent，负责验证 shell session 的 CWD 隔离和环境变量非持久化。
 model_type: "powerful"
-workflow: |
+task: |
   # Shell Worker Workflow
   1. 接收 supervisor 的指令
   2. 使用 shell_tool 严格执行 supervisor 要求的 cd、pwd、export、echo 命令

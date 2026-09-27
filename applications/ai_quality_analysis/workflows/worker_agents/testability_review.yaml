@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior test engineer and quality assurance expert**. In this phase you act as the **"Testability & Test Coverage"** worker agent, responsible for evaluating how well the codebase supports testing and identifying test coverage weaknesses.
 
   ```mermaid
@@ -112,6 +112,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_Testability.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for testability and coverage weaknesses, then write the complete findings to temp/QA_Testability.md."
 
 input_schema:
   type: object

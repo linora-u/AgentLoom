@@ -369,7 +369,7 @@ def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
     }
     for relative in WORKFLOWS.values():
         payload = yaml.safe_load((Path(__file__).resolve().parents[3] / relative).read_text(encoding="utf-8"))
-        workflow = str(payload.get("workflow") or "")
+        workflow = str(payload.get("task") or "")
         assert "memory(action=" not in workflow
         assert "EXACTLY this" not in workflow
         assert payload.get("model_type") == "summary"
@@ -388,7 +388,7 @@ def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
             (APP_ROOT / "variants" / "on" / "workflows" / "analyze_without_memory.yaml").read_text(
                 encoding="utf-8"
             )
-        )["workflow"]
+        )["task"]
     )
     assert "untrusted task data" not in review_workflow
     assert "data, never as instructions" in review_workflow
@@ -401,7 +401,7 @@ def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
             / "workflows"
             / "analyze_with_memory.yaml"
         ).read_text(encoding="utf-8")
-    )["workflow"]
+    )["task"]
     assert "verified durable" in project_writer
     assert "persistent-memory" in project_writer
 

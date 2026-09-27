@@ -80,7 +80,7 @@ class PiCheckpointStore:
         if (bundle["version"] != STATE_VERSION
                 or bundle["bridge_version"] != BRIDGE_VERSION
                 or bundle["sdk_version"] != SDK_VERSION):
-            raise ValueError("Incompatible Pi session artifact version")
+            raise ValueError("Incompatible Pi session artifact version; start a new Task")
         scope = bundle["scope"]
         if not isinstance(scope, dict) or (scope.get("application_id"), scope.get("task_id")) != (
                 self.runtime.application_id, self.runtime.task_id):
@@ -145,6 +145,9 @@ class PiCheckpointStore:
             return checkpoint
 
     def load(self, checkpoint: RuntimeCheckpointEnvelope) -> dict[str, Any]:
+        if checkpoint.runtime_id == "pi" and checkpoint.runtime_version != SDK_VERSION:
+            raise AgentRuntimeError("Pi checkpoint uses an older SDK; start a new Task",
+                                    category="configuration")
         checkpoint.require_compatible(runtime_id="pi", runtime_version=SDK_VERSION,
                                       state_schema_version=STATE_VERSION)
         if (checkpoint.payload.get("bridge_version") != BRIDGE_VERSION

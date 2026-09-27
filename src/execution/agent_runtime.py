@@ -745,9 +745,11 @@ class AgentRuntimeRequest:
     event_sink: RuntimeEventSink | None = None
     continue_session: bool = False
     record_task: bool = True
+    has_more_task_items: bool = False
     additional_args: Mapping[str, JSONValue] = field(default_factory=dict)
     checkpoint: RuntimeCheckpointEnvelope | None = None
     checkpoint_sink: Callable[[RuntimeCheckpointEnvelope], None] | None = None
+    recovery_task_input: str | None = None
 
     def __post_init__(self) -> None:
         if self.task is not None and (
@@ -756,6 +758,10 @@ class AgentRuntimeRequest:
             raise ValueError(
                 "runtime task must be a non-empty string when provided"
             )
+        if self.recovery_task_input is not None and (
+            not isinstance(self.recovery_task_input, str) or not self.recovery_task_input.strip()
+        ):
+            raise ValueError("recovery task input must be a non-empty string when provided")
         for field_name in ("application_id", "task_id", "run_id"):
             object.__setattr__(
                 self,
@@ -773,6 +779,8 @@ class AgentRuntimeRequest:
             raise TypeError("continue_session must be a boolean")
         if not isinstance(self.record_task, bool):
             raise TypeError("record_task must be a boolean")
+        if not isinstance(self.has_more_task_items, bool):
+            raise TypeError("has_more_task_items must be a boolean")
         if self.checkpoint is not None and not isinstance(
             self.checkpoint,
             RuntimeCheckpointEnvelope,

@@ -22,7 +22,7 @@ def write(path: Path, text: str) -> Path:
 def native_project(tmp_path, monkeypatch):
     write(tmp_path / "config/system.yaml", "checkpoint: {enabled: false}\nself_learning: {enabled: false}\nsmart_summary: false\ntodo: {mode: auto}\ndefault_toolsets: []\n")
     write(tmp_path / "config/llm.yaml", "model:\n  default_model_type: test\n  test: {model: fixture/model, adapter: openai_chat, api_key: fixture-secret}\n  summary: {model: fixture/model, adapter: openai_chat}\n")
-    path = write(tmp_path / "applications/native/workflows/root.yaml", "name: native\nagent_runtime: native-fixture\ndescription: Return the requested answer.\nworkflow: Answer directly.\ntools: []\ntoolsets: []\nruntime_options: {thinking: low}\n")
+    path = write(tmp_path / "applications/native/workflows/root.yaml", "name: native\nagent_runtime: native-fixture\ndescription: Return the requested answer.\ntask: Answer directly.\ntools: []\ntoolsets: []\nruntime_options: {thinking: low}\n")
     definitions = []
     class Observations(list):
         barrier = None

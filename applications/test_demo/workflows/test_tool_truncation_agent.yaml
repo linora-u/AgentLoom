@@ -4,7 +4,7 @@ description: "Validate tool result truncation, persistence, and pagination feedb
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Tool Result Truncation Validation
 
   Execute ALL steps below. Report PASS or FAIL for each.

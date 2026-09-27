@@ -278,7 +278,8 @@ class StudioQueryService:
             "definition": {
                 "name": str(definition.get("name") or supervisor_path.stem),
                 "description": str(definition.get("description") or ""),
-                "workflow": self._workflow_text(definition.get("workflow")),
+                "task": definition.get("task"),
+                "system_prompt": definition.get("system_prompt"),
                 "model_type": str(definition.get("model_type") or ""),
                 "path": system_id,
             },
@@ -319,7 +320,7 @@ class StudioQueryService:
             or applications_root not in resolved.parents
             or "workflows" not in relative.parts
             or "worker_agents" in relative.parts
-            or resolved.suffix.lower() not in {".yaml", ".yml", ".md"}
+            or resolved.suffix.lower() not in {".yaml", ".yml"}
         ):
             raise StudioServiceError("not_found", f"system not found: {system_id}")
 
@@ -495,7 +496,7 @@ class StudioQueryService:
             or applications_root not in resolved.parents
             or "workflows" not in relative.parts
             or "worker_agents" in relative.parts
-            or resolved.suffix.lower() not in {".yaml", ".yml", ".md"}
+            or resolved.suffix.lower() not in {".yaml", ".yml"}
             or self._application_id(resolved) != application_id
         ):
             raise StudioServiceError("invalid_params", "system_id must identify the Run's Agent System")
@@ -2282,7 +2283,7 @@ class StudioQueryService:
             return []
         paths = sorted(
             path
-            for pattern in ("*.yaml", "*.yml", "*.md")
+            for pattern in ("*.yaml", "*.yml")
             for path in applications_root.rglob(pattern)
             if "workflows" in path.parts
             and "worker_agents" not in path.parts
@@ -2349,7 +2350,7 @@ class StudioQueryService:
                 candidate.relative_to(self.project_root)
             except ValueError:
                 continue
-            if candidate.is_file() and candidate.suffix.lower() in {".yaml", ".yml", ".md"}:
+            if candidate.is_file() and candidate.suffix.lower() in {".yaml", ".yml"}:
                 workers.append(candidate)
         return workers
 
@@ -2359,10 +2360,6 @@ class StudioQueryService:
             "kind": kind,
             "size": path.stat().st_size,
         }
-
-    @staticmethod
-    def _workflow_text(raw_workflow: Any) -> str:
-        return raw_workflow if isinstance(raw_workflow, str) else ""
 
     @staticmethod
     def _read_definition(
