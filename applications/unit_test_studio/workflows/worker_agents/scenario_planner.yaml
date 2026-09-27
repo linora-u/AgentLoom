@@ -8,7 +8,7 @@ runtime_options:
   max_steps: 40
   smart_summary: false
 
-workflow: |
+system_prompt: |
   # 0) Structured Tool Execution Contract
   - Invoke tools through native structured tool calls. Do not replace calls with
     inferred outputs.
@@ -66,6 +66,8 @@ workflow: |
     - `output_dir`
     - `planned_items`
   - Each `planned_item` must include `module_path`, `function_name`, and parsed `scenario`.
+
+task: "Analyze the supplied query and produce the scenario plan required by your instructions."
 
 tools:
   - name: "get_function_context"

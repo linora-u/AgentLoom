@@ -6,7 +6,7 @@ runtime_options:
   max_steps: 8
   smart_summary: false
 
-workflow: |
+task: |
   Load the assigned case with `validation_memory_case`, investigate it, and
   return a concise JSON answer with keys `answer` and `basis`. Use the tools
   according to their descriptions. Preserve only verified durable knowledge;

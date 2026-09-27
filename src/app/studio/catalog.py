@@ -109,7 +109,7 @@ def _agent_tree(
     definition_cache: AgentDefinitionCache | None,
 ) -> dict[str, Any] | None:
     raw_path = summary.get("path") or summary.get("id")
-    path = _safe_project_file(root, raw_path, suffixes={".yaml", ".yml", ".md"})
+    path = _safe_project_file(root, raw_path, suffixes={".yaml", ".yml"})
     if path is None:
         return None
     relative = path.relative_to(root)
@@ -210,7 +210,7 @@ def _worker_path(
         candidate = resolve_worker_path(root, supervisor_path, raw_path)
     except ValueError:
         return None
-    return _safe_project_file(root, candidate, suffixes={".yaml", ".yml", ".md"})
+    return _safe_project_file(root, candidate, suffixes={".yaml", ".yml"})
 
 
 def _configured_skills(raw: Any) -> dict[str, Any]:
@@ -295,7 +295,7 @@ def _contains_supervisor_yaml(root: Path, workflows_root: Path) -> bool:
                 continue
             if entry.is_file(follow_symlinks=False):
                 path = Path(entry.path)
-                if path.suffix.lower() in {".yaml", ".yml", ".md"} and _safe_project_file(root, path) is not None:
+                if path.suffix.lower() in {".yaml", ".yml"} and _safe_project_file(root, path) is not None:
                     return True
                 continue
             if entry.is_dir(follow_symlinks=False) and entry.name != "worker_agents":
@@ -473,7 +473,7 @@ def _read_agent_definition_object(
 ) -> dict[str, Any]:
     """Reuse a bridge parse while preserving the catalog's file safety limits."""
 
-    safe = _safe_project_file(root, path, suffixes={".yaml", ".yml", ".md"})
+    safe = _safe_project_file(root, path, suffixes={".yaml", ".yml"})
     if safe is None:
         return {}
     try:

@@ -8,7 +8,7 @@ runtime_options:
 goal:
   enabled: true
 
-workflow: |
+task: |
   Call get_goal and inspect_parallel_goal_report using their native tool schemas.
   If the report already belongs to this Goal, verify it and complete without
   rerunning its Worker batch. Otherwise call run_parallel_goal_probe with six

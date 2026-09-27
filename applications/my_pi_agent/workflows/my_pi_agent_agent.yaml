@@ -1,0 +1,12 @@
+name: my_pi_agent
+agent_runtime: pi
+model_type: codex_luna
+description: 阅读 AgentLoom 项目文档并回答用户的问题。
+
+system_prompt:
+  path: ../config/prompts/my_pi_agent.md
+task: 解释一下 AgentLoom 的 Application 是什么。
+
+tools:
+  - name: read
+toolsets: []

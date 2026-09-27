@@ -7,7 +7,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Shell Persistence & Isolation Test
   我们的目标是验证主 agent (你) 和 子 agent (shell_worker) 的 Bash/shell 环境是完全隔离并持久的。
 

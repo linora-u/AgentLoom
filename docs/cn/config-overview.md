@@ -10,7 +10,7 @@ AgentLoom 的配置主要分为三大类，分别存放在不同的配置文件�
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **全局系统配置**。控制工具、工作区、权限和运行时存储等系统级行为。 |
 | `llm.yaml` | `config/llm.yaml` | **全局模型配置**。每个模型类型显式选择 wire adapter，并独立管理模型名、凭据、网关和请求参数。 |
-| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、runtime、workflow、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
+| `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、runtime、必填 task、可选 system_prompt、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
 | *应用级系统配置* | `applications/<app>/config/system.yaml` | **可选的应用级覆盖**。用于覆盖特定应用的默认系统行为（例如修改工作区或替换默认工具）。 |
 
 > 详情参考：
@@ -44,7 +44,7 @@ flowchart TD
 系统在加载 Agent YAML 时，会自动向上查找其所在的 `applications/<app>` 目录。如果该应用目录下存在 `config/system.yaml`，则将其深度合并到全局配置之上。
 
 #### Level 3: Agent 级覆盖
-单个 Agent 的 YAML 文件除了定义自身的工作流外，还可以覆盖系统的部分配置。支持覆盖的白名单字段（`_WORKFLOW_OVERLAY_KEYS`）包含：
+单个 Agent 的 YAML 文件除了定义 task 与可选 system_prompt 外，还可以覆盖系统的部分配置。支持覆盖的白名单字段（`_WORKFLOW_OVERLAY_KEYS`）包含：
 - `system`, `runtime_options`, `context_engine`, `tool_access_control`, `tools`, `shell_settings`, `default_toolsets`, `toolsets`, `mcp_servers`, `self_learning`, `hooks`。
 
 ### Runtime 存储归属

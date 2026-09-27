@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import time
+import json
 import os
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -17,6 +18,14 @@ from typing import Any
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from agentloom.execution.logging import get_logger
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from litellm.exceptions import (
     APIConnectionError,
     AuthenticationError,
@@ -25,13 +34,6 @@ from litellm.exceptions import (
     RateLimitError,
     ServiceUnavailableError,
     Timeout,
-)
-from tenacity import (
-    RetryCallState,
-    retry,
-    retry_if_exception,
-    stop_after_attempt,
-    wait_exponential,
 )
 
 logger = get_logger(__name__)
@@ -54,6 +56,26 @@ _PROVIDER_CALL_BUDGET: ContextVar[ProviderCallBudget | None] = ContextVar(
     "agentloom_provider_call_budget",
     default=None,
 )
+
+
+@dataclass
+class _ModelTraceTurn:
+    turn_id: str
+    attempt: int = 0
+
+
+_MODEL_TRACE_TURN: ContextVar[_ModelTraceTurn | None] = ContextVar(
+    "agentloom_litellm_model_trace_turn", default=None,
+)
+
+
+@contextmanager
+def bind_model_trace_turn(turn_id: str | None) -> Iterator[None]:
+    token = _MODEL_TRACE_TURN.set(_ModelTraceTurn(turn_id) if turn_id else None)
+    try:
+        yield
+    finally:
+        _MODEL_TRACE_TURN.reset(token)
 
 
 @contextmanager
@@ -84,7 +106,85 @@ def _call_provider(
         if budget.calls >= budget.max_calls:
             raise ProviderCallBudgetExceeded("provider call budget exhausted")
         budget.calls += 1
-    return original_func(*args, **kwargs)
+    turn = _MODEL_TRACE_TURN.get()
+    recorder = None
+    observed_client: Any = None
+    capture_error = None
+    if turn is not None:
+        from agentloom.execution.observability import TraceStorageError, get_current_trace_recorder
+
+        recorder = get_current_trace_recorder()
+        turn.attempt += 1
+        if recorder is not None:
+            request = kwargs if not args else {"args": args, "kwargs": kwargs}
+            recorder.record_model_request(
+                request, runtime="smolagents", boundary="litellm_provider_call_input",
+                attempt=turn.attempt, turn_id=turn.turn_id,
+            )
+            if (
+                not args and ("messages" in kwargs or "input" in kwargs)
+                and str(kwargs.get("model", "")).startswith("openai/")
+                and "client" not in kwargs and kwargs.get("api_key")
+            ):
+                import httpx
+                import litellm
+                from litellm.llms.custom_httpx.http_handler import get_ssl_configuration
+
+                def capture_http_request(request: httpx.Request) -> None:
+                    nonlocal capture_error
+                    try:
+                        body = json.loads(request.read())
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        body = request.read().decode("utf-8", errors="replace")
+                    try:
+                        recorder.record_model_request(
+                            {"method": request.method, "url": str(request.url),
+                             "headers": dict(request.headers), "body": body},
+                            runtime="smolagents", boundary="openai_http_request",
+                            provider_request_complete=True, attempt=turn.attempt,
+                            turn_id=turn.turn_id,
+                        )
+                    except TraceStorageError as exc:
+                        capture_error = exc
+                        raise
+
+                if litellm.client_session is None:
+                    http_client = httpx.Client(
+                        verify=get_ssl_configuration(), follow_redirects=True,
+                        event_hooks={"request": [capture_http_request]},
+                    )
+                    if "messages" in kwargs:
+                        from openai import OpenAI
+
+                        observed_client = OpenAI(
+                            api_key=kwargs["api_key"], base_url=kwargs.get("api_base"),
+                            http_client=http_client, max_retries=0,
+                        )
+                    else:
+                        from litellm.llms.custom_httpx.http_handler import HTTPHandler
+
+                        observed_client = HTTPHandler(client=http_client)
+                    kwargs = {**kwargs, "client": observed_client}
+    try:
+        response = original_func(*args, **kwargs)
+    except Exception as error:
+        if recorder is not None and turn is not None:
+            recorder.record_model_response(
+                turn.turn_id, runtime="smolagents", error=error, attempt=turn.attempt,
+            )
+        if capture_error is not None:
+            raise capture_error from error
+        raise
+    finally:
+        if observed_client is not None:
+            observed_client.close()
+    if recorder is not None and turn is not None:
+        model_dump = getattr(response, "model_dump", None)
+        captured = model_dump() if callable(model_dump) else response
+        recorder.record_model_response(
+            turn.turn_id, captured, runtime="smolagents", attempt=turn.attempt,
+        )
+    return response
 
 
 def _is_rate_limit_error(exception: Exception) -> bool:

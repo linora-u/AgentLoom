@@ -6,6 +6,7 @@ from agentloom.execution.logging.levels import AgentLoomLogLevel
 from agentloom.execution.trace import capture_explicit_execution_context
 from rich.console import Console
 from rich.text import Text
+
 from smolagents import AgentLogger
 from smolagents import LogLevel as SmolaLogLevel
 
@@ -133,6 +134,11 @@ class EnhancedAgentLogger(AgentLogger):
         **kwargs,
     ) -> None:  # type: ignore[override]
         """Emit args if resolved level >= ``self._agent_loom_level``."""
+        from agentloom.execution.observability import get_current_trace_recorder
+
+        recorder = get_current_trace_recorder()
+        if recorder is not None and recorder.has_presenter:
+            return
         agent_loom_level = self._to_agent_loom_level(level)
         if agent_loom_level < self._agent_loom_level:
             return

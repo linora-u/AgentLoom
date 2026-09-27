@@ -10,7 +10,7 @@ toolsets: []
 context_engine:
   min_chars: 80000
   preview_max_chars: 80000
-workflow: Parse query as the actual change_planner result. Read CONTRACT.md and implicated
+task: Parse query as the actual change_planner result. Read CONTRACT.md and implicated
   source files using read_workspace_file. Repair the original defect causes with write_workspace_file,
   maintaining public interfaces. Author meaningful pytest regressions in tests/generated/test_checkout_regressions.py.
   Include all required scenario identifiers in test names and concrete assertions/raises

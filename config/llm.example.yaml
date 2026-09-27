@@ -7,10 +7,32 @@ model:
   # 全局默认模型类型；Agent 未指定 model_type 时必须配置这里
   default_model_type: powerful
 
+  # Pi-only ChatGPT subscription profiles. Log in with Pi once; Pi owns and
+  # refreshes the saved OAuth credential. Do not put a token in this YAML.
+  codex_luna:
+    adapter: openai_codex_responses
+    model: gpt-6-luna
+    context_window: 272000
+    max_output_tokens: 16384
+    timeout: 300
+    num_retries: 0
+    reasoning_effort: xhigh # max is also supported
+    web_search: auto # off | auto | required
+
+  codex_luna_search:
+    adapter: openai_codex_responses
+    model: gpt-6-luna
+    context_window: 272000
+    max_output_tokens: 16384
+    timeout: 300
+    num_retries: 0
+    reasoning_effort: xhigh
+    web_search: required
+
   # 强大模型配置（用于复杂任务，如代码生成、复杂推理）
   powerful:
     # Required wire protocol. Supported values:
-    # openai_chat, openai_responses, anthropic_messages.
+    # openai_chat, openai_responses, anthropic_messages, openai_codex_responses.
     adapter: openai_chat
     base_url: "xxxxxxx"
     api_key: "xxxxxxx"

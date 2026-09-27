@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior software architect and design expert**. In this phase you act as the **"Architecture & Design Quality"** worker agent, responsible for evaluating the structural quality of the codebase at the module, component, and system level.
 
   ```mermaid
@@ -110,6 +110,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_Architecture.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for architectural issues, then write the complete findings to temp/QA_Architecture.md."
 
 input_schema:
   type: object

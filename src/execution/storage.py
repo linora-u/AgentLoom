@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import stat
@@ -209,6 +210,53 @@ class SecureDirectory:
             # Without this fsync, a crash can lose the completed rename and make a
             # durable claim appear unclaimed after restart.
             os.fsync(parent_fd)
+        finally:
+            if file_fd >= 0:
+                os.close(file_fd)
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+            os.close(parent_fd)
+
+    def write_content_addressed(
+        self, directory: str | Path, chunks: Iterator[bytes],
+    ) -> tuple[str, int]:
+        """Publish streamed bytes under their SHA-256 name after fsync."""
+
+        parent_fd = self._open_dir(self._parts(directory), create=True)
+        temporary = f".payload.{uuid.uuid4().hex}.tmp"
+        file_fd = -1
+        try:
+            file_fd = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW,
+                0o600,
+                dir_fd=parent_fd,
+            )
+            checksum = hashlib.sha256()
+            size = 0
+            with os.fdopen(file_fd, "wb", closefd=True) as stream:
+                file_fd = -1
+                for chunk in chunks:
+                    if not isinstance(chunk, bytes):
+                        raise TypeError("content-addressed chunks must be bytes")
+                    checksum.update(chunk)
+                    size += len(chunk)
+                    stream.write(chunk)
+                stream.flush()
+                os.fsync(stream.fileno())
+            digest = checksum.hexdigest()
+            target = f"{digest}.blob"
+            try:
+                existing = os.stat(target, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None and not stat.S_ISREG(existing.st_mode):
+                raise RuntimeError(f"storage target is not regular: {self.path / str(directory) / target}")
+            os.replace(temporary, target, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            os.fsync(parent_fd)
+            return digest, size
         finally:
             if file_fd >= 0:
                 os.close(file_fd)

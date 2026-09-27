@@ -21,7 +21,7 @@ from agentloom.app.definition import (
 
 
 def scan_app_structure(app_path: str) -> str:
-    """扫描 Application 目录结构，提取 YAML/Markdown 与工具相关关键字段。
+    """扫描 Application 目录结构，提取 Agent YAML 与工具相关关键字段。
 
     返回结构化的文本摘要，包含：
     - Supervisor 配置摘要（name、description 前 80 字、tools 列表、worker_agents 列表、agent_runtime、model_type、max_steps）
@@ -112,14 +112,14 @@ def scan_app_structure(app_path: str) -> str:
     return "\n".join(sections)
 
 
-def extract_workflow_text(yaml_path: str) -> str:
-    """从单个 YAML/Markdown 文件中提取 workflow 字段文本。
+def extract_agent_prompts(yaml_path: str) -> str:
+    """显示 Agent YAML 中的 system_prompt 配置和各条 user task。
 
     Args:
-        yaml_path: Agent 配置文件路径。支持 .yaml/.yml/.md。
+        yaml_path: Agent YAML 配置文件路径。
 
     Returns:
-        workflow 字段文本。如果不存在或解析失败则返回提示信息。
+        配置的指令和任务。如果不存在或解析失败则返回提示信息。
     """
     normalized = yaml_path.strip() if isinstance(yaml_path, str) else ""
     if not normalized:
@@ -130,6 +130,8 @@ def extract_workflow_text(yaml_path: str) -> str:
         return root_error
 
     fpath = _resolve_app_path(normalized)
+    if fpath.suffix.lower() not in {".yaml", ".yml"}:
+        return "❌ Agent 定义必须是 YAML 文件"
     if not fpath.is_file():
         return (
             f"❌ 文件不存在: {fpath}\n\n"
@@ -146,11 +148,22 @@ def extract_workflow_text(yaml_path: str) -> str:
         return "❌ YAML 内容不是字典格式"
 
     name = data.get("name", "(未命名)")
-    workflow = data.get("workflow")
-    if workflow is None:
-        return f"⚠️ {name}: 未找到 workflow 字段"
+    task = data.get("task")
+    if task is None:
+        return f"⚠️ {name}: 未找到 task 字段"
 
-    return f"# {name} — workflow 全文\n\n{_render_workflow_text(workflow)}"
+    sections = [f"# {name} — Agent 提示词与任务"]
+    system_prompt = data.get("system_prompt")
+    if isinstance(system_prompt, str):
+        sections.append(f"## system_prompt\n\n{system_prompt}")
+    elif isinstance(system_prompt, dict):
+        sections.append(f"## system_prompt\n\npath: {system_prompt.get('path', '(无效)')}")
+    items = [task] if isinstance(task, str) else task
+    if not isinstance(items, list):
+        return f"⚠️ {name}: task 必须是字符串或字符串列表"
+    for index, item in enumerate(items, start=1):
+        sections.append(f"## task {index}\n\n{item}")
+    return "\n\n".join(sections)
 
 
 # ---------------------------------------------------------------------------
@@ -191,11 +204,6 @@ def _resolve_app_path(path_str: str) -> Path:
     if path_obj.is_absolute():
         return path_obj
     return Path.cwd() / path_obj
-
-
-def _render_workflow_text(workflow: Any) -> str:
-    """Render the stored value without inventing list execution semantics."""
-    return str(workflow)
 
 
 def _discover_tool_capabilities(app_dir: Path) -> str:

@@ -9,12 +9,12 @@ type Obj = Record<string, any>;
 export function restoreSession(agentDir: string, cwd: string, checkpoint: Obj) {
   const plan = JSON.parse(readFileSync(join(agentDir, "restore.json"), "utf8"));
   const bundle = plan.bundle;
-  if (checkpoint.runtime_id !== "pi" || checkpoint.runtime_version !== "0.79.4" ||
+  if (checkpoint.runtime_id !== "pi" || checkpoint.runtime_version !== "0.87.1" ||
       checkpoint.state_schema_version !== 2 || checkpoint.payload.bridge_version !== 1 ||
-      bundle.version !== 2 || bundle.bridge_version !== 1 || bundle.sdk_version !== "0.79.4" ||
+      bundle.version !== 2 || bundle.bridge_version !== 1 || bundle.sdk_version !== "0.87.1" ||
       bundle.session.header.version !== 3 || bundle.session.header.cwd !== cwd ||
       bundle.session.header.id !== checkpoint.payload.session_id)
-    throw new Error("Incompatible Pi native checkpoint");
+    throw new Error("Incompatible Pi native checkpoint; start a new Task");
   const sessionPath = join(agentDir, "restored-session.jsonl");
   writeFileSync(sessionPath, [bundle.session.header, ...bundle.session.entries]
     .map(value => JSON.stringify(value)).join("\n") + "\n", {mode: 0o600, flag: "wx"});
@@ -50,7 +50,7 @@ export class SessionPersistence {
     // snapshot when its turn reaches the queue, never overwrite newer state
     // with a delayed snapshot captured by an earlier tool.
     this.pending = this.pending.then(async () => {
-      const bundle = {version: 2, bridge_version: 1, sdk_version: "0.79.4", scope: this.scope(),
+      const bundle = {version: 2, bridge_version: 1, sdk_version: "0.87.1", scope: this.scope(),
         session: {header: this.manager.getHeader(), entries: this.manager.getEntries()},
         calls: [...this.calls.values()], phase};
       const raw = JSON.stringify(bundle);

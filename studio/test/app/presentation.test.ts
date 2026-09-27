@@ -53,7 +53,7 @@ describe("detail presentation", () => {
         name: "demo_agent",
         description: "Coordinates the Application",
         role: "supervisor",
-        workflow: longWorkflow,
+        task: longWorkflow,
         model: { type: "powerful", source: "global" },
         tools: [{ name: "read_file", source: "agent" }],
         skills: [{
@@ -81,7 +81,7 @@ describe("detail presentation", () => {
     expect(agentText).toContain("read_file · agent")
     expect(agentText).toContain("demo-skill · application")
     expect(agentText).toContain("权限 · application: mode=denylist, shell=false")
-    expect(agent.sections.some((section) => section.title === "Workflow 摘要")).toBeTrue()
+    expect(agent.sections.some((section) => section.title === "任务摘要")).toBeTrue()
     expect(agentText).not.toContain(longWorkflow)
   })
 
@@ -270,7 +270,7 @@ describe("detail presentation", () => {
       definition: {
         name: "digest_agent",
         description: "Summarize documents",
-        workflow: ["collect", "summarize"],
+        task: ["collect", "summarize"],
         model_type: "powerful",
         path: "applications/digest/workflows/digest.yaml",
       },
@@ -288,7 +288,7 @@ describe("detail presentation", () => {
 
     expect(text).toContain("尚未运行，无执行结果")
     expect(text).toContain("模型: powerful")
-    expect(text).toContain("工作流摘要: collect → summarize")
+    expect(text).toContain("任务摘要: collect → summarize")
     expect(text).toContain("reader — Reads")
     expect(text).toContain("applications/digest/workflows/digest.yaml (workflow, 320 B)")
     expect(text).not.toContain("undefined")

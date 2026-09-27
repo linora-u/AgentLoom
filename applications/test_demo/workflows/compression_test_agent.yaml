@@ -7,7 +7,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # 压缩功能测试 Workflow
 
   ## 任务目标

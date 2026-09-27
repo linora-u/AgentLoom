@@ -7,7 +7,7 @@ runtime_options:
   smart_summary: false
 concurrency: 1
 
-workflow: |
+task: |
   Use only the EVIDENCE_BUNDLE embedded in the query. Compare the requested Goal
   documentation slice with code and validator truth.
   Check YAML forms, Supervisor-only ownership, list semantics, resume,

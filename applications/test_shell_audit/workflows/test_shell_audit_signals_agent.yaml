@@ -29,7 +29,7 @@ shell_settings:
     - "wc"
   allowed_operators: ["|", "&&"]
 
-workflow: |
+task: |
   # Shell Audit Signals Validation Workflow
 
   Use native structured tool calls and retain every actual result or error.

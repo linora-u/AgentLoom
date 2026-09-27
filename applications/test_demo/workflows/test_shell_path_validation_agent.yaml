@@ -4,7 +4,7 @@ description: "Validate shell_tool path boundary checks restrict operations to pr
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Shell Path Validation
 
   Execute ALL steps below. Report PASS/FAIL for each.

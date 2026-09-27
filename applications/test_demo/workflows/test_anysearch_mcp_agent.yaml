@@ -13,10 +13,11 @@ mcp_servers:
 tools:
   - name: "read_file"
 
-workflow: |
+system_prompt: "You are an intelligent search agent connected to the **AnySearch** MCP server."
+task: |
   # AnySearch MCP Integration Agent
 
-  You are an intelligent search agent connected to the **AnySearch** MCP server.
+
   You have access to the following MCP tools (prefixed with `mcp__AnySearch__`):
 
   - `mcp__AnySearch__search` — General web search or vertical domain search

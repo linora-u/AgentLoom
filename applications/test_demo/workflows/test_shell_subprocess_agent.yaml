@@ -4,10 +4,11 @@ description: "Validate shell tool with stateless subprocess architecture: CWD pe
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # Shell Tool (Stateless Subprocess) Validation Workflow
 
-  You are a testing agent. Execute ALL steps below using the shell_tool.
+  Execute ALL steps below using the shell_tool.
   After each step, report PASS or FAIL with a short explanation.
 
   ## Step 1: Basic echo command
