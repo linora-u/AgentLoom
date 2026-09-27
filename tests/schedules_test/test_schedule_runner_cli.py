@@ -40,7 +40,7 @@ def _supervisor(project_root: Path, relative: str = "applications/test/workflows
             "name: test\n"
             "agent_runtime: smolagents\n"
             "description: Scheduled test supervisor.\n"
-            "workflow: Run the scheduled test task.\n"
+            "task: Run the scheduled test task.\n"
         ),
         encoding="utf-8",
     )
@@ -402,7 +402,7 @@ def test_cli_schedule_add_rejects_non_supervisor_before_storage_creation(
                 "name: worker\n"
                 "agent_runtime: smolagents\n"
                 "description: Worker.\n"
-                "workflow: Complete the delegated task.\n"
+                "task: Complete the delegated task.\n"
             ),
             encoding="utf-8",
         )

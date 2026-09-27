@@ -4,10 +4,11 @@ description: "Validate foreground stall detection: interactive prompts are autom
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # Shell Stall Detection Validation Workflow
 
-  You are a testing agent. Execute ALL steps below using the shell_tool.
+  Execute ALL steps below using the shell_tool.
   After each step, report PASS or FAIL with a short explanation.
 
   ## Step 1: Normal command — no stall interference

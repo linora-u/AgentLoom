@@ -10,7 +10,7 @@ description: |
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Complex Checkpoint Validation
 
   Execute these phases in order. Use each shell command once. Do not repeat

@@ -8,16 +8,17 @@
 name: "<agent_name>"
 agent_runtime: "smolagents"
 description: "<一两句话角色定位>"
-workflow: |
-  <完整执行协议>
+task: |
+  <本次用户任务>
 ```
 
-`description` 只写角色定位；`workflow` 必须是单个非空字符串，作为 Agent 的
-system instructions。每轮 task 通过独立 user message 传入；没有 task 时不使用
-`description` 伪造输入。
+`description` 只写角色定位。可选 `system_prompt` 写长期指令，可直写字符串或使用
+`{path: prompts/role.md}` 引用文件；缺省时沿用 Runtime 默认行为。`task` 必须是
+非空字符串或非空字符串列表，每项作为独立 user message 依次进入同一 Agent 会话。
+不从 `description` 或运行参数伪造任务。
 
-Supervisor 和 Worker 的定义格式均支持 `.yaml`、`.yml`、`.md`。Markdown 使用
-`yaml` 围栏代码块；其余非空正文覆盖 `workflow`。Studio 目录/详情、公开预检、
+Supervisor 和 Worker 的定义格式只支持 `.yaml`、`.yml`。Markdown 文件可作为
+`system_prompt.path` 引用的正文，但不能作为 Agent 定义。Studio 目录/详情、公开预检、
 schedule 目标与执行复用同一解析语义，包含嵌套 Application 和 workflow 目录；
 不要把 Markdown Worker 当成独立 Supervisor。重复 key、非法定义和越界/符号链接
 引用仍须拒绝，结构读取不得构造模型或分配 Run。
@@ -33,8 +34,8 @@ runtime_options:
   max_steps: 80
 worker_agents:
   - path: "applications/<app_name>/workflows/worker_agents/<worker>.yaml"
-workflow: |
-  # <Workflow Name>
+task: |
+  # <本次任务>
   ...
 ```
 
@@ -53,8 +54,9 @@ goal:
 ```
 
 只接受 `goal: true/false` 或显式包含 `enabled: bool` 的 mapping；旧
-`token_budget` 静默忽略。`workflow` 在 Goal 模式下仍必须是单个非空字符串，
-list 会在预检阶段失败。Goal 的完成、resume、checkpoint 和 schedule 语义见项目
+`token_budget` 静默忽略。`task` 为列表时，每项分别进入 Goal 模式；只有该项
+显式调用 `update_goal(status="complete")` 才会进入下一项，共用会话。
+Goal 的完成、resume、checkpoint 和 schedule 语义见项目
 `docs/cn/goal_mode.md`。
 
 ## Worker
@@ -89,8 +91,8 @@ output_schema:
         type: string
   required: [report, risks]
   additionalProperties: false
-workflow: |
-  # <Worker Workflow>
+task: |
+  # <Worker 自身任务>
   ...
 ```
 
@@ -98,14 +100,14 @@ workflow: |
 
 - Supervisor 只注册 `worker_agents` 显式引用的 Worker；Tool 名称和说明直接来自
   Worker 的 `name` 与 `description`。
-- 未写 `input_schema` 时，Tool 默认只有必填的 `task: string` 参数；未写
-  `output_schema` 时，Worker 返回普通文本。简单 Worker 应优先使用默认值。
+- 未写 `input_schema` 时，Tool 的参数为空对象；未写 `output_schema` 时，Worker
+  返回普通文本。Worker 的任务始终来自自己的 YAML。
 - `input_schema` 使用 JSON Schema Draft 2020-12 且根必须是 object；参数类型不会
   被强制转成字符串。`output_schema` 可描述任意合法 JSON 根值。
 - `properties`、`items`、`required`、`enum`、`additionalProperties` 和本地 `$ref`
   可用；远程引用会在执行前被拒绝。
-- Tool 参数先经过严格解码与 schema 校验，再创建 Worker。单个字符串参数成为普通
-  user message；多字段参数保持 JSON 类型并作为一个 JSON user input 投影。
+- Tool 参数先经过严格解码与 schema 校验，再创建 Worker。参数是调用数据，保持
+  JSON 类型，随 Worker 第一项 YAML 任务提供给 Runtime；不覆盖或追加任务。
 - 配置 `output_schema` 后，Runtime 必须在 Agent 会话内执行原生结构化约束和本地
   校验；不支持的 Runtime/Provider 组合在模型或 Tool 执行前失败，不退化为 prompt。
 - 成功的结构化结果以原始 JSON 值返回；校验失败在当前会话内纠正并消耗既有步骤

@@ -10,7 +10,7 @@ toolsets:
   - "core_search"
   - "context"
   - "skills"
-workflow: |
+system_prompt: |
   You are a **senior software engineer and concurrency analysis expert**. In this phase you act as the **"Concurrency Safety"** worker agent, responsible for a comprehensive audit of shared state, access patterns, synchronization mechanisms, and concurrency hazards.
 
   This stage combines shared-variable identification, access-interface mapping, and risk assessment into a single coherent analysis.
@@ -114,6 +114,8 @@ workflow: |
   Write analysis results as Markdown to `temp/QA_ConcurrencySafety.md`.
 
   **Important: Write the complete Markdown document with `write_file(file_path=..., content=...)`. Read an existing target before replacing it.**
+
+task: "Review the supplied project and module context for concurrency risks, then write the complete findings to temp/QA_ConcurrencySafety.md."
 
 input_schema:
   type: object

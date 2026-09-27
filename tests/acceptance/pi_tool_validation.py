@@ -18,6 +18,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from tests.acceptance.platform_tool_validation import configure_case, verify_case, dump
+from agentloom.runtimes.pi.metadata import SDK_VERSION
 
 CASES = ('native_read', 'mcp', 'mcp_nested', 'mcp_error', 'goal', 'skill', 'skill_proposal',
          'memory', 'context', 'worker', 'parallel_workers', 'goal_worker')
@@ -88,7 +89,7 @@ def child(case: str, workspace: Path, profile: str):
         proof['native_journal'] = [str(path) for path in (result.run.run_dir / 'native-tools').rglob('*.json')]
         assert proof['native_journal']
     dump(workspace / 'report.json', {'case': case, 'profile': profile, 'status': 'passed',
-        'revision': revision, 'dirty': dirty, 'runtime': 'pi', 'provider': 'real', 'sdk': '0.79.4',
+        'revision': revision, 'dirty': dirty, 'runtime': 'pi', 'provider': 'real', 'sdk': SDK_VERSION,
         'output': result.output, 'run_id': result.run.run_id, 'run_dir': str(result.run.run_dir),
         'manifest_path': str(result.run.manifest_path), 'completed_tools': sorted(completed), **proof})
 

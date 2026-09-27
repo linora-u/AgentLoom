@@ -1,19 +1,19 @@
 """Reject inconsistent recovery evidence through the real Application and Pi SDK."""
 from __future__ import annotations
 
-from contextlib import contextmanager
 import hashlib
 import json
 import sys
+from contextlib import contextmanager
 
 import pytest
-
 from agentloom.app.run import ApplicationRunError
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
+from agentloom.execution.tool_protocol import ToolCallRecord
+
 from tests.pi_test.test_application import model_service, project
 from tests.pi_test.test_recovery_application import audit, checkpoints, enable
-
 
 _platform_calls = []
 
@@ -26,6 +26,11 @@ def receipt_probe(label: str) -> str:
     """
     _platform_calls.append(label)
     return "platform-receipt-proof:" + label
+
+
+def structured_receipt_probe(label: str) -> dict[str, str]:
+    _platform_calls.append(label)
+    return {"label": label, "api_key": "fixture-secret"}
 
 
 @contextmanager
@@ -200,6 +205,39 @@ def test_platform_preparation_runs_once_and_survives_recovery(tmp_path, decision
                 assert json.loads(assistant['tool_calls'][0]['function']['arguments']) == {'label': 'observed-once'}
 
 
+def test_structured_platform_result_is_identical_after_resume(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    _platform_calls.clear()
+    with model_service(
+        turns=[[('structured-call', 'structured_receipt_probe', {'label': 'once'})]],
+        fail_requests={2: 500},
+    ) as (url, requests):
+        app = project(tmp_path, url)
+        enable(app, tools=[{
+            'name': 'structured_receipt_probe', 'module': __name__,
+            'function': 'structured_receipt_probe',
+        }])
+        with bind_config(load_project_config(tmp_path)):
+            with pytest.raises(ApplicationRunError) as interrupted:
+                execute_app(app, file_logging=True)
+            first_content = next(message['content'] for message in requests[1][1]['messages']
+                                 if message['role'] == 'tool')
+            assert json.loads(first_content) == {'api_key': '[REDACTED]', 'label': 'once'}
+            with inspect_run(interrupted.value.run) as trace:
+                tool = next(event for event in trace.events() if event['kind'] == 'tool'
+                            and event['tool_name'] == 'structured_receipt_probe')
+                assert trace.read_text(tool['model_ref']) == first_content
+            assert interrupted.value.run.log_path is not None
+            assert f'Observations: {first_content}' in interrupted.value.run.log_path.read_text()
+            resumed = execute_app(app, resume_task_id=interrupted.value.run.task_id, file_logging=False)
+    assert resumed.output == 'Pi answer'
+    assert _platform_calls == ['once']
+    resumed_content = next(message['content'] for message in requests[2][1]['messages']
+                           if message['role'] == 'tool')
+    assert resumed_content == first_content
+
+
 def test_platform_call_id_can_be_reused_at_a_later_native_position(tmp_path):
     _platform_calls.clear()
     call = [('reused-platform-id', 'receipt_probe', {'label': 'same-id'})]
@@ -273,7 +311,7 @@ def test_invalid_arguments_reuse_the_durable_rejection_across_resume(
                 else receipt["rejection"]
             )
             assert record["status"] == "blocked"
-            expected_text = record["error"]["message"]
+            expected_text = ToolCallRecord.from_dict(record).model_content()
             [(checkpoint_path, checkpoint)] = checkpoints(tmp_path)
             envelope = checkpoint["runtime_checkpoint"]
             artifact = checkpoint_path.parent / "pi/sessions" / (

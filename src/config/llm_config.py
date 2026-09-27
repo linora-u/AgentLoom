@@ -102,6 +102,7 @@ class LlmModelTypeSettings(BaseModel):
     system_prompt_boundary: str | None = None
     description: str = ""
     requests_per_minute: int = DEFAULT_MODEL_REQUESTS_PER_MINUTE
+    supports_structured_output: bool = False
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body). Any YAML key not in the known fields list is collected here.
     extra_completion_params: dict[str, Any] | None = None
@@ -248,6 +249,9 @@ class LLMConfig(BaseModel):
                 system_prompt_boundary=v.get("system_prompt_boundary", None),
                 description=str(v.get("description", f"Model type '{k}' loaded from YAML config")),
                 requests_per_minute=int(resolved_rpm),
+                supports_structured_output=BoolParser.parse(
+                    v.get("supports_structured_output", False), default=False,
+                ),
                 extra_completion_params=extra_completion_params,
             )
 

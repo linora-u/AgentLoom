@@ -27,7 +27,7 @@ input_schema:
   required:
   - query
   additionalProperties: false
-workflow: |
+task: |
   # Memory Reviewer Worker
 
   Parse `query`, create one Application memory proposal, verify its public

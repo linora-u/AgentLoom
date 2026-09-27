@@ -5,7 +5,7 @@
 ```
 applications/<app_name>/
 ├── README.md
-├── <app_name>_app.py                 # 可选：需要自定义 CLI/task_override 时才创建
+├── <app_name>_app.py                 # 可选：需要预处理、后处理或批处理时创建
 ├── agent_tools/
 │   └── <tool_module>.py
 ├── skills/
@@ -39,7 +39,7 @@ Worker YAML 一律不写 `goal`。
 4. `hooks/<hook_name>/HOOK.yaml` 与脚本（仅需要 Hook 时）
 5. `agent_tools/*.py`
 6. `config/system.yaml`
-7. `<app_name>_app.py`（可选；只有需要自定义 CLI 参数、预处理/后处理、批处理或 `task_override` 时创建）
+7. `<app_name>_app.py`（可选；只有需要预处理、后处理或批处理时创建）
 8. `README.md`
 
 没有对应需求时不要创建空目录。应用专属 Skill 与 Hook Bundle 分别放在 Application 的 `skills/`、`hooks/` 下，并在配置中分别启用。
@@ -52,7 +52,7 @@ Worker YAML 一律不写 `goal`。
 .venv/bin/loom run applications/<app_name>/workflows/<app_name>_agent.yaml
 ```
 
-`<app_name>_app.py` 不是 Application 必需文件。只有当应用需要自定义自然语言请求、预处理/后处理、批量循环、`file_logging`/`resume` 包装，或需要通过 `run_app(..., task_override=...)` 嵌入到别的 Python 流程时，才创建入口脚本。
+`<app_name>_app.py` 不是 Application 必需文件。只有当应用需要预处理/后处理、批量循环或 `file_logging`/`resume` 包装时，才创建入口脚本。任务只由 Agent YAML 的 `task` 提供。
 
 ```python
 #!/usr/bin/env python3
@@ -70,14 +70,9 @@ if project_root not in sys.path:
 from agentloom.app.runner import run_app
 
 
-def main(user_request: str, file_logging: bool | None = None, resume: str | None = None) -> str:
-    if not user_request or not user_request.strip():
-        raise ValueError("user_request must be non-empty")
-
-    task = f"用户需求:\\n{user_request.strip()}\\n\\n请按 workflow 执行。"
+def main(file_logging: bool | None = None, resume: str | None = None):
     result = run_app(
         "applications/<app_name>/workflows/<app_name>_agent.yaml",
-        task_override=task,
         file_logging=file_logging,
         resume_task_id=resume,
     )

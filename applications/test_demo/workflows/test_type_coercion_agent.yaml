@@ -4,7 +4,7 @@ description: "Validate LLM semantic type coercion for tool parameters"
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Type Coercion Validation
 
   Execute ALL steps below. Report PASS or FAIL for each.

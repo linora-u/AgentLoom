@@ -5,9 +5,8 @@ runtime_options:
 description: |
   直连测试 worker，用于验证 input_schema 是否驱动 Tool 注册，以及工具调用时是否收到了输入并返回输出。
 model_type: "powerful"
-workflow: |
-  你是一个直连验证 worker。
-
+system_prompt: 你是一个直连验证 Worker。
+task: |
   任务要求：
   1. 阅读用户输入内容。
   2. 多参数输入是一个 JSON 对象，请按字段读取。

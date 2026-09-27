@@ -90,7 +90,7 @@ Do not use an editable install to validate a release.
 The Python package includes AgentLoom's bridge TypeScript, JSON schema, npm
 manifest/lock and professional tool query files. It contains no upstream Pi SDK,
 `node_modules`, compiled bridge or local install marker. `loom runtime install pi`
-downloads the fixed SDK **0.79.4** with `npm ci`, builds the bridge inside the
+downloads the fixed SDK **0.87.1** with `npm ci`, builds the bridge inside the
 installed `agentloom/runtimes/pi/bridge/` directory and validates its assets.
 The environment must be writable during this explicit installation step.
 

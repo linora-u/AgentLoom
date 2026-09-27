@@ -48,7 +48,7 @@ const sourceText = sources.map(source => fs.readFileSync(source, 'utf8')).join('
 const mismatch = sourceText.includes('TEST_HANDSHAKE_SDK_MISMATCH');
 const missingNewline = sourceText.includes('TEST_HANDSHAKE_MISSING_NEWLINE');
 const oversized = sourceText.includes('TEST_HANDSHAKE_OVERSIZED');
-const sdkVersion = mismatch ? '0.0.0' : '0.79.4';
+const sdkVersion = mismatch ? '0.0.0' : '0.87.1';
 fs.writeFileSync('dist/index.js', `import {createInterface} from 'node:readline';
 import {realpathSync} from 'node:fs';
 const input=createInterface({input:process.stdin,crlfDelay:Infinity});
@@ -75,8 +75,10 @@ with Path(os.environ['TEST_NPM_CALLS']).open('a') as f:f.write(json.dumps(sys.ar
 if os.environ.get('TEST_NPM_FAIL'):
  print('PRIVATE-REGISTRY-CREDENTIAL');sys.exit(3)
 sdk=root/'node_modules/@earendil-works/pi-coding-agent';sdk.mkdir(parents=True,exist_ok=True)
-(sdk/'package.json').write_text(json.dumps({{'version':'0.79.4','type':'module','main':'index.js'}}))
+(sdk/'package.json').write_text(json.dumps({{'version':'0.87.1','type':'module','main':'index.js'}}))
 (sdk/'index.js').write_text('export const fixture = true;')
+ai=root/'node_modules/@earendil-works/pi-ai';ai.mkdir(parents=True,exist_ok=True)
+(ai/'package.json').write_text(json.dumps({{'version':'0.87.1','type':'module','main':'index.js'}}))
 tsc=root/'node_modules/typescript/bin/tsc';tsc.parent.mkdir(parents=True,exist_ok=True)
 tsc.write_text({tsc_script!r})
 ''')
@@ -150,7 +152,7 @@ def assert_installed_entry_handshakes(entry: Path) -> None:
         )
     response = json.loads(result.stdout)
     assert response["payload"]["runtime_id"] == "pi"
-    assert response["payload"]["sdk_version"] == "0.79.4"
+    assert response["payload"]["sdk_version"] == "0.87.1"
 
 
 @pytest.mark.parametrize("changed_file", ["index.ts", "tools.ts", "model.ts", "nested/helper.ts"])
@@ -173,10 +175,11 @@ def test_install_downloads_lock_builds_once_and_rebuilds_changed_source(installa
     assert len(tsc_calls(installation)) == 2
 
 
-def test_version_mismatch_fails_before_download(installation):
+@pytest.mark.parametrize("package", ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"])
+def test_version_mismatch_fails_before_download(installation, package):
     manifest = source_bridge(installation) / "package.json"
     data = json.loads(manifest.read_text())
-    data["dependencies"]["@earendil-works/pi-coding-agent"] = "0.0.1"
+    data["dependencies"][package] = "0.0.1"
     manifest.write_text(json.dumps(data))
     with pytest.raises(RuntimeError, match="version.*lock"):
         install_pi(source_bridge(installation), runtime_root(installation))

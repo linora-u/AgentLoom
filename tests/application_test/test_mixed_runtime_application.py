@@ -1,6 +1,7 @@
 """Ticket 11: mixed execution and curated memory at the Application boundary."""
 import json
 import re
+import sys
 from threading import Barrier
 
 import pytest
@@ -21,6 +22,8 @@ from tests.application_test.mixed_runtime_support import (
 
 @pytest.mark.parametrize("supervisor,worker", [("smolagents", "pi"), ("pi", "smolagents")])
 def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supervisor, worker):
+    from agentloom.execution.observability import inspect_run
+
     (tmp_path / 'note.txt').write_text('Repository verification token: SAFFRON-7419\n')
 
     def program(request):
@@ -57,6 +60,440 @@ def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supe
     worker_requests = [r for r in requests if r['model'] == 'worker']
     names = {t['function']['name'] for t in worker_requests[0]['tools']}
     assert ('read' in names, 'read_file' in names) == (worker == 'pi', worker == 'smolagents')
+    smol_model = 'supervisor' if supervisor == 'smolagents' else 'worker'
+    with inspect_run(result.run) as trace:
+        model_requests = [event for event in trace.events() if event['kind'] == 'model_request'
+                          and event['runtime'] == 'smolagents' and event['attempt'] is None]
+        model_responses = [event for event in trace.events() if event['kind'] == 'model_response'
+                           and event['runtime'] == 'smolagents' and event['attempt'] is None]
+        sent = [request for request in requests if request['model'] == smol_model]
+        assert len(model_requests) == len(model_responses) == len(sent)
+        for event, actual in zip(model_requests, sent, strict=True):
+            saved = json.loads(trace.read_text(event['request_ref']))
+            assert event['boundary'] == 'litellm_input'
+            assert event['provider_request_complete'] is False
+            assert saved['model'] == f"openai/{actual['model']}"
+            assert saved['tools'] == actual['tools']
+            assert [{key: value for key, value in message.items() if value is not None}
+                    for message in saved['messages']] == actual['messages']
+        wire_requests = [event for event in trace.events() if event['kind'] == 'model_request'
+                         and event['runtime'] == 'smolagents' and event['boundary'] == 'openai_http_request']
+        assert len(wire_requests) == len(sent)
+        for event, actual in zip(wire_requests, sent, strict=True):
+            captured = json.loads(trace.read_text(event['request_ref']))
+            assert event['provider_request_complete'] is True
+            assert captured['method'] == 'POST'
+            assert captured['body'] == actual
+            assert 'fixture-key' not in trace.read_text(event['request_ref'])
+        pi_sent = [request for request in requests if request['model'] != smol_model]
+        pi_wire = [event for event in trace.events() if event['kind'] == 'model_request'
+                   and event['runtime'] == 'pi' and event['boundary'] == 'openai_http_request']
+        assert len(pi_wire) == len(pi_sent)
+        for event, actual in zip(pi_wire, pi_sent, strict=True):
+            captured = json.loads(trace.read_text(event['request_ref']))
+            assert event['provider_request_complete'] is True
+            assert captured['method'] == 'POST'
+            assert captured['body'] == actual
+            assert 'fixture-key' not in trace.read_text(event['request_ref'])
+        assert {event['model_turn_id'] for event in model_requests} == {
+            event['model_turn_id'] for event in model_responses}
+        all_requests = [event for event in trace.events() if event['kind'] == 'model_request'
+                        and event['boundary'] in {'litellm_input', 'pi_payload'}]
+        assert all(event['provider_request_complete'] is False for event in all_requests)
+        assert [event['run_step_number'] for event in all_requests] == list(range(1, len(all_requests) + 1))
+        worker_request = next(event for event in all_requests
+                              if event['kind'] == 'model_request' and event['runtime'] == worker)
+        step = trace.inspect_step(worker_request['run_step_number'])
+        assert step['agent_id'] == worker_request['agent_id']
+        turn_events = [event['kind'] for event in step['events']
+                       if event.get('boundary') != 'openai_http_request'
+                       and (event.get('runtime') != 'smolagents' or event.get('attempt') is None)]
+        assert turn_events.count('model_request') == 1
+        assert turn_events.count('model_response') == 1
+        tool = next(event for event in step['events'] if event['kind'] == 'tool')
+        assert tool['tool_name'] == ('read' if worker == 'pi' else 'read_file')
+        assert 'SAFFRON-7419' in step['payloads'][tool['model_ref']]
+        sizes = sorted(trace.reference_metadata(ref)['size'] for ref in step['payload_refs'])
+        assert len(sizes) >= 2 and sizes[0] > 0
+        inline_budget = sizes[1]
+        bounded = trace.inspect_step(worker_request['run_step_number'], max_inline_bytes=inline_budget)
+        assert sum(len(value.encode('utf-8')) for value in bounded['payloads'].values()) <= inline_budget
+
+
+def test_smol_provider_retries_share_one_step_and_record_attempts(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    with model_service(lambda request: finish(request, 'retry-complete'), fail_requests={1}) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='smolagents', worker='pi')
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        write_yaml(workflow, definition)
+        model_path = tmp_path / 'config/llm.yaml'
+        profiles = yaml.safe_load(model_path.read_text())
+        profiles['model']['supervisor'].update(num_retries=2, retry_delay=0, max_retry_delay=0)
+        write_yaml(model_path, profiles)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'retry-complete'
+    assert len(requests) == 2
+    with inspect_run(result.run) as trace:
+        events = trace.events()
+    base = [event for event in events if event['kind'] == 'model_request'
+            and event['runtime'] == 'smolagents' and event['attempt'] is None]
+    attempts = [event for event in events if event['kind'] == 'model_request'
+                and event['boundary'] == 'litellm_provider_call_input']
+    assert len(base) == 1
+    assert [event['attempt'] for event in attempts] == [1, 2]
+    assert {event['model_turn_id'] for event in base + attempts} == {base[0]['model_turn_id']}
+    assert {event['run_step_number'] for event in base + attempts} == {1}
+    responses = [event for event in events if event['kind'] == 'model_response'
+                 and event['runtime'] == 'smolagents']
+    assert [(event['attempt'], event['status']) for event in responses] == [
+        (1, 'error'), (2, 'completed'), (None, 'completed'),
+    ]
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert 'Model attempt 1' in log and 'Model attempt 2' in log
+    assert log.count('Input tokens:') == 1
+
+
+@pytest.mark.parametrize('runtime', ['smolagents', 'pi'])
+def test_provider_request_trace_failure_prevents_sending_to_model(tmp_path, monkeypatch, runtime):
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.execution.observability import TraceRecorder, TraceStorageError
+
+    original = TraceRecorder.record_model_request
+
+    def fail_http_record(self, request, **kwargs):
+        if kwargs['boundary'] == 'openai_http_request':
+            raise TraceStorageError('fixture provider request trace failed')
+        return original(self, request, **kwargs)
+
+    monkeypatch.setattr(TraceRecorder, 'record_model_request', fail_http_record)
+    with model_service(lambda request: finish(request, 'unexpected')) as (url, requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            with pytest.raises(ApplicationRunError, match='fixture provider request trace failed') as failed:
+                execute_app(workflow, file_logging=False)
+    assert requests == []
+    assert json.loads(failed.value.run.manifest_path.read_text())['status'] == 'failed'
+
+
+def test_smol_responses_request_matches_provider_http_body(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    with model_service(lambda request: [('finish', 'final_answer', {'answer': 'transport-recorded'})]) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='smolagents', worker='pi')
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        write_yaml(workflow, definition)
+        profile_path = tmp_path / 'config/llm.yaml'
+        profiles = yaml.safe_load(profile_path.read_text())
+        profiles['model']['supervisor']['adapter'] = 'openai_responses'
+        write_yaml(profile_path, profiles)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == 'transport-recorded'
+    assert len(requests) == 1
+    with inspect_run(result.run) as trace:
+        events = [event for event in trace.events() if event['kind'] == 'model_request'
+                  and event['boundary'] == 'openai_http_request']
+        assert len(events) == 1
+        assert events[0]['provider_request_complete'] is True
+        assert json.loads(trace.read_text(events[0]['request_ref']))['body'] == requests[0]
+
+
+@pytest.mark.parametrize('worker', ['pi', 'smolagents'])
+def test_small_native_or_platform_result_is_redacted_before_model_and_trace(tmp_path, worker):
+    from agentloom.execution.observability import inspect_run
+
+    (tmp_path / 'note.txt').write_text('api_key=fixture-secret\nstatus=ok\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            if not messages:
+                return [('read-note', 'read' if worker == 'pi' else 'read_file',
+                         {'path': 'note.txt'} if worker == 'pi' else {'file_path': str(tmp_path / 'note.txt')})]
+            content = messages[-1]['content']
+            assert 'fixture-secret' not in content
+            assert 'api_key=[REDACTED]' in content
+            return finish(request, 'redacted')
+        return [('delegate', 'inspect_note', {'query': 'note.txt'})] if not messages else finish(request, 'verified')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='pi', worker=worker)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == 'verified'
+    worker_messages = tool_messages(next(request for request in requests if request['model'] == 'worker' and tool_messages(request)))
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool' and event['tool_name'] in {'read', 'read_file'})
+        assert trace.read_text(tool['model_ref']) == worker_messages[-1]['content']
+        retained = trace.read_text(tool['output_ref'])
+        assert 'fixture-secret' not in retained
+        assert 'api_key=[REDACTED]' in retained
+        assert json.loads(retained) == worker_messages[-1]['content']
+
+
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_failed_platform_tool_error_matches_model_trace_and_log(tmp_path, runtime):
+    from agentloom.execution.observability import inspect_run
+
+    def program(request):
+        messages = tool_messages(request)
+        if not messages:
+            return [('secret-failure', 'fail_with_secret', {'value': 'sample'})]
+        assert 'fixture-secret' not in messages[-1]['content']
+        assert 'api_key=[REDACTED]' in messages[-1]['content']
+        return finish(request, 'handled')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        definition['tools'] = [{
+            'name': 'fail_with_secret',
+            'module': 'tests.application_test.test_platform_tool_application',
+            'function': 'fail_with_secret',
+        }]
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'handled'
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool'
+                    and event['tool_name'] == 'fail_with_secret')
+        visible = trace.read_text(tool['model_ref'])
+    assert visible == tool_messages(requests[1])[-1]['content']
+    assert result.run.log_path is not None
+    assert f'Observations: {visible}' in result.run.log_path.read_text()
+
+
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_blocked_tool_result_matches_model_and_trace(tmp_path, runtime):
+    from agentloom.execution.observability import inspect_run
+
+    hook = tmp_path / 'block_tool.py'
+    hook.write_text(
+        'import json\nprint(json.dumps({"decision":"block",'
+        '"reason":"api_key=fixture-secret"}))\n'
+    )
+
+    def program(request):
+        messages = tool_messages(request)
+        if not messages:
+            return [('blocked-call', 'trace_payload', {'value': 'sample'})]
+        content = messages[-1]['content']
+        payload = json.loads(content)
+        assert payload['status'] == 'blocked'
+        assert payload['error']['message'] == 'api_key=[REDACTED]'
+        return finish(request, 'handled')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        definition['tools'] = [{
+            'name': 'trace_payload',
+            'module': 'tests.application_test.test_platform_tool_application',
+            'function': 'trace_payload',
+        }]
+        definition['hooks'] = {'PreToolUse': [{
+            'id': 'block-tool', 'matcher': 'trace_payload',
+            'command': f'{sys.executable} {hook}',
+        }]}
+        write_yaml(workflow, definition)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'handled'
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool'
+                    and event['tool_name'] == 'trace_payload')
+        visible = trace.read_text(tool['model_ref'])
+    assert visible == tool_messages(requests[1])[-1]['content']
+    assert result.run.log_path is not None
+    assert f'Observations: {visible}' in result.run.log_path.read_text()
+
+
+@pytest.mark.parametrize('supervisor,worker', [('pi', 'pi'), ('smolagents', 'pi'), ('pi', 'smolagents')])
+def test_steps_and_tool_observations_reach_terminal_and_runtime_log(tmp_path, capsys, supervisor, worker):
+    (tmp_path / 'note.txt').write_text('Visible result: MARIGOLD-8372\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            if not messages:
+                return [('read-note', 'read' if worker == 'pi' else 'read_file',
+                         {'path': 'note.txt'} if worker == 'pi' else {'file_path': str(tmp_path / 'note.txt')})]
+            return finish(request, 'MARIGOLD-8372')
+        if not messages:
+            return [('delegate', 'inspect_note', {'query': 'note.txt'})]
+        return finish(request, 'Verified MARIGOLD-8372')
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor=supervisor, worker=worker)
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': True, 'file_enabled': True}
+        write_yaml(system_path, system)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    terminal = capsys.readouterr().out
+    assert result.output == 'Verified MARIGOLD-8372'
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert terminal.count('New run') == log.count('New run') == 2
+    for number in range(1, 5):
+        assert sum(f'Step {number}' in line for line in terminal.splitlines() if '━' in line) == 1
+        assert sum(f'Step {number}' in line for line in log.splitlines() if '━' in line) == 1
+    for text in ('Calling tool:', 'Observations:', 'MARIGOLD-8372'):
+        assert text in terminal and text in log
+    assert terminal.count('Duration') == log.count('Duration') == 4
+    assert 'Current tokens:' not in terminal and 'Current tokens:' not in log
+    assert 'Input tokens:' in terminal and 'Input tokens:' in log
+    assert terminal.count('Final answer: Verified MARIGOLD-8372') == 1
+    assert log.count('Final answer: Verified MARIGOLD-8372') == 1
+
+
+@pytest.mark.parametrize('runtime', ['smolagents', 'pi'])
+def test_tool_projection_uses_model_input_budget(tmp_path, runtime):
+    from agentloom.execution.observability import inspect_run
+
+    source = tmp_path / 'short-window.txt'
+    source.write_text('TOKEN-PROJECTED-2481\n' + 'a' * 3000)
+
+    def program(request):
+        messages = tool_messages(request)
+        if not messages:
+            name = 'read' if runtime == 'pi' else 'read_file'
+            arguments = {'path': 'short-window.txt'} if runtime == 'pi' else {'file_path': str(source)}
+            return [('read-short-window', name, arguments)]
+        assert '[ContextRef ctx_' in messages[-1]['content']
+        assert 'TOKEN-PROJECTED-2481' in messages[-1]['content']
+        return finish(request, 'projected')
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        definition = yaml.safe_load(workflow.read_text())
+        definition['worker_agents'] = []
+        definition['tools'] = [{'name': 'read' if runtime == 'pi' else 'read_file'}]
+        write_yaml(workflow, definition)
+        profile_path = tmp_path / 'config/llm.yaml'
+        profiles = yaml.safe_load(profile_path.read_text())
+        profiles['model']['supervisor'].update(context_window=8192, max_output_tokens=1000)
+        write_yaml(profile_path, profiles)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == 'projected'
+    with inspect_run(result.run) as trace:
+        tool = next(event for event in trace.events() if event['kind'] == 'tool')
+        visible = trace.read_text(tool['model_ref'])
+        assert len(visible.encode()) <= (8192 - 1000) // 4
+        ref = re.search(r'ctx_[0-9a-f]{32}', visible).group()
+        assert 'a' * 3000 in trace.read_text(ref)
+
+
+@pytest.mark.parametrize('level', ['INFO', 'ERROR'])
+def test_text_cli_prints_final_answer_once_with_pi_steps(tmp_path, level):
+    from agentloom.__main__ import main
+    from click.testing import CliRunner
+
+    (tmp_path / 'note.txt').write_text('CLI token: DAHLIA-6104\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            return [('read-note', 'read', {'path': 'note.txt'})] if not messages else 'DAHLIA-6104'
+        return [('delegate', 'inspect_note', {'query': 'note.txt'})] if not messages else 'Verified DAHLIA-6104'
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor='pi', worker='pi')
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': True, 'file_enabled': True, 'level': level}
+        write_yaml(system_path, system)
+        with bind_config(load_project_config(tmp_path)):
+            result = CliRunner().invoke(main, ['run', str(workflow)])
+    assert result.exit_code == 0, result.output
+    assert result.stdout.count('Verified DAHLIA-6104') == 1
+    if level == 'INFO':
+        assert result.stdout.count('Final answer: Verified DAHLIA-6104') == 1
+        assert 'Step 1' in result.stdout
+        logs = list((tmp_path / 'runtime/runs/mixed').glob('*/logs/runtime.log'))
+        assert len(logs) == 1
+        assert logs[0].read_text().count('Final answer: Verified DAHLIA-6104') == 1
+
+
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_debug_log_contains_the_models_reply_for_both_runtimes(tmp_path, runtime):
+    (tmp_path / 'note.txt').write_text('Reply token: AZALEA-4920\n')
+
+    def program(request):
+        messages = tool_messages(request)
+        if request['model'] == 'worker':
+            if not messages:
+                return [('read-note', 'read' if runtime == 'pi' else 'read_file',
+                         {'path': 'note.txt'} if runtime == 'pi' else {'file_path': str(tmp_path / 'note.txt')})]
+            return finish(request, 'AZALEA-4920')
+        return [('delegate', 'inspect_note', {'query': 'note.txt'})] if not messages else finish(request, 'Verified AZALEA-4920')
+
+    with model_service(program) as (url, _requests):
+        workflow = project(tmp_path, url, supervisor=runtime, worker=runtime)
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': False, 'file_enabled': True, 'level': 'DEBUG'}
+        write_yaml(system_path, system)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert 'Model response:' in log
+    assert 'AZALEA-4920' in log
+
+
+def test_smol_supervisor_trace_records_stop_rejection_and_acceptance(tmp_path):
+    from agentloom.execution.observability import inspect_run
+
+    marker = tmp_path / 'stop-count'
+    hook = tmp_path / 'stop_once.py'
+    hook.write_text(
+        'import json\nfrom pathlib import Path\n'
+        f'p=Path({str(marker)!r})\n'
+        'count=int(p.read_text()) if p.exists() else 0\n'
+        'p.write_text(str(count+1))\n'
+        'print(json.dumps({"decision":"block","reason":"continue once"}'
+        ' if count==0 else {"decision":"allow"}))\n'
+    )
+
+    def program(request):
+        return finish(request, 'accepted-answer-8426')
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor='smolagents', worker='pi')
+        definition = yaml.safe_load(workflow.read_text())
+        definition['hooks'] = {'Stop': [{'id': 'stop-once', 'command': f'{sys.executable} {hook}'}]}
+        write_yaml(workflow, definition)
+        system_path = tmp_path / 'config/system.yaml'
+        system = yaml.safe_load(system_path.read_text())
+        system['logging'] = {'console_enabled': False, 'file_enabled': True}
+        write_yaml(system_path, system)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=True)
+    assert result.output == 'accepted-answer-8426'
+    assert len(requests) >= 2
+    with inspect_run(result.run) as trace:
+        decisions = [event for event in trace.events()
+                     if event['kind'] == 'hook_decision' and event['event'] == 'Stop']
+        assert [json.loads(trace.read_text(event['decision_ref']))['result']['decision']
+                for event in decisions] == ['block', 'allow']
+    assert result.run.log_path is not None
+    log = result.run.log_path.read_text()
+    assert 'Stop blocked: continue once' in log
+    assert log.count('Final answer: accepted-answer-8426') == 1
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])
@@ -121,7 +558,7 @@ def test_parallel_and_repeated_workers_have_separate_sessions_and_hook_owners(tm
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])
 def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, supervisor, worker):
-    original = ''.join(f'def release_item_{i}():\n    return {i}\n\n' for i in range(180)) + 'def TARGET_RECORD_CORIANDER_5287():\n    return 5287\n'
+    original = ''.join(f'def release_item_{i}():\n    return {i}\n\n' for i in range(30000)) + 'def TARGET_RECORD_CORIANDER_5287():\n    return 5287\n'
     source = tmp_path / 'large-note.py'
     source.write_text(original)
     refs = []
@@ -131,7 +568,7 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         if request['model'] == 'worker':
             if not messages:
                 return [('large-read', 'read_context_fixture', {'file_path': str(source)})]
-            match = re.search(r'ctx_[0-9a-f]{16}', messages[-1]['content'])
+            match = re.search(r'ctx_[0-9a-f]{32}', messages[-1]['content'])
             assert match is not None
             ref = match.group()
             refs.append(ref)
@@ -140,11 +577,15 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
         if not messages:
             return [('delegate', 'inspect_note', {'query': 'large-note.py'})]
         if len(messages) == 1:
-            match = re.search(r'ctx_[0-9a-f]{16}', messages[0]['content'])
+            match = re.search(r'ctx_[0-9a-f]{32}', messages[0]['content'])
             assert match is not None
             ref = match.group()
             return [('retrieve', 'loom_retrieve_context', {'ref': ref, 'query': 'TARGET_RECORD', 'limit': 3})]
-        assert 'CORIANDER_5287' in messages[-1]['content']
+        if 'CORIANDER_5287' not in messages[-1]['content']:
+            next_offset = re.search(r'next_offset=(\d+)', messages[-1]['content'])
+            assert next_offset is not None
+            return [(f'retrieve-{len(messages)}', 'loom_retrieve_context',
+                     {'ref': refs[0], 'query': 'TARGET_RECORD', 'offset': int(next_offset.group(1)), 'limit': 3})]
         assert 'WRONG-NEW-CONTENT' not in messages[-1]['content']
         return finish(request, 'CORIANDER_5287')
 
@@ -159,10 +600,9 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
                 'module': 'tests.application_test.mixed_runtime_support',
                 'function': 'read_context_fixture',
             },
-            {'name': 'loom_retrieve_context'},
         ]
         write_yaml(worker_path, worker_definition)
-        definition['tools'] = [{'name': 'loom_retrieve_context'}]
+        definition['tools'] = []
         write_yaml(workflow, definition)
         system_path = tmp_path / 'config/system.yaml'
         system = yaml.safe_load(system_path.read_text())
@@ -172,12 +612,25 @@ def test_contextref_from_worker_retains_original_after_source_changes(tmp_path, 
             result = execute_app(workflow, file_logging=True)
     assert result.output == 'CORIANDER_5287'
     assert len(refs) == 1
-    entries = [json.loads(p.read_text()) for p in (tmp_path / 'runtime').rglob(f'{refs[0]}.json')]
-    assert len(entries) == 1
-    assert entries[0]['tool_name'] == 'read_context_fixture'
-    assert 'TARGET_RECORD_CORIANDER_5287' in entries[0]['original']
-    assert all(f'release_item_{i}' in entries[0]['original'] for i in range(180))
-    assert 'WRONG-NEW-CONTENT' not in entries[0]['original']
+    from agentloom.execution.observability import inspect_run
+
+    with inspect_run(result.run) as trace:
+        metadata = trace.reference_metadata(refs[0])
+        original = trace.read_text(refs[0])
+        assert metadata['tool_name'] == 'read_context_fixture'
+        assert 'TARGET_RECORD_CORIANDER_5287' in original
+        assert 'release_item_0' in original and 'release_item_29999' in original
+        assert 'WRONG-NEW-CONTENT' not in original
+        page = trace.search_page(refs[0], 'TARGET_RECORD', limit=1)
+        assert page.matches == [] and page.next_offset is not None
+        page = trace.search_page(refs[0], 'TARGET_RECORD', offset=page.next_offset, limit=1)
+        assert len(page.matches) == 1
+        assert 'CORIANDER_5287' in page.matches[0][1]
+        tool = next(event for event in trace.events()
+                    if event['kind'] == 'tool' and event['tool_name'] == 'read_context_fixture')
+        model_visible = trace.read_text(tool['model_ref'])
+    assert result.run.log_path is not None
+    assert f'Observations: {model_visible}' in result.run.log_path.read_text()
 
 
 @pytest.mark.parametrize('supervisor,worker', [('smolagents', 'pi'), ('pi', 'smolagents')])

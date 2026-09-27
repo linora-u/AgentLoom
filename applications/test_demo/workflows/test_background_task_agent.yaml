@@ -4,10 +4,11 @@ description: "Validate background task management: explicit background execution
 
 model_type: "powerful"
 
-workflow: |
+system_prompt: "You are a testing agent."
+task: |
   # Background Task Management Validation Workflow
 
-  You are a testing agent. Execute ALL steps below using the available tools.
+  Execute ALL steps below using the available tools.
   After each step, report PASS or FAIL with a short explanation.
 
   ## Step 1: List background tasks (empty)

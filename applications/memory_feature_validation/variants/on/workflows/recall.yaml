@@ -6,7 +6,7 @@ runtime_options:
   max_steps: 5
   smart_summary: false
 
-workflow: |
+task: |
   Read only the curated persistent-memory snapshot supplied at run start. Do
   not infer from the task, history, or world knowledge. If the snapshot
   contains a fact, return exactly one JSON object with key `answer` whose value

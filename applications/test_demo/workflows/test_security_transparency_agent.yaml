@@ -4,7 +4,7 @@ description: "Validate security policy transparency: dynamic tool descriptions, 
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Security Policy Transparency Validation Workflow
 
   Use native structured `shell_tool` calls. Retain every actual result or error:

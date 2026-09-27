@@ -6,7 +6,7 @@ import pytest
 import yaml
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
-from agentloom.execution.model_protocol import FunctionCallItem, MessageItem, ModelTurnResult
+from agentloom.execution.model_protocol import FunctionCallItem, FunctionCallOutputItem, MessageItem, ModelTurnResult
 
 from tests.application_test.native_read_support import (
     SCENARIOS,
@@ -42,7 +42,7 @@ def test_application_native_read_runs_production_hooks_and_durable_host(tmp_path
 
     class Model:
         def turn(self, *, items, **kwargs):
-            if not items:
+            if not any(isinstance(item, FunctionCallOutputItem) for item in items):
                 return ModelTurnResult(
                     (FunctionCallItem("fixture-read", "native_read", json.dumps({"path": str(path)})),)
                 )

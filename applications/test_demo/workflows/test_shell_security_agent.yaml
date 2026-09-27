@@ -4,7 +4,7 @@ description: "Validate shell_tool security checks block injection patterns while
 
 model_type: "powerful"
 
-workflow: |
+task: |
   # Shell Security Validation
 
   Execute ALL steps below. Report PASS/FAIL for each.
