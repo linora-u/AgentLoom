@@ -30,7 +30,7 @@ class ParallelAgentExecutor:
         max_pending: Back-pressure threshold — when this many futures are
                      in-flight, block until at least one completes before
         circuit_breaker_threshold: After this many *consecutive* failures the
-                                   remaining tasks are marked "skipped"
+                                   remaining tasks are marked "skipped". None disables it.
     """
 
     def __init__(
@@ -38,7 +38,7 @@ class ParallelAgentExecutor:
         max_workers: Optional[int] = None,
         model_type: str = "powerful",
         max_pending: int = 20,
-        circuit_breaker_threshold: int = 5,
+        circuit_breaker_threshold: int | None = 5,
     ):
         self._model_type = model_type
         self._max_pending = max_pending
@@ -66,8 +66,8 @@ class ParallelAgentExecutor:
 
         Features:
         - **Back-pressure**: at most *max_pending* futures in flight.
-        - **Circuit-breaker**: after *circuit_breaker_threshold* consecutive
-          failures the remaining tasks are returned as ``status="skipped"``.
+        - **Circuit-breaker**: when enabled, after *circuit_breaker_threshold*
+          consecutive failures the remaining tasks are returned as ``status="skipped"``.
         - **Error isolation**: one task's exception does not affect others.
         - **Log isolation**: each thread gets its own ``sub_task_context``.
         """
@@ -84,7 +84,7 @@ class ParallelAgentExecutor:
 
             for task in tasks:
                 # ── Circuit breaker ──
-                if consecutive_failures >= self._cb_threshold:
+                if self._cb_threshold is not None and consecutive_failures >= self._cb_threshold:
                     results.append(TaskResult(
                         task_id=task.get("task_id", task.get("dir_path", "?")),
                         status="skipped",
