@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from agentloom.app.run import ApplicationRunError
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
@@ -142,6 +141,7 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
     payload = requests[0]["body"]
     assert requests[0]["url"] == "https://chatgpt.com/backend-api/codex/responses"
     assert payload["model"] == "gpt-6-luna"
+    assert "service_tier" not in payload
     assert payload["reasoning"] == {"effort": "xhigh", "summary": "auto"}
     if mode == "off":
         assert not any(tool.get("type") == "web_search" for tool in payload.get("tools", []))
@@ -264,6 +264,23 @@ def test_codex_max_reasoning_is_an_explicit_profile_setting(tmp_path, monkeypatc
     assert json.loads(wire.read_text().splitlines()[0])["body"]["reasoning"]["effort"] == "max"
 
 
+@pytest.mark.parametrize(("tier", "wire_tier"), [("fast", "priority"), ("default", "default")])
+@pytest.mark.parametrize("search", ["off", "required"])
+def test_codex_service_tier_reaches_the_wire(tmp_path, monkeypatch, tier, wire_tier, search):
+    app, wire = _fixture(tmp_path, monkeypatch, search=search, completed=search == "required")
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"]["service_tier"] = tier
+    path.write_text(yaml.safe_dump(config))
+    with bind_config(load_project_config(tmp_path)):
+        execute_app(app, file_logging=False)
+    requests = [json.loads(line)["body"] for line in wire.read_text().splitlines()]
+    assert len(requests) == 1
+    assert requests[0]["service_tier"] == wire_tier
+    if search == "required":
+        assert requests[0]["tool_choice"] == {"type": "web_search"}
+
+
 def test_required_search_is_enforced_on_each_model_turn(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="required",
                          first_textual_tool_call=True)
@@ -383,6 +400,7 @@ def test_codex_preserves_optional_native_tool_fields_without_strict_schema(tmp_p
 @pytest.mark.parametrize(("change", "message"), [
     ({"web_search": "always"}, "web_search must be off, auto or required"),
     ({"reasoning_effort": "ultra"}, "reasoning_effort must be xhigh or max"),
+    ({"service_tier": "ultrafast"}, "service_tier must be default or fast"),
     ({"api_key": "not-a-subscription"}, "requires Pi OAuth"),
     ({"base_url": "https://example.org/v1"}, "requires Pi OAuth"),
     ({"extra_headers": {"Authorization": "Bearer fake"}}, "requires Pi OAuth"),

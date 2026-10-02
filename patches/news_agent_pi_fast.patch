@@ -1,0 +1,47 @@
+diff --git a/config/model.yaml b/config/model.yaml
+--- a/config/model.yaml
++++ b/config/model.yaml
+@@ -11,0 +12 @@
++    service_tier: fast
+diff --git a/tests/test_baseline_pi.py b/tests/test_baseline_pi.py
+--- a/tests/test_baseline_pi.py
++++ b/tests/test_baseline_pi.py
+@@ -5,0 +6 @@
++import shutil
+@@ -7 +7,0 @@
+-import shutil
+@@ -10,0 +11 @@
++from news_agent import baseline
+@@ -12 +12,0 @@
+-from news_agent import baseline
+@@ -13,0 +14,18 @@
++
++
++def test_fast_tier_changes_news_model_signature(tmp_path: Path, monkeypatch) -> None:
++    source_root = baseline.ROOT
++    config_dir = tmp_path / "config"
++    config_dir.mkdir()
++    for name in ("model.yaml", "system.yaml"):
++        shutil.copyfile(source_root / "config" / name, config_dir / name)
++    for name in ("baseline.py", "settings.py", "run.py", "report.py", "skill_reference.py"):
++        shutil.copyfile(source_root / name, tmp_path / name)
++    monkeypatch.setattr(baseline, "ROOT", tmp_path)
++    fast_signature = baseline._model_signature()
++    path = config_dir / "model.yaml"
++    profiles = yaml.safe_load(path.read_text())
++    for profile in profiles["model"].values():
++        profile["service_tier"] = "default"
++    path.write_text(yaml.safe_dump(profiles))
++    assert baseline._model_signature() != fast_signature
+@@ -40,0 +59 @@
++    assert payload["service_tier"] == "priority"
+@@ -74 +93,3 @@
+-    assert len(wire.read_text().splitlines()) == 2
++    requests = [json.loads(line)["body"] for line in wire.read_text().splitlines()]
++    assert len(requests) == 2
++    assert all(request["service_tier"] == "priority" for request in requests)
+@@ -103 +124,3 @@
+-    assert len(wire.read_text().splitlines()) == 1
++    requests = [json.loads(line)["body"] for line in wire.read_text().splitlines()]
++    assert len(requests) == 1
++    assert requests[0]["service_tier"] == "priority"

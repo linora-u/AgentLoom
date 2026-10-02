@@ -141,6 +141,8 @@ async function createSession(p: Obj): Promise<AgentSession> {
       else result.reasoning_effort = extra.reasoning_effort;
     }
     const projected = {...result, ...extra.extra_body};
+    if (codex && extra.service_tier !== undefined)
+      projected.service_tier = extra.service_tier === "fast" ? "priority" : extra.service_tier;
     const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));
     if (Array.isArray(projected.tools)) projected.tools = projected.tools.map((tool: Obj) => {
       const name = tool.function?.name ?? tool.name;

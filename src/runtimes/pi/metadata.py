@@ -71,10 +71,16 @@ def validate_model(model: RuntimeModelSelection) -> None:
         if not isinstance(settings.get(name), str):
             raise ValueError(f"Pi model {name} must be a string")
     extra = settings.get("extra_completion_params") or {}
-    if not isinstance(extra, Mapping) or set(extra) - {"extra_body", "tool_choice", "parallel_tool_calls", "top_p", "seed", "reasoning_effort", "web_search"}:
+    allowed_extra = {
+        "extra_body", "tool_choice", "parallel_tool_calls", "top_p", "seed",
+        "reasoning_effort", "web_search", "service_tier",
+    }
+    if not isinstance(extra, Mapping) or set(extra) - allowed_extra:
         raise ValueError("Pi model extra_completion_params contains unsupported parameters")
     if not codex and "web_search" in extra:
         raise ValueError("Pi native web_search requires openai_codex_responses")
+    if not codex and "service_tier" in extra:
+        raise ValueError("Pi native service_tier requires openai_codex_responses")
     if extra.get("tool_choice", "auto") not in ("auto", "none") or type(extra.get("parallel_tool_calls", False)) is not bool:
         raise ValueError("Pi requires tool_choice auto/none and boolean parallel_tool_calls")
     if codex:
@@ -84,6 +90,8 @@ def validate_model(model: RuntimeModelSelection) -> None:
             raise ValueError("Pi Codex reasoning_effort must be xhigh or max")
         if extra.get("web_search", "auto") not in ("off", "auto", "required"):
             raise ValueError("Pi Codex web_search must be off, auto or required")
+        if "service_tier" in extra and extra["service_tier"] not in ("default", "fast"):
+            raise ValueError("Pi Codex service_tier must be default or fast")
     body = extra.get("extra_body") or {}
     protected = {"model", "messages", "input", "instructions", "tools", "tool_choice", "parallel_tool_calls",
                  "stream", "stream_options", "max_tokens", "max_completion_tokens", "max_output_tokens", "temperature"}
