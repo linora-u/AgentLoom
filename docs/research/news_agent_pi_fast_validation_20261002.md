@@ -4,6 +4,7 @@
 
 - 主仓库基线：`81db2404568de994e252a5e16156e19c22e2b419`；验证分支：`codex/news-pi-fast-20261002`，路径：`/home/lin/code/AgentLoom-pi-fast`。
 - 从当前 `applications/news_agent` 工作目录复制约 419 KB 的代码、Prompt、Skill、workflow 和配置；未复制嵌套 `.git`、新闻/行情数据、历史评估与输出。根配置 `config/llm.yaml` 以权限 `0600` 复制，仅供隔离运行；Pi OAuth 文件未复制，运行时沿用已有 Pi 登录。
+- 原 news_agent 工作目录在验证期间仍有其他改动；隔离副本以本次刷新时的代码为快照。后续合入前应再检查应用侧补丁与当时文件的差异，并重跑相应测试。
 - `applications/news_agent` 是独立 Git 仓库，且其当前工作目录有未提交改动。主仓库分支不会自动包含该项目的配置修改；准确的两文件变更保存在 [`patches/news_agent_pi_fast.patch`](../../patches/news_agent_pi_fast.patch)。原目录执行 `git apply --check --unidiff-zero` 已通过，尚未应用。
 
 ## 改动
