@@ -122,6 +122,7 @@ model:
     timeout: 300
     num_retries: 0
     reasoning_effort: xhigh
+    service_tier: fast
     web_search: auto
 ```
 
@@ -132,9 +133,13 @@ completed search call. The bridge records the completed call and structured URL
 citations in Model evidence and Run events, then appends clickable sources to a
 plain-text answer when citations exist. It does not infer citations from answer
 text. Luna reasoning defaults to `xhigh`; set `reasoning_effort: max` explicitly
-for the higher level. The Codex adapter rejects API keys, custom base URLs, and
-custom authorization headers. Pi's native function tools have optional fields;
-Codex requests mark those function schemas non-strict while AgentLoom continues
+for the higher level. `service_tier` is optional: `default` requests Standard,
+while `fast` sends Codex's `priority` request value. Set it on each Pi model
+profile that should request Fast; Codex CLI `/fast` and `config.toml` do not
+configure this isolated Pi process. The Codex adapter rejects API keys, custom
+base URLs, and custom authorization headers. Pi's native function tools can
+have optional fields. Codex requests mark those function schemas non-strict
+while AgentLoom continues
 to validate and authorize tool arguments before execution.
 
 Other protocols/settings fail explicitly. `system_prompt_boundary` is unsupported.
