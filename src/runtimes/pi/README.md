@@ -93,7 +93,7 @@ or protected Shell query mapping are rejected before execution.
 | --- | --- |
 | `adapter: openai_chat` / `openai_responses` | Native OpenAI Completions / Responses SDK transport, SSE |
 | `adapter: openai_chatgpt_responses` | Pi 1.0.0 OpenAI subscription OAuth over the public Responses API |
-| `adapter: openai_codex_responses` | Legacy Pi Codex OAuth transport; retained for existing profiles |
+| `adapter: openai_codex_responses` | Pi Codex OAuth through the ChatGPT subscription backend |
 | `model` | Preserve the model ID, removing the legacy `openai/` or `gemini/` routing prefix |
 | `base_url`, `api_key` | Selected endpoint and in-memory credentials; no user auth discovery |
 | Effective request headers | Literal private headers; no Pi command/env interpolation |
@@ -107,13 +107,13 @@ or protected Shell query mapping are rejected before execution.
 | `top_p`, `seed`, `reasoning_effort` | Explicit provider parameters; Responses maps reasoning effort into `reasoning.effort` |
 | `tool_choice: auto/none`, `parallel_tool_calls: false` | Compatible no-tool settings; no tool schema is emitted |
 
-For a personal ChatGPT subscription, use Pi 1.0.0's **OpenAI → Sign in with ChatGPT**
-login and select a Pi-only
-profile. AgentLoom passes the path to Pi's own `auth.json` into its isolated
-process; Pi reads it and refreshes OAuth credentials. The default location is
-`~/.pi/agent/auth.json`, or `PI_CODING_AGENT_DIR/auth.json` when set in the parent
-environment. Do not put a token in `llm.yaml`. A missing or expired login fails
-the Run; it never opens an interactive login or changes providers.
+Both subscription adapters use Pi's own OAuth credentials. **OpenAI → Sign in
+with ChatGPT** authorizes the public Responses API; **OpenAI Codex** authorizes
+the native Codex backend. AgentLoom passes Pi's `auth.json` path into its
+isolated process; Pi reads it and refreshes the selected credential. The
+default path is `~/.pi/agent/auth.json`, or `PI_CODING_AGENT_DIR/auth.json` when
+set in the parent environment. Do not put a token in `llm.yaml`. A missing or
+expired login fails the Run without changing providers.
 
 ```yaml
 model:
@@ -136,20 +136,22 @@ completed search call. The bridge records the completed call and structured URL
 citations in Model evidence and Run events, then appends clickable sources to a
 plain-text answer when citations exist. It does not infer citations from answer
 text. Luna reasoning defaults to `xhigh`; set `reasoning_effort: max` explicitly
-for the higher level. `service_tier` is optional: `default` requests Standard,
-while `fast` sends the public Responses API's `fast` request value. The bridge
-records both the requested tier and the actual `response.completed.service_tier`
-in Model events and captures; a `default` response is recorded as a downgrade,
-not silently relabeled as Fast. Set it on each Pi model profile that should
-request Fast; Codex CLI `/fast` and `config.toml` do not configure this isolated
-Pi process. The ChatGPT subscription adapter uses `https://api.openai.com/v1/responses`
-with Pi's new OAuth grant and rejects API keys, custom base URLs, and custom
-authorization headers. ChatGPT plan authorization may reject `fast` or complete
-`priority` requests at `default`; verify the actual response tier before using
-Fast for a workload. Pi's native function tools can have optional fields.
-Subscription requests mark those function schemas non-strict
-while AgentLoom continues
-to validate and authorize tool arguments before execution.
+for the higher level. For the public adapter, `service_tier: default` requests
+Standard and `fast` requests Fast. This adapter uses
+`https://api.openai.com/v1/responses`, rejects API keys and custom URLs, and
+records the response tier as the effective tier. The current subscription
+authorization rejects `fast` and completes `priority` requests at `default`.
+
+For native Codex subscription Fast, select `adapter: openai_codex_responses`
+and `service_tier: fast` in each Pi profile. Pi sends `priority`, the request
+value used by Codex. Codex CLI `/fast` and `config.toml` do not configure Pi.
+The bridge records the requested tier and raw response tier separately. OpenAI
+says native Codex's response field is not a reliable end-to-end Fast indicator;
+the Run event leaves `effective` null on this route. A completed `priority`
+request proves the profile and wire path, while per-request Fast allocation
+requires separate usage evidence. Pi's native function tools may have optional
+fields; the bridge sends non-strict schemas and still validates and authorizes
+tool arguments before execution.
 
 Other protocols/settings fail explicitly. `system_prompt_boundary` is unsupported.
 Tool forcing/parallel tools are rejected. Provider error bodies are never exposed
