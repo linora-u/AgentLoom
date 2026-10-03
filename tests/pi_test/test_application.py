@@ -149,7 +149,7 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
         message["role"] == "user" and "Answer the configured request." in json.dumps(message["content"])
         for message in messages
     )
-    assert headers["X-Fixture"] == "selected-profile"
+    assert {name.lower(): value for name, value in headers.items()}["x-fixture"] == "selected-profile"
     assert "todo_write" not in json.dumps(payload)
     assert "final_answer" not in json.dumps(payload)
     assert result.run.manifest_path.is_file()

@@ -1,0 +1,153 @@
+--- a/config/model.yaml
++++ b/config/model.yaml
+@@ -1,6 +1,6 @@
+ model:
+   codex_luna_news_replay: &news_model
+-    adapter: openai_codex_responses
++    adapter: openai_chatgpt_responses
+     model: gpt-6-luna
+     context_window: 272000
+     max_output_tokens: 16384
+@@ -9,6 +9,7 @@
+     retry_delay: 15
+     max_retry_delay: 30
+     reasoning_effort: xhigh
++    service_tier: default
+     web_search: auto
+     supports_structured_output: true
+   codex_luna_news_initial:
+--- a/baseline.py
++++ b/baseline.py
+@@ -160,9 +160,9 @@
+                          ("codex_luna_news_replay", "auto"),
+                          ("codex_luna_news_source_review", "required")):
+         profile = raw["model"][name]
+-        if (profile.get("adapter") != "openai_codex_responses"
++        if (profile.get("adapter") != "openai_chatgpt_responses"
+                 or profile.get("web_search") != search):
+-            raise ValueError(f"{name}: Pi Codex 模型及联网设置与当前流程不一致")
++            raise ValueError(f"{name}: Pi ChatGPT 模型及联网设置与当前流程不一致")
+         profiles[name] = profile
+     digest = hashlib.sha256(json.dumps(profiles, sort_keys=True).encode())
+     paths = [path for folder in ("agent", "skills", "config", "workflows", "processing", "evaluation")
+--- a/tests/test_baseline.py
++++ b/tests/test_baseline.py
+@@ -66,7 +66,7 @@
+     config = tmp_path / "config"
+     config.mkdir()
+     (config / "system.yaml").write_text("system: test\n")
+-    common = {"adapter": "openai_codex_responses", "model": "gpt-6-luna", "timeout": 900}
++    common = {"adapter": "openai_chatgpt_responses", "model": "gpt-6-luna", "timeout": 900}
+     models = {name: {**common, "web_search": search, "num_retries": 0}
+               for name, search in (("codex_luna_news_initial", "off"),
+                                    ("codex_luna_news_replay", "auto"),
+--- a/tests/test_baseline_pi.py
++++ b/tests/test_baseline_pi.py
+@@ -1,16 +1,34 @@
+-"""Verify the news agent's actual Pi Codex request boundary without live network."""
++"""Verify news_agent Pi ChatGPT requests without live network."""
+ 
+ from __future__ import annotations
+ 
+ import json
++import shutil
+ from pathlib import Path
+-import shutil
+ 
+ import pytest
+ import yaml
++from news_agent import baseline
+ 
+-from news_agent import baseline
+ from tests.pi_test.test_codex_application import _fixture
++
++
++def test_service_tier_changes_news_model_signature(tmp_path: Path, monkeypatch) -> None:
++    source_root = baseline.ROOT
++    config_dir = tmp_path / "config"
++    config_dir.mkdir()
++    for name in ("model.yaml", "system.yaml"):
++        shutil.copyfile(source_root / "config" / name, config_dir / name)
++    for name in ("baseline.py", "settings.py", "run.py", "report.py", "skill_reference.py"):
++        shutil.copyfile(source_root / name, tmp_path / name)
++    monkeypatch.setattr(baseline, "ROOT", tmp_path)
++    original_signature = baseline._model_signature()
++    path = config_dir / "model.yaml"
++    profiles = yaml.safe_load(path.read_text())
++    for profile in profiles["model"].values():
++        profile["service_tier"] = "fast"
++    path.write_text(yaml.safe_dump(profiles))
++    assert baseline._model_signature() != original_signature
+ 
+ 
+ @pytest.mark.parametrize(("workflow", "prompt", "answer", "expected"), [
+@@ -18,11 +36,11 @@
+     ("refined", "精筛.md", '{"events": [], "reviews": []}', {"events": [], "reviews": []}),
+     ("source_review", "来源复核.md", '{"decisions": []}', {"decisions": []}),
+ ])
+-def test_news_worker_uses_codex_with_only_its_allowed_tools(
++def test_news_worker_uses_chatgpt_with_only_its_allowed_tools(
+     tmp_path: Path, monkeypatch, workflow: str, prompt: str, answer: str, expected: dict,
+ ) -> None:
+     _, wire = _fixture(tmp_path, monkeypatch, search="off", completed=workflow != "initial",
+-                       answer=answer)
++                       answer=answer, provider="openai", response_tier="default")
+     application = tmp_path / "applications" / "news_agent"
+     for relative in ("config/model.yaml", "config/system.yaml",
+                      f"workflows/{workflow}.yaml", f"agent/{prompt}"):
+@@ -43,6 +61,8 @@
+     assert len(requests) == 1
+     payload = requests[0]["body"]
+     assert payload["model"] == "gpt-6-luna"
++    assert requests[0]["url"] == "https://api.openai.com/v1/responses"
++    assert payload["service_tier"] == "default"
+     # AgentLoom supplies its task-scoped context reader whenever tools are present.
+     allowed = set() if workflow != "refined" else {
+         "skill", "read_news_reference", "loom_retrieve_context",
+@@ -62,7 +82,8 @@
+ 
+ def test_provider_retry_is_measured_and_raw_responses_remain_available(tmp_path, monkeypatch):
+     _, wire = _fixture(tmp_path, monkeypatch, search="off", first_status=500,
+-                       completed=False, answer='{"classifications": []}')
++                       completed=False, answer='{"classifications": []}',
++                       provider="openai", response_tier="default")
+     application = tmp_path / "applications/news_agent"
+     for relative in ("config/model.yaml", "config/system.yaml",
+                      "workflows/initial.yaml", "agent/初筛.md"):
+@@ -76,7 +97,9 @@
+     path.write_text(yaml.safe_dump(config))
+     monkeypatch.setattr(baseline, "ROOT", application)
+     assert baseline._call_worker(application / "workflows/initial.yaml", "全部新闻为行情复述") == {"classifications": []}
+-    assert len(wire.read_text().splitlines()) == 2
++    requests = [json.loads(line)["body"] for line in wire.read_text().splitlines()]
++    assert len(requests) == 2
++    assert all(request["service_tier"] == "default" for request in requests)
+     manifest = next((application / "data/runtime/runs").rglob("manifest.json"))
+     timing = json.loads(manifest.read_text())["performance"]
+     assert (timing["provider_requests"], timing["retries"]) == (2, 1)
+@@ -90,7 +113,7 @@
+ 
+ def test_source_review_cannot_succeed_without_actual_native_search(tmp_path, monkeypatch):
+     _, wire = _fixture(tmp_path, monkeypatch, search="required", completed=False,
+-                       answer='{"decisions": []}')
++                       answer='{"decisions": []}', provider="openai", response_tier="default")
+     application = tmp_path / "applications" / "news_agent"
+     for relative in ("config/model.yaml", "config/system.yaml",
+                      "workflows/source_review.yaml", "agent/来源复核.md"):
+@@ -105,12 +128,14 @@
+     monkeypatch.setattr(baseline, "ROOT", application)
+     with pytest.raises(RuntimeError, match="required web search was not executed"):
+         baseline._call_worker(application / "workflows/source_review.yaml", "核实当时的原始发布")
+-    assert len(wire.read_text().splitlines()) == 1
++    requests = [json.loads(line)["body"] for line in wire.read_text().splitlines()]
++    assert len(requests) == 1
++    assert requests[0]["service_tier"] == "default"
+ 
+ 
+ def test_refinement_cannot_succeed_with_search_but_without_required_rule_reads(tmp_path, monkeypatch):
+     _, wire = _fixture(tmp_path, monkeypatch, search="auto", completed=True,
+-                       answer='{"events": [], "reviews": []}')
++                       answer='{"events": [], "reviews": []}', provider="openai", response_tier="default")
+     application = tmp_path / "applications" / "news_agent"
+     for relative in ("config/model.yaml", "config/system.yaml",
+                      "workflows/refined.yaml", "agent/精筛.md"):
