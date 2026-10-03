@@ -287,6 +287,24 @@ def test_codex_service_tier_reaches_the_wire(tmp_path, monkeypatch, tier, wire_t
         assert requests[0]["tool_choice"] == {"type": "web_search"}
 
 
+def test_codex_response_tier_does_not_claim_effective_fast_tier(tmp_path, monkeypatch):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", response_tier="default")
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"]["service_tier"] = "fast"
+    path.write_text(yaml.safe_dump(config))
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert json.loads(wire.read_text().splitlines()[0])["body"]["service_tier"] == "priority"
+    events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
+    tiers = [event["details"] for event in events if event["kind"] == "model"
+             and event["details"].get("phase") == "provider_tier"]
+    assert len(tiers) == 1
+    assert tiers[0]["requested"] == "fast"
+    assert tiers[0]["response_tier"] == "default"
+    assert tiers[0]["effective"] is None
+
+
 @pytest.mark.parametrize("effective", ["fast", "default"])
 def test_chatgpt_public_api_records_actual_service_tier(tmp_path, monkeypatch, effective):
     app, wire = _fixture(tmp_path, monkeypatch, search="off", provider="openai",
@@ -312,6 +330,7 @@ def test_chatgpt_public_api_records_actual_service_tier(tmp_path, monkeypatch, e
              and event["details"].get("phase") == "provider_tier"]
     assert len(tiers) == 1
     assert tiers[0]["requested"] == "fast"
+    assert tiers[0]["response_tier"] == effective
     assert tiers[0]["effective"] == effective
 
 
