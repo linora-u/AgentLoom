@@ -33,6 +33,7 @@ let nativeIncomplete = false;
 let modelFailure = {timedOut: false, status: 0, reason: ""};
 let reportRetry: ((attempt: number) => void) | undefined;
 let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
+let reportTier: ((identity: Obj, attempt: number, tier: string) => void) | undefined;
 let outputCorrection = false;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
@@ -65,15 +66,17 @@ async function createSession(p: Obj): Promise<AgentSession> {
   outputCorrection = false;
   const s = p.model.settings;
   const codex = p.model.protocol === "openai_codex_responses";
-  if (codex && !piAuthPath) throw new Error("Pi Codex credential path is unavailable");
+  const chatgpt = p.model.protocol === "openai_chatgpt_responses";
+  const subscription = codex || chatgpt;
+  if (subscription && !piAuthPath) throw new Error("Pi ChatGPT credential path is unavailable");
   const runtime = await ModelRuntime.create({
-    authPath: codex ? piAuthPath : join(agentDir, "auth.json"),
+    authPath: subscription ? piAuthPath : join(agentDir, "auth.json"),
     modelsPath: null, refreshOnCreate: false,
   });
   const api = codex ? "openai-codex-responses" :
     p.model.protocol === "openai_chat" ? "openai-completions" : "openai-responses";
-  const modelId = codex ? p.model.model_id : p.model.model_id.replace(/^(openai|gemini)\//, "");
-  if (!codex) {
+  const modelId = subscription ? p.model.model_id : p.model.model_id.replace(/^(openai|gemini)\//, "");
+  if (!subscription) {
     runtime.registerProvider("agentloom", {
       api, baseUrl: s.base_url || "https://api.openai.com/v1", apiKey: "agentloom-runtime-key",
       models: [{id: modelId, name: modelId, reasoning: false, input: ["text"],
@@ -82,13 +85,15 @@ async function createSession(p: Obj): Promise<AgentSession> {
     });
     await runtime.setRuntimeApiKey("agentloom", s.api_key || "no-key");
   }
-  const model = runtime.getModel(codex ? "openai-codex" : "agentloom", modelId);
-  if (!model) throw new Error(codex ? `Pi Codex model ${modelId} is unavailable` : `Pi model ${modelId} is unavailable`);
-  if (codex) {
+  const model = runtime.getModel(codex ? "openai-codex" : chatgpt ? "openai" : "agentloom", modelId);
+  if (!model) throw new Error(`Pi ${codex ? "Codex model" : chatgpt ? "ChatGPT model" : "model"} ${modelId} is unavailable`);
+  if (subscription) {
     let auth;
     try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
-    catch {throw new Error("Pi Codex credential refresh failed; check the connection or log in through Pi again");}
-    if (!auth) throw new Error("Pi Codex login is missing; log in through Pi before running this Agent");
+    catch {throw new Error(`Pi ${codex ? "Codex" : "ChatGPT"} credential refresh failed; check the connection or log in through Pi again`);}
+    if (!auth) throw new Error(`Pi ${codex ? "Codex" : "ChatGPT"} login is missing; log in through Pi before running this Agent`);
+    if (chatgpt && auth.source !== "OAuth")
+      throw new Error("Pi ChatGPT subscription login is missing; authorize the OpenAI provider in Pi");
   }
   // Adapter-controlled, bounded retry waits; no hidden SDK retry multiplier.
   const settings = SettingsManager.inMemory({retry: {enabled: false, provider: {maxRetries: 0, timeoutMs: s.timeout * 1000}},
@@ -105,17 +110,17 @@ async function createSession(p: Obj): Promise<AgentSession> {
     native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
   const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
   const extra = s.extra_completion_params || {};
-  const searchMode = codex ? (extra.web_search || "auto") : "off";
+  const searchMode = subscription ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    systemPrompt: codex && searchMode !== "off" ?
+    systemPrompt: subscription && searchMode !== "off" ?
       `${p.instructions}\n\nNative web search is available. Use it for current information and cite the sources you use.` :
       p.tools.length ? p.instructions :
       `${p.instructions}\n\nNo tools are available in this run. Do not call or simulate tools. If the task needs unavailable information, explain the limitation.`,
     extensionFactories: [selected.extension]});
   await loader.reload();
   const {session: created} = await createAgentSession({cwd: p.cwd, agentDir, modelRuntime: runtime,
-    model, thinkingLevel: codex ? (extra.reasoning_effort || "xhigh") : "off", tools: selected.tools.map(tool => tool.name),
+    model, thinkingLevel: subscription ? (extra.reasoning_effort || "xhigh") : "off", tools: selected.tools.map(tool => tool.name),
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   enableInstructionOnlyTurns(created);
@@ -127,8 +132,9 @@ async function createSession(p: Obj): Promise<AgentSession> {
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
     finalDelivery = permit.state === "final";
     return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
-  }, attempt => reportRetry?.(attempt), agentDir, invoke, codex,
-  (identity, attempt, result) => reportSearch?.(identity, attempt, result));
+  }, attempt => reportRetry?.(attempt), agentDir, invoke, {codex, chatgpt},
+  (identity, attempt, result) => reportSearch?.(identity, attempt, result),
+  (identity, attempt, tier) => reportTier?.(identity, attempt, tier));
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
@@ -136,13 +142,13 @@ async function createSession(p: Obj): Promise<AgentSession> {
     for (const key of ["top_p", "seed"]) if (extra[key] !== undefined) result[key] = extra[key];
     if (p.tools.length) for (const key of ["tool_choice", "parallel_tool_calls"])
       if (extra[key] !== undefined) result[key] = extra[key];
-    if (extra.reasoning_effort !== undefined && !codex) {
+    if (extra.reasoning_effort !== undefined && !subscription) {
       if (api === "openai-responses") result.reasoning = {effort: extra.reasoning_effort};
       else result.reasoning_effort = extra.reasoning_effort;
     }
     const projected = {...result, ...extra.extra_body};
-    if (codex && extra.service_tier !== undefined)
-      projected.service_tier = extra.service_tier === "fast" ? "priority" : extra.service_tier;
+    if (subscription && extra.service_tier !== undefined)
+      projected.service_tier = codex && extra.service_tier === "fast" ? "priority" : extra.service_tier;
     const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));
     if (Array.isArray(projected.tools)) projected.tools = projected.tools.map((tool: Obj) => {
       const name = tool.function?.name ?? tool.name;
@@ -151,7 +157,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
       // Pi's native schemas include optional fields. Codex rejects strict
       // function schemas unless every field is required; AgentLoom still
       // validates and authorizes the selected tool arguments before execution.
-      const strict = codex ? false : tool.strict;
+      const strict = subscription ? false : tool.strict;
       return tool.function
         ? {...tool, strict, function: {...tool.function, parameters}}
         : {...tool, strict, parameters};
@@ -161,7 +167,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
       delete projected.tool_choice;
       delete projected.parallel_tool_calls;
     }
-    if (codex && searchMode !== "off") {
+    if (subscription && searchMode !== "off") {
       projected.tools = [...(projected.tools || []), {type: "web_search"}];
       if (searchMode === "required") projected.tool_choice = {type: "web_search"};
     }
@@ -196,6 +202,9 @@ async function run(frame: Frame, abort: AbortController) {
     event("model", {phase: "web_search", call_id: identity.call_id, attempt,
       completed_calls: result.calls, citations: result.citations});
   };
+  reportTier = (identity, attempt, tier) => event("model", {phase: "provider_tier",
+    call_id: identity.call_id, attempt, requested: p.model.settings.extra_completion_params?.service_tier || "default",
+    effective: tier});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
   let unavailableToolTurns = 0;
@@ -328,7 +337,8 @@ async function run(frame: Frame, abort: AbortController) {
   } catch (error) {
     const interrupted = abort.signal.aborted;
     const detail = error instanceof Error ? error.message : "";
-    const safeDetail = detail.startsWith("Pi Codex ") || detail.startsWith("Incompatible Pi native checkpoint")
+    const safeDetail = detail.startsWith("Pi Codex ") || detail.startsWith("Pi ChatGPT ") ||
+      detail.startsWith("Incompatible Pi native checkpoint")
       ? detail.slice(0, 240) : "";
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
       output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
@@ -339,6 +349,7 @@ async function run(frame: Frame, abort: AbortController) {
     current = undefined;
     reportRetry = undefined;
     reportSearch = undefined;
+    reportTier = undefined;
   }
 }
 

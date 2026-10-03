@@ -48,7 +48,7 @@ const sourceText = sources.map(source => fs.readFileSync(source, 'utf8')).join('
 const mismatch = sourceText.includes('TEST_HANDSHAKE_SDK_MISMATCH');
 const missingNewline = sourceText.includes('TEST_HANDSHAKE_MISSING_NEWLINE');
 const oversized = sourceText.includes('TEST_HANDSHAKE_OVERSIZED');
-const sdkVersion = mismatch ? '0.0.0' : '0.87.1';
+const sdkVersion = mismatch ? '0.0.0' : '1.0.0';
 fs.writeFileSync('dist/index.js', `import {createInterface} from 'node:readline';
 import {realpathSync} from 'node:fs';
 const input=createInterface({input:process.stdin,crlfDelay:Infinity});
@@ -75,10 +75,10 @@ with Path(os.environ['TEST_NPM_CALLS']).open('a') as f:f.write(json.dumps(sys.ar
 if os.environ.get('TEST_NPM_FAIL'):
  print('PRIVATE-REGISTRY-CREDENTIAL');sys.exit(3)
 sdk=root/'node_modules/@earendil-works/pi-coding-agent';sdk.mkdir(parents=True,exist_ok=True)
-(sdk/'package.json').write_text(json.dumps({{'version':'0.87.1','type':'module','main':'index.js'}}))
+(sdk/'package.json').write_text(json.dumps({{'version':'1.0.0','type':'module','main':'index.js'}}))
 (sdk/'index.js').write_text('export const fixture = true;')
 ai=root/'node_modules/@earendil-works/pi-ai';ai.mkdir(parents=True,exist_ok=True)
-(ai/'package.json').write_text(json.dumps({{'version':'0.87.1','type':'module','main':'index.js'}}))
+(ai/'package.json').write_text(json.dumps({{'version':'1.0.0','type':'module','main':'index.js'}}))
 tsc=root/'node_modules/typescript/bin/tsc';tsc.parent.mkdir(parents=True,exist_ok=True)
 tsc.write_text({tsc_script!r})
 ''')
@@ -152,7 +152,7 @@ def assert_installed_entry_handshakes(entry: Path) -> None:
         )
     response = json.loads(result.stdout)
     assert response["payload"]["runtime_id"] == "pi"
-    assert response["payload"]["sdk_version"] == "0.87.1"
+    assert response["payload"]["sdk_version"] == "1.0.0"
 
 
 @pytest.mark.parametrize("changed_file", ["index.ts", "tools.ts", "model.ts", "nested/helper.ts"])
