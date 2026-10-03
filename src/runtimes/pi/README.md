@@ -149,9 +149,12 @@ The bridge records the requested tier and raw response tier separately. OpenAI
 says native Codex's response field is not a reliable end-to-end Fast indicator;
 the Run event leaves `effective` null on this route. A completed `priority`
 request proves the profile and wire path, while per-request Fast allocation
-requires separate usage evidence. Pi's native function tools may have optional
-fields; the bridge sends non-strict schemas and still validates and authorizes
-tool arguments before execution.
+requires separate usage evidence. A bounded, interleaved subscription latency
+probe in `docs/research/news_agent_pi_1_0_0_public_fast_20261003.md` found an
+aggregate speed gain with two slow `priority` request outliers; latency does
+not identify the server-side tier of an individual request. Pi's native
+function tools may have optional fields; the bridge sends non-strict schemas
+and still validates and authorizes tool arguments before execution.
 
 Other protocols/settings fail explicitly. `system_prompt_boundary` is unsupported.
 Tool forcing/parallel tools are rejected. Provider error bodies are never exposed
