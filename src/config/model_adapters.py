@@ -8,6 +8,7 @@ type AdapterKind = Literal[
     "openai_chat",
     "openai_responses",
     "openai_codex_responses",
+    "openai_chatgpt_responses",
     "anthropic_messages",
 ]
 

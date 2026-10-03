@@ -24,12 +24,14 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
              citations: bool = True, status: int = 200, refresh: bool = False,
              refresh_error: bool = False, first_textual_tool_call: bool = False,
              answer: str = "Current result", first_status: int | None = None,
-             first_answer: str | None = None):
+             first_answer: str | None = None, provider: str = "openai-codex",
+             response_tier: str = "default"):
     app = project(tmp_path, "http://127.0.0.1:1/v1")
     configuration = tmp_path / "config/llm.yaml"
     data = yaml.safe_load(configuration.read_text())
     data["model"]["codex"] = {
-        "adapter": "openai_codex_responses", "model": "gpt-6-luna",
+        "adapter": "openai_chatgpt_responses" if provider == "openai" else "openai_codex_responses",
+        "model": "gpt-6-luna",
         "context_window": 272000, "max_output_tokens": 256,
         "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000,
         "reasoning_effort": "xhigh", "web_search": search,
@@ -45,9 +47,10 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
         "https://api.openai.com/auth": {"chatgpt_account_id": "fixture-account"}
     }).encode()).decode().rstrip("=")
     credential = auth_dir / "auth.json"
-    credential.write_text(json.dumps({"openai-codex": {
+    credential.write_text(json.dumps({provider: {
         "type": "oauth", "access": f"fixture.{account}.signature",
         "refresh": "fixture-refresh", "expires": int(time.time() * 1000) + (-1000 if refresh else 3600_000),
+        "clientId": "fixture-client", "scopes": ["chatgpt.tokens.use.direct"],
     }}))
     credential.chmod(0o600)
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(auth_dir))
@@ -59,7 +62,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
                                     "refresh_error": refresh_error,
                                     "first_textual_tool_call": first_textual_tool_call,
                                     "answer": answer, "first_status": first_status,
-                                    "first_answer": first_answer}))
+                                    "first_answer": first_answer, "provider": provider,
+                                    "response_tier": response_tier}))
     bootstrap = tmp_path / "codex-bootstrap.mjs"
     bootstrap.write_text("""
 import {appendFileSync, readFileSync} from 'node:fs';
@@ -76,7 +80,8 @@ globalThis.fetch = async (input, init) => {
     return new Response(JSON.stringify({access_token: %ACCESS%, refresh_token: 'fixture-new-refresh',
       expires_in: 3600}), {status: 200, headers: {'content-type': 'application/json'}});
   }
-  if (!request.url.endsWith('/backend-api/codex/responses')) return nativeFetch(input, init);
+  if (!['https://chatgpt.com/backend-api/codex/responses',
+        'https://api.openai.com/v1/responses'].includes(request.url)) return nativeFetch(input, init);
   let body = Buffer.from(await request.arrayBuffer());
   if (request.headers.get('content-encoding') === 'zstd') body = zstdDecompressSync(body);
   const payload = JSON.parse(body.toString('utf8'));
@@ -107,6 +112,7 @@ globalThis.fetch = async (input, init) => {
     {type: 'response.output_text.delta', item_id: 'msg_1', output_index: 1, content_index: 0, delta: answer},
     {type: 'response.output_item.done', output_index: 1, item: message},
     {type: 'response.completed', response: {id: 'resp_1', model: payload.model, status: 'completed', output,
+      service_tier: scenario.response_tier,
       usage: {input_tokens: 12, output_tokens: 3, total_tokens: 15,
         input_tokens_details: {cached_tokens: 0}}}},
   ];
@@ -279,6 +285,34 @@ def test_codex_service_tier_reaches_the_wire(tmp_path, monkeypatch, tier, wire_t
     assert requests[0]["service_tier"] == wire_tier
     if search == "required":
         assert requests[0]["tool_choice"] == {"type": "web_search"}
+
+
+@pytest.mark.parametrize("effective", ["fast", "default"])
+def test_chatgpt_public_api_records_actual_service_tier(tmp_path, monkeypatch, effective):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", provider="openai",
+                         response_tier=effective)
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"]["service_tier"] = "fast"
+    path.write_text(yaml.safe_dump(config))
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    requests = [json.loads(line) for line in wire.read_text().splitlines()]
+    assert len(requests) == 1
+    assert requests[0]["url"] == "https://api.openai.com/v1/responses"
+    assert requests[0]["body"]["service_tier"] == "fast"
+    assert requests[0]["body"]["store"] is False
+    assert requests[0]["body"]["stream"] is True
+    with inspect_run(result.run) as trace:
+        response = next(event for event in trace.events() if event["kind"] == "model_response")
+        captured = json.loads(trace.read_text(response["response_ref"]))
+        assert captured["native_service_tier"] == effective
+    events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
+    tiers = [event["details"] for event in events if event["kind"] == "model"
+             and event["details"].get("phase") == "provider_tier"]
+    assert len(tiers) == 1
+    assert tiers[0]["requested"] == "fast"
+    assert tiers[0]["effective"] == effective
 
 
 def test_required_search_is_enforced_on_each_model_turn(tmp_path, monkeypatch):

@@ -177,7 +177,7 @@ def test_signal_terminated_bash_is_recorded_as_error_not_successful_evidence(tmp
             result = execute_app(app, file_logging=False)
     entries = [json.loads(p.read_text()) for p in tmp_path.rglob("native-tools/**/*.json")]
     assert len(entries) == 1
-    # Pi 0.87.1 reports SIGKILL as exit code 137. It is a known failed command,
+    # Pi reports SIGKILL as exit code 137. It is a known failed command,
     # recorded as an error rather than successful Shell output.
     assert entries[0]["state"] == "committed"
     assert entries[0]["record"]["status"] == "error"

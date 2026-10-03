@@ -14,7 +14,7 @@ let nextRequestAt = 0;
 const EMPTY_TOOL_PLACEHOLDERS = new Set(["(see attached image)", "(no tool output)"]);
 const MAX_MODEL_CAPTURE_BYTES = 32 * 1024 * 1024;
 export type SearchEvidence = {calls: {id: string; status: "completed"}[];
-  citations: {url: string; title: string}[]};
+  citations: {url: string; title: string}[]; serviceTier?: string};
 const httpCapture = new AsyncLocalStorage<(input: RequestInfo | URL, init: RequestInit | undefined,
   send: () => Promise<Response>) => Promise<Response>>();
 const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -44,6 +44,7 @@ async function readBounded(body: ReadableStream<Uint8Array> | null): Promise<Buf
 function searchEvidence(raw: string): SearchEvidence {
   const calls = new Map<string, {id: string; status: "completed"}>();
   const citations = new Map<string, string>();
+  let serviceTier: string | undefined;
   const inspect = (value: unknown): void => {
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value)) {for (const part of value) inspect(part); return;}
@@ -69,11 +70,15 @@ function searchEvidence(raw: string): SearchEvidence {
     try {
       const event = JSON.parse(data) as Obj;
       if (event.type === "response.output_item.done") inspect(event.item);
-      else if (event.type === "response.completed") inspect(event.response?.output);
+      else if (event.type === "response.completed") {
+        inspect(event.response?.output);
+        if (typeof event.response?.service_tier === "string") serviceTier = event.response.service_tier;
+      }
       else if (event.type === "response.output_text.annotation.added") inspect(event.annotation);
     } catch { /* Ignore non-JSON SSE heartbeat data. */ }
   }
-  return {calls: [...calls.values()], citations: [...citations].map(([url, title]) => ({url, title}))};
+  return {calls: [...calls.values()], citations: [...citations].map(([url, title]) => ({url, title})),
+    ...(serviceTier ? {serviceTier} : {})};
 }
 
 function emptyToolCallIds(messages: readonly Obj[]) {
@@ -128,7 +133,11 @@ function failedStream(model: Model<Api>, interrupted: boolean, reason?: string) 
 export function configureModel(session: AgentSession, settings: Obj, headers: Obj,
     prepare: () => Promise<{state: "work" | "final" | "denied"; agent_context: string[]; identity: Obj}>,
     retry: (attempt: number) => void, agentDir: string, invoke: (payload: Obj) => Promise<Obj>,
-    codex = false, reportSearch?: (identity: Obj, attempt: number, evidence: SearchEvidence) => void) {
+    provider: {codex: boolean; chatgpt: boolean} = {codex: false, chatgpt: false},
+    reportSearch?: (identity: Obj, attempt: number, evidence: SearchEvidence) => void,
+    reportTier?: (identity: Obj, attempt: number, tier: string) => void) {
+  const {codex, chatgpt} = provider;
+  const subscription = codex || chatgpt;
   const nativeStream = session.agent.streamFunction;
   const failure = {timedOut: false, status: 0, reason: ""};
   const capture = async (identity: Obj, attempt: number, phase: "request" | "response", value: unknown,
@@ -191,7 +200,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
             {method: request.method, url: request.url, headers: safeHeaders, body},
             "openai_http_request");
           const response = await send();
-          if (codex && settings.extra_completion_params?.web_search !== "off" && response.ok) {
+          if (subscription && response.ok) {
             searchPromise = readBounded(response.clone().body).then(bytes => searchEvidence(bytes.toString("utf8")));
             void searchPromise.catch(() => {});
           }
@@ -199,7 +208,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         };
         try {
           stream = await httpCapture.run(captureHttp, () => nativeStream(model, selectedContext, {...options, signal,
-            temperature: codex ? undefined : settings.temperature, maxTokens: settings.max_output_tokens, headers,
+            temperature: subscription ? undefined : settings.temperature, maxTokens: settings.max_output_tokens, headers,
             cacheRetention: settings.context_cache ? "short" : "none", transport: "sse",
             onPayload: async (payload, selectedModel) => {
               const projected = await options?.onPayload?.(payload, selectedModel);
@@ -224,17 +233,23 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           let evidence: SearchEvidence | undefined;
           if (searchPromise) {
             evidence = await searchPromise;
-            reportSearch?.(permit.identity, attempt, evidence);
+            if (settings.extra_completion_params?.web_search !== "off")
+              reportSearch?.(permit.identity, attempt, evidence);
+            if (evidence.serviceTier) reportTier?.(permit.identity, attempt, evidence.serviceTier);
           }
-          if (codex && settings.extra_completion_params?.web_search === "required" &&
+          if (subscription && settings.extra_completion_params?.web_search === "required" &&
               message.stopReason !== "error" && message.stopReason !== "aborted" &&
               !evidence?.calls.length)
-            throw new Error("Pi Codex required web search was not executed");
+            throw new Error("Pi ChatGPT required web search was not executed");
           // An already-aborted turn can produce an SDK error stream without
           // reaching onPayload. There is no provider request to pair it with.
           if (requestCaptured) {
             responseAttempted = true;
-            await capture(permit.identity, attempt, "response", evidence ? {...message, native_search: evidence} : message);
+            await capture(permit.identity, attempt, "response", evidence
+              ? {...message, ...(settings.extra_completion_params?.web_search !== "off" ? {native_search: {
+                calls: evidence.calls, citations: evidence.citations}} : {}),
+                ...(evidence.serviceTier ? {native_service_tier: evidence.serviceTier} : {})}
+              : message);
           }
           if (!failure.timedOut && message.stopReason !== "error") return stream;
           errorText = message.errorMessage || "";
@@ -254,15 +269,16 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         } finally {
           if (timeout !== undefined) clearTimeout(timeout);
         }
-        const errorStatus = /^(\d{3})\b/.exec(errorText);
-        if (errorStatus) failure.status = Number(errorStatus[1]);
+        const errorStatus = /^(?:(\d{3})\b|OpenAI API error \((\d{3})\):)/.exec(errorText);
+        if (errorStatus) failure.status = Number(errorStatus[1] || errorStatus[2]);
         const quotaExhausted = /usage limit|insufficient_quota|out of budget|quota exceeded|billing/i.test(errorText);
-        failure.reason = codex ?
-          errorText === "Pi Codex required web search was not executed" ? errorText :
-          failure.status === 401 || failure.status === 403 ? "Pi Codex authentication failed; log in through Pi again" :
-          failure.status === 404 ? "Pi Codex model is unavailable" :
-          quotaExhausted ? "Pi Codex subscription quota exhausted" :
-          "Pi Codex provider request failed" : "Pi model request failed";
+        const name = codex ? "Codex" : "ChatGPT";
+        failure.reason = subscription ?
+          errorText === "Pi ChatGPT required web search was not executed" ? errorText :
+          failure.status === 401 || failure.status === 403 ? `Pi ${name} authentication failed; log in through Pi again` :
+          failure.status === 404 ? `Pi ${name} model is unavailable` :
+          quotaExhausted ? `Pi ${name} subscription quota exhausted` :
+          `Pi ${name} provider request failed` : "Pi model request failed";
         const retryable = failure.timedOut || failure.status === 408 || (failure.status === 429 && !quotaExhausted) || failure.status >= 500 ||
           (!errorStatus && /connection|network|fetch failed|timed? out|timeout|stream ended/i.test(errorText));
         if (options?.signal?.aborted || !retryable || attempt >= settings.num_retries)

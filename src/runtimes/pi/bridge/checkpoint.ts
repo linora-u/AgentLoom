@@ -5,13 +5,15 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 type Obj = Record<string, any>;
+const sdkPackage = new URL("../package.json", import.meta.resolve("@earendil-works/pi-coding-agent"));
+const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as string;
 
 export function restoreSession(agentDir: string, cwd: string, checkpoint: Obj) {
   const plan = JSON.parse(readFileSync(join(agentDir, "restore.json"), "utf8"));
   const bundle = plan.bundle;
-  if (checkpoint.runtime_id !== "pi" || checkpoint.runtime_version !== "0.87.1" ||
+  if (checkpoint.runtime_id !== "pi" || checkpoint.runtime_version !== sdkVersion ||
       checkpoint.state_schema_version !== 2 || checkpoint.payload.bridge_version !== 1 ||
-      bundle.version !== 2 || bundle.bridge_version !== 1 || bundle.sdk_version !== "0.87.1" ||
+      bundle.version !== 2 || bundle.bridge_version !== 1 || bundle.sdk_version !== sdkVersion ||
       bundle.session.header.version !== 3 || bundle.session.header.cwd !== cwd ||
       bundle.session.header.id !== checkpoint.payload.session_id)
     throw new Error("Incompatible Pi native checkpoint; start a new Task");
@@ -50,7 +52,7 @@ export class SessionPersistence {
     // snapshot when its turn reaches the queue, never overwrite newer state
     // with a delayed snapshot captured by an earlier tool.
     this.pending = this.pending.then(async () => {
-      const bundle = {version: 2, bridge_version: 1, sdk_version: "0.87.1", scope: this.scope(),
+      const bundle = {version: 2, bridge_version: 1, sdk_version: sdkVersion, scope: this.scope(),
         session: {header: this.manager.getHeader(), entries: this.manager.getEntries()},
         calls: [...this.calls.values()], phase};
       const raw = JSON.stringify(bundle);
