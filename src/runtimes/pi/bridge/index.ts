@@ -204,7 +204,10 @@ async function run(frame: Frame, abort: AbortController) {
   };
   reportTier = (identity, attempt, tier) => event("model", {phase: "provider_tier",
     call_id: identity.call_id, attempt, requested: p.model.settings.extra_completion_params?.service_tier || "default",
-    effective: tier});
+    response_tier: tier,
+    // The public API documents this as the actual tier. Codex's subscription
+    // backend does not expose an authoritative per-request tier in this field.
+    effective: p.model.protocol === "openai_chatgpt_responses" ? tier : null});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
   let unavailableToolTurns = 0;
