@@ -1,5 +1,7 @@
 # Pi 1.0.0 与 news_agent 的 Fast 接入记录（2026-10-03）
 
+> 前半部分按隔离验证时的状态留存；主目录接入和最终验证见文末。
+
 ## 版本与路径
 
 - 2026-10-03 查询 npm 的 `@earendil-works/pi-ai` 和 `@earendil-works/pi-coding-agent`，两者 `dist-tags.latest` 均为 `1.0.0`；[上游发布页](https://github.com/earendil-works/pi/releases)也把 v1.0.0 标为 Latest。
@@ -56,3 +58,11 @@ AgentLoom 新增 `openai_chatgpt_responses` 用于公开 API 的订阅授权验�
 - 通过本机 Codex app-server 的只读 `account/rateLimits/read` 查询到订阅账号的 `codex` 周限额；当前 `primary.usedPercent` 为整数百分比，且没有逐请求服务档位或扣减明细。查询时该账号的八月新闻回放仍在运行，多个 Pi worker 同时请求模型，无法把前后百分比变化归给某一次隔离探测。
 - 用 Pi Codex OAuth 对 `GET /backend-api/codex/usage` 做只读尝试，服务端返回 403；没有把该内部路径作为正式证据来源，也没有进一步改变认证或请求来源以绕过限制。
 - 这排除了用当前可见的额度读数验证单次实际 Fast 的方法。需要服务端逐请求档位或可归因的用量记录，才可把候选配置提升为“实际 Fast 已证实”。期间继续保留原始请求、完成事件、模型和运行版本证据。
+
+## 主目录接入（2026-10-03）
+
+- 主仓库 `main` 快进合入 Pi 工作树至 `9ab2cf0`，原有两处不相关的已修改文件及未追踪文件保留。主目录 `.venv` 重新安装锁定的 Pi 1.0.0；Pi Codex OAuth 检查为 `ready`。`news_agent` 自身 Git 仓库的 `master` 将 `config/model.yaml` 提交为 `e8f3026`；三个模型配置通过 YAML 锚点全部继承 `service_tier: fast`，五个 Pi workflow 的模型引用均核对通过。
+- 切换前终止正在执行的 v23 八月回放，避免同一轮使用两种服务档位。停止前的进度快照及原模型配置保存在 `applications/news_agent/data/evaluation/v23_formal/pre_fast_cutover_progress_20261003.json` 和 `pre_fast_cutover_model_20261003.yaml`。快照仍是首日精筛 37/50 块，月份未完成；已有结果文件保留，不能将这一轮当成完整月验收。
+- 主目录定向测试 `tests/pi_test/test_codex_application.py`、`applications/news_agent/tests/test_baseline_pi.py` 和 `applications/news_agent/tests/test_baseline.py` 共 **48 通过**。测试含初筛、精筛和来源复核的 `priority` 请求检查。
+- 主目录真实初筛模拟输入在约 4.7 秒内完成，1 次订阅请求、0 次重试，返回 `{"classifications":[[1,2]]}`；真实来源复核模拟输入在约 13.8 秒内完成，1 次订阅请求、1 次联网搜索、0 次重试，并因原文无法核实而弃权。两次留存的 HTTP 请求都发往 `https://chatgpt.com/backend-api/codex/responses`，模型 `gpt-6-luna`，`service_tier: priority`。日志位于 `applications/news_agent/data/evaluation/fast_cutover_*_20261003.log`，原始请求与响应在对应 `data/runtime/traces` 中。模拟输入不计入投资预测验收。
+- 以上验证使用 Pi 的 ChatGPT 订阅 OAuth，没有付费 API key。仍然不能从 Codex 原生响应中的 `default` 判断单次有效档位；隔离工作树的交错性能对照是实际提速证据，不是逐请求计量记录。
