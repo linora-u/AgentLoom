@@ -17,6 +17,7 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 
 ## Table of Contents
 
+- [redaction — Content Redaction](#redaction--content-redaction)
 - [Quick Reference: Representative YAML Structure](#quick-reference-representative-yaml-structure)
 - [1. system — System Metadata](#1-system--system-metadata)
 - [2. runtime_options — Backend Options](#2-runtime_options--backend-options)
@@ -35,6 +36,24 @@ The configuration loading order is `config/system.yaml` → `config/llm.yaml` �
 - [Appendix B: Application-Level Override and Directory Structure](#appendix-b-application-level-override-and-directory-structure)
 
 ---
+
+## redaction — Content Redaction
+
+`redaction.enabled` controls secret redaction and defaults to `true`. The global
+`config/system.yaml` supplies the default; an Application's `config/system.yaml`
+may override it. Agent YAML cannot override it. The effective value is pinned
+for each Run, inherited by Workers, and recorded in the Run manifest.
+
+```yaml
+redaction:
+  enabled: false
+```
+
+Disabling redaction preserves logging and execution evidence while skipping
+secret scanning. Prompt-injection checks remain independent. Transport
+authentication is excluded at capture time. Changes apply to subsequent Runs
+without rewriting existing records.
+
 
 ## Quick Reference: Representative YAML Structure
 
@@ -67,6 +86,9 @@ logging:
   file_enabled: true
   max_file_bytes: 26214400
   backup_count: 3
+
+redaction:
+  enabled: true
 
 # ============================================
 # Default Toolsets

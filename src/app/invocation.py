@@ -82,6 +82,16 @@ class AgentInvocation:
     answer_present: bool = False
 
     def run(self) -> JSONValue:
+        from agentloom.config.redaction import bind_redaction_policy
+
+        effective = self.owner._effective_agent_config or self.owner._config
+        with bind_redaction_policy(effective, inherit=True) as enabled:
+            context = get_current_run_context()
+            if context is not None and self.owns_root_run:
+                context.update_manifest(redaction={"enabled": enabled})
+            return self._run_bound()
+
+    def _run_bound(self) -> JSONValue:
         from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
         from agentloom.execution.goal import (
             GoalStateProvider,

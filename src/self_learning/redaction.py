@@ -9,6 +9,8 @@ import re
 import unicodedata
 from typing import Any
 
+from agentloom.config.redaction import redaction_enabled
+
 _REDACTED = "[REDACTED]"
 BLOCKED_TEXT = "[BLOCKED]"
 _SCAN_CHUNK_CHARS = 65_536
@@ -377,9 +379,10 @@ def _key_before_separator(text: str, separator_index: int) -> tuple[int, str] | 
         if cursor > 0 and text[cursor - 1] in {'"', "'"}:
             quote = text[cursor - 1]
             key_end = cursor - 1
+            escaped_quote = key_end > 0 and text[key_end - 1] == "\\"
             start = key_end
             while start > 0:
-                if text[start - 1] == quote and (start < 2 or text[start - 2] != "\\"):
+                if text[start - 1] == quote and (start >= 2 and text[start - 2] == "\\") == escaped_quote:
                     break
                 start -= 1
             opening_quote = start - 1
@@ -393,9 +396,13 @@ def _key_before_separator(text: str, separator_index: int) -> tuple[int, str] | 
     if text[end - 1] in {'"', "'"}:
         quote = text[end - 1]
         key_end -= 1
+        # An escaped closing quote belongs to an escaped opening quote.
+        # Otherwise each embedded JSON key scans back through the whole
+        # preceding payload and normalizes an ever-growing false key.
+        escaped_quote = key_end > 0 and text[key_end - 1] == "\\"
         start = key_end
         while start > 0:
-            if text[start - 1] == quote and (start < 2 or text[start - 2] != "\\"):
+            if text[start - 1] == quote and (start >= 2 and text[start - 2] == "\\") == escaped_quote:
                 break
             start -= 1
         if start == key_end or start == 0:
@@ -682,6 +689,10 @@ def _as_redaction_text(value: Any) -> str:
 def redact_text(value: Any, *, max_chars: int | None = None) -> str:
     """Return a string with common credential shapes replaced."""
     text = _as_redaction_text(value)
+    if not redaction_enabled():
+        if max_chars is not None and max_chars >= 0 and len(text) > max_chars:
+            return text[:max_chars] + f"\n...[truncated {len(text) - max_chars} chars]"
+        return text
 
     # Safe escaped JSON keeps its exact bytes: normalized views are returned
     # only after a credential is found. Structural redaction owns the complete
@@ -713,6 +724,8 @@ def redact_value(value: Any) -> Any:
     function is safe for callers that have not serialized their payload yet.
     Scalar strings still receive free-text credential scanning.
     """
+    if not redaction_enabled():
+        return value
     if isinstance(value, dict):
         redacted: dict[Any, Any] = {}
         for key, item in value.items():
@@ -837,7 +850,7 @@ def _sanitize_value_fragments_recursive(
                 key_tainted = False
             else:
                 safe_key, key_tainted = sanitize_text_fragment_with_taint(key)
-            if _is_sensitive_key(key):
+            if redaction_enabled() and _is_sensitive_key(key):
                 safe_item = _REDACTED
                 item_tainted = legacy_redaction_provenance or item != _REDACTED
             elif safe_key == BLOCKED_TEXT:
