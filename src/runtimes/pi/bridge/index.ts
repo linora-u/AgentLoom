@@ -31,8 +31,6 @@ let restoredPhase: string | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
 let nativeIncomplete = false;
-let modelFailure = {timedOut: false, status: 0, reason: ""};
-let reportRetry: ((attempt: number) => void) | undefined;
 let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
 let reportTier: ((identity: Obj, attempt: number, tier: string) => void) | undefined;
 let outputCorrection = false;
@@ -139,7 +137,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   if (!subscription) {
     runtime.registerProvider("agentloom", {
       api, baseUrl: s.base_url || "https://api.openai.com/v1", apiKey: "agentloom-runtime-key",
-      models: [{id: modelId, name: modelId, reasoning: false, input: ["text"],
+      models: [{id: modelId, name: modelId, reasoning: Boolean(s.extra_completion_params?.reasoning_effort), input: ["text"],
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: s.context_window,
         maxTokens: s.max_output_tokens, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
     });
@@ -163,9 +161,15 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     if (chatgpt && auth.source !== "OAuth")
       throw new Error("Pi ChatGPT subscription login is missing; authorize the OpenAI provider in Pi");
   }
-  // Adapter-controlled, bounded retry waits; no hidden SDK retry multiplier.
-  const settings = SettingsManager.inMemory({retry: {enabled: false, provider: {maxRetries: 0, timeoutMs: s.timeout * 1000}},
-    compaction: {enabled: false, ...p.runtime_options.compaction}, enableAnalytics: false, enableInstallTelemetry: false, packages: []});
+  const {max_stop_attempts: _maxStopAttempts, ...nativeSettings} = p.runtime_options;
+  const settings = SettingsManager.inMemory({
+    retry: {maxRetries: s.num_retries, baseDelayMs: s.retry_delay * 1000,
+      maxAgentDelayMs: s.max_retry_delay * 1000,
+      provider: {maxRetries: s.num_retries, timeoutMs: s.timeout * 1000,
+        maxRetryDelayMs: s.max_retry_delay * 1000}},
+    enableAnalytics: false, enableInstallTelemetry: false, packages: [],
+    ...nativeSettings,
+  });
   const restored = p.checkpoint ? restoreSession(agentDir, p.cwd, p.checkpoint) : undefined;
   const manager = restored?.manager ?? SessionManager.inMemory(p.cwd);
   restoredPhase = restored?.bundle.phase;
@@ -188,33 +192,26 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     extensionFactories: [selected.extension]});
   await loader.reload();
   const {session: created} = await createAgentSession({cwd: p.cwd, agentDir, modelRuntime: runtime,
-    model, thinkingLevel: subscription ? (extra.reasoning_effort || "xhigh") : "off", tools: selected.tools.map(tool => tool.name),
+    model, thinkingLevel: extra.reasoning_effort, tools: selected.tools.map(tool => tool.name),
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   enableInstructionOnlyTurns(created);
   await created.bindExtensions({onError: () => created.agent.abort()});
-  modelFailure = configureModel(created, s, p.model.request_headers, async () => {
+  configureModel(created, s, p.model.request_headers, async () => {
     await persistence!.save();
     const requestIdentity = identity(`model:${randomUUID()}`);
     const permit = await invoke({method: "model_prepare", identity: requestIdentity});
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
     finalDelivery = permit.state === "final";
     return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
-  }, attempt => reportRetry?.(attempt), agentDir, invoke, {codex, chatgpt},
+  }, agentDir, invoke, {codex, chatgpt},
   (identity, attempt, result) => reportSearch?.(identity, attempt, result),
   (identity, attempt, tier) => reportTier?.(identity, attempt, tier));
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
     const extra = s.extra_completion_params || {};
-    for (const key of ["top_p", "seed"]) if (extra[key] !== undefined) result[key] = extra[key];
-    if (p.tools.length) for (const key of ["tool_choice", "parallel_tool_calls"])
-      if (extra[key] !== undefined) result[key] = extra[key];
-    if (extra.reasoning_effort !== undefined && !subscription) {
-      if (api === "openai-responses") result.reasoning = {effort: extra.reasoning_effort};
-      else result.reasoning_effort = extra.reasoning_effort;
-    }
-    const projected = {...result, ...extra.extra_body};
+    const projected = result;
     if (subscription && extra.service_tier !== undefined)
       projected.service_tier = codex && extra.service_tier === "fast" ? "priority" : extra.service_tier;
     const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));
@@ -260,7 +257,6 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
 async function run(frame: Frame, abort: AbortController) {
   const p = frame.payload;
   outputCorrection = false;
-  modelFailure = {timedOut: false, status: 0, reason: ""};
   let seq = 0;
   const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
@@ -302,6 +298,7 @@ async function run(frame: Frame, abort: AbortController) {
     unsubscribe = session.subscribe(e => {
       if (e.type === "compaction_start") event("checkpoint", {phase: "compaction_started"});
       if (e.type === "compaction_end") event("checkpoint", {phase: "compaction_ended", aborted: e.aborted});
+      if (e.type === "auto_retry_start") event("model", {phase: "retry", attempt: e.attempt});
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
         if (e.message.content.some(block => block.type === "toolCall" && !p.tools.some((tool: Obj) => tool.visible_name === block.name))) {
@@ -319,7 +316,6 @@ async function run(frame: Frame, abort: AbortController) {
         event("model", {phase: "completed", stop_reason: e.message.stopReason});
       }
     });
-    reportRetry = attempt => event("model", {phase: "retry", attempt});
     const trigger = async (content: string | null, correction = false) => {
       if (correction) {
         await session!.sendCustomMessage({
@@ -394,7 +390,7 @@ async function run(frame: Frame, abort: AbortController) {
       }
       break;
     }
-    if (nativeIncomplete || modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
+    if (nativeIncomplete || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       outputBudgetExhausted ? "max_steps_error" :
@@ -408,7 +404,7 @@ async function run(frame: Frame, abort: AbortController) {
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? {category: "provider", message: modelFailure.reason || "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
+      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: false} :
         outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch (error) {
     const interrupted = abort.signal.aborted;
@@ -418,12 +414,11 @@ async function run(frame: Frame, abort: AbortController) {
       ? detail.slice(0, 240) : "";
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
       output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: {category: interrupted ? "interrupted" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : safeDetail || modelFailure.reason || "Pi model request failed", retryable: modelFailure.timedOut}});
+      error: {category: interrupted ? "interrupted" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : safeDetail || "Pi model request failed", retryable: false}});
   } finally {
     rejectCallbacks();
     unsubscribe?.();
     current = undefined;
-    reportRetry = undefined;
     reportSearch = undefined;
     reportTier = undefined;
   }
