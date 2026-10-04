@@ -190,7 +190,7 @@ model:
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ 否 | 模型的人类可读描述。用于日志和文档 |
 | `temperature` | `float` | `0.1` | ❌ 否 | 创造力/随机性控制 (0.0 - 2.0)。详见 [3.2 temperature 建议](#32-temperature-配置建议) |
 | `context_window` | `int` | `150000` | ❌ 否 | 模型总上下文窗口，用于计算输入与预留输出预算 |
-| `max_output_tokens` | `int` | `16384` | ❌ 否 | 单次生成预留并传给模型服务的最大输出 Token 数 |
+| `max_output_tokens` | `int` | `16384` | ❌ 否 | 单次生成的输出容量（含推理 Token）；订阅接口的区别见 3.3 |
 | `max_tokens` | `int` | `150000` | ❌ 否 | 已弃用的兼容字段；单独使用时同时填充两项旧预算。旧值 `"max"` 会解析为该有限默认值。 |
 | `timeout` | `int` | `60` | ❌ 否 | 单次 HTTP 请求超时（秒）。超过此时间未响应则中断 |
 | `num_retries` | `int` | `5` | ❌ 否 | API 调用失败重试次数 |
@@ -214,9 +214,17 @@ model:
 ### 3.3 上下文与输出预算
 
 使用 `context_window` 声明服务端总上下文容量，使用 `max_output_tokens`
-声明生成预留。AgentLoom 按 `context_window - max_output_tokens` 压缩模型输入，
+声明生成预留。smolagents 按 `context_window - max_output_tokens` 压缩模型输入，
 只把 `max_output_tokens` 作为 `max_tokens` 发送给模型服务。仅当两个新字段都未设置时，
 继续接受旧的 `max_tokens` 配置。
+
+Pi 将这两项登记为原生模型的 `contextWindow` 和 `maxTokens`，输入压缩及
+compact 由 Pi SDK 管理。`openai_codex_responses` 在原生 `onPayload` 钩子中
+补充 `max_output_tokens`，传给 `https://chatgpt.com/backend-api/codex/responses`；
+该端点实测会按配置限制包含推理在内的生成 Token。
+`openai_chatgpt_responses` 使用公开 API 的 ChatGPT 订阅登录；该接口
+[不支持 `max_output_tokens`](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)，
+Pi 原生省略此字段，此时配置仅声明 SDK 模型输出容量，不控制服务端生成上限。
 
 ### 3.4 extra_headers 请求头
 
