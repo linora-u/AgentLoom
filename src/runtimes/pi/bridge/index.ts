@@ -1,5 +1,6 @@
 /** One SDK session per managed process. stdout is exclusively protocol JSONL. */
 import { createInterface } from "node:readline";
+import { createServer } from "node:net";
 import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -30,7 +31,7 @@ let restoredPhase: string | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
 let nativeIncomplete = false;
-let modelFailure = {timedOut: false, status: 0, reason: ""};
+let modelFailure = {timedOut: false, budgetExceeded: false, status: 0, reason: ""};
 let reportRetry: ((attempt: number) => void) | undefined;
 let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
 let reportTier: ((identity: Obj, attempt: number, tier: string) => void) | undefined;
@@ -61,7 +62,66 @@ function rejectCallbacks() {
   callbacks.clear();
 }
 
-async function createSession(p: Obj): Promise<AgentSession> {
+async function codexCallbackPortAvailable(): Promise<boolean> {
+  const server = createServer();
+  return new Promise(resolve => {
+    server.once("error", () => resolve(false));
+    server.listen(1455, "127.0.0.1", () => server.close(() => resolve(true)));
+  });
+}
+
+async function ensureCodexLogin(runtime: ModelRuntime, model: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
+    event: (kind: string, payload: Obj) => void): Promise<void> {
+  let auth;
+  let reason = "missing";
+  try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
+  catch {
+    if (current?.abort.signal.aborted) throw new Error("Interrupted");
+    reason = "refresh_failed";
+  }
+  if (auth?.source === "OAuth") return;
+  event("run", {phase: "auth_login_required", reason});
+  const browserLogin = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY) &&
+    await codexCallbackPortAvailable();
+  const controller = new AbortController();
+  const interrupted = () => controller.abort();
+  current?.abort.signal.addEventListener("abort", interrupted, {once: true});
+  if (current?.abort.signal.aborted) controller.abort();
+  let timedOut = false;
+  const timeout = setTimeout(() => {timedOut = true; controller.abort();}, 15 * 60_000);
+  try {
+    await runtime.login("openai-codex", "oauth", {
+      signal: controller.signal,
+      prompt: async prompt => {
+        if (prompt.type === "select") return browserLogin ? "browser" : "device_code";
+        if (prompt.type === "manual_code") {
+          // The SDK races this prompt against its loopback callback. The
+          // browser callback wins and aborts the unused manual prompt.
+          return new Promise<string>((_resolve, reject) => {
+            if (prompt.signal?.aborted) {reject(new Error("Login prompt cancelled")); return;}
+            prompt.signal?.addEventListener("abort", () => reject(new Error("Login prompt cancelled")), {once: true});
+          });
+        }
+        throw new Error("Unsupported Pi Codex login prompt");
+      },
+      notify: notice => {
+        if (notice.type === "auth_url") event("run", {phase: "auth_open_browser", url: notice.url});
+        if (notice.type === "device_code") event("run", {phase: "auth_device_code", url: notice.verificationUri, code: notice.userCode});
+      },
+    });
+    auth = await runtime.getAuth(model, {signal: controller.signal});
+    if (auth?.source !== "OAuth") throw new Error("Missing OAuth credential after login");
+    event("run", {phase: "auth_login_completed"});
+  } catch {
+    throw new Error(timedOut ? "Pi Codex login timed out after 15 minutes" :
+      "Pi Codex login was not completed; complete browser authorization and retry");
+  } finally {
+    clearTimeout(timeout);
+    current?.abort.signal.removeEventListener("abort", interrupted);
+  }
+}
+
+async function createSession(p: Obj, event: (kind: string, payload: Obj) => void): Promise<AgentSession> {
   nativeIncomplete = false;
   outputCorrection = false;
   const s = p.model.settings;
@@ -87,7 +147,8 @@ async function createSession(p: Obj): Promise<AgentSession> {
   }
   const model = runtime.getModel(codex ? "openai-codex" : chatgpt ? "openai" : "agentloom", modelId);
   if (!model) throw new Error(`Pi ${codex ? "Codex model" : chatgpt ? "ChatGPT model" : "model"} ${modelId} is unavailable`);
-  if (subscription) {
+  if (codex) await ensureCodexLogin(runtime, model, event);
+  else if (subscription) {
     let auth;
     try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
     catch {throw new Error(`Pi ${codex ? "Codex" : "ChatGPT"} credential refresh failed; check the connection or log in through Pi again`);}
@@ -192,7 +253,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
 async function run(frame: Frame, abort: AbortController) {
   const p = frame.payload;
   outputCorrection = false;
-  modelFailure = {timedOut: false, status: 0, reason: ""};
+  modelFailure = {timedOut: false, budgetExceeded: false, status: 0, reason: ""};
   let seq = 0;
   const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
@@ -227,7 +288,7 @@ async function run(frame: Frame, abort: AbortController) {
     if (p.checkpoint && session) throw new Error("Cannot restore into an active Pi session");
     if (!p.continue_session || !session) {
       session?.dispose();
-      session = await createSession(p);
+      session = await createSession(p, event);
     }
     if (abort.signal.aborted) throw new Error("Interrupted");
     event("run", {phase: "started", resumed: Boolean(p.checkpoint)});
@@ -286,6 +347,11 @@ async function run(frame: Frame, abort: AbortController) {
       return true;
     };
     while (last?.role === "assistant" && last.stopReason !== "error") {
+      if (outputValidator && last.stopReason === "length") {
+        outputBudgetExhausted = true;
+        outputValidationReason = "model output token limit";
+        break;
+      }
       const text = last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("");
       const textualTool = textualToolCallName(text);
       if (textualTool) {
@@ -335,7 +401,9 @@ async function run(frame: Frame, abort: AbortController) {
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? {category: "provider", message: modelFailure.reason || "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
+      error: state === "failed" && modelFailure.budgetExceeded
+        ? {category: "output_validation", message: modelFailure.reason, retryable: true}
+        : state === "failed" ? {category: "provider", message: modelFailure.reason || "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
         outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch (error) {
     const interrupted = abort.signal.aborted;
