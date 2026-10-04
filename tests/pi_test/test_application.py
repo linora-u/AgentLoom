@@ -346,12 +346,13 @@ def test_provider_failure_during_structured_correction_stays_provider_error(
     assert len(requests) == 2
 
 
-def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
-    tmp_path,
+@pytest.mark.parametrize("answer", ["not-json", '{"findings": []}'])
+def test_structured_output_at_token_limit_is_recoverable_output_validation(
+    tmp_path, answer,
 ):
     from agentloom.app.run import ApplicationRunError
 
-    with model_service(outputs=["not-json"], finish="length") as (url, requests):
+    with model_service(outputs=[answer], finish="length") as (url, requests):
         app = project(tmp_path, url)
         config = yaml.safe_load(app.read_text())
         config["output_schema"] = {
@@ -376,6 +377,7 @@ def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
     assert captured.value.original_error.category == "output_validation"
     assert captured.value.original_error.kind == "output_validation"
     assert captured.value.original_error.stage == "output_validation"
+    assert captured.value.original_error.retryable
     assert len(requests) == 1
 
 

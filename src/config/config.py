@@ -525,6 +525,11 @@ def extract_workflow_overlay(
     *,
     source_name: str = "workflow config",
 ) -> dict[str, Any]:
+    if "redaction" in config_map:
+        raise ValueError(
+            f"redaction is not configurable in Agent YAML ({source_name}); "
+            "use the global or Application config/system.yaml"
+        )
     if "project" in config_map:
         source = str(config_map.get("_yaml_file_path") or config_map.get("name") or "workflow config")
         raise raise_project_key_error(source)

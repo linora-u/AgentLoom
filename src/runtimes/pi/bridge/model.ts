@@ -13,7 +13,8 @@ let nextRequestAt = 0;
 
 const EMPTY_TOOL_PLACEHOLDERS = new Set(["(see attached image)", "(no tool output)"]);
 const MAX_MODEL_CAPTURE_BYTES = 32 * 1024 * 1024;
-export type SearchEvidence = {calls: {id: string; status: "completed"}[];
+export type SearchEvidence = {calls: {id: string; status: "completed"; action: Obj | null;
+  action_url_sha256?: string}[];
   citations: {url: string; title: string}[]; serviceTier?: string};
 const httpCapture = new AsyncLocalStorage<(input: RequestInfo | URL, init: RequestInit | undefined,
   send: () => Promise<Response>) => Promise<Response>>();
@@ -42,23 +43,27 @@ async function readBounded(body: ReadableStream<Uint8Array> | null): Promise<Buf
 }
 
 function searchEvidence(raw: string): SearchEvidence {
-  const calls = new Map<string, {id: string; status: "completed"}>();
+  const calls = new Map<string, SearchEvidence["calls"][number]>();
   const citations = new Map<string, string>();
   let serviceTier: string | undefined;
   const inspect = (value: unknown): void => {
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value)) {for (const part of value) inspect(part); return;}
     const item = value as Obj;
-    if (item.type === "web_search_call" && item.status === "completed" && calls.size < 50) {
-      const id = typeof item.id === "string" ? item.id.slice(0, 150) : `search-${calls.size + 1}`;
-      calls.set(id, {id, status: "completed"});
+    if (item.type === "web_search_call" && item.status === "completed") {
+      const id = typeof item.id === "string" ? item.id : `search-${calls.size + 1}`;
+      const action = item.action && typeof item.action === "object" && !Array.isArray(item.action)
+        ? item.action as Obj : null;
+      calls.set(id, {id, status: "completed", action,
+        ...(typeof action?.url === "string" ? {action_url_sha256:
+          createHash("sha256").update(action.url).digest("hex")} : {})});
     }
-    if (item.type === "url_citation" && typeof item.url === "string" && item.url.length <= 2048 && citations.size < 100) {
+    if (item.type === "url_citation" && typeof item.url === "string") {
       try {
         const url = new URL(item.url);
         if (url.protocol === "https:" || url.protocol === "http:")
           citations.set(url.href, typeof item.title === "string" && item.title.trim()
-            ? item.title.trim().replace(/[\r\n]/g, " ").slice(0, 250) : url.hostname);
+            ? item.title.trim().replace(/[\r\n]/g, " ") : url.hostname);
       } catch { /* Ignore invalid provider citations. */ }
     }
     for (const part of Object.values(item)) inspect(part);
@@ -70,7 +75,7 @@ function searchEvidence(raw: string): SearchEvidence {
     try {
       const event = JSON.parse(data) as Obj;
       if (event.type === "response.output_item.done") inspect(event.item);
-      else if (event.type === "response.completed") {
+      else if (["response.completed", "response.incomplete", "response.failed"].includes(event.type)) {
         inspect(event.response?.output);
         if (typeof event.response?.service_tier === "string") serviceTier = event.response.service_tier;
       }
@@ -118,12 +123,13 @@ function restoreEmptyToolResults(payload: unknown, messages: readonly Obj[]) {
   return changed ? result : payload;
 }
 
-function failedStream(model: Model<Api>, interrupted: boolean, reason?: string) {
+function failedStream(model: Model<Api>, interrupted: boolean, reason?: string,
+    usage?: AssistantMessage["usage"]) {
   const stream = createAssistantMessageEventStream();
   const message: AssistantMessage = {role: "assistant", content: [], api: model.api, provider: model.provider,
     model: model.id, timestamp: Date.now(), stopReason: interrupted ? "aborted" : "error",
     errorMessage: interrupted ? "Pi model request interrupted" : reason || "Pi model request failed",
-    usage: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+    usage: usage ?? {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}}};
   stream.push({type: "error", reason: message.stopReason as "error" | "aborted", error: message});
   stream.end(message);
@@ -139,7 +145,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
   const {codex, chatgpt} = provider;
   const subscription = codex || chatgpt;
   const nativeStream = session.agent.streamFunction;
-  const failure = {timedOut: false, status: 0, reason: ""};
+  const failure = {timedOut: false, budgetExceeded: false, status: 0, reason: ""};
   const capture = async (identity: Obj, attempt: number, phase: "request" | "response", value: unknown,
       boundary?: "openai_http_request") => {
     const captureId = randomUUID().replaceAll("-", "");
@@ -168,6 +174,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           {role: "user" as const, content: permit.agent_context.join("\n"), timestamp: Date.now()}] : context.messages};
       for (let attempt = 0; ; attempt++) {
         failure.timedOut = false;
+        failure.budgetExceeded = false;
         failure.status = 0;
         failure.reason = "";
         const timeoutAbort = new AbortController();
@@ -219,6 +226,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
                 projected === undefined ? payload : projected,
                 selectedContext.messages as Obj[],
               );
+              if (codex) (outgoing as Obj).max_output_tokens = settings.max_output_tokens;
               await capture(permit.identity, attempt, "request", outgoing);
               requestCaptured = true;
               return outgoing;
@@ -250,6 +258,14 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
                 calls: evidence.calls, citations: evidence.citations}} : {}),
                 ...(evidence.serviceTier ? {native_service_tier: evidence.serviceTier} : {})}
               : message);
+          }
+          const total = message.usage.input + message.usage.cacheRead + message.usage.cacheWrite
+            + message.usage.output;
+          const contextBudget = Math.min(settings.context_window, model.contextWindow);
+          if (total > contextBudget) {
+            failure.budgetExceeded = true;
+            failure.reason = `Pi model exceeded its total context budget: ${total} > ${contextBudget} tokens`;
+            return failedStream(model, false, failure.reason, message.usage);
           }
           if (!failure.timedOut && message.stopReason !== "error") return stream;
           errorText = message.errorMessage || "";

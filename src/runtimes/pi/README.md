@@ -112,8 +112,14 @@ with ChatGPT** authorizes the public Responses API; **OpenAI Codex** authorizes
 the native Codex backend. AgentLoom passes Pi's `auth.json` path into its
 isolated process; Pi reads it and refreshes the selected credential. The
 default path is `~/.pi/agent/auth.json`, or `PI_CODING_AGENT_DIR/auth.json` when
-set in the parent environment. Do not put a token in `llm.yaml`. A missing or
-expired login fails the Run without changing providers.
+set in the parent environment. Do not put a token in `llm.yaml`. For
+`openai_codex_responses`, a missing login or failed token refresh starts Pi's
+subscription OAuth flow, opens the system browser, waits up to 15 minutes for
+the callback, and then continues the same Run. A headless session uses Pi's
+device-code flow and prints its URL and code. Concurrent Runs share one login
+attempt; a cancelled or failed login leaves the Run failed without changing
+providers. The public `openai_chatgpt_responses` adapter retains its own
+separate login requirement.
 
 ```yaml
 model:

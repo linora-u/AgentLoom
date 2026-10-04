@@ -652,11 +652,16 @@ def test_final_answer_is_not_printed_before_success_manifest_commits(platform_pr
     assert json.loads(failed.value.run.manifest_path.read_text())["status"] == "failed"
 
 
-def test_exporter_failure_is_diagnostic_and_does_not_hold_application_result(platform_project):
+@pytest.mark.parametrize("redaction", [True, False])
+def test_exporter_failure_is_diagnostic_and_does_not_hold_application_result(platform_project, redaction):
     from threading import Event
     from time import monotonic, sleep
 
-    _, _, programs, _, run = platform_project
+    root, _, programs, _, run = platform_project
+    config_path = root / "config/system.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["redaction"] = {"enabled": redaction}
+    config_path.write_text(yaml.safe_dump(config))
     programs["platform"] = lambda _definition, _request: "ready"
     entered = Event()
     release = Event()
@@ -668,7 +673,7 @@ def test_exporter_failure_is_diagnostic_and_does_not_hold_application_result(pla
             submitted.append((event["event_id"], trace_dir))
             entered.set()
             release.wait(10)
-            raise RuntimeError("late exporter failure")
+            raise RuntimeError("late exporter failure api_key=fixture-secret")
 
     try:
         started = monotonic()
@@ -687,6 +692,11 @@ def test_exporter_failure_is_diagnostic_and_does_not_hold_application_result(pla
             break
         sleep(0.02)
     assert "late exporter failure" in diagnostics_path.read_text()
+    if redaction:
+        assert "fixture-secret" not in diagnostics_path.read_text()
+        assert "api_key=[REDACTED]" in diagnostics_path.read_text()
+    else:
+        assert "api_key=fixture-secret" in diagnostics_path.read_text()
 
 
 def test_application_trace_records_effective_pre_tool_decision(platform_project):

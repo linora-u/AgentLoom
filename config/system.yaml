@@ -120,6 +120,12 @@ checkpoint:
   heartbeat_interval: 5
 
 # ============================================
+# Content redaction (Applications may override this default)
+# ============================================
+redaction:
+  enabled: true
+
+# ============================================
 # Self-learning foundation
 # ============================================
 self_learning:

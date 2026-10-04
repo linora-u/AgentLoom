@@ -245,6 +245,13 @@ class RuntimeSettings(BaseModel):
         return cleaned
 
 
+class RedactionSettings(BaseModel):
+    """Global redaction default; Applications may override it."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(default=True, strict=True)
+
+
 class LoggingSettings(BaseModel):
     """Run-scoped logging settings with bounded file retention."""
 
@@ -353,6 +360,7 @@ class RootSettings(BaseModel):
     tool_access_control: ToolAccessControlSettings = Field(default_factory=ToolAccessControlSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    redaction: RedactionSettings = Field(default_factory=RedactionSettings)
     context_engine: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any] = Field(default_factory=dict)
     tools: list[Any] = Field(default_factory=list)

@@ -27,6 +27,7 @@ from agentloom.execution.native_tools import NativeCallIdentity
 from agentloom.execution.tool_gateway import PreparedToolGateway
 from agentloom.execution.trace import capture_explicit_execution_context
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
+from agentloom.runtimes.pi.auth import CodexLoginGate, open_login_browser, show_device_code
 from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
 from agentloom.runtimes.pi.protocol import (
     PI_BRIDGE_PROTOCOL_VERSION,
@@ -134,6 +135,21 @@ class PiRuntime:
                     pass
 
         def observe(event):
+            if event.event == "run" and event.payload.get("phase", "").startswith("auth_"):
+                phase = event.payload.get("phase")
+                if phase == "auth_open_browser":
+                    opened = open_login_browser(event.payload["url"])
+                    emit("run", {"phase": "auth_browser_opened" if opened else "auth_browser_link_shown"})
+                elif phase == "auth_device_code":
+                    show_device_code(event.payload["url"], event.payload["code"])
+                    emit("run", {"phase": "auth_device_code_shown"})
+                else:
+                    if phase == "auth_login_completed" and login_gate is not None:
+                        login_gate.release()
+                    emit("run", event.payload)
+                return
+            if event.event == "run" and event.payload.get("phase") == "started" and login_gate is not None:
+                login_gate.release()
             emit(event.event, event.payload)
 
         execution = capture_explicit_execution_context()
@@ -145,6 +161,7 @@ class PiRuntime:
         task = request.task
         max_stops = cast(int, definition.runtime_options.get("max_stop_attempts", 3))
         run_id = request.run_id or uuid4().hex
+        login_gate: CodexLoginGate | None = None
         cwd = str(Path(definition.project_root or ".").resolve())
         native_entries = tuple(tool for tool in definition.tool_manifest if tool.owner == "runtime")
         platform_entries = {tool.visible_name: tool for tool in definition.tool_manifest if tool.owner != "runtime"}
@@ -216,8 +233,16 @@ class PiRuntime:
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
                     additional_args=dict(request.additional_args), checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)
-                response = self.transport.request(wire, run_id=run_id, observe=observe, callback=protocol.handle,
-                                                  cancel_callbacks=cancel_callbacks)
+                if attempt == 0 and selection.protocol == "openai_codex_responses":
+                    login_gate = CodexLoginGate(self.transport.pi_auth_path)
+                    login_gate.acquire(cancelled=lambda: self.transport.process.poll() is not None)
+                try:
+                    response = self.transport.request(wire, run_id=run_id, observe=observe, callback=protocol.handle,
+                                                      cancel_callbacks=cancel_callbacks)
+                finally:
+                    if login_gate is not None:
+                        login_gate.release(failed=True)
+                        login_gate = None
                 result = response.payload
                 assert isinstance(result, RunResult)
                 if result.terminal_rejections > remaining_terminal_attempts:
