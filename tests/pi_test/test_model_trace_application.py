@@ -48,7 +48,7 @@ def test_pi_model_turn_records_projected_request_and_response(tmp_path):
         assert started[0]["step_number"] == 1
 
 
-def test_pi_retry_attempts_share_one_step_and_are_distinguishable(tmp_path):
+def test_pi_native_provider_retry_records_actual_http_requests(tmp_path):
     with model_service(fail_requests={1: 500}) as (url, requests):
         app = project(tmp_path, url)
         change_model(tmp_path, num_retries=1, retry_delay=0.01)
@@ -63,15 +63,14 @@ def test_pi_retry_attempts_share_one_step_and_are_distinguishable(tmp_path):
         wire = [event for event in trace.events() if event["kind"] == "model_request"
                 and event["boundary"] == "openai_http_request"]
         completed = [event for event in trace.events() if event["kind"] == "model_response"]
-    assert len(started) == len(wire) == len(completed) == 2
-    assert [event["attempt"] for event in started] == [0, 1]
-    assert [event["attempt"] for event in wire] == [0, 1]
-    assert [event["attempt"] for event in completed] == [0, 1]
+    assert len(started) == len(completed) == 1
+    assert len(wire) == 2
+    assert [event["attempt"] for event in started + wire + completed] == [0, 0, 0, 0]
     assert {event["run_step_number"] for event in started + completed} == {1}
     assert {event["model_turn_id"] for event in started} == {
         event["model_turn_id"] for event in completed
     }
-    assert [event["status"] for event in completed] == ["error", "completed"]
+    assert [event["status"] for event in completed] == ["completed"]
 
 
 def test_pi_failed_model_response_is_recorded_as_error(tmp_path):
@@ -119,7 +118,7 @@ const directory = process.argv[2];
 const scenario = process.argv[3];
 const calls = [];
 const model = {api: 'openai-completions', provider: 'agentloom', id: 'fixture-model'};
-const session = {agent: {streamFunction: async (_model, _context, options) => {
+const session = {retryAttempt: 0, agent: {streamFunction: async (_model, _context, options) => {
   await options.onPayload({model: 'fixture-model', messages: [], tools: []}, model);
   if (scenario === 'transport_exception') throw new Error('fixture post-request transport exception');
   return {result: async () => ({role: 'assistant', content: [{type: 'text', text: 'provider success'}],
@@ -128,7 +127,7 @@ const session = {agent: {streamFunction: async (_model, _context, options) => {
 configureModel(session,
   {timeout: 5, requests_per_minute: 2000000, num_retries: 0, retry_delay: 0.01, max_retry_delay: 0.01},
   {}, async () => ({state: 'work', agent_context: [], identity: {call_id: 'model:fixture'}}),
-  () => {}, directory,
+  directory,
   async payload => {
     calls.push(payload);
     if (scenario === 'response_trace_rejected' && payload.phase === 'response')

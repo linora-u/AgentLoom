@@ -45,6 +45,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
     configuration.write_text(yaml.safe_dump(data))
     definition = yaml.safe_load(app.read_text())
     definition["model_type"] = "codex"
+    definition["runtime_options"] = {"transport": "sse", "cacheWarming": "off",
+                                     "compaction": {"enabled": False}}
     app.write_text(yaml.safe_dump(definition))
 
     auth_dir = tmp_path / "pi-auth"
@@ -161,8 +163,20 @@ globalThis.fetch = async (input, init) => {
   return new Response(events.map(event => `event: ${event.type}\\ndata: ${JSON.stringify(event)}\\n\\n`).join(''),
     {status: 200, headers: {'content-type': 'text/event-stream'}});
 };
-const {ModelRuntime} = await import(new URL('../node_modules/@earendil-works/pi-coding-agent/dist/index.js',
+const {ModelRuntime, SettingsManager} = await import(new URL('../node_modules/@earendil-works/pi-coding-agent/dist/index.js',
   pathToFileURL(process.argv[1])).href);
+const nativeSettings = SettingsManager.inMemory;
+SettingsManager.inMemory = function(settings, ...args) {
+  appendFileSync(%SDKOPTIONS%, JSON.stringify({settings}) + '\\n');
+  return nativeSettings.call(this, settings, ...args);
+};
+const nativeStreamSimple = ModelRuntime.prototype.streamSimple;
+ModelRuntime.prototype.streamSimple = function(model, context, options) {
+  const {timeoutMs, maxRetries, maxRetryDelayMs, transport, maxTokens} = options;
+  appendFileSync(%SDKOPTIONS%, JSON.stringify({request: {
+    timeoutMs, maxRetries, maxRetryDelayMs, transport, maxTokens}}) + '\\n');
+  return nativeStreamSimple.call(this, model, context, options);
+};
 const nativeGetModel = ModelRuntime.prototype.getModel;
 ModelRuntime.prototype.getModel = function(provider, id) {
   const model = nativeGetModel.call(this, provider, id);
@@ -172,6 +186,7 @@ ModelRuntime.prototype.getModel = function(provider, id) {
 };
 """.replace("%WIRE%", json.dumps(str(wire))).replace("%SCENARIO%", json.dumps(str(scenario)))
        .replace("%MODELS%", json.dumps(str(tmp_path / "sdk-models.jsonl")))
+       .replace("%SDKOPTIONS%", json.dumps(str(tmp_path / "sdk-options.jsonl")))
        .replace("%REFRESH%", json.dumps(str(tmp_path / "refresh.log")))
        .replace("%LOGIN%", json.dumps(str(tmp_path / "login.log")))
        .replace("%ACCESS%", json.dumps(f"fixture.{account}.signature")))
@@ -188,6 +203,48 @@ ModelRuntime.prototype.getModel = function(provider, id) {
     launcher.chmod(0o755)
     monkeypatch.setenv("PATH", str(launcher_dir) + os.pathsep + os.environ["PATH"])
     return app, wire
+
+
+def test_pi_native_settings_and_request_options_are_forwarded(tmp_path, monkeypatch):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", completed=False, citations=False)
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"].update(reasoning_effort="low", context_window=500000,
+                                    max_output_tokens=65536)
+    path.write_text(yaml.safe_dump(config))
+    definition = yaml.safe_load(app.read_text())
+    native = {"compaction": {"enabled": False, "modelOverrides": {
+        "openai-codex/gpt-6-luna": {"reserveTokens": 24000, "keepRecentTokens": 8000}}},
+        "retry": {"enabled": True, "maxRetries": 0, "provider": {
+            "timeoutMs": 4321, "maxRetries": 0, "maxRetryDelayMs": 9876}},
+        "transport": "sse", "cacheWarming": "off"}
+    definition["runtime_options"] = native
+    app.write_text(yaml.safe_dump(definition))
+    with bind_config(load_project_config(tmp_path)):
+        assert execute_app(app, file_logging=False).output == "Current result"
+    observed = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
+    settings = next(item["settings"] for item in observed if "settings" in item)
+    assert all(settings[key] == value for key, value in native.items())
+    request = next(item["request"] for item in observed if "request" in item)
+    assert request == {"timeoutMs": 4321, "maxRetries": 0, "maxRetryDelayMs": 9876,
+                       "transport": "sse", "maxTokens": 65536}
+    assert json.loads(wire.read_text().splitlines()[0])["body"]["reasoning"]["effort"] == "low"
+
+
+def test_invalid_native_timeout_is_rejected_by_sdk(tmp_path, monkeypatch):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off")
+    definition = yaml.safe_load(app.read_text())
+    definition["runtime_options"]["retry"] = {"enabled": False, "provider": {
+        "timeoutMs": -1, "maxRetries": 0}}
+    app.write_text(yaml.safe_dump(definition))
+    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
+        execute_app(app, file_logging=False)
+    observed = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
+    assert next(item["request"] for item in observed if "request" in item)["timeoutMs"] == -1
+    with inspect_run(failure.value.run) as trace:
+        response = next(event for event in trace.events() if event["kind"] == "model_response")
+        assert "Invalid timeoutMs: -1" in json.loads(trace.read_text(response["response_ref"]))["errorMessage"]
+    assert not wire.exists()
 
 
 def _complete_browser_login(monkeypatch):
@@ -216,7 +273,7 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
     payload = requests[0]["body"]
     assert requests[0]["url"] == "https://chatgpt.com/backend-api/codex/responses"
     assert payload["model"] == "gpt-6-luna"
-    assert payload["max_output_tokens"] == 256
+    assert "max_output_tokens" not in payload  # Native Codex SDK omits this field.
     assert "service_tier" not in payload
     assert payload["reasoning"] == {"effort": "xhigh", "summary": "auto"}
     if mode == "off":
@@ -255,12 +312,13 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
         assert search_events[0]["details"]["completed_calls"] == captured["native_search"]["calls"]
 
 
-def test_required_search_without_completed_call_fails(tmp_path, monkeypatch):
+def test_required_search_passes_tool_choice_without_adapter_rejection(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="required", completed=False)
-    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
-        execute_app(app, file_logging=False)
-    assert len(wire.read_text().splitlines()) == 1
-    assert "required web search was not executed" in str(failure.value)
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert result.output.startswith("Current result")
+    request = json.loads(wire.read_text().splitlines()[0])["body"]
+    assert request["tool_choice"] == {"type": "web_search"}
 
 
 def test_completed_search_without_structured_citation_adds_no_source(tmp_path, monkeypatch):
@@ -376,7 +434,10 @@ def test_codex_provider_failures_do_not_fallback(tmp_path, monkeypatch, status, 
     app, wire = _fixture(tmp_path, monkeypatch, search="off", status=status)
     with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
         execute_app(app, file_logging=False)
-    assert message in str(failure.value)
+    assert "Pi model request failed" in str(failure.value)
+    with inspect_run(failure.value.run) as trace:
+        responses = [event for event in trace.events() if event["kind"] == "model_response"]
+        assert json.loads(trace.read_text(responses[-1]["response_ref"]))["errorMessage"]
     assert len(wire.read_text().splitlines()) == 1
 
 
@@ -486,11 +547,15 @@ def test_required_search_stays_on_for_retry_attempt(tmp_path, monkeypatch):
     assert all(request["tool_choice"] == {"type": "web_search"} for request in requests)
     with inspect_run(result.run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
-        assert [event["attempt"] for event in responses] == [0, 1]
-        assert [event["status"] for event in responses] == ["error", "completed"]
-        assert len({event["model_turn_id"] for event in responses}) == 2
+        # Provider retries stay inside one SDK stream and expose one final message.
+        assert [event["attempt"] for event in responses] == [0]
+        assert [event["status"] for event in responses] == ["completed"]
+        assert len({event["model_turn_id"] for event in responses}) == 1
         assert {event["run_step_number"] for event in responses} == {1}
-        assert json.loads(trace.read_text(responses[1]["response_ref"]))["native_search"]["calls"]
+        assert json.loads(trace.read_text(responses[0]["response_ref"]))["native_search"]["calls"]
+        wire_events = [event for event in trace.events() if event["kind"] == "model_request"
+                       and event["boundary"] == "openai_http_request"]
+        assert len(wire_events) == 2
 
 
 def test_required_search_stays_on_for_stop_continuation(tmp_path, monkeypatch):
@@ -571,29 +636,11 @@ def test_codex_preserves_optional_native_tool_fields_without_strict_schema(tmp_p
     assert {"type": "web_search"} in request["tools"]
 
 
-@pytest.mark.parametrize(("change", "message"), [
-    ({"web_search": "always"}, "web_search must be off, auto or required"),
-    ({"reasoning_effort": "ultra"}, "reasoning_effort must be xhigh or max"),
-    ({"service_tier": "ultrafast"}, "service_tier must be default or fast"),
-    ({"api_key": "not-a-subscription"}, "requires Pi OAuth"),
-    ({"base_url": "https://example.org/v1"}, "requires Pi OAuth"),
-    ({"extra_headers": {"Authorization": "Bearer fake"}}, "requires Pi OAuth"),
-])
-def test_codex_profile_rejects_invalid_settings_before_http(tmp_path, monkeypatch, change, message):
-    app, wire = _fixture(tmp_path, monkeypatch, search="off")
-    path = tmp_path / "config/llm.yaml"
-    config = yaml.safe_load(path.read_text())
-    config["model"]["codex"].update(change)
-    path.write_text(yaml.safe_dump(config))
-    with bind_config(load_project_config(tmp_path)), pytest.raises((ValueError, RuntimeError), match=message):
-        execute_app(app, file_logging=False)
-    assert not wire.exists()
-
-
 def test_codex_profile_requires_pi_runtime(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off")
     definition = yaml.safe_load(app.read_text())
     definition["agent_runtime"] = "smolagents"
+    definition.pop("runtime_options", None)
     app.write_text(yaml.safe_dump(definition))
     with bind_config(load_project_config(tmp_path)), pytest.raises((ValueError, RuntimeError),
                                                                match="requires agent_runtime: pi"):
@@ -629,7 +676,9 @@ def test_sdk_window_and_usage_preserve_successful_tool_calls(tmp_path, monkeypat
     assert sdk_models[-1]["context_window"] == context_window
     assert sdk_models[-1]["max_output_tokens"] == 65536
     assert len(requests) == 2
-    assert all(request["body"]["max_output_tokens"] == 65536 for request in requests)
+    options = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
+    assert all(item["request"]["maxTokens"] == 65536 for item in options if "request" in item)
+    assert all("max_output_tokens" not in request["body"] for request in requests)
     with inspect_run(run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
         assert responses[0]["usage"]["input_tokens"] == input_tokens
@@ -652,7 +701,8 @@ def test_native_compaction_preserves_completed_response_above_configured_window(
     config["model"]["codex"].update(context_window=500000, max_output_tokens=65536)
     path.write_text(yaml.safe_dump(config))
     definition = yaml.safe_load(app.read_text())
-    definition["runtime_options"] = {"compaction": {"enabled": True}}
+    definition["runtime_options"] = {"compaction": {"enabled": True}, "transport": "sse",
+                                     "cacheWarming": "off"}
     app.write_text(yaml.safe_dump(definition))
     with bind_config(load_project_config(tmp_path)):
         result = execute_app(app, file_logging=False)

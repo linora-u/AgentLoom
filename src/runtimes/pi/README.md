@@ -91,21 +91,51 @@ or protected Shell query mapping are rejected before execution.
 
 | Profile setting | Pi behavior |
 | --- | --- |
-| `adapter: openai_chat` / `openai_responses` | Native OpenAI Completions / Responses SDK transport, SSE |
+| `adapter: openai_chat` / `openai_responses` | Native OpenAI Completions / Responses SDK transport |
 | `adapter: openai_chatgpt_responses` | Pi 1.0.0 OpenAI subscription OAuth over the public Responses API |
 | `adapter: openai_codex_responses` | Pi Codex OAuth through the ChatGPT subscription backend |
 | `model` | Preserve the model ID, removing the legacy `openai/` or `gemini/` routing prefix |
 | `base_url`, `api_key` | Selected endpoint and in-memory credentials; no user auth discovery |
 | Effective request headers | Literal private headers; no Pi command/env interpolation |
-| `temperature`, `max_output_tokens` | Native stream options; protocol-appropriate output budget |
+| `temperature`, `max_output_tokens` | Native `temperature` / `maxTokens` stream options; the provider decides the wire format. Pi Codex currently omits `max_output_tokens` from its HTTP body |
 | `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved window is applied to the SDK model before session creation, including Codex and ChatGPT subscription models; `max_output_tokens` sets its generation limit |
-| `timeout` | Seconds per model attempt, including an already-open SSE stream; cancellation remains immediate |
-| `num_retries`, `retry_delay`, `max_retry_delay` | Bounded exponential retry of transient failed no-tool turns; native nested retries disabled |
-| `requests_per_minute` | Minimum interval per Pi instance, including retry/Stop continuation attempts |
+| `timeout` | Converted from seconds to native `retry.provider.timeoutMs`; the SDK owns timeout behavior |
+| `num_retries`, `retry_delay`, `max_retry_delay` | Mapped to native retry counts, `baseDelayMs`, `maxAgentDelayMs` and provider `maxRetryDelayMs`; the SDK owns retries and fallback |
+| `requests_per_minute` | No Pi SDK equivalent; Pi does not implement an additional limiter |
 | `context_cache` | Pi's native short/none cache hint; actual cache support is provider-dependent |
-| `extra_body` | Explicit vendor request fields; cannot override model, conversation, tools or mapped generation fields |
+| `extra_body`, sampling parameters | Passed through native `samplingParams`; support depends on the provider |
 | `top_p`, `seed`, `reasoning_effort` | Explicit provider parameters; Responses maps reasoning effort into `reasoning.effort` |
-| `tool_choice: auto/none`, `parallel_tool_calls: false` | Compatible no-tool settings; no tool schema is emitted |
+| `tool_choice`, `parallel_tool_calls` | Native sampling parameters for compatible providers |
+
+`runtime_options` passes directly to `SettingsManager.inMemory`, except
+`max_stop_attempts`, which belongs to AgentLoom's Stop gate. Native settings
+override the mapped model-profile defaults. For example:
+
+```yaml
+runtime_options:
+  compaction:
+    enabled: true
+    reserveTokens: 16384
+    keepRecentTokens: 20000
+  retry:
+    maxRetries: 2
+    baseDelayMs: 15000
+    maxAgentDelayMs: 30000
+    provider:
+      timeoutMs: 900000
+      maxRetries: 2
+      maxRetryDelayMs: 30000
+  transport: auto
+```
+
+The two native retry budgets apply at the provider and session layers; configure
+them separately here when needed. The bridge does not validate SDK settings,
+classify transient errors, retry requests, impose a context-token gate, force
+SSE, or change private compaction state. Pi applies its own defaults and
+validation. AgentLoom keeps its Application/Stop, tool authorization, output
+contract and evidence interfaces. HTTP capture uses the SDK's `fetch` option;
+search evidence uses `onProviderStreamEvent`, without waiting for a cloned
+response stream to close.
 
 Both subscription adapters use Pi's own OAuth credentials. **OpenAI → Sign in
 with ChatGPT** authorizes the public Responses API; **OpenAI Codex** authorizes
@@ -137,12 +167,11 @@ model:
 
 Set `model_type: codex_luna` on only the Pi Agents that should use the
 subscription. `web_search` is `off`, `auto`, or `required`. `required` requests
-Pi's native `web_search` on every Model request and fails a turn without a
-completed search call. The bridge records the completed call and structured URL
+native provider `web_search` on every Model request. The bridge records the completed call and structured URL
 citations in Model evidence and Run events, then appends clickable sources to a
 plain-text answer when citations exist. It does not infer citations from answer
-text. Luna reasoning defaults to `xhigh`; set `reasoning_effort: max` explicitly
-for the higher level. For the public adapter, `service_tier: default` requests
+text. `reasoning_effort` is passed as the SDK thinking level; omitted values use
+SDK defaults. For the public adapter, `service_tier: default` requests
 Standard and `fast` requests Fast. This adapter uses
 `https://api.openai.com/v1/responses`, rejects API keys and custom URLs, and
 records the response tier as the effective tier. The current subscription
