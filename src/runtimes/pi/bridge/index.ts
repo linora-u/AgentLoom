@@ -31,7 +31,7 @@ let restoredPhase: string | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
 let nativeIncomplete = false;
-let modelFailure = {timedOut: false, budgetExceeded: false, status: 0, reason: ""};
+let modelFailure = {timedOut: false, status: 0, reason: ""};
 let reportRetry: ((attempt: number) => void) | undefined;
 let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
 let reportTier: ((identity: Obj, attempt: number, tier: string) => void) | undefined;
@@ -260,7 +260,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
 async function run(frame: Frame, abort: AbortController) {
   const p = frame.payload;
   outputCorrection = false;
-  modelFailure = {timedOut: false, budgetExceeded: false, status: 0, reason: ""};
+  modelFailure = {timedOut: false, status: 0, reason: ""};
   let seq = 0;
   const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
@@ -408,9 +408,7 @@ async function run(frame: Frame, abort: AbortController) {
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" && modelFailure.budgetExceeded
-        ? {category: "output_validation", message: modelFailure.reason, retryable: true}
-        : state === "failed" ? {category: "provider", message: modelFailure.reason || "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
+      error: state === "failed" ? {category: "provider", message: modelFailure.reason || "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
         outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch (error) {
     const interrupted = abort.signal.aborted;

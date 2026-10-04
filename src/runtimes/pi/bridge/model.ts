@@ -123,13 +123,12 @@ function restoreEmptyToolResults(payload: unknown, messages: readonly Obj[]) {
   return changed ? result : payload;
 }
 
-function failedStream(model: Model<Api>, interrupted: boolean, reason?: string,
-    usage?: AssistantMessage["usage"]) {
+function failedStream(model: Model<Api>, interrupted: boolean, reason?: string) {
   const stream = createAssistantMessageEventStream();
   const message: AssistantMessage = {role: "assistant", content: [], api: model.api, provider: model.provider,
     model: model.id, timestamp: Date.now(), stopReason: interrupted ? "aborted" : "error",
     errorMessage: interrupted ? "Pi model request interrupted" : reason || "Pi model request failed",
-    usage: usage ?? {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+    usage: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}}};
   stream.push({type: "error", reason: message.stopReason as "error" | "aborted", error: message});
   stream.end(message);
@@ -145,7 +144,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
   const {codex, chatgpt} = provider;
   const subscription = codex || chatgpt;
   const nativeStream = session.agent.streamFunction;
-  const failure = {timedOut: false, budgetExceeded: false, status: 0, reason: ""};
+  const failure = {timedOut: false, status: 0, reason: ""};
   const capture = async (identity: Obj, attempt: number, phase: "request" | "response", value: unknown,
       boundary?: "openai_http_request") => {
     const captureId = randomUUID().replaceAll("-", "");
@@ -174,7 +173,6 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           {role: "user" as const, content: permit.agent_context.join("\n"), timestamp: Date.now()}] : context.messages};
       for (let attempt = 0; ; attempt++) {
         failure.timedOut = false;
-        failure.budgetExceeded = false;
         failure.status = 0;
         failure.reason = "";
         const timeoutAbort = new AbortController();
@@ -258,14 +256,6 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
                 calls: evidence.calls, citations: evidence.citations}} : {}),
                 ...(evidence.serviceTier ? {native_service_tier: evidence.serviceTier} : {})}
               : message);
-          }
-          const total = message.usage.input + message.usage.cacheRead + message.usage.cacheWrite
-            + message.usage.output;
-          const contextBudget = Math.min(settings.context_window, model.contextWindow);
-          if (total > contextBudget) {
-            failure.budgetExceeded = true;
-            failure.reason = `Pi model exceeded its total context budget: ${total} > ${contextBudget} tokens`;
-            return failedStream(model, false, failure.reason, message.usage);
           }
           if (!failure.timedOut && message.stopReason !== "error") return stream;
           errorText = message.errorMessage || "";
