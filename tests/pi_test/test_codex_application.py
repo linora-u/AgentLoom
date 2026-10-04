@@ -30,7 +30,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
              answer: str = "Current result", first_status: int | None = None,
              first_answer: str | None = None, provider: str = "openai-codex",
              response_tier: str = "default", search_actions: list[dict] | None = None,
-             reported_usage: dict | None = None, propose_write: str | None = None):
+             reported_usage: dict | None = None, propose_write: str | None = None,
+             first_reported_usage: dict | None = None, compaction_answer: str | None = None):
     app = project(tmp_path, "http://127.0.0.1:1/v1")
     configuration = tmp_path / "config/llm.yaml"
     data = yaml.safe_load(configuration.read_text())
@@ -69,7 +70,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
                                     "answer": answer, "first_status": first_status,
                                     "first_answer": first_answer, "provider": provider,
                                     "response_tier": response_tier, "search_actions": search_actions,
-                                    "reported_usage": reported_usage, "propose_write": propose_write}))
+                                    "reported_usage": reported_usage, "propose_write": propose_write,
+                                    "first_reported_usage": first_reported_usage, "compaction_answer": compaction_answer}))
     bootstrap = tmp_path / "codex-bootstrap.mjs"
     bootstrap.write_text("""
 import {appendFileSync, readFileSync} from 'node:fs';
@@ -114,7 +116,9 @@ globalThis.fetch = async (input, init) => {
     return new Response(JSON.stringify({error: {message, type: 'provider_error'}}),
       {status, headers: {'content-type': 'application/json'}});
   }
-  const answer = scenario.first_textual_tool_call && count === 1
+  const compact = /context summarization assistant/i.test(payload.instructions || '');
+  const answer = compact && scenario.compaction_answer ? scenario.compaction_answer
+    : scenario.first_textual_tool_call && count === 1
     ? '<｜DSML｜tool_calls>\\n<｜DSML｜invoke name="unknown_tool">'
     : count === 1 && scenario.first_answer !== null ? scenario.first_answer : scenario.answer;
   let message = {type: 'message', id: 'msg_1', role: 'assistant', status: 'completed',
@@ -151,7 +155,7 @@ globalThis.fetch = async (input, init) => {
     {type: 'response.output_item.done', output_index: messageIndex, item: message},
     {type: 'response.completed', response: {id: 'resp_1', model: payload.model, status: 'completed', output,
       service_tier: scenario.response_tier,
-      usage: scenario.reported_usage || {input_tokens: 12, output_tokens: 3, total_tokens: 15,
+      usage: (count === 1 ? scenario.first_reported_usage : null) || scenario.reported_usage || {input_tokens: 12, output_tokens: 3, total_tokens: 15,
         input_tokens_details: {cached_tokens: 0}}}},
   ];
   return new Response(events.map(event => `event: ${event.type}\\ndata: ${JSON.stringify(event)}\\n\\n`).join(''),
@@ -599,8 +603,8 @@ def test_codex_profile_requires_pi_runtime(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("over_budget", [False, True])
 @pytest.mark.parametrize("context_window", [272000, 500000])
-def test_context_budget_preserves_usage_and_blocks_available_write(tmp_path, monkeypatch, over_budget, context_window):
-    marker = tmp_path / "context-guard.txt"
+def test_sdk_window_and_usage_preserve_successful_tool_calls(tmp_path, monkeypatch, over_budget, context_window):
+    marker = tmp_path / "sdk-tool.txt"
     total = context_window + 7057 if over_budget else context_window
     input_tokens = context_window - 25711
     usage = {"input_tokens": input_tokens, "output_tokens": total - input_tokens, "total_tokens": total,
@@ -616,21 +620,15 @@ def test_context_budget_preserves_usage_and_blocks_available_write(tmp_path, mon
     definition["tools"] = [{"name": "write"}]
     app.write_text(yaml.safe_dump(definition))
     with bind_config(load_project_config(tmp_path)):
-        if over_budget:
-            with pytest.raises(ApplicationRunError, match="total context budget") as failure:
-                execute_app(app, file_logging=False)
-            run = failure.value.run
-            assert not marker.exists()
-        else:
-            result = execute_app(app, file_logging=False)
-            run = result.run
-            assert marker.read_text() == "context guard control"
+        result = execute_app(app, file_logging=False)
+        run = result.run
+        assert marker.read_text() == "context guard control"
     requests = [json.loads(line) for line in wire.read_text().splitlines()]
     sdk_models = [json.loads(line) for line in (tmp_path / "sdk-models.jsonl").read_text().splitlines()]
     assert sdk_models[-1]["provider"] == "openai-codex"
     assert sdk_models[-1]["context_window"] == context_window
     assert sdk_models[-1]["max_output_tokens"] == 65536
-    assert len(requests) == (1 if over_budget else 2)
+    assert len(requests) == 2
     assert all(request["body"]["max_output_tokens"] == 65536 for request in requests)
     with inspect_run(run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
@@ -640,6 +638,33 @@ def test_context_budget_preserves_usage_and_blocks_available_write(tmp_path, mon
     metered = [event["details"] for event in audit if event["kind"] == "usage"]
     assert metered[-1]["input_tokens"] == input_tokens * len(requests)
     assert metered[-1]["output_tokens"] == (total - input_tokens) * len(requests)
+
+
+def test_native_compaction_preserves_completed_response_above_configured_window(tmp_path, monkeypatch):
+    completed_review = "COMPLETED_NEWS_REVIEW " * 5000
+    usage = {"input_tokens": 484013, "output_tokens": 40870, "total_tokens": 524883,
+             "input_tokens_details": {"cached_tokens": 0}}
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", completed=False, citations=False,
+                         answer=completed_review, first_reported_usage=usage,
+                         compaction_answer="NATIVE_COMPACTION_SUMMARY: the news review is complete.")
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"].update(context_window=500000, max_output_tokens=65536)
+    path.write_text(yaml.safe_dump(config))
+    definition = yaml.safe_load(app.read_text())
+    definition["runtime_options"] = {"compaction": {"enabled": True}}
+    app.write_text(yaml.safe_dump(definition))
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert result.output == completed_review
+    requests = [json.loads(line) for line in wire.read_text().splitlines()]
+    compact_requests = [item for item in requests if "context summarization assistant" in
+                        item["body"].get("instructions", "")]
+    assert len(requests) == 2
+    assert len(compact_requests) == 1
+    with inspect_run(result.run) as trace:
+        responses = [event for event in trace.events() if event["kind"] == "model_response"]
+        assert responses[0]["usage"] == {"input_tokens": 484013, "output_tokens": 40870}
 
 
 def test_native_search_retains_search_open_find_and_all_completed_calls(tmp_path, monkeypatch):
