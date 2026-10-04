@@ -212,6 +212,9 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
     const extra = s.extra_completion_params || {};
     const projected = result;
+    // The Codex backend enforces this cap, but Pi's Codex provider omits maxTokens.
+    // The public ChatGPT subscription API does not support this request field.
+    if (codex) projected.max_output_tokens = s.max_output_tokens;
     if (subscription && extra.service_tier !== undefined)
       projected.service_tier = codex && extra.service_tier === "fast" ? "priority" : extra.service_tier;
     const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));

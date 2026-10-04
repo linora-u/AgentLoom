@@ -228,7 +228,9 @@ def test_pi_native_settings_and_request_options_are_forwarded(tmp_path, monkeypa
     request = next(item["request"] for item in observed if "request" in item)
     assert request == {"timeoutMs": 4321, "maxRetries": 0, "maxRetryDelayMs": 9876,
                        "transport": "sse", "maxTokens": 65536}
-    assert json.loads(wire.read_text().splitlines()[0])["body"]["reasoning"]["effort"] == "low"
+    payload = json.loads(wire.read_text().splitlines()[0])["body"]
+    assert payload["reasoning"]["effort"] == "low"
+    assert payload["max_output_tokens"] == 65536
 
 
 def test_invalid_native_timeout_is_rejected_by_sdk(tmp_path, monkeypatch):
@@ -273,7 +275,7 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
     payload = requests[0]["body"]
     assert requests[0]["url"] == "https://chatgpt.com/backend-api/codex/responses"
     assert payload["model"] == "gpt-6-luna"
-    assert "max_output_tokens" not in payload  # Native Codex SDK omits this field.
+    assert payload["max_output_tokens"] == 256
     assert "service_tier" not in payload
     assert payload["reasoning"] == {"effort": "xhigh", "summary": "auto"}
     if mode == "off":
@@ -292,6 +294,7 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
         wire_events = [event for event in events if event["kind"] == "model_request"
                        and event["boundary"] == "openai_http_request"]
         recorded_request = json.loads(trace.read_text(wire_events[0]["request_ref"]))
+        assert recorded_request["body"]["max_output_tokens"] == 256
         assert all(name.lower() not in {"authorization", "cookie", "chatgpt-account-id"}
                    for name in recorded_request["headers"])
     if mode == "off":
@@ -503,6 +506,7 @@ def test_chatgpt_public_api_records_actual_service_tier(tmp_path, monkeypatch, e
     assert requests[0]["body"]["service_tier"] == "fast"
     assert requests[0]["body"]["store"] is False
     assert requests[0]["body"]["stream"] is True
+    assert "max_output_tokens" not in requests[0]["body"]
     with inspect_run(result.run) as trace:
         response = next(event for event in trace.events() if event["kind"] == "model_response")
         captured = json.loads(trace.read_text(response["response_ref"]))
@@ -678,7 +682,7 @@ def test_sdk_window_and_usage_preserve_successful_tool_calls(tmp_path, monkeypat
     assert len(requests) == 2
     options = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
     assert all(item["request"]["maxTokens"] == 65536 for item in options if "request" in item)
-    assert all("max_output_tokens" not in request["body"] for request in requests)
+    assert all(request["body"]["max_output_tokens"] == 65536 for request in requests)
     with inspect_run(run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
         assert responses[0]["usage"]["input_tokens"] == input_tokens
