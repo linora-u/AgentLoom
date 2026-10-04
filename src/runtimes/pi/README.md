@@ -98,7 +98,7 @@ or protected Shell query mapping are rejected before execution.
 | `base_url`, `api_key` | Selected endpoint and in-memory credentials; no user auth discovery |
 | Effective request headers | Literal private headers; no Pi command/env interpolation |
 | `temperature`, `max_output_tokens` | Native stream options; protocol-appropriate output budget |
-| `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved context metadata; `max_output_tokens` is the generation limit |
+| `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved window is applied to the SDK model before session creation, including Codex and ChatGPT subscription models; `max_output_tokens` sets its generation limit |
 | `timeout` | Seconds per model attempt, including an already-open SSE stream; cancellation remains immediate |
 | `num_retries`, `retry_delay`, `max_retry_delay` | Bounded exponential retry of transient failed no-tool turns; native nested retries disabled |
 | `requests_per_minute` | Minimum interval per Pi instance, including retry/Stop continuation attempts |

@@ -145,7 +145,14 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     });
     await runtime.setRuntimeApiKey("agentloom", s.api_key || "no-key");
   }
-  const model = runtime.getModel(codex ? "openai-codex" : chatgpt ? "openai" : "agentloom", modelId);
+  const providerId = codex ? "openai-codex" : chatgpt ? "openai" : "agentloom";
+  if (subscription) {
+    runtime.registerProvider(providerId, {
+      models: runtime.getModels(providerId).map(model => model.id === modelId
+        ? {...model, contextWindow: s.context_window, maxTokens: s.max_output_tokens} : model),
+    });
+  }
+  const model = runtime.getModel(providerId, modelId);
   if (!model) throw new Error(`Pi ${codex ? "Codex model" : chatgpt ? "ChatGPT model" : "model"} ${modelId} is unavailable`);
   if (codex) await ensureCodexLogin(runtime, model, event);
   else if (subscription) {
