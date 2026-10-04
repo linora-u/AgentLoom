@@ -74,6 +74,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
     bootstrap.write_text("""
 import {appendFileSync, readFileSync} from 'node:fs';
 import {zstdDecompressSync} from 'node:zlib';
+import {pathToFileURL} from 'node:url';
 const nativeFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const request = new Request(input, init);
@@ -156,7 +157,17 @@ globalThis.fetch = async (input, init) => {
   return new Response(events.map(event => `event: ${event.type}\\ndata: ${JSON.stringify(event)}\\n\\n`).join(''),
     {status: 200, headers: {'content-type': 'text/event-stream'}});
 };
+const {ModelRuntime} = await import(new URL('../node_modules/@earendil-works/pi-coding-agent/dist/index.js',
+  pathToFileURL(process.argv[1])).href);
+const nativeGetModel = ModelRuntime.prototype.getModel;
+ModelRuntime.prototype.getModel = function(provider, id) {
+  const model = nativeGetModel.call(this, provider, id);
+  if (model) appendFileSync(%MODELS%, JSON.stringify({provider, id,
+    context_window: model.contextWindow, max_output_tokens: model.maxTokens}) + '\\n');
+  return model;
+};
 """.replace("%WIRE%", json.dumps(str(wire))).replace("%SCENARIO%", json.dumps(str(scenario)))
+       .replace("%MODELS%", json.dumps(str(tmp_path / "sdk-models.jsonl")))
        .replace("%REFRESH%", json.dumps(str(tmp_path / "refresh.log")))
        .replace("%LOGIN%", json.dumps(str(tmp_path / "login.log")))
        .replace("%ACCESS%", json.dumps(f"fixture.{account}.signature")))
@@ -587,15 +598,18 @@ def test_codex_profile_requires_pi_runtime(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("over_budget", [False, True])
-def test_context_budget_preserves_usage_and_blocks_available_write(tmp_path, monkeypatch, over_budget):
+@pytest.mark.parametrize("context_window", [272000, 500000])
+def test_context_budget_preserves_usage_and_blocks_available_write(tmp_path, monkeypatch, over_budget, context_window):
     marker = tmp_path / "context-guard.txt"
-    total = 279057 if over_budget else 272000
-    usage = {"input_tokens": 246289, "output_tokens": total - 246289, "total_tokens": total,
+    total = context_window + 7057 if over_budget else context_window
+    input_tokens = context_window - 25711
+    usage = {"input_tokens": input_tokens, "output_tokens": total - input_tokens, "total_tokens": total,
              "input_tokens_details": {"cached_tokens": 0}}
     app, wire = _fixture(tmp_path, monkeypatch, search="off", reported_usage=usage,
                          propose_write=str(marker))
     config_path = tmp_path / "config/llm.yaml"
     config = yaml.safe_load(config_path.read_text())
+    config["model"]["codex"]["context_window"] = context_window
     config["model"]["codex"]["max_output_tokens"] = 65536
     config_path.write_text(yaml.safe_dump(config))
     definition = yaml.safe_load(app.read_text())
@@ -612,16 +626,20 @@ def test_context_budget_preserves_usage_and_blocks_available_write(tmp_path, mon
             run = result.run
             assert marker.read_text() == "context guard control"
     requests = [json.loads(line) for line in wire.read_text().splitlines()]
+    sdk_models = [json.loads(line) for line in (tmp_path / "sdk-models.jsonl").read_text().splitlines()]
+    assert sdk_models[-1]["provider"] == "openai-codex"
+    assert sdk_models[-1]["context_window"] == context_window
+    assert sdk_models[-1]["max_output_tokens"] == 65536
     assert len(requests) == (1 if over_budget else 2)
     assert all(request["body"]["max_output_tokens"] == 65536 for request in requests)
     with inspect_run(run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
-        assert responses[0]["usage"]["input_tokens"] == 246289
-        assert responses[0]["usage"]["output_tokens"] == total - 246289
+        assert responses[0]["usage"]["input_tokens"] == input_tokens
+        assert responses[0]["usage"]["output_tokens"] == total - input_tokens
     audit = [json.loads(line) for line in (run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
     metered = [event["details"] for event in audit if event["kind"] == "usage"]
-    assert metered[-1]["input_tokens"] == 246289 * len(requests)
-    assert metered[-1]["output_tokens"] == (total - 246289) * len(requests)
+    assert metered[-1]["input_tokens"] == input_tokens * len(requests)
+    assert metered[-1]["output_tokens"] == (total - input_tokens) * len(requests)
 
 
 def test_native_search_retains_search_open_find_and_all_completed_calls(tmp_path, monkeypatch):
