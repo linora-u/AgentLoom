@@ -1,0 +1,31 @@
+name: news_initial
+agent_runtime: pi
+runtime_options:
+  compaction:
+    enabled: true
+model_type: codex_luna_news_initial
+description: 对历史新闻批次进行高召回初筛。
+system_prompt:
+  path: ../agent/初筛.md
+task: 逐条完整阅读，返回覆盖全部新闻的序号与分类代码。
+tools: []
+toolsets: []
+input_schema:
+  type: object
+  properties:
+    query:
+      type: string
+  required: [query]
+  additionalProperties: false
+output_schema:
+  type: object
+  properties:
+    classifications:
+      type: array
+      items:
+        type: array
+        items: {type: integer}
+        minItems: 2
+        maxItems: 2
+  required: [classifications]
+  additionalProperties: false

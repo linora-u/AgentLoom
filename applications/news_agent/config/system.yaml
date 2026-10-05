@@ -1,0 +1,7 @@
+checkpoint:
+  enabled: false
+redaction:
+  enabled: false
+self_learning:
+  enabled: false
+default_toolsets: []

@@ -1,0 +1,17 @@
+model:
+  codex_luna_news_replay: &news_model
+    adapter: openai_codex_responses
+    model: gpt-6-luna
+    context_window: 500000
+    max_output_tokens: 65536  # 包括 xhigh 推理与可见 JSON
+    timeout: 900
+    num_retries: 2
+    retry_delay: 15
+    max_retry_delay: 30
+    reasoning_effort: xhigh
+    service_tier: fast
+    web_search: auto
+    supports_structured_output: true
+  codex_luna_news_initial:
+    <<: *news_model
+    web_search: "off"

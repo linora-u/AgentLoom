@@ -1,0 +1,30 @@
+# 从 AgentLoom 根目录运行: PYTHONPATH=applications .venv/bin/python -m news_agent.run
+# mode: prepare | prepare_year | report | evaluate
+mode: prepare
+scope: evaluation  # prepare/report 可选 daily 或 evaluation；prepare_year/evaluate 固定使用 evaluation
+day: latest  # 最近已下载日期；也可填 today（北京时间）或 YYYY-MM-DD
+year: 2025
+timezone: Asia/Shanghai
+news_root: news_agent/data/news
+etf_root: news_agent/data/etf_dk_merge
+etf_config: news_agent/data/etf_universe.yaml
+daily_output_root: news_agent/data/output
+evaluation_output_root: news_agent/data/evaluation
+batching:
+  token_encoding: o200k_base  # 本地分词计数；服务端实际用量另记入运行日志。
+  initial_max_tokens: 350000
+  refined_max_tokens: 350000  # 精筛只按新闻输入 token 分批，不设新闻条数上限
+baseline:
+  initial_workers: 20
+  refined_workers: 20
+  exposure_root: news_agent/data/etf_exposure
+  hold_days: 3
+  sell_at: open
+  replay:
+    version: v24_token_only
+    development_month: "2025-08"
+    # 2025-09 留作开发与验收的价格窗口间隔；验收月份连续扩展。
+    validation_months: ["2025-10", "2025-11", "2025-12"]
+  thresholds:
+    positive: "0.02"
+    negative: "-0.015"
