@@ -331,18 +331,14 @@ def test_model_timeout_excludes_platform_callback_time(tmp_path):
     assert any(m.get('content') == 'Tool completed' for m in requests[1][1]['messages'])
 
 
-def test_profile_request_rate_applies_between_internal_pi_model_turns(tmp_path):
-    import time
-
+def test_profile_request_rate_does_not_replace_native_pi_transport_policy(tmp_path):
     from tests.pi_test.test_application import change_model
-    times = []
     (tmp_path / 'note.txt').write_text('Read before next paced model call')
-    with model_service(turns=[[('paced-read', 'read', {'path': 'note.txt'})]],
-                       on_request=lambda *_: times.append(time.monotonic())) as (url, requests):
+    with model_service(turns=[[('paced-read', 'read', {'path': 'note.txt'})]]) as (url, requests):
         app = project(tmp_path, url)
         select(app, tools=[{'name': 'read'}])
         change_model(tmp_path, requests_per_minute=30, timeout=1)
         with bind_config(load_project_config(tmp_path)):
-            execute_app(app, file_logging=False)
+            result = execute_app(app, file_logging=False)
+    assert result.output == 'Pi answer'
     assert len(requests) == 2
-    assert times[1] - times[0] >= 1.95

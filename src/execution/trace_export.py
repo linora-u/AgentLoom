@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextvars import copy_context
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,7 +49,8 @@ class AsyncTraceExport:
         self._storage = storage.duplicate()
         self._queue: Queue[dict[str, Any]] = Queue(maxsize=256)
         self._closing = Event()
-        self._thread = Thread(target=self._drain, name="agentloom-trace-export", daemon=True)
+        context = copy_context()
+        self._thread = Thread(target=lambda: context.run(self._drain), name="agentloom-trace-export", daemon=True)
         try:
             self._thread.start()
         except Exception:

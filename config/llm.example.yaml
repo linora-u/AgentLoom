@@ -10,7 +10,7 @@ model:
   # Pi-only ChatGPT subscription profiles. Log in with Pi once; Pi owns and
   # refreshes the saved OAuth credential. Do not put a token in this YAML.
   codex_luna:
-    adapter: openai_codex_responses
+    adapter: openai_chatgpt_responses
     model: gpt-6-luna
     context_window: 272000
     max_output_tokens: 16384
@@ -20,7 +20,7 @@ model:
     web_search: auto # off | auto | required
 
   codex_luna_search:
-    adapter: openai_codex_responses
+    adapter: openai_chatgpt_responses
     model: gpt-6-luna
     context_window: 272000
     max_output_tokens: 16384
@@ -32,7 +32,7 @@ model:
   # 强大模型配置（用于复杂任务，如代码生成、复杂推理）
   powerful:
     # Required wire protocol. Supported values:
-    # openai_chat, openai_responses, anthropic_messages, openai_codex_responses.
+    # openai_chat, openai_responses, anthropic_messages, openai_chatgpt_responses.
     adapter: openai_chat
     base_url: "xxxxxxx"
     api_key: "xxxxxxx"

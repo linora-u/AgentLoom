@@ -40,6 +40,7 @@ class PiTransport:
         # credential store so its SDK can read and refresh the saved login.
         pi_agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or Path.home() / ".pi" / "agent").expanduser().resolve()
         pi_auth_path = pi_agent_dir / "auth.json"
+        self.pi_auth_path = pi_auth_path
         env = build_subprocess_env()
         for name in list(env):
             if name.startswith(("PI_", "NODE_")):

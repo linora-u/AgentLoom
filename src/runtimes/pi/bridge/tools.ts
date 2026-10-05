@@ -57,6 +57,8 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
           try {
             if (signal?.aborted) throw new Error("Interrupted");
             result = await captured.tool.execute(callId, args, signal, onUpdate, ctx);
+            if ((result as Obj | undefined)?.isError === true)
+              error = {kind: "NativeToolError", message: "Pi native tool reported an error", stage: "tool_execution", retryable: false};
           } catch {
             error = {kind: "NativeToolError", message: "Pi native tool execution failed", stage: "tool_execution", retryable: false};
           }

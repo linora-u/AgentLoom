@@ -133,7 +133,7 @@ def test_continued_empty_task_does_not_recompact_without_new_context(tmp_path):
             transport.close()
 
     assert exhausted.state == "failed"
-    # Pi 0.87.1 cannot compact a second time when the previous compaction has
+    # Pi cannot compact a second time when the previous compaction has
     # left no new model-visible user context to summarize. It fails the turn.
     assert result.state == "failed"
     assert len(requests) == 5

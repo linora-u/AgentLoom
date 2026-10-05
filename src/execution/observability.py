@@ -404,6 +404,23 @@ class TraceRecorder:
             run_step = self._run_step_number(execution.local_run_id, agent_step, create=True)
             with self._lock:
                 self._model_steps[turn_id] = run_step
+            # Transport authentication is not execution evidence. Exclude it
+            # before the optional content-redaction policy is applied.
+            if isinstance(request, dict):
+                request = dict(request)
+                if runtime == "smolagents":
+                    credential_keys = {"api_key", "azure_ad_token", "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "client"}
+                    request = {key: value for key, value in request.items() if key not in credential_keys}
+                    if isinstance(request.get("kwargs"), dict):
+                        request["kwargs"] = {key: value for key, value in request["kwargs"].items()
+                                             if key not in credential_keys}
+                for container in (request, request.get("kwargs")):
+                    if not isinstance(container, dict):
+                        continue
+                    for header_key in ("headers", "extra_headers"):
+                        if isinstance(container.get(header_key), dict):
+                            container[header_key] = {key: value for key, value in container[header_key].items()
+                                if str(key).casefold() not in {"authorization", "cookie", "set-cookie", "proxy-authorization", "chatgpt-account-id", "x-api-key", "api-key"}}
             request_ref = self._payload(request, content_type="application/json")
             self._append({
                 "kind": "model_request",

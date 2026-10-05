@@ -1,6 +1,6 @@
 # Pi runtime (tickets 07, 09, 10)
 
-This adapter runs real `@earendil-works/pi-coding-agent` **0.87.1** AgentSessions.
+This adapter runs real `@earendil-works/pi-coding-agent` **1.0.0** AgentSessions.
 Python owns Application identity, receipts, Hook Run/Stop and resource cleanup;
 Pi owns its in-memory conversation and native provider protocol. No smol model,
 Tool, Todo, final_answer implementation or message format is required.
@@ -16,7 +16,7 @@ uv run --locked loom runtime install pi
 
 This downloads the published SDK using `npm ci --ignore-scripts`, then builds
 AgentLoom's bridge and verifies its imports. `package.json` fixes the SDK at
-**0.87.1**; `package-lock.json` fixes transitive versions and integrity hashes.
+**1.0.0**; `package-lock.json` fixes transitive versions and integrity hashes.
 uv manages Python dependencies; npm installs this Node package. No SDK source
 checkout, global Pi command, or manual npm build is needed.
 
@@ -91,51 +91,105 @@ or protected Shell query mapping are rejected before execution.
 
 | Profile setting | Pi behavior |
 | --- | --- |
-| `adapter: openai_chat` / `openai_responses` | Native OpenAI Completions / Responses SDK transport, SSE |
+| `adapter: openai_chat` / `openai_responses` | Native OpenAI Completions / Responses SDK transport |
+| `adapter: openai_chatgpt_responses` | Pi 1.0.0 OpenAI subscription OAuth over the public Responses API |
+| `adapter: openai_codex_responses` | Pi Codex OAuth through the ChatGPT subscription backend |
 | `model` | Preserve the model ID, removing the legacy `openai/` or `gemini/` routing prefix |
 | `base_url`, `api_key` | Selected endpoint and in-memory credentials; no user auth discovery |
 | Effective request headers | Literal private headers; no Pi command/env interpolation |
-| `temperature`, `max_output_tokens` | Native stream options; protocol-appropriate output budget |
-| `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved context metadata; `max_output_tokens` is the generation limit |
-| `timeout` | Seconds per model attempt, including an already-open SSE stream; cancellation remains immediate |
-| `num_retries`, `retry_delay`, `max_retry_delay` | Bounded exponential retry of transient failed no-tool turns; native nested retries disabled |
-| `requests_per_minute` | Minimum interval per Pi instance, including retry/Stop continuation attempts |
+| `temperature`, `max_output_tokens` | Native `temperature` / `maxTokens` stream options; the provider decides the wire format. Pi Codex currently omits `max_output_tokens` from its HTTP body |
+| `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved window is applied to the SDK model before session creation, including Codex and ChatGPT subscription models; `max_output_tokens` sets its generation limit |
+| `timeout` | Converted from seconds to native `retry.provider.timeoutMs`; the SDK owns timeout behavior |
+| `num_retries`, `retry_delay`, `max_retry_delay` | Mapped to native retry counts, `baseDelayMs`, `maxAgentDelayMs` and provider `maxRetryDelayMs`; the SDK owns retries and fallback |
+| `requests_per_minute` | No Pi SDK equivalent; Pi does not implement an additional limiter |
 | `context_cache` | Pi's native short/none cache hint; actual cache support is provider-dependent |
-| `extra_body` | Explicit vendor request fields; cannot override model, conversation, tools or mapped generation fields |
+| `extra_body`, sampling parameters | Passed through native `samplingParams`; support depends on the provider |
 | `top_p`, `seed`, `reasoning_effort` | Explicit provider parameters; Responses maps reasoning effort into `reasoning.effort` |
-| `tool_choice: auto/none`, `parallel_tool_calls: false` | Compatible no-tool settings; no tool schema is emitted |
+| `tool_choice`, `parallel_tool_calls` | Native sampling parameters for compatible providers |
 
-For a personal ChatGPT subscription, log in once through Pi and select a Pi-only
-profile. AgentLoom passes the path to Pi's own `auth.json` into its isolated
-process; Pi reads it and refreshes OAuth credentials. The default location is
-`~/.pi/agent/auth.json`, or `PI_CODING_AGENT_DIR/auth.json` when set in the parent
-environment. Do not put a token in `llm.yaml`. A missing or expired login fails
-the Run; it never opens an interactive login or changes providers.
+`runtime_options` passes directly to `SettingsManager.inMemory`, except
+`max_stop_attempts`, which belongs to AgentLoom's Stop gate. Native settings
+override the mapped model-profile defaults. For example:
+
+```yaml
+runtime_options:
+  compaction:
+    enabled: true
+    reserveTokens: 16384
+    keepRecentTokens: 20000
+  retry:
+    maxRetries: 2
+    baseDelayMs: 15000
+    maxAgentDelayMs: 30000
+    provider:
+      timeoutMs: 900000
+      maxRetries: 2
+      maxRetryDelayMs: 30000
+  transport: auto
+```
+
+The two native retry budgets apply at the provider and session layers; configure
+them separately here when needed. The bridge does not validate SDK settings,
+classify transient errors, retry requests, impose a context-token gate, force
+SSE, or change private compaction state. Pi applies its own defaults and
+validation. AgentLoom keeps its Application/Stop, tool authorization, output
+contract and evidence interfaces. HTTP capture uses the SDK's `fetch` option;
+search evidence uses `onProviderStreamEvent`, without waiting for a cloned
+response stream to close.
+
+Both subscription adapters use Pi's own OAuth credentials. **OpenAI → Sign in
+with ChatGPT** authorizes the public Responses API; **OpenAI Codex** authorizes
+the native Codex backend. AgentLoom passes Pi's `auth.json` path into its
+isolated process; Pi reads it and refreshes the selected credential. The
+default path is `~/.pi/agent/auth.json`, or `PI_CODING_AGENT_DIR/auth.json` when
+set in the parent environment. Do not put a token in `llm.yaml`. For
+`openai_codex_responses`, a missing login or failed token refresh starts Pi's
+subscription OAuth flow, opens the system browser, waits up to 15 minutes for
+the callback, and then continues the same Run. A headless session uses Pi's
+device-code flow and prints its URL and code. Concurrent Runs share one login
+attempt; a cancelled or failed login leaves the Run failed without changing
+providers. The public `openai_chatgpt_responses` adapter retains its own
+separate login requirement.
 
 ```yaml
 model:
   codex_luna:
-    adapter: openai_codex_responses
+    adapter: openai_chatgpt_responses
     model: gpt-6-luna
     context_window: 272000
     max_output_tokens: 16384
     timeout: 300
     num_retries: 0
     reasoning_effort: xhigh
+    service_tier: default
     web_search: auto
 ```
 
 Set `model_type: codex_luna` on only the Pi Agents that should use the
 subscription. `web_search` is `off`, `auto`, or `required`. `required` requests
-Pi's native `web_search` on every Model request and fails a turn without a
-completed search call. The bridge records the completed call and structured URL
+native provider `web_search` on every Model request. The bridge records the completed call and structured URL
 citations in Model evidence and Run events, then appends clickable sources to a
 plain-text answer when citations exist. It does not infer citations from answer
-text. Luna reasoning defaults to `xhigh`; set `reasoning_effort: max` explicitly
-for the higher level. The Codex adapter rejects API keys, custom base URLs, and
-custom authorization headers. Pi's native function tools have optional fields;
-Codex requests mark those function schemas non-strict while AgentLoom continues
-to validate and authorize tool arguments before execution.
+text. `reasoning_effort` is passed as the SDK thinking level; omitted values use
+SDK defaults. For the public adapter, `service_tier: default` requests
+Standard and `fast` requests Fast. This adapter uses
+`https://api.openai.com/v1/responses`, rejects API keys and custom URLs, and
+records the response tier as the effective tier. The current subscription
+authorization rejects `fast` and completes `priority` requests at `default`.
+
+For native Codex subscription Fast, select `adapter: openai_codex_responses`
+and `service_tier: fast` in each Pi profile. Pi sends `priority`, the request
+value used by Codex. Codex CLI `/fast` and `config.toml` do not configure Pi.
+The bridge records the requested tier and raw response tier separately. OpenAI
+says native Codex's response field is not a reliable end-to-end Fast indicator;
+the Run event leaves `effective` null on this route. A completed `priority`
+request proves the profile and wire path, while per-request Fast allocation
+requires separate usage evidence. A bounded, interleaved subscription latency
+probe in `docs/research/news_agent_pi_1_0_0_public_fast_20261003.md` found an
+aggregate speed gain with two slow `priority` request outliers; latency does
+not identify the server-side tier of an individual request. Pi's native
+function tools may have optional fields; the bridge sends non-strict schemas
+and still validates and authorizes tool arguments before execution.
 
 Other protocols/settings fail explicitly. `system_prompt_boundary` is unsupported.
 Tool forcing/parallel tools are rejected. Provider error bodies are never exposed
@@ -155,7 +209,7 @@ in public errors because they may echo credentials or prompts.
   bounds terminal-delivery attempts (default 3), including structured-output
   corrections; persistent rejection fails the Application.
 - Sequential workflow tasks may continue the current in-memory session.
-  Persisted resume restores an SDK 0.87.1 session only for the same Application,
+  Persisted resume restores an SDK 1.0.0 session only for the same Application,
   task, selected definition, bridge/state version and workspace. A resumed
   attempt uses a new Run while preserving the original call identities.
   Older Pi checkpoints are rejected; start a new Task. `additional_args` is

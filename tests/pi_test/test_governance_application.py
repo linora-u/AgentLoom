@@ -192,6 +192,34 @@ def test_skill_activation_uses_one_platform_catalog_and_no_pi_discovery(tmp_path
     assert [record['tool_name'] for record in records] == ['skill']
 
 
+def test_standalone_pi_worker_can_activate_platform_skill(tmp_path):
+    """A Python caller may use a Pi Worker without an enclosing Application Run."""
+    from agentloom.app.factory import YamlAgentFactory
+    from agentloom.execution.logging import NullLoggerBackend
+
+    source = tmp_path / 'reference.txt'
+    source.write_text('STANDALONE-REFERENCE-6942')
+    with model_service(turns=[[('activate-review', 'skill', {'name': 'review'}),
+                               ('read-reference', 'file_probe', {'file_path': str(source)})]]) as (url, requests):
+        app = project(tmp_path, url)
+        skill_dir = app.parents[1] / 'skills' / 'review'
+        skill_dir.mkdir(parents=True)
+        (skill_dir / 'SKILL.md').write_text(
+            '---\nname: review\ndescription: Inspect the review token.\n---\nSTANDALONE-SKILL-6941\n'
+        )
+        select(app, tools=[{'name': 'skill'},
+                           {'name': 'file_probe', 'module': __name__, 'function': 'file_probe'}], toolsets=[],
+               input_schema={'type': 'object', 'properties': {'query': {'type': 'string'}},
+                             'required': ['query'], 'additionalProperties': False})
+        with bind_config(load_project_config(tmp_path)):
+            worker = YamlAgentFactory.create_agent_as_tool(app, logger=NullLoggerBackend())
+            assert worker is not None
+            assert worker(query='activate the review skill') == 'Pi answer'
+    assert len(requests) == 2
+    assert 'STANDALONE-SKILL-6941' in json.dumps(requests[1][1])
+    assert 'STANDALONE-REFERENCE-6942' in json.dumps(requests[1][1])
+
+
 def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_path):
     root_turns = [[('worker', 'probe', {'query': 'verify permission'})], [('root-observe', 'get_goal', {})],
                   [('root-complete', 'update_goal', {'status': 'complete', 'evidence': 'Root verified denied Worker completion.'})]]

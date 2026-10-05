@@ -207,7 +207,8 @@ def test_smol_responses_request_matches_provider_http_body(tmp_path):
 
 
 @pytest.mark.parametrize('worker', ['pi', 'smolagents'])
-def test_small_native_or_platform_result_is_redacted_before_model_and_trace(tmp_path, worker):
+@pytest.mark.parametrize('global_policy,application_policy', [(None, None), (True, False), (False, True), (False, None)])
+def test_small_native_or_platform_result_respects_run_redaction_policy(tmp_path, worker, global_policy, application_policy):
     from agentloom.execution.observability import inspect_run
 
     (tmp_path / 'note.txt').write_text('api_key=fixture-secret\nstatus=ok\n')
@@ -219,23 +220,44 @@ def test_small_native_or_platform_result_is_redacted_before_model_and_trace(tmp_
                 return [('read-note', 'read' if worker == 'pi' else 'read_file',
                          {'path': 'note.txt'} if worker == 'pi' else {'file_path': str(tmp_path / 'note.txt')})]
             content = messages[-1]['content']
-            assert 'fixture-secret' not in content
-            assert 'api_key=[REDACTED]' in content
+            if expected:
+                assert 'fixture-secret' not in content
+                assert 'api_key=[REDACTED]' in content
+            else:
+                assert 'api_key=fixture-secret' in content
             return finish(request, 'redacted')
         return [('delegate', 'inspect_note', {'query': 'note.txt'})] if not messages else finish(request, 'verified')
 
     with model_service(program) as (url, requests):
         workflow = project(tmp_path, url, supervisor='pi', worker=worker)
+        expected = application_policy if application_policy is not None else (global_policy if global_policy is not None else True)
+        if global_policy is not None:
+            path = tmp_path / 'config/system.yaml'
+            system = yaml.safe_load(path.read_text())
+            system['redaction'] = {'enabled': global_policy}
+            write_yaml(path, system)
+        if application_policy is not None:
+            write_yaml(workflow.parent.parent / 'config/system.yaml', {'redaction': {'enabled': application_policy}})
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(workflow, file_logging=False)
     assert result.output == 'verified'
+    manifest = json.loads(result.run.manifest_path.read_text())
+    assert manifest['redaction']['enabled'] is expected
     worker_messages = tool_messages(next(request for request in requests if request['model'] == 'worker' and tool_messages(request)))
     with inspect_run(result.run) as trace:
         tool = next(event for event in trace.events() if event['kind'] == 'tool' and event['tool_name'] in {'read', 'read_file'})
         assert trace.read_text(tool['model_ref']) == worker_messages[-1]['content']
+        for event in trace.events():
+            if event['kind'] == 'model_request' and event.get('request_ref'):
+                captured = json.loads(trace.read_text(event['request_ref']))
+                assert 'api_key' not in captured
+                assert 'authorization' not in {key.lower() for key in captured.get('headers', {})}
         retained = trace.read_text(tool['output_ref'])
-        assert 'fixture-secret' not in retained
-        assert 'api_key=[REDACTED]' in retained
+        if expected:
+            assert 'fixture-secret' not in retained
+            assert 'api_key=[REDACTED]' in retained
+        else:
+            assert 'api_key=fixture-secret' in retained
         assert json.loads(retained) == worker_messages[-1]['content']
 
 

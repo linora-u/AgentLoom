@@ -313,7 +313,9 @@ def test_worker_completion_before_platform_receipt_recovers_without_reexecution(
         if worker_result:
             assert worker_result in str(messages)
         else:
-            assert any(message.get('content') == '' for message in messages)
+            # Pi's native Completions projection represents an empty tool result
+            # with a placeholder; the durable Worker result must still be empty.
+            assert any(message.get('content') == '(no tool output)' for message in messages)
         return 'Verified worker-window-proof-739'
 
     with mixed_service(program) as (url, requests):
@@ -361,7 +363,9 @@ def test_worker_completion_before_platform_receipt_recovers_without_reexecution(
 
         assert result.output == 'Verified worker-window-proof-739'
         assert [request for request in requests if request['model'] == 'worker'] == worker_requests
-        assert json.loads(receipt_path.read_text())['state'] == 'committed'
+        committed = json.loads(receipt_path.read_text())
+        assert committed['state'] == 'committed'
+        assert committed['record']['output'] == worker_result
         assert len([request for request in requests if request['model'] == 'supervisor']) == 2
 
 
