@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+/data/
+
+# Generated evaluation datasets and runtime outputs stay local.
+/evaluation/data/
+/evaluation/prehistory/
+/output/

@@ -1,0 +1,59 @@
+name: news_refined
+agent_runtime: pi
+runtime_options:
+  compaction:
+    enabled: true
+model_type: codex_luna_news_replay
+description: 联网核实原始发布与首次披露，识别可形成 ETF 三日利好或利空方向信号的事件。
+system_prompt:
+  path: ../agent/精筛.md
+task: 完整阅读入选新闻，自主联网核对原文、首披及事前状态，输出利好买入、利空方向或放弃结论及依据。
+tools:
+  - name: skill
+  - name: read_news_reference
+    module: news_agent.skill_reference
+    function: read_news_reference
+toolsets: []
+input_schema:
+  type: object
+  properties:
+    query:
+      type: string
+  required: [query]
+  additionalProperties: false
+output_schema:
+  type: object
+  properties:
+    reviews:
+      type: array
+      items:
+        type: object
+        properties:
+          event_id:
+            type: [string, 'null']
+          etf_code:
+            type: [string, 'null']
+          record_numbers:
+            type: array
+            minItems: 1
+            items: {type: integer, minimum: 1}
+          summary: {type: string}
+          decision:
+            type: string
+            enum: [利好, 利空, 放弃]
+          reason: {type: string}
+          sources:
+            type: array
+            items:
+              type: object
+              properties:
+                url: {type: string, minLength: 1}
+                published_at: {type: string, minLength: 1}
+                version_available_at: {type: string, minLength: 1}
+                excerpt: {type: string, minLength: 1}
+              required: [url, published_at, version_available_at, excerpt]
+              additionalProperties: false
+        required: [event_id, etf_code, record_numbers, summary, decision, reason, sources]
+        additionalProperties: false
+  required: [reviews]
+  additionalProperties: false
