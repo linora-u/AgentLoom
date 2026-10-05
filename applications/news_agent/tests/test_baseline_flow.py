@@ -69,10 +69,13 @@ def test_single_initial_pass_and_final_bearish_decision_preserve_all_mappings(
         }), path)
     baseline.copy_prices(source, prices, candidates)
 
-    configured = baseline.load_baseline_settings()
+    from news_agent.evaluation import baseline as evaluation_baseline
+
+    configured = replace(baseline.load_baseline_settings(), exposure_root=None)
     token_limit = max(count_tokens(_record_input(row), configured.token_encoding) for row in records)
-    monkeypatch.setattr(baseline, "load_baseline_settings",
-                        lambda: replace(configured, refined_max_tokens=token_limit))
+    configured = replace(configured, refined_max_tokens=token_limit)
+    monkeypatch.setattr(baseline, "load_baseline_settings", lambda: configured)
+    monkeypatch.setattr(evaluation_baseline, "load_baseline_settings", lambda: configured)
 
     calls: list[str] = []
 

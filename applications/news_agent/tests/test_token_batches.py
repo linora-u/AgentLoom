@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from news_agent.processing.prepare import chunk_selected_records, count_tokens, prepare_day
-from news_agent.settings import load_settings
+from news_agent.settings import Settings
 
 
 def _record(record_id, text):
@@ -36,8 +36,9 @@ def test_preparation_records_tokenizer_and_rebuilds_when_token_budget_changes(tm
     pq.write_table(pa.table({"datetime": ["2025-08-14 10:00:00"] * 3,
                              "title": ["N1", "N2", "N3"],
                              "content": ["你好世界" * 500] * 3}), raw)
-    settings = replace(load_settings(), news_root=tmp_path / "news",
-                       output_root=tmp_path / "inputs", initial_max_tokens=1500)
+    settings = Settings(news_root=tmp_path / "news", etf_root=tmp_path / "prices",
+                        etf_config=tmp_path / "etf_universe.yaml", output_root=tmp_path / "inputs",
+                        mode="prepare", day=date(2025, 8, 14), year=2025, initial_max_tokens=1500)
     first = prepare_day(settings, date(2025, 8, 14))
     assert first["raw_count"] == first["prepared_count"] == 3
     assert len(first["batches"]) == 3

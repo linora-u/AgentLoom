@@ -3,6 +3,8 @@ from __future__ import annotations
 from news_agent.tests.source_evidence import verified_sources
 
 from argparse import Namespace
+from dataclasses import replace
+from functools import partial
 import hashlib
 import json
 import os
@@ -137,7 +139,11 @@ def test_cross_chunk_decision_merge_preserves_sources_and_cache(
         raise AssertionError("unexpected redundant event reanalysis")
 
     monkeypatch.setattr(baseline, "_call_worker", worker)
-    settings = load_baseline_settings()
+    prices = tmp_path / "prices"
+    reference = prices / "ts_code=510300.SH" / "data.parquet"
+    reference.parent.mkdir(parents=True)
+    pq.write_table(pa.table({"trade_date": ["20250815", "20250818"]}), reference)
+    settings = replace(load_baseline_settings(), prices=prices, exposure_root=tmp_path / "exposure")
     args = Namespace(hold_days=5, sell_at="open", candidates=candidates,
                      **settings.thresholds)
     result = baseline._analyze_selected(date(2025, 8, 17), tmp_path, ["N1", "N2"],
@@ -157,10 +163,20 @@ def test_cross_chunk_decision_merge_preserves_sources_and_cache(
 
 
 
-def _invoke(*args: str) -> subprocess.CompletedProcess[str]:
+def _invoke(*args: str, config_path: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "PYTHONPATH": str(APPLICATIONS) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    command = [sys.executable, "-m", "news_agent.baseline", *args]
+    if config_path is not None:
+        # Run the real CLI with a test-owned config and normal __main__ metadata.
+        bootstrap = (
+            "import runpy,sys; from functools import partial; from pathlib import Path; "
+            "from news_agent import settings; "
+            "settings.load_baseline_settings = partial(settings.load_baseline_settings, Path(sys.argv.pop(1))); "
+            "runpy.run_module('news_agent.baseline', run_name='__main__', alter_sys=True)"
+        )
+        command = [sys.executable, "-c", bootstrap, str(config_path), *args]
     return subprocess.run(
-        [sys.executable, "-m", "news_agent.baseline", *args],
+        command,
         env=env,
         capture_output=True,
         text=True,
@@ -227,7 +243,17 @@ def test_copy_prices_rejects_missing_fields_and_unreadable_pages(tmp_path: Path,
     assert not (target / "copy_manifest.json").exists()
 
 
-def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) -> None:
+def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path, monkeypatch) -> None:
+    import yaml
+    from news_agent.evaluation import baseline as evaluation_baseline
+
+    config = yaml.safe_load((baseline.ROOT / "config/settings.yaml").read_text())
+    config["baseline"]["exposure_root"] = None
+    config_path = tmp_path / "settings.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    settings = load_baseline_settings(config_path)
+    monkeypatch.setattr(evaluation_baseline, "load_baseline_settings", lambda: settings)
+    invoke = partial(_invoke, config_path=config_path)
     source = tmp_path / "source"
     price_file = source / "ts_code=510300.SH" / "data.parquet"
     price_file.parent.mkdir(parents=True)
@@ -241,7 +267,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
     candidates = tmp_path / "etf_candidates.txt"
     candidates.write_text("ETF 候选池\n510300.SH\t沪深300\n", encoding="utf-8")
     local_prices = tmp_path / "prices"
-    copied = _invoke("copy-prices", "--source", str(source), "--target", str(local_prices),
+    copied = invoke("copy-prices", "--source", str(source), "--target", str(local_prices),
                      "--candidates", str(candidates))
     assert copied.returncode == 0, copied.stderr
     price_file.unlink()  # Evaluation must be independent of the source after copying.
@@ -273,7 +299,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["prepared_count"] = 2
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    inconsistent = _invoke("run", "--day", "2025-08-17", "--input-root", str(root),
+    inconsistent = invoke("run", "--day", "2025-08-17", "--input-root", str(root),
                            *expected,
                            "--prices", str(local_prices), "--candidates", str(candidates),
                            "--max-initial-batches", "0")
@@ -282,7 +308,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
     manifest["prepared_count"] = 1
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    pending = _invoke("run", "--day", "2025-08-17", "--input-root", str(root),
+    pending = invoke("run", "--day", "2025-08-17", "--input-root", str(root),
                       *expected,
                       "--prices", str(local_prices), "--candidates", str(candidates),
                       "--max-initial-batches", "0")
@@ -292,7 +318,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
 
     initial_file = initial / "batch-0001.json"
     initial_file.unlink()
-    incomplete = _invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
+    incomplete = invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
                          *expected,
                          "--prices", str(local_prices), "--candidates", str(candidates))
     assert incomplete.returncode != 0
@@ -315,7 +341,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
         _settings(root, local_prices, candidates, date(2025, 8, 17)), date(2025, 8, 17))
     results.with_suffix(".meta.json").write_text(json.dumps(metadata), encoding="utf-8")
 
-    evaluated = _invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
+    evaluated = invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
                         *expected,
                         "--prices", str(local_prices), "--candidates", str(candidates),
                         "--hold-days", "2", "--sell-at", "open")
@@ -332,7 +358,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
     assert all(abs(row["return"] - 0.04) < 1e-12 for row in details)
     assert all(abs(row["max_drawdown"] - 20 / 110) < 1e-12 for row in details)
 
-    closing = _invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
+    closing = invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
                       *expected,
                       "--prices", str(local_prices), "--candidates", str(candidates),
                       "--hold-days", "2", "--sell-at", "close")
@@ -341,7 +367,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
     assert json.loads((root / "reports" / "baseline" / "2025-08-17.json").read_text())["sell_at"] == "open"
     prediction["sell_at"] = "close"  # Represents a fresh prediction for the other exit time.
     results.with_suffix(".meta.json").write_text(json.dumps(metadata), encoding="utf-8")
-    closing = _invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
+    closing = invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
                       *expected,
                       "--prices", str(local_prices), "--candidates", str(candidates),
                       "--hold-days", "2", "--sell-at", "close")
@@ -351,7 +377,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
     assert all(abs(row["max_drawdown"] - 60 / 110) < 1e-12 for row in closed)
 
     candidates.write_text("ETF 候选池\n510300.SH\t沪深300指数\n", encoding="utf-8")
-    stale = _invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
+    stale = invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
                     *expected, "--prices", str(local_prices), "--candidates", str(candidates),
                     "--hold-days", "2", "--sell-at", "close")
     assert stale.returncode != 0
@@ -363,7 +389,7 @@ def test_evaluate_day_scores_grade_and_excludes_post_exit_close(tmp_path: Path) 
     metadata["analysis_fingerprint"] = analysis_fingerprint(
         _settings(root, local_prices, candidates, date(2025, 8, 17)), date(2025, 8, 17))
     results.with_suffix(".meta.json").write_text(json.dumps(metadata), encoding="utf-8")
-    insufficient = _invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
+    insufficient = invoke("evaluate", "--day", "2025-08-17", "--input-root", str(root),
                            *expected, "--prices", str(local_prices), "--candidates", str(candidates),
                            "--hold-days", "5", "--sell-at", "close")
     assert insufficient.returncode == 0, insufficient.stderr

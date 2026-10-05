@@ -3,13 +3,23 @@ from pathlib import Path
 import json
 
 import pytest
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from news_agent.settings import load_baseline_settings
 from news_agent.evaluation import replay
 
 
 def _config(tmp_path, monkeypatch):
+    prices = tmp_path / "prices"
+    reference = prices / "ts_code=510300.SH" / "data.parquet"
+    reference.parent.mkdir(parents=True)
+    pq.write_table(pa.table({"trade_date": [
+        "20241231", "20250102", "20250103", "20250228", "20250303",
+        "20250304", "20250401", "20250402", "20250506", "20250507",
+    ]}), reference)
     config = replace(load_baseline_settings(), evaluation_root=tmp_path,
+                     prices=prices, exposure_root=None,
                      version="test", development_month="2025-01",
                      validation_months=("2025-03", "2025-04", "2025-05"))
     monkeypatch.setattr(replay, "load_baseline_settings", lambda: config)

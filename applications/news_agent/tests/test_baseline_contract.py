@@ -11,6 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from news_agent import baseline
 from news_agent.processing import prepare
@@ -145,7 +147,11 @@ def test_failed_refinement_never_triggers_project_split_or_retry(tmp_path: Path,
 
     monkeypatch.setattr(baseline, "_call_worker", worker)
     monkeypatch.setattr(baseline, "historical_candidates", lambda universe, *_: universe)
-    settings = replace(load_baseline_settings(), exposure_root=None, refined_workers=1)
+    prices = tmp_path / "prices"
+    reference = prices / "ts_code=510300.SH" / "data.parquet"
+    reference.parent.mkdir(parents=True)
+    pq.write_table(pa.table({"trade_date": ["20250731", "20250801"]}), reference)
+    settings = replace(load_baseline_settings(), prices=prices, exposure_root=None, refined_workers=1)
     args = SimpleNamespace(hold_days=settings.hold_days, sell_at=settings.sell_at, **settings.thresholds)
     with pytest.raises(RuntimeError, match="精筛块失败"):
         baseline._analyze_selected(day, tmp_path, ids, records, {"510300.SH": "宽基"},
