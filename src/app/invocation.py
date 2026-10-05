@@ -87,7 +87,8 @@ class AgentInvocation:
         effective = self.owner._effective_agent_config or self.owner._config
         with bind_redaction_policy(effective, inherit=True) as enabled:
             context = get_current_run_context()
-            if context is not None and self.owns_root_run:
+            # The Application lifecycle owns manifest initialization.
+            if context is not None and self.owns_root_run and context.manifest_path.is_file():
                 context.update_manifest(redaction={"enabled": enabled})
             return self._run_bound()
 
