@@ -10,6 +10,30 @@ from news_agent import baseline
 from tests.pi_test.test_codex_application import _fixture
 
 
+def test_native_http_retries_are_counted_without_inventing_failed_request_usage():
+    events = [
+        {"kind": "model_request", "provider_request_complete": True,
+         "model_turn_id": "turn-one", "attempt": 0},
+        {"kind": "model_request", "provider_request_complete": True,
+         "model_turn_id": "turn-one", "attempt": 0},
+        {"kind": "model_response", "model_turn_id": "turn-one",
+         "usage": {"input_tokens": 12, "output_tokens": 3}},
+    ]
+    measured = baseline._measured_tokens(events)
+    assert (measured["provider_requests"], measured["retries"]) == (2, 1)
+    assert measured["unreported_provider_requests"] == 1
+    assert not measured["token_usage_complete"]
+
+
+def test_separate_model_turns_are_not_counted_as_http_retries():
+    events = [
+        {"kind": "model_request", "provider_request_complete": True,
+         "model_turn_id": turn, "attempt": 0}
+        for turn in ("turn-one", "turn-two")
+    ]
+    assert baseline._measured_tokens(events)["retries"] == 0
+
+
 def test_failed_request_remains_unreported_when_a_retry_succeeds(tmp_path, monkeypatch):
     _, wire = _fixture(tmp_path, monkeypatch, search="off", first_status=500,
                        completed=False, answer='{"classifications": []}')

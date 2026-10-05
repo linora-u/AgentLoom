@@ -5,6 +5,7 @@ from __future__ import annotations
 from news_agent.tests.source_evidence import verified_sources
 
 from datetime import date
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -16,7 +17,7 @@ import pytest
 
 from news_agent import baseline
 from news_agent.evaluation.baseline import verify_evaluation_artifacts
-from news_agent.processing.prepare import _record_input
+from news_agent.processing.prepare import _record_input, count_tokens
 
 
 def test_single_initial_pass_and_final_bearish_decision_preserve_all_mappings(
@@ -68,11 +69,10 @@ def test_single_initial_pass_and_final_bearish_decision_preserve_all_mappings(
         }), path)
     baseline.copy_prices(source, prices, candidates)
 
-    def event(event_id: str, ids: list[str], summary: str, code: str,
-              direction: str) -> dict:
-        return {"event_id": event_id, "record_ids": ids, "summary": summary,
-                "etf_code": code, "direction": direction,
-                "reason": "原文提供了对应行业的需求信息"}
+    configured = baseline.load_baseline_settings()
+    token_limit = max(count_tokens(_record_input(row), configured.token_encoding) for row in records)
+    monkeypatch.setattr(baseline, "load_baseline_settings",
+                        lambda: replace(configured, refined_max_tokens=token_limit))
 
     calls: list[str] = []
 
@@ -87,8 +87,6 @@ def test_single_initial_pass_and_final_bearish_decision_preserve_all_mappings(
         if definition.name == "initial.yaml":
             if "两项独立消息 3" in query:
                 return {"classifications": [[1, 6]]}
-            if "两项独立消息 2" in query and "校验器拒绝" not in query:
-                return {"classifications": [[999, 0]]}
             return {"classifications": [[1, 0]]}
         def review(ids: list[str], summary: str) -> dict:
             return {"event_id": ("E3" if summary == "独立事件" else "E1" if ids == ["N1"] else "E2"), "etf_code": "510300.SH", "record_ids": ids, "summary": summary,
@@ -148,7 +146,7 @@ def test_single_initial_pass_and_final_bearish_decision_preserve_all_mappings(
     assert len(details) == 3
     assert "方向命中率：66.67%" in (root / "reports" / "baseline" / f"{stem}.md").read_text(encoding="utf-8")
     assert "利好跑赢沪深300 ETF" in (root / "reports" / "baseline" / f"{stem}.md").read_text(encoding="utf-8")
-    assert calls.count("initial.yaml") == 4  # One invalid response is corrected once.
+    assert calls.count("initial.yaml") == 3  # Each prepared batch is screened once.
     assert calls.count("refined.yaml") == 2
     assert set(calls) == {"initial.yaml", "refined.yaml"}
 

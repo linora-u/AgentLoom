@@ -100,5 +100,13 @@ def test_provider_retry_is_measured_and_raw_responses_remain_available(tmp_path,
                        if path.parent.name == timing["run_id"]]
     responses = [event for event in response_events if event.get("kind") == "model_response"]
     responses.sort(key=lambda event: event["sequence"])
-    assert [event["status"] for event in responses] == ["error", "completed"]
+    # The SDK performs both HTTP requests within one stream and reports its final
+    # response once. The failed request's usage remains explicitly unreported.
+    assert [event["status"] for event in responses] == ["completed"]
     assert all(event["response_ref"] for event in responses)
+    wire_events = [event for event in response_events if event.get("kind") == "model_request"
+                   and event.get("provider_request_complete")]
+    assert len(wire_events) == 2
+    assert len({event["model_turn_id"] for event in wire_events + responses}) == 1
+    assert timing["unreported_provider_requests"] == 1
+    assert not timing["token_usage_complete"]

@@ -346,15 +346,17 @@ def test_provider_failure_during_structured_correction_stays_provider_error(
     assert len(requests) == 2
 
 
+@pytest.mark.parametrize("compaction", [False, True])
 @pytest.mark.parametrize("answer", ["not-json", '{"findings": []}'])
 def test_structured_output_at_token_limit_is_recoverable_output_validation(
-    tmp_path, answer,
+    tmp_path, answer, compaction,
 ):
     from agentloom.app.run import ApplicationRunError
 
     with model_service(outputs=[answer], finish="length") as (url, requests):
         app = project(tmp_path, url)
         config = yaml.safe_load(app.read_text())
+        config["runtime_options"]["compaction"] = {"enabled": compaction}
         config["output_schema"] = {
             "type": "object",
             "properties": {

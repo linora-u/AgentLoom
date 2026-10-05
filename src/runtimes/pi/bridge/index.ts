@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { configureModel, type SearchEvidence } from "./model.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
@@ -280,6 +281,7 @@ async function run(frame: Frame, abort: AbortController) {
   let unavailableToolTurns = 0;
   let outputBudgetExhausted = false;
   let terminalRejections = 0;
+  let lastAssistant: AssistantMessage | undefined;
   let unsubscribe: (() => void) | undefined;
   let outputValidator: ValidateFunction | undefined;
   if (p.output_contract) {
@@ -304,6 +306,7 @@ async function run(frame: Frame, abort: AbortController) {
       if (e.type === "auto_retry_start") event("model", {phase: "retry", attempt: e.attempt});
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
+        lastAssistant = e.message;
         if (e.message.content.some(block => block.type === "toolCall" && !p.tools.some((tool: Obj) => tool.visible_name === block.name))) {
           unavailableToolTurns += 1;
           if (unavailableToolTurns >= (p.runtime_options.max_stop_attempts || 3)) {
@@ -338,7 +341,14 @@ async function run(frame: Frame, abort: AbortController) {
         content: "Resume the interrupted task from the restored conversation and committed tool results. Do not repeat completed work.",
       }, {triggerTurn: true});
     } else await trigger(p.task);
-    let last = session.messages.at(-1);
+    const finalMessage = () => {
+      const projected = session!.messages.at(-1);
+      // Native overflow recovery may omit a truncated response even when it
+      // cannot compact and retry. Preserve that observed outcome for validation.
+      return projected?.role !== "assistant" && lastAssistant?.stopReason === "length"
+        ? lastAssistant : projected;
+    };
+    let last = finalMessage();
     let outputValidationReason = "invalid structured output";
     const correctOutput = async (message: string, disableTools = true): Promise<boolean> => {
       if (disableTools) outputCorrection = true;
@@ -349,7 +359,7 @@ async function run(frame: Frame, abort: AbortController) {
         return false;
       }
       await trigger(message, true);
-      last = session!.messages.at(-1);
+      last = finalMessage();
       return true;
     };
     while (last?.role === "assistant" && last.stopReason !== "error") {

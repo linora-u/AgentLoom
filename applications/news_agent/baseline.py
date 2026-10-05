@@ -252,8 +252,15 @@ def _measured_tokens(events: list[dict]) -> dict:
     usages = [item["usage"] for item in events if item["kind"] == "model_response"
               and item.get("usage") is not None
               and (item["usage"]["input_tokens"] > 0 or item["usage"]["output_tokens"] > 0)]
+    seen_turns: set[str] = set()
+    retries = 0
+    for item in requests:
+        turn_id = item.get("model_turn_id")
+        retries += int((item.get("attempt") or 0) > 0 or (turn_id is not None and turn_id in seen_turns))
+        if turn_id is not None:
+            seen_turns.add(turn_id)
     return {"provider_requests": len(requests),
-            "retries": sum((item.get("attempt") or 0) > 0 for item in requests),
+            "retries": retries,
             "input_tokens": sum(item["input_tokens"] for item in usages) if usages else None,
             "output_tokens": sum(item["output_tokens"] for item in usages) if usages else None,
             "usage_responses": len(usages),
