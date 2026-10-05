@@ -1,9 +1,11 @@
 /** One SDK session per managed process. stdout is exclusively protocol JSONL. */
 import { createInterface } from "node:readline";
+import { createServer } from "node:net";
 import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { configureModel, type SearchEvidence } from "./model.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
@@ -30,9 +32,8 @@ let restoredPhase: string | undefined;
 let current: {frame: Frame; abort: AbortController} | undefined;
 let closing = false;
 let nativeIncomplete = false;
-let modelFailure = {timedOut: false, status: 0, reason: ""};
-let reportRetry: ((attempt: number) => void) | undefined;
 let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
+let reportTier: ((identity: Obj, attempt: number, tier: string) => void) | undefined;
 let outputCorrection = false;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
@@ -60,39 +61,116 @@ function rejectCallbacks() {
   callbacks.clear();
 }
 
-async function createSession(p: Obj): Promise<AgentSession> {
+async function codexCallbackPortAvailable(): Promise<boolean> {
+  const server = createServer();
+  return new Promise(resolve => {
+    server.once("error", () => resolve(false));
+    server.listen(1455, "127.0.0.1", () => server.close(() => resolve(true)));
+  });
+}
+
+async function ensureCodexLogin(runtime: ModelRuntime, model: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
+    event: (kind: string, payload: Obj) => void): Promise<void> {
+  let auth;
+  let reason = "missing";
+  try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
+  catch {
+    if (current?.abort.signal.aborted) throw new Error("Interrupted");
+    reason = "refresh_failed";
+  }
+  if (auth?.source === "OAuth") return;
+  event("run", {phase: "auth_login_required", reason});
+  const browserLogin = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY) &&
+    await codexCallbackPortAvailable();
+  const controller = new AbortController();
+  const interrupted = () => controller.abort();
+  current?.abort.signal.addEventListener("abort", interrupted, {once: true});
+  if (current?.abort.signal.aborted) controller.abort();
+  let timedOut = false;
+  const timeout = setTimeout(() => {timedOut = true; controller.abort();}, 15 * 60_000);
+  try {
+    await runtime.login("openai-codex", "oauth", {
+      signal: controller.signal,
+      prompt: async prompt => {
+        if (prompt.type === "select") return browserLogin ? "browser" : "device_code";
+        if (prompt.type === "manual_code") {
+          // The SDK races this prompt against its loopback callback. The
+          // browser callback wins and aborts the unused manual prompt.
+          return new Promise<string>((_resolve, reject) => {
+            if (prompt.signal?.aborted) {reject(new Error("Login prompt cancelled")); return;}
+            prompt.signal?.addEventListener("abort", () => reject(new Error("Login prompt cancelled")), {once: true});
+          });
+        }
+        throw new Error("Unsupported Pi Codex login prompt");
+      },
+      notify: notice => {
+        if (notice.type === "auth_url") event("run", {phase: "auth_open_browser", url: notice.url});
+        if (notice.type === "device_code") event("run", {phase: "auth_device_code", url: notice.verificationUri, code: notice.userCode});
+      },
+    });
+    auth = await runtime.getAuth(model, {signal: controller.signal});
+    if (auth?.source !== "OAuth") throw new Error("Missing OAuth credential after login");
+    event("run", {phase: "auth_login_completed"});
+  } catch {
+    throw new Error(timedOut ? "Pi Codex login timed out after 15 minutes" :
+      "Pi Codex login was not completed; complete browser authorization and retry");
+  } finally {
+    clearTimeout(timeout);
+    current?.abort.signal.removeEventListener("abort", interrupted);
+  }
+}
+
+async function createSession(p: Obj, event: (kind: string, payload: Obj) => void): Promise<AgentSession> {
   nativeIncomplete = false;
   outputCorrection = false;
   const s = p.model.settings;
   const codex = p.model.protocol === "openai_codex_responses";
-  if (codex && !piAuthPath) throw new Error("Pi Codex credential path is unavailable");
+  const chatgpt = p.model.protocol === "openai_chatgpt_responses";
+  const subscription = codex || chatgpt;
+  if (subscription && !piAuthPath) throw new Error("Pi ChatGPT credential path is unavailable");
   const runtime = await ModelRuntime.create({
-    authPath: codex ? piAuthPath : join(agentDir, "auth.json"),
+    authPath: subscription ? piAuthPath : join(agentDir, "auth.json"),
     modelsPath: null, refreshOnCreate: false,
   });
   const api = codex ? "openai-codex-responses" :
     p.model.protocol === "openai_chat" ? "openai-completions" : "openai-responses";
-  const modelId = codex ? p.model.model_id : p.model.model_id.replace(/^(openai|gemini)\//, "");
-  if (!codex) {
+  const modelId = subscription ? p.model.model_id : p.model.model_id.replace(/^(openai|gemini)\//, "");
+  if (!subscription) {
     runtime.registerProvider("agentloom", {
       api, baseUrl: s.base_url || "https://api.openai.com/v1", apiKey: "agentloom-runtime-key",
-      models: [{id: modelId, name: modelId, reasoning: false, input: ["text"],
+      models: [{id: modelId, name: modelId, reasoning: Boolean(s.extra_completion_params?.reasoning_effort), input: ["text"],
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: s.context_window,
         maxTokens: s.max_output_tokens, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
     });
     await runtime.setRuntimeApiKey("agentloom", s.api_key || "no-key");
   }
-  const model = runtime.getModel(codex ? "openai-codex" : "agentloom", modelId);
-  if (!model) throw new Error(codex ? `Pi Codex model ${modelId} is unavailable` : `Pi model ${modelId} is unavailable`);
-  if (codex) {
+  const providerId = codex ? "openai-codex" : chatgpt ? "openai" : "agentloom";
+  if (subscription) {
+    runtime.registerProvider(providerId, {
+      models: runtime.getModels(providerId).map(model => model.id === modelId
+        ? {...model, contextWindow: s.context_window, maxTokens: s.max_output_tokens} : model),
+    });
+  }
+  const model = runtime.getModel(providerId, modelId);
+  if (!model) throw new Error(`Pi ${codex ? "Codex model" : chatgpt ? "ChatGPT model" : "model"} ${modelId} is unavailable`);
+  if (codex) await ensureCodexLogin(runtime, model, event);
+  else if (subscription) {
     let auth;
     try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
-    catch {throw new Error("Pi Codex credential refresh failed; check the connection or log in through Pi again");}
-    if (!auth) throw new Error("Pi Codex login is missing; log in through Pi before running this Agent");
+    catch {throw new Error(`Pi ${codex ? "Codex" : "ChatGPT"} credential refresh failed; check the connection or log in through Pi again`);}
+    if (!auth) throw new Error(`Pi ${codex ? "Codex" : "ChatGPT"} login is missing; log in through Pi before running this Agent`);
+    if (chatgpt && auth.source !== "OAuth")
+      throw new Error("Pi ChatGPT subscription login is missing; authorize the OpenAI provider in Pi");
   }
-  // Adapter-controlled, bounded retry waits; no hidden SDK retry multiplier.
-  const settings = SettingsManager.inMemory({retry: {enabled: false, provider: {maxRetries: 0, timeoutMs: s.timeout * 1000}},
-    compaction: {enabled: false, ...p.runtime_options.compaction}, enableAnalytics: false, enableInstallTelemetry: false, packages: []});
+  const {max_stop_attempts: _maxStopAttempts, ...nativeSettings} = p.runtime_options;
+  const settings = SettingsManager.inMemory({
+    retry: {maxRetries: s.num_retries, baseDelayMs: s.retry_delay * 1000,
+      maxAgentDelayMs: s.max_retry_delay * 1000,
+      provider: {maxRetries: s.num_retries, timeoutMs: s.timeout * 1000,
+        maxRetryDelayMs: s.max_retry_delay * 1000}},
+    enableAnalytics: false, enableInstallTelemetry: false, packages: [],
+    ...nativeSettings,
+  });
   const restored = p.checkpoint ? restoreSession(agentDir, p.cwd, p.checkpoint) : undefined;
   const manager = restored?.manager ?? SessionManager.inMemory(p.cwd);
   restoredPhase = restored?.bundle.phase;
@@ -105,42 +183,41 @@ async function createSession(p: Obj): Promise<AgentSession> {
     native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
   const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
   const extra = s.extra_completion_params || {};
-  const searchMode = codex ? (extra.web_search || "auto") : "off";
+  const searchMode = subscription ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    systemPrompt: codex && searchMode !== "off" ?
+    systemPrompt: subscription && searchMode !== "off" ?
       `${p.instructions}\n\nNative web search is available. Use it for current information and cite the sources you use.` :
       p.tools.length ? p.instructions :
       `${p.instructions}\n\nNo tools are available in this run. Do not call or simulate tools. If the task needs unavailable information, explain the limitation.`,
     extensionFactories: [selected.extension]});
   await loader.reload();
   const {session: created} = await createAgentSession({cwd: p.cwd, agentDir, modelRuntime: runtime,
-    model, thinkingLevel: codex ? (extra.reasoning_effort || "xhigh") : "off", tools: selected.tools.map(tool => tool.name),
+    model, thinkingLevel: extra.reasoning_effort, tools: selected.tools.map(tool => tool.name),
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   enableInstructionOnlyTurns(created);
   await created.bindExtensions({onError: () => created.agent.abort()});
-  modelFailure = configureModel(created, s, p.model.request_headers, async () => {
+  configureModel(created, s, p.model.request_headers, async () => {
     await persistence!.save();
     const requestIdentity = identity(`model:${randomUUID()}`);
     const permit = await invoke({method: "model_prepare", identity: requestIdentity});
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
     finalDelivery = permit.state === "final";
     return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
-  }, attempt => reportRetry?.(attempt), agentDir, invoke, codex,
-  (identity, attempt, result) => reportSearch?.(identity, attempt, result));
+  }, agentDir, invoke, {codex, chatgpt},
+  (identity, attempt, result) => reportSearch?.(identity, attempt, result),
+  (identity, attempt, tier) => reportTier?.(identity, attempt, tier));
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
     const extra = s.extra_completion_params || {};
-    for (const key of ["top_p", "seed"]) if (extra[key] !== undefined) result[key] = extra[key];
-    if (p.tools.length) for (const key of ["tool_choice", "parallel_tool_calls"])
-      if (extra[key] !== undefined) result[key] = extra[key];
-    if (extra.reasoning_effort !== undefined && !codex) {
-      if (api === "openai-responses") result.reasoning = {effort: extra.reasoning_effort};
-      else result.reasoning_effort = extra.reasoning_effort;
-    }
-    const projected = {...result, ...extra.extra_body};
+    const projected = result;
+    // The Codex backend enforces this cap, but Pi's Codex provider omits maxTokens.
+    // The public ChatGPT subscription API does not support this request field.
+    if (codex) projected.max_output_tokens = s.max_output_tokens;
+    if (subscription && extra.service_tier !== undefined)
+      projected.service_tier = codex && extra.service_tier === "fast" ? "priority" : extra.service_tier;
     const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));
     if (Array.isArray(projected.tools)) projected.tools = projected.tools.map((tool: Obj) => {
       const name = tool.function?.name ?? tool.name;
@@ -149,7 +226,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
       // Pi's native schemas include optional fields. Codex rejects strict
       // function schemas unless every field is required; AgentLoom still
       // validates and authorizes the selected tool arguments before execution.
-      const strict = codex ? false : tool.strict;
+      const strict = subscription ? false : tool.strict;
       return tool.function
         ? {...tool, strict, function: {...tool.function, parameters}}
         : {...tool, strict, parameters};
@@ -159,7 +236,7 @@ async function createSession(p: Obj): Promise<AgentSession> {
       delete projected.tool_choice;
       delete projected.parallel_tool_calls;
     }
-    if (codex && searchMode !== "off") {
+    if (subscription && searchMode !== "off") {
       projected.tools = [...(projected.tools || []), {type: "web_search"}];
       if (searchMode === "required") projected.tool_choice = {type: "web_search"};
     }
@@ -184,7 +261,6 @@ async function createSession(p: Obj): Promise<AgentSession> {
 async function run(frame: Frame, abort: AbortController) {
   const p = frame.payload;
   outputCorrection = false;
-  modelFailure = {timedOut: false, status: 0, reason: ""};
   let seq = 0;
   const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
     run_id: frame.run_id, request_id: frame.request_id, sequence: ++seq, event: kind, payload});
@@ -194,11 +270,18 @@ async function run(frame: Frame, abort: AbortController) {
     event("model", {phase: "web_search", call_id: identity.call_id, attempt,
       completed_calls: result.calls, citations: result.citations});
   };
+  reportTier = (identity, attempt, tier) => event("model", {phase: "provider_tier",
+    call_id: identity.call_id, attempt, requested: p.model.settings.extra_completion_params?.service_tier || "default",
+    response_tier: tier,
+    // The public API documents this as the actual tier. Codex's subscription
+    // backend does not expose an authoritative per-request tier in this field.
+    effective: p.model.protocol === "openai_chatgpt_responses" ? tier : null});
   const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
   let unavailableTool = false;
   let unavailableToolTurns = 0;
   let outputBudgetExhausted = false;
   let terminalRejections = 0;
+  let lastAssistant: AssistantMessage | undefined;
   let unsubscribe: (() => void) | undefined;
   let outputValidator: ValidateFunction | undefined;
   if (p.output_contract) {
@@ -213,15 +296,17 @@ async function run(frame: Frame, abort: AbortController) {
     if (p.checkpoint && session) throw new Error("Cannot restore into an active Pi session");
     if (!p.continue_session || !session) {
       session?.dispose();
-      session = await createSession(p);
+      session = await createSession(p, event);
     }
     if (abort.signal.aborted) throw new Error("Interrupted");
     event("run", {phase: "started", resumed: Boolean(p.checkpoint)});
     unsubscribe = session.subscribe(e => {
       if (e.type === "compaction_start") event("checkpoint", {phase: "compaction_started"});
       if (e.type === "compaction_end") event("checkpoint", {phase: "compaction_ended", aborted: e.aborted});
+      if (e.type === "auto_retry_start") event("model", {phase: "retry", attempt: e.attempt});
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
+        lastAssistant = e.message;
         if (e.message.content.some(block => block.type === "toolCall" && !p.tools.some((tool: Obj) => tool.visible_name === block.name))) {
           unavailableToolTurns += 1;
           if (unavailableToolTurns >= (p.runtime_options.max_stop_attempts || 3)) {
@@ -237,7 +322,6 @@ async function run(frame: Frame, abort: AbortController) {
         event("model", {phase: "completed", stop_reason: e.message.stopReason});
       }
     });
-    reportRetry = attempt => event("model", {phase: "retry", attempt});
     const trigger = async (content: string | null, correction = false) => {
       if (correction) {
         await session!.sendCustomMessage({
@@ -257,7 +341,14 @@ async function run(frame: Frame, abort: AbortController) {
         content: "Resume the interrupted task from the restored conversation and committed tool results. Do not repeat completed work.",
       }, {triggerTurn: true});
     } else await trigger(p.task);
-    let last = session.messages.at(-1);
+    const finalMessage = () => {
+      const projected = session!.messages.at(-1);
+      // Native overflow recovery may omit a truncated response even when it
+      // cannot compact and retry. Preserve that observed outcome for validation.
+      return projected?.role !== "assistant" && lastAssistant?.stopReason === "length"
+        ? lastAssistant : projected;
+    };
+    let last = finalMessage();
     let outputValidationReason = "invalid structured output";
     const correctOutput = async (message: string, disableTools = true): Promise<boolean> => {
       if (disableTools) outputCorrection = true;
@@ -268,10 +359,15 @@ async function run(frame: Frame, abort: AbortController) {
         return false;
       }
       await trigger(message, true);
-      last = session!.messages.at(-1);
+      last = finalMessage();
       return true;
     };
     while (last?.role === "assistant" && last.stopReason !== "error") {
+      if (outputValidator && last.stopReason === "length") {
+        outputBudgetExhausted = true;
+        outputValidationReason = "model output token limit";
+        break;
+      }
       const text = last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("");
       const textualTool = textualToolCallName(text);
       if (textualTool) {
@@ -307,7 +403,7 @@ async function run(frame: Frame, abort: AbortController) {
       }
       break;
     }
-    if (nativeIncomplete || modelFailure.timedOut || unavailableTool || abort.signal.aborted ||
+    if (nativeIncomplete || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
     const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       outputBudgetExhausted ? "max_steps_error" :
@@ -321,22 +417,23 @@ async function run(frame: Frame, abort: AbortController) {
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? {category: "provider", message: modelFailure.reason || "Pi model request failed", retryable: modelFailure.status === 429 || modelFailure.status >= 500} :
+      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: false} :
         outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch (error) {
     const interrupted = abort.signal.aborted;
     const detail = error instanceof Error ? error.message : "";
-    const safeDetail = detail.startsWith("Pi Codex ") || detail.startsWith("Incompatible Pi native checkpoint")
+    const safeDetail = detail.startsWith("Pi Codex ") || detail.startsWith("Pi ChatGPT ") ||
+      detail.startsWith("Incompatible Pi native checkpoint")
       ? detail.slice(0, 240) : "";
     response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
       output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: {category: interrupted ? "interrupted" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : modelFailure.timedOut ? "Pi model request timed out" : safeDetail || modelFailure.reason || "Pi model request failed", retryable: modelFailure.timedOut}});
+      error: {category: interrupted ? "interrupted" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : safeDetail || "Pi model request failed", retryable: false}});
   } finally {
     rejectCallbacks();
     unsubscribe?.();
     current = undefined;
-    reportRetry = undefined;
     reportSearch = undefined;
+    reportTier = undefined;
   }
 }
 

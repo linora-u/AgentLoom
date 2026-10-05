@@ -17,6 +17,7 @@
 
 ## 目录
 
+- [redaction — 内容脱敏](#redaction--内容脱敏)
 - [快速参考：代表性 YAML 结构](#快速参考代表性-yaml-结构)
 - [1. system — 系统元数据](#1-system--系统元数据)
 - [2. runtime_options — 基座专属参数](#2-runtime_options--基座专属参数)
@@ -36,6 +37,21 @@
 - [附录 B：应用级覆盖与目录结构](#附录-b应用级覆盖与目录结构)
 
 ---
+
+## redaction — 内容脱敏
+
+`redaction.enabled` 控制框架的秘密信息脱敏，缺省为 `true`。全局
+`config/system.yaml` 提供默认值，应用的 `config/system.yaml` 可覆盖；Agent YAML
+不能单独覆盖。每次运行固定有效值，Worker 继承该值，Run manifest 记录配置。
+
+```yaml
+redaction:
+  enabled: false
+```
+
+关闭时保留日志和运行证据，直接保存原内容并跳过秘密扫描；提示注入检查仍独立执行。
+传输认证信息不属于业务证据，在采集阶段排除。配置变化作用于后续运行，不重写已有记录。
+
 
 ## 快速参考：代表性 YAML 结构
 
@@ -68,6 +84,9 @@ logging:
   file_enabled: true
   max_file_bytes: 26214400
   backup_count: 3
+
+redaction:
+  enabled: true
 
 # ============================================
 # 默认加载 Toolsets

@@ -320,6 +320,23 @@ def test_token_usage_telemetry_keys_are_not_treated_as_credentials():
     )
 
 
+def test_escaped_json_key_scanning_has_linear_work(monkeypatch):
+    import agentloom.self_learning.redaction as redaction
+
+    text = '"literal ' + r'\"safe\":0,' * 600
+    normalized_chars = 0
+    normalize = redaction._normalized_key
+
+    def count_chars(value):
+        nonlocal normalized_chars
+        normalized_chars += len(str(value or ""))
+        return normalize(value)
+
+    monkeypatch.setattr(redaction, "_normalized_key", count_chars)
+    assert redaction.redact_text(text) == text
+    assert normalized_chars <= len(text) * 8
+
+
 def test_plural_secret_keys_never_cross_memory_or_digest_boundaries(tmp_path: Path):
     value = {
         "nested": {

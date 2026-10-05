@@ -190,7 +190,7 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ No | Human-readable model description. Used in logs and documentation |
 | `temperature` | `float` | `0.1` | ❌ No | Creativity/randomness control (0.0 - 2.0). See [3.2 temperature Recommendations](#32-temperature-configuration-recommendations) |
 | `context_window` | `int` | `150000` | ❌ No | Total model context window used to budget input plus reserved output |
-| `max_output_tokens` | `int` | `16384` | ❌ No | Maximum tokens reserved for one model generation and sent to the provider |
+| `max_output_tokens` | `int` | `16384` | ❌ No | Output capacity for one generation, including reasoning tokens; subscription differences are explained in 3.3 |
 | `max_tokens` | `int` | `150000` | ❌ No | Deprecated compatibility alias; when used alone it supplies both legacy budgets. The old `"max"` value resolves to this finite default. |
 | `timeout` | `int` | `60` | ❌ No | Single HTTP request timeout (seconds). Interrupted if no response within this time |
 | `num_retries` | `int` | `5` | ❌ No | Number of retries on API call failure |
@@ -214,10 +214,20 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 ### 3.3 Context and output budgets
 
 Use `context_window` for the provider's total context capacity and
-`max_output_tokens` for the generation reserve. AgentLoom compresses model input
+`max_output_tokens` for the generation reserve. smolagents compresses model input
 against `context_window - max_output_tokens`; only `max_output_tokens` is sent to
 the provider as `max_tokens`. The legacy `max_tokens` field remains accepted when
 neither new field is set.
+
+Pi registers these settings as the native model's `contextWindow` and `maxTokens`;
+the Pi SDK manages input compaction. For `openai_codex_responses`, the native
+`onPayload` hook adds `max_output_tokens` to requests sent to
+`https://chatgpt.com/backend-api/codex/responses`. Live probes confirmed that this
+endpoint enforces the configured cap, including reasoning tokens.
+For `openai_chatgpt_responses`, ChatGPT sign-in through the public API
+[does not support `max_output_tokens`](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+Pi omits that field; the setting declares SDK model capacity rather than a
+server-side generation cap on that route.
 
 ### 3.4 extra_headers Request Headers
 

@@ -4,13 +4,15 @@ from __future__ import annotations
 import base64
 import json
 import os
+import socket
 import sys
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.request import urlopen
 
 import pytest
 import yaml
-
 from agentloom.app.run import ApplicationRunError
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
@@ -23,14 +25,19 @@ from tests.pi_test.test_application import project
 
 def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True,
              citations: bool = True, status: int = 200, refresh: bool = False,
-             refresh_error: bool = False, first_textual_tool_call: bool = False,
+             refresh_error: bool = False, login_error: bool = False,
+             first_textual_tool_call: bool = False,
              answer: str = "Current result", first_status: int | None = None,
-             first_answer: str | None = None):
+             first_answer: str | None = None, provider: str = "openai-codex",
+             response_tier: str = "default", search_actions: list[dict] | None = None,
+             reported_usage: dict | None = None, propose_write: str | None = None,
+             first_reported_usage: dict | None = None, compaction_answer: str | None = None):
     app = project(tmp_path, "http://127.0.0.1:1/v1")
     configuration = tmp_path / "config/llm.yaml"
     data = yaml.safe_load(configuration.read_text())
     data["model"]["codex"] = {
-        "adapter": "openai_codex_responses", "model": "gpt-6-luna",
+        "adapter": "openai_chatgpt_responses" if provider == "openai" else "openai_codex_responses",
+        "model": "gpt-6-luna",
         "context_window": 272000, "max_output_tokens": 256,
         "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000,
         "reasoning_effort": "xhigh", "web_search": search,
@@ -38,6 +45,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
     configuration.write_text(yaml.safe_dump(data))
     definition = yaml.safe_load(app.read_text())
     definition["model_type"] = "codex"
+    definition["runtime_options"] = {"transport": "sse", "cacheWarming": "off",
+                                     "compaction": {"enabled": False}}
     app.write_text(yaml.safe_dump(definition))
 
     auth_dir = tmp_path / "pi-auth"
@@ -46,9 +55,10 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
         "https://api.openai.com/auth": {"chatgpt_account_id": "fixture-account"}
     }).encode()).decode().rstrip("=")
     credential = auth_dir / "auth.json"
-    credential.write_text(json.dumps({"openai-codex": {
+    credential.write_text(json.dumps({provider: {
         "type": "oauth", "access": f"fixture.{account}.signature",
         "refresh": "fixture-refresh", "expires": int(time.time() * 1000) + (-1000 if refresh else 3600_000),
+        "clientId": "fixture-client", "scopes": ["chatgpt.tokens.use.direct"],
     }}))
     credential.chmod(0o600)
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(auth_dir))
@@ -57,27 +67,45 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
     scenario = tmp_path / "codex-scenario.json"
     scenario.write_text(json.dumps({"completed": completed, "citations": citations,
                                     "status": status, "refresh": refresh,
-                                    "refresh_error": refresh_error,
+                                    "refresh_error": refresh_error, "login_error": login_error,
                                     "first_textual_tool_call": first_textual_tool_call,
                                     "answer": answer, "first_status": first_status,
-                                    "first_answer": first_answer}))
+                                    "first_answer": first_answer, "provider": provider,
+                                    "response_tier": response_tier, "search_actions": search_actions,
+                                    "reported_usage": reported_usage, "propose_write": propose_write,
+                                    "first_reported_usage": first_reported_usage, "compaction_answer": compaction_answer}))
     bootstrap = tmp_path / "codex-bootstrap.mjs"
     bootstrap.write_text("""
 import {appendFileSync, readFileSync} from 'node:fs';
 import {zstdDecompressSync} from 'node:zlib';
+import {pathToFileURL} from 'node:url';
 const nativeFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const request = new Request(input, init);
+  if (request.url === 'https://auth.openai.com/api/accounts/deviceauth/usercode')
+    return new Response(JSON.stringify({device_auth_id: 'fixture-device', user_code: 'ABCD-EFGH', interval: 0}),
+      {status: 200, headers: {'content-type': 'application/json'}});
+  if (request.url === 'https://auth.openai.com/api/accounts/deviceauth/token')
+    return new Response(JSON.stringify({authorization_code: 'fixture-code', code_verifier: 'fixture-verifier'}),
+      {status: 200, headers: {'content-type': 'application/json'}});
   if (request.url === 'https://auth.openai.com/oauth/token') {
     const scenario = JSON.parse(readFileSync(%SCENARIO%, 'utf8'));
-    if (!scenario.refresh) throw new Error('unexpected OAuth refresh');
-    appendFileSync(%REFRESH%, 'refreshed\\n');
-    if (scenario.refresh_error) return new Response(JSON.stringify({error: 'invalid_grant'}),
+    const grant = new URLSearchParams(await request.text()).get('grant_type');
+    if (grant === 'refresh_token') {
+      if (!scenario.refresh) throw new Error('unexpected OAuth refresh');
+      appendFileSync(%REFRESH%, 'refreshed\\n');
+    } else if (grant === 'authorization_code') {
+      appendFileSync(%LOGIN%, 'logged in\\n');
+    } else throw new Error('unexpected OAuth grant');
+    if ((grant === 'refresh_token' && scenario.refresh_error) ||
+        (grant === 'authorization_code' && scenario.login_error))
+      return new Response(JSON.stringify({error: 'invalid_grant'}),
       {status: 401, headers: {'content-type': 'application/json'}});
     return new Response(JSON.stringify({access_token: %ACCESS%, refresh_token: 'fixture-new-refresh',
       expires_in: 3600}), {status: 200, headers: {'content-type': 'application/json'}});
   }
-  if (!request.url.endsWith('/backend-api/codex/responses')) return nativeFetch(input, init);
+  if (!['https://chatgpt.com/backend-api/codex/responses',
+        'https://api.openai.com/v1/responses'].includes(request.url)) return nativeFetch(input, init);
   let body = Buffer.from(await request.arrayBuffer());
   if (request.headers.get('content-encoding') === 'zstd') body = zstdDecompressSync(body);
   const payload = JSON.parse(body.toString('utf8'));
@@ -90,32 +118,77 @@ globalThis.fetch = async (input, init) => {
     return new Response(JSON.stringify({error: {message, type: 'provider_error'}}),
       {status, headers: {'content-type': 'application/json'}});
   }
-  const answer = scenario.first_textual_tool_call && count === 1
+  const compact = /context summarization assistant/i.test(payload.instructions || '');
+  const answer = compact && scenario.compaction_answer ? scenario.compaction_answer
+    : scenario.first_textual_tool_call && count === 1
     ? '<｜DSML｜tool_calls>\\n<｜DSML｜invoke name="unknown_tool">'
     : count === 1 && scenario.first_answer !== null ? scenario.first_answer : scenario.answer;
-  const message = {type: 'message', id: 'msg_1', role: 'assistant', status: 'completed',
+  let message = {type: 'message', id: 'msg_1', role: 'assistant', status: 'completed',
     content: [{type: 'output_text', text: answer, annotations: scenario.citations
       ? [{type: 'url_citation', url: 'https://example.org/news', title: 'Example News', start_index: 0, end_index: 7}]
       : []}]};
-  const output = scenario.completed
-    ? [{type: 'web_search_call', id: 'search_1', status: 'completed'}, message] : [message];
+  const writing = scenario.propose_write && count === 1;
+  if (writing) {
+    const tool = payload.tools.find(tool => tool.type === 'function' && /write/i.test(tool.name)
+      && tool.parameters?.properties?.content);
+    if (!tool) throw new Error('fixture requires an available file writer');
+    const properties = tool.parameters.properties;
+    const pathKey = properties.path ? 'path' : 'file_path';
+    message = {type: 'function_call', id: 'fc_1', call_id: 'write_1', name: tool.name,
+      arguments: JSON.stringify({[pathKey]: scenario.propose_write, content: 'context guard control'})};
+  }
+  const calls = scenario.completed ? (scenario.search_actions || [null]).map((action, index) =>
+    ({type: 'web_search_call', id: `search_${index + 1}`, status: 'completed', ...(action ? {action} : {})})) : [];
+  const output = [...calls, message];
+  const messageIndex = calls.length;
   const events = [
     {type: 'response.created', response: {id: 'resp_1', model: payload.model, status: 'in_progress', output: []}},
-    ...(scenario.completed ? [{type: 'response.output_item.done', output_index: 0, item: output[0]}] : []),
-    {type: 'response.output_item.added', output_index: 1, item: {...message, content: []}},
-    {type: 'response.content_part.added', item_id: 'msg_1', output_index: 1, content_index: 0,
+    ...calls.map((item, output_index) => ({type: 'response.output_item.done', output_index, item})),
+    ...(writing ? [
+      {type: 'response.output_item.added', output_index: messageIndex, item: {...message, arguments: ''}},
+      {type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: messageIndex,
+        delta: message.arguments},
+    ] : [
+    {type: 'response.output_item.added', output_index: messageIndex, item: {...message, content: []}},
+    {type: 'response.content_part.added', item_id: 'msg_1', output_index: messageIndex, content_index: 0,
       part: {type: 'output_text', text: '', annotations: []}},
-    {type: 'response.output_text.delta', item_id: 'msg_1', output_index: 1, content_index: 0, delta: answer},
-    {type: 'response.output_item.done', output_index: 1, item: message},
+    {type: 'response.output_text.delta', item_id: 'msg_1', output_index: messageIndex, content_index: 0, delta: answer},
+    ]),
+    {type: 'response.output_item.done', output_index: messageIndex, item: message},
     {type: 'response.completed', response: {id: 'resp_1', model: payload.model, status: 'completed', output,
-      usage: {input_tokens: 12, output_tokens: 3, total_tokens: 15,
+      service_tier: scenario.response_tier,
+      usage: (count === 1 ? scenario.first_reported_usage : null) || scenario.reported_usage || {input_tokens: 12, output_tokens: 3, total_tokens: 15,
         input_tokens_details: {cached_tokens: 0}}}},
   ];
   return new Response(events.map(event => `event: ${event.type}\\ndata: ${JSON.stringify(event)}\\n\\n`).join(''),
     {status: 200, headers: {'content-type': 'text/event-stream'}});
 };
+const {ModelRuntime, SettingsManager} = await import(new URL('../node_modules/@earendil-works/pi-coding-agent/dist/index.js',
+  pathToFileURL(process.argv[1])).href);
+const nativeSettings = SettingsManager.inMemory;
+SettingsManager.inMemory = function(settings, ...args) {
+  appendFileSync(%SDKOPTIONS%, JSON.stringify({settings}) + '\\n');
+  return nativeSettings.call(this, settings, ...args);
+};
+const nativeStreamSimple = ModelRuntime.prototype.streamSimple;
+ModelRuntime.prototype.streamSimple = function(model, context, options) {
+  const {timeoutMs, maxRetries, maxRetryDelayMs, transport, maxTokens} = options;
+  appendFileSync(%SDKOPTIONS%, JSON.stringify({request: {
+    timeoutMs, maxRetries, maxRetryDelayMs, transport, maxTokens}}) + '\\n');
+  return nativeStreamSimple.call(this, model, context, options);
+};
+const nativeGetModel = ModelRuntime.prototype.getModel;
+ModelRuntime.prototype.getModel = function(provider, id) {
+  const model = nativeGetModel.call(this, provider, id);
+  if (model) appendFileSync(%MODELS%, JSON.stringify({provider, id,
+    context_window: model.contextWindow, max_output_tokens: model.maxTokens}) + '\\n');
+  return model;
+};
 """.replace("%WIRE%", json.dumps(str(wire))).replace("%SCENARIO%", json.dumps(str(scenario)))
+       .replace("%MODELS%", json.dumps(str(tmp_path / "sdk-models.jsonl")))
+       .replace("%SDKOPTIONS%", json.dumps(str(tmp_path / "sdk-options.jsonl")))
        .replace("%REFRESH%", json.dumps(str(tmp_path / "refresh.log")))
+       .replace("%LOGIN%", json.dumps(str(tmp_path / "login.log")))
        .replace("%ACCESS%", json.dumps(f"fixture.{account}.signature")))
     real_node = find_node(build_subprocess_env())
     launcher_dir = tmp_path / "bin"
@@ -132,6 +205,66 @@ globalThis.fetch = async (input, init) => {
     return app, wire
 
 
+def test_pi_native_settings_and_request_options_are_forwarded(tmp_path, monkeypatch):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", completed=False, citations=False)
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"].update(reasoning_effort="low", context_window=500000,
+                                    max_output_tokens=65536)
+    path.write_text(yaml.safe_dump(config))
+    definition = yaml.safe_load(app.read_text())
+    native = {"compaction": {"enabled": False, "modelOverrides": {
+        "openai-codex/gpt-6-luna": {"reserveTokens": 24000, "keepRecentTokens": 8000}}},
+        "retry": {"enabled": True, "maxRetries": 0, "provider": {
+            "timeoutMs": 4321, "maxRetries": 0, "maxRetryDelayMs": 9876}},
+        "transport": "sse", "cacheWarming": "off"}
+    definition["runtime_options"] = native
+    app.write_text(yaml.safe_dump(definition))
+    with bind_config(load_project_config(tmp_path)):
+        assert execute_app(app, file_logging=False).output == "Current result"
+    observed = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
+    settings = next(item["settings"] for item in observed if "settings" in item)
+    assert all(settings[key] == value for key, value in native.items())
+    request = next(item["request"] for item in observed if "request" in item)
+    assert request == {"timeoutMs": 4321, "maxRetries": 0, "maxRetryDelayMs": 9876,
+                       "transport": "sse", "maxTokens": 65536}
+    payload = json.loads(wire.read_text().splitlines()[0])["body"]
+    assert payload["reasoning"]["effort"] == "low"
+    assert payload["max_output_tokens"] == 65536
+
+
+def test_invalid_native_timeout_is_rejected_by_sdk(tmp_path, monkeypatch):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off")
+    definition = yaml.safe_load(app.read_text())
+    definition["runtime_options"]["retry"] = {"enabled": False, "provider": {
+        "timeoutMs": -1, "maxRetries": 0}}
+    app.write_text(yaml.safe_dump(definition))
+    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
+        execute_app(app, file_logging=False)
+    observed = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
+    assert next(item["request"] for item in observed if "request" in item)["timeoutMs"] == -1
+    with inspect_run(failure.value.run) as trace:
+        response = next(event for event in trace.events() if event["kind"] == "model_response")
+        assert "Invalid timeoutMs: -1" in json.loads(trace.read_text(response["response_ref"]))["errorMessage"]
+    assert not wire.exists()
+
+
+def _complete_browser_login(monkeypatch):
+    monkeypatch.setenv("DISPLAY", ":99")
+    opened = []
+
+    def open_browser(url):
+        opened.append(url)
+        state = parse_qs(urlsplit(url).query)["state"][0]
+        callback = "http://127.0.0.1:1455/auth/callback?" + urlencode({"code": "fixture-code", "state": state})
+        with urlopen(callback, timeout=5) as response:
+            assert response.status == 200
+        return True
+
+    monkeypatch.setattr("agentloom.runtimes.pi.runtime.open_login_browser", open_browser)
+    return opened
+
+
 @pytest.mark.parametrize("mode", ["off", "auto", "required"])
 def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
     app, wire = _fixture(tmp_path, monkeypatch, search=mode, completed=mode != "off")
@@ -142,6 +275,8 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
     payload = requests[0]["body"]
     assert requests[0]["url"] == "https://chatgpt.com/backend-api/codex/responses"
     assert payload["model"] == "gpt-6-luna"
+    assert payload["max_output_tokens"] == 256
+    assert "service_tier" not in payload
     assert payload["reasoning"] == {"effort": "xhigh", "summary": "auto"}
     if mode == "off":
         assert not any(tool.get("type") == "web_search" for tool in payload.get("tools", []))
@@ -159,13 +294,14 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
         wire_events = [event for event in events if event["kind"] == "model_request"
                        and event["boundary"] == "openai_http_request"]
         recorded_request = json.loads(trace.read_text(wire_events[0]["request_ref"]))
+        assert recorded_request["body"]["max_output_tokens"] == 256
         assert all(name.lower() not in {"authorization", "cookie", "chatgpt-account-id"}
                    for name in recorded_request["headers"])
     if mode == "off":
         assert "native_search" not in captured
         assert result.output == "Current result"
     else:
-        assert captured["native_search"]["calls"] == [{"id": "search_1", "status": "completed"}]
+        assert captured["native_search"]["calls"] == [{"id": "search_1", "status": "completed", "action": None}]
         assert captured["native_search"]["citations"] == [
             {"url": "https://example.org/news", "title": "Example News"}]
         assert "[Example News](<https://example.org/news>)" in result.output
@@ -179,12 +315,13 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
         assert search_events[0]["details"]["completed_calls"] == captured["native_search"]["calls"]
 
 
-def test_required_search_without_completed_call_fails(tmp_path, monkeypatch):
+def test_required_search_passes_tool_choice_without_adapter_rejection(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="required", completed=False)
-    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
-        execute_app(app, file_logging=False)
-    assert len(wire.read_text().splitlines()) == 1
-    assert "required web search was not executed" in str(failure.value)
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert result.output.startswith("Current result")
+    request = json.loads(wire.read_text().splitlines()[0])["body"]
+    assert request["tool_choice"] == {"type": "web_search"}
 
 
 def test_completed_search_without_structured_citation_adds_no_source(tmp_path, monkeypatch):
@@ -211,22 +348,73 @@ def test_pi_refreshes_saved_codex_login_and_reuses_it_next_run(tmp_path, monkeyp
     assert saved["openai-codex"]["refresh"] == "fixture-new-refresh"
 
 
-def test_pi_refresh_failure_is_clear_and_sends_no_model_request(tmp_path, monkeypatch):
+def test_pi_refresh_failure_opens_login_then_continues_same_run(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off", refresh=True,
                          refresh_error=True)
-    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
-        execute_app(app, file_logging=False)
-    assert "Pi Codex credential refresh failed" in str(failure.value)
-    assert not wire.exists()
+    opened = _complete_browser_login(monkeypatch)
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert result.output == "Current result"
+    assert len(opened) == 1
+    assert (tmp_path / "refresh.log").read_text().splitlines() == ["refreshed"]
+    assert (tmp_path / "login.log").read_text().splitlines() == ["logged in"]
+    assert len(wire.read_text().splitlines()) == 1
 
 
-def test_missing_pi_login_fails_without_provider_request(tmp_path, monkeypatch):
+def test_missing_pi_login_opens_browser_and_continues_same_run(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off")
     (tmp_path / "pi-auth/auth.json").unlink()
+    opened = _complete_browser_login(monkeypatch)
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert result.output == "Current result"
+    assert len(opened) == 1
+    assert len(wire.read_text().splitlines()) == 1
+    saved = json.loads((tmp_path / "pi-auth/auth.json").read_text())
+    assert saved["openai-codex"]["type"] == "oauth"
+    events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
+    phases = [event["details"].get("phase") for event in events if event["kind"] == "run"]
+    assert [phase for phase in phases if phase and phase.startswith("auth_")] == [
+        "auth_login_required", "auth_browser_opened", "auth_login_completed"]
+    assert not any("fixture-code" in line or "code_challenge" in line
+                   for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines())
+
+
+def test_pi_login_failure_sends_no_model_request(tmp_path, monkeypatch):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", login_error=True)
+    (tmp_path / "pi-auth/auth.json").unlink()
+    _complete_browser_login(monkeypatch)
     with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
         execute_app(app, file_logging=False)
-    assert "Pi Codex login is missing" in str(failure.value)
+    assert "Pi Codex login was not completed" in str(failure.value)
     assert not wire.exists()
+
+
+@pytest.mark.parametrize("fallback", ["headless", "busy_callback_port"])
+def test_pi_login_uses_sdk_device_code_when_browser_callback_unavailable(tmp_path, monkeypatch, fallback):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off")
+    (tmp_path / "pi-auth/auth.json").unlink()
+    listener = None
+    if fallback == "headless":
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    else:
+        monkeypatch.setenv("DISPLAY", ":99")
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 1455))
+        listener.listen()
+    shown = []
+    monkeypatch.setattr("agentloom.runtimes.pi.runtime.show_device_code",
+                        lambda url, code: shown.append((url, code)))
+    try:
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    finally:
+        if listener is not None:
+            listener.close()
+    assert result.output == "Current result"
+    assert shown == [("https://auth.openai.com/codex/device", "ABCD-EFGH")]
+    assert len(wire.read_text().splitlines()) == 1
 
 
 def test_unlisted_codex_model_fails_without_provider_request(tmp_path, monkeypatch):
@@ -249,7 +437,10 @@ def test_codex_provider_failures_do_not_fallback(tmp_path, monkeypatch, status, 
     app, wire = _fixture(tmp_path, monkeypatch, search="off", status=status)
     with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
         execute_app(app, file_logging=False)
-    assert message in str(failure.value)
+    assert "Pi model request failed" in str(failure.value)
+    with inspect_run(failure.value.run) as trace:
+        responses = [event for event in trace.events() if event["kind"] == "model_response"]
+        assert json.loads(trace.read_text(responses[-1]["response_ref"]))["errorMessage"]
     assert len(wire.read_text().splitlines()) == 1
 
 
@@ -262,6 +453,71 @@ def test_codex_max_reasoning_is_an_explicit_profile_setting(tmp_path, monkeypatc
     with bind_config(load_project_config(tmp_path)):
         execute_app(app, file_logging=False)
     assert json.loads(wire.read_text().splitlines()[0])["body"]["reasoning"]["effort"] == "max"
+
+
+@pytest.mark.parametrize(("tier", "wire_tier"), [("fast", "priority"), ("default", "default")])
+@pytest.mark.parametrize("search", ["off", "required"])
+def test_codex_service_tier_reaches_the_wire(tmp_path, monkeypatch, tier, wire_tier, search):
+    app, wire = _fixture(tmp_path, monkeypatch, search=search, completed=search == "required")
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"]["service_tier"] = tier
+    path.write_text(yaml.safe_dump(config))
+    with bind_config(load_project_config(tmp_path)):
+        execute_app(app, file_logging=False)
+    requests = [json.loads(line)["body"] for line in wire.read_text().splitlines()]
+    assert len(requests) == 1
+    assert requests[0]["service_tier"] == wire_tier
+    if search == "required":
+        assert requests[0]["tool_choice"] == {"type": "web_search"}
+
+
+def test_codex_response_tier_does_not_claim_effective_fast_tier(tmp_path, monkeypatch):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", response_tier="default")
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"]["service_tier"] = "fast"
+    path.write_text(yaml.safe_dump(config))
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert json.loads(wire.read_text().splitlines()[0])["body"]["service_tier"] == "priority"
+    events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
+    tiers = [event["details"] for event in events if event["kind"] == "model"
+             and event["details"].get("phase") == "provider_tier"]
+    assert len(tiers) == 1
+    assert tiers[0]["requested"] == "fast"
+    assert tiers[0]["response_tier"] == "default"
+    assert tiers[0]["effective"] is None
+
+
+@pytest.mark.parametrize("effective", ["fast", "default"])
+def test_chatgpt_public_api_records_actual_service_tier(tmp_path, monkeypatch, effective):
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", provider="openai",
+                         response_tier=effective)
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"]["service_tier"] = "fast"
+    path.write_text(yaml.safe_dump(config))
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    requests = [json.loads(line) for line in wire.read_text().splitlines()]
+    assert len(requests) == 1
+    assert requests[0]["url"] == "https://api.openai.com/v1/responses"
+    assert requests[0]["body"]["service_tier"] == "fast"
+    assert requests[0]["body"]["store"] is False
+    assert requests[0]["body"]["stream"] is True
+    assert "max_output_tokens" not in requests[0]["body"]
+    with inspect_run(result.run) as trace:
+        response = next(event for event in trace.events() if event["kind"] == "model_response")
+        captured = json.loads(trace.read_text(response["response_ref"]))
+        assert captured["native_service_tier"] == effective
+    events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
+    tiers = [event["details"] for event in events if event["kind"] == "model"
+             and event["details"].get("phase") == "provider_tier"]
+    assert len(tiers) == 1
+    assert tiers[0]["requested"] == "fast"
+    assert tiers[0]["response_tier"] == effective
+    assert tiers[0]["effective"] == effective
 
 
 def test_required_search_is_enforced_on_each_model_turn(tmp_path, monkeypatch):
@@ -295,11 +551,15 @@ def test_required_search_stays_on_for_retry_attempt(tmp_path, monkeypatch):
     assert all(request["tool_choice"] == {"type": "web_search"} for request in requests)
     with inspect_run(result.run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
-        assert [event["attempt"] for event in responses] == [0, 1]
-        assert [event["status"] for event in responses] == ["error", "completed"]
-        assert len({event["model_turn_id"] for event in responses}) == 2
+        # Provider retries stay inside one SDK stream and expose one final message.
+        assert [event["attempt"] for event in responses] == [0]
+        assert [event["status"] for event in responses] == ["completed"]
+        assert len({event["model_turn_id"] for event in responses}) == 1
         assert {event["run_step_number"] for event in responses} == {1}
-        assert json.loads(trace.read_text(responses[1]["response_ref"]))["native_search"]["calls"]
+        assert json.loads(trace.read_text(responses[0]["response_ref"]))["native_search"]["calls"]
+        wire_events = [event for event in trace.events() if event["kind"] == "model_request"
+                       and event["boundary"] == "openai_http_request"]
+        assert len(wire_events) == 2
 
 
 def test_required_search_stays_on_for_stop_continuation(tmp_path, monkeypatch):
@@ -380,30 +640,124 @@ def test_codex_preserves_optional_native_tool_fields_without_strict_schema(tmp_p
     assert {"type": "web_search"} in request["tools"]
 
 
-@pytest.mark.parametrize(("change", "message"), [
-    ({"web_search": "always"}, "web_search must be off, auto or required"),
-    ({"reasoning_effort": "ultra"}, "reasoning_effort must be xhigh or max"),
-    ({"api_key": "not-a-subscription"}, "requires Pi OAuth"),
-    ({"base_url": "https://example.org/v1"}, "requires Pi OAuth"),
-    ({"extra_headers": {"Authorization": "Bearer fake"}}, "requires Pi OAuth"),
-])
-def test_codex_profile_rejects_invalid_settings_before_http(tmp_path, monkeypatch, change, message):
-    app, wire = _fixture(tmp_path, monkeypatch, search="off")
-    path = tmp_path / "config/llm.yaml"
-    config = yaml.safe_load(path.read_text())
-    config["model"]["codex"].update(change)
-    path.write_text(yaml.safe_dump(config))
-    with bind_config(load_project_config(tmp_path)), pytest.raises((ValueError, RuntimeError), match=message):
-        execute_app(app, file_logging=False)
-    assert not wire.exists()
-
-
 def test_codex_profile_requires_pi_runtime(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off")
     definition = yaml.safe_load(app.read_text())
     definition["agent_runtime"] = "smolagents"
+    definition.pop("runtime_options", None)
     app.write_text(yaml.safe_dump(definition))
     with bind_config(load_project_config(tmp_path)), pytest.raises((ValueError, RuntimeError),
                                                                match="requires agent_runtime: pi"):
         execute_app(app, file_logging=False)
     assert not wire.exists()
+
+
+@pytest.mark.parametrize("over_budget", [False, True])
+@pytest.mark.parametrize("context_window", [272000, 500000])
+def test_sdk_window_and_usage_preserve_successful_tool_calls(tmp_path, monkeypatch, over_budget, context_window):
+    marker = tmp_path / "sdk-tool.txt"
+    total = context_window + 7057 if over_budget else context_window
+    input_tokens = context_window - 25711
+    usage = {"input_tokens": input_tokens, "output_tokens": total - input_tokens, "total_tokens": total,
+             "input_tokens_details": {"cached_tokens": 0}}
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", reported_usage=usage,
+                         propose_write=str(marker))
+    config_path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    config["model"]["codex"]["context_window"] = context_window
+    config["model"]["codex"]["max_output_tokens"] = 65536
+    config_path.write_text(yaml.safe_dump(config))
+    definition = yaml.safe_load(app.read_text())
+    definition["tools"] = [{"name": "write"}]
+    app.write_text(yaml.safe_dump(definition))
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+        run = result.run
+        assert marker.read_text() == "context guard control"
+    requests = [json.loads(line) for line in wire.read_text().splitlines()]
+    sdk_models = [json.loads(line) for line in (tmp_path / "sdk-models.jsonl").read_text().splitlines()]
+    assert sdk_models[-1]["provider"] == "openai-codex"
+    assert sdk_models[-1]["context_window"] == context_window
+    assert sdk_models[-1]["max_output_tokens"] == 65536
+    assert len(requests) == 2
+    options = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
+    assert all(item["request"]["maxTokens"] == 65536 for item in options if "request" in item)
+    assert all(request["body"]["max_output_tokens"] == 65536 for request in requests)
+    with inspect_run(run) as trace:
+        responses = [event for event in trace.events() if event["kind"] == "model_response"]
+        assert responses[0]["usage"]["input_tokens"] == input_tokens
+        assert responses[0]["usage"]["output_tokens"] == total - input_tokens
+    audit = [json.loads(line) for line in (run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
+    metered = [event["details"] for event in audit if event["kind"] == "usage"]
+    assert metered[-1]["input_tokens"] == input_tokens * len(requests)
+    assert metered[-1]["output_tokens"] == (total - input_tokens) * len(requests)
+
+
+def test_native_compaction_preserves_completed_response_above_configured_window(tmp_path, monkeypatch):
+    completed_review = "COMPLETED_NEWS_REVIEW " * 5000
+    usage = {"input_tokens": 484013, "output_tokens": 40870, "total_tokens": 524883,
+             "input_tokens_details": {"cached_tokens": 0}}
+    app, wire = _fixture(tmp_path, monkeypatch, search="off", completed=False, citations=False,
+                         answer=completed_review, first_reported_usage=usage,
+                         compaction_answer="NATIVE_COMPACTION_SUMMARY: the news review is complete.")
+    path = tmp_path / "config/llm.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["model"]["codex"].update(context_window=500000, max_output_tokens=65536)
+    path.write_text(yaml.safe_dump(config))
+    definition = yaml.safe_load(app.read_text())
+    definition["runtime_options"] = {"compaction": {"enabled": True}, "transport": "sse",
+                                     "cacheWarming": "off"}
+    app.write_text(yaml.safe_dump(definition))
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    assert result.output == completed_review
+    requests = [json.loads(line) for line in wire.read_text().splitlines()]
+    compact_requests = [item for item in requests if "context summarization assistant" in
+                        item["body"].get("instructions", "")]
+    assert len(requests) == 2
+    assert len(compact_requests) == 1
+    with inspect_run(result.run) as trace:
+        responses = [event for event in trace.events() if event["kind"] == "model_response"]
+        assert responses[0]["usage"] == {"input_tokens": 484013, "output_tokens": 40870}
+
+
+def test_native_search_retains_search_open_find_and_all_completed_calls(tmp_path, monkeypatch):
+    from hashlib import sha256
+    original_url = "https://www.reuters.com/business/energy/sk-innovation-expects-public-evidence"
+    actions = [{"type": "search", "queries": ["original publication"]},
+               {"type": "open_page", "url": original_url},
+               {"type": "find_in_page", "url": "https://example.org/original", "pattern": "published"}]
+    actions.extend({"type": "search", "queries": [f"source {index}"]} for index in range(57))
+    app, _ = _fixture(tmp_path, monkeypatch, search="required", search_actions=actions)
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    with inspect_run(result.run) as trace:
+        response = next(event for event in trace.events() if event["kind"] == "model_response")
+        captured = json.loads(trace.read_text(response["response_ref"]))
+    calls = captured["native_search"]["calls"]
+    assert len(calls) == 60
+    assert [call["action"]["type"] for call in calls[:3]] == ["search", "open_page", "find_in_page"]
+    assert calls[1]["action_url_sha256"] == sha256(original_url.encode()).hexdigest()
+    assert calls[2]["action"]["pattern"] == "published"
+    assert calls[-1]["id"] == "search_60"
+
+
+def test_refined_worker_current_pool_enum_rejects_wrong_exchange(tmp_path, monkeypatch):
+    baseline = pytest.importorskip("news_agent.baseline", reason="Optional local news_agent Application")
+    review = {"event_id": None, "etf_code": "159611.SH", "record_numbers": [1],
+              "summary": "已考虑的行业映射", "decision": "放弃",
+              "reason": "无法证明属于新事实", "sources": []}
+    invalid = {"reviews": [review]}
+    valid = {"reviews": [{**review, "etf_code": "159611.SZ"}]}
+    _, wire = _fixture(tmp_path, monkeypatch, search="auto", first_answer=json.dumps(invalid),
+                       answer=json.dumps(valid))
+    definition = yaml.safe_load((baseline.ROOT / "workflows/refined.yaml").read_text())
+    definition.update(system_prompt="Return the fixture classification using only the supplied ETF pool.",
+                      task="Return the complete fixture JSON.", tools=[], toolsets=[])
+    path = tmp_path / "schema-fixture.yaml"
+    path.write_text(yaml.safe_dump(definition, allow_unicode=True))
+    answer = baseline._call_worker(path, "Fixture source. Allowed ETF: 159611.SZ.", etf_codes=["159611.SZ"])
+    assert answer == valid
+    requests = [json.loads(line) for line in wire.read_text().splitlines()]
+    assert len(requests) == 2
+    assert "required JSON Schema" in json.dumps(requests[1]["body"])

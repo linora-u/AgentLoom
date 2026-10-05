@@ -241,7 +241,9 @@ class PiPlatformToolHandler:
         with self._lock:
             if (
                 (identity.application_id, identity.task_id, identity.run_id, identity.instance_id)
-                != (self._request.application_id, self._request.task_id, self._run_id, self._instance_id)
+                != (self._request.application_id or "standalone",
+                    self._request.task_id or "standalone",
+                    self._run_id, self._instance_id)
                 or payload.tool_name not in self._platform_entries
                 or identity in self._platform_calls
             ):

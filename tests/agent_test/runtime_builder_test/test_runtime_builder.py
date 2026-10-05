@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -294,9 +295,11 @@ def test_invocation_uses_runtime_neutral_request(monkeypatch):
     assert dict(request.additional_args) == {}
 
 
+@pytest.mark.parametrize("prepared", [False, True])
 def test_invocation_populates_runtime_context_identity_and_real_requirements(
     tmp_path,
     monkeypatch,
+    prepared,
 ):
     agent = _make_agent(logger=DummyLoggerBackend())
     agent._effective_agent_config = {
@@ -313,6 +316,9 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
         task_id="canonical-task",
         run_id="canonical-run",
     )
+    if prepared:
+        context.prepare_run()
+        context.write_manifest()
 
     with bind_run_context(context):
         result = _run_configured_task(agent,
@@ -333,6 +339,12 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
         checkpoint_resume=True,
         subagents=True,
     )
+    if prepared:
+        manifest = json.loads(context.manifest_path.read_text())
+        assert manifest["redaction"] == {"enabled": True}
+        assert manifest["run_id"] == "canonical-run"
+    else:
+        assert not context.manifest_path.exists()
 
 
 def test_subtask_runtime_projects_owned_subagent_lifecycle_events() -> None:

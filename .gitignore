@@ -186,6 +186,7 @@ skills/generated/proposals/
 # Generated application outputs
 output/
 outputs/
+/applications/news_agent/data/
 
 # Local/runtime-only content (must not be tracked)
 config/llm.yaml

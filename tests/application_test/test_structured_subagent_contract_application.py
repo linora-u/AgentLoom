@@ -248,7 +248,13 @@ def test_invalid_subagent_output_becomes_an_output_validation_tool_record(
 
         if not messages:
             return [("invalid-call", "invalid_structured", {})]
-        assert "invalid structured output" in messages[-1]["content"].lower()
+        failure = json.loads(messages[-1]["content"])
+        assert failure["error"]["kind"] == "output_validation"
+        assert failure["error"]["stage"] == "output_validation"
+        if worker_runtime == "pi":
+            assert "model output token limit" in failure["error"]["message"]
+        else:
+            assert "invalid structured output" in failure["error"]["message"].lower()
         return finish(request, "Handled invalid Worker output")
 
     with model_service(program) as (url, _requests):

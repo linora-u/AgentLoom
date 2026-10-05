@@ -123,7 +123,7 @@ def project(root: Path, url: str):
     (root / "config/llm.yaml").write_text(yaml.safe_dump({"model": {"default_model_type": "test", "test": model, "summary": model}}))
     app = root / "applications/pi/workflows/root.yaml"
     app.parent.mkdir(parents=True)
-    app.write_text("name: pi\nagent_runtime: pi\ndescription: Answer directly.\nsystem_prompt: Say Pi answer.\ntask: Answer the configured request.\ntools: []\ntoolsets: []\n")
+    app.write_text("name: pi\nagent_runtime: pi\ndescription: Answer directly.\nsystem_prompt: Say Pi answer.\ntask: Answer the configured request.\nruntime_options: {compaction: {enabled: false}, transport: sse, cacheWarming: 'off'}\ntools: []\ntoolsets: []\n")
     return app
 
 
@@ -149,7 +149,7 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
         message["role"] == "user" and "Answer the configured request." in json.dumps(message["content"])
         for message in messages
     )
-    assert headers["X-Fixture"] == "selected-profile"
+    assert {name.lower(): value for name, value in headers.items()}["x-fixture"] == "selected-profile"
     assert "todo_write" not in json.dumps(payload)
     assert "final_answer" not in json.dumps(payload)
     assert result.run.manifest_path.is_file()
@@ -346,14 +346,17 @@ def test_provider_failure_during_structured_correction_stays_provider_error(
     assert len(requests) == 2
 
 
-def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
-    tmp_path,
+@pytest.mark.parametrize("compaction", [False, True])
+@pytest.mark.parametrize("answer", ["not-json", '{"findings": []}'])
+def test_structured_output_at_token_limit_is_recoverable_output_validation(
+    tmp_path, answer, compaction,
 ):
     from agentloom.app.run import ApplicationRunError
 
-    with model_service(outputs=["not-json"], finish="length") as (url, requests):
+    with model_service(outputs=[answer], finish="length") as (url, requests):
         app = project(tmp_path, url)
         config = yaml.safe_load(app.read_text())
+        config["runtime_options"]["compaction"] = {"enabled": compaction}
         config["output_schema"] = {
             "type": "object",
             "properties": {
@@ -376,6 +379,7 @@ def test_invalid_structured_output_at_budget_exhaustion_is_output_validation(
     assert captured.value.original_error.category == "output_validation"
     assert captured.value.original_error.kind == "output_validation"
     assert captured.value.original_error.stage == "output_validation"
+    assert captured.value.original_error.retryable
     assert len(requests) == 1
 
 
@@ -464,7 +468,7 @@ def test_structured_correction_and_stop_gate_share_one_delivery_budget(
     assert len(requests) == 2
 
 
-@pytest.mark.parametrize("status,retries,expected", [(500, 2, 2), (429, 1, 2), (401, 3, 1), (400, 3, 1), (500, 0, 1)])
+@pytest.mark.parametrize("status,retries,expected", [(500, 2, 2), (429, 1, 2), (401, 3, 2), (400, 3, 2), (500, 0, 1)])
 def test_profile_retry_count_and_private_error_redaction(tmp_path, status, retries, expected):
     from agentloom.app.run import ApplicationRunError
     with model_service(fail_count=1, error_status=status) as (url, requests):
@@ -484,12 +488,14 @@ def test_profile_retry_count_and_private_error_redaction(tmp_path, status, retri
 
 
 @pytest.mark.parametrize("selection,match", [
-    ("runtime_options: {thinking: low}\n", "Unsupported pi runtime_options"),
+    ("runtime_options: {max_stop_attempts: 0}\n", "max_stop_attempts"),
 ])
-def test_unsupported_features_rejected_at_public_application_boundary(tmp_path, selection, match):
+def test_agentloom_stop_option_rejected_at_public_application_boundary(tmp_path, selection, match):
     with model_service() as (url, requests):
         app = project(tmp_path, url)
-        app.write_text(app.read_text() + selection)
+        config = yaml.safe_load(app.read_text())
+        config.update(yaml.safe_load(selection))
+        app.write_text(yaml.safe_dump(config))
         with bind_config(load_project_config(tmp_path)), pytest.raises(ValueError, match=match):
             execute_app(app, file_logging=False)
     assert not requests
@@ -497,9 +503,6 @@ def test_unsupported_features_rejected_at_public_application_boundary(tmp_path, 
 
 @pytest.mark.parametrize("changes,match", [
     ({"adapter": "anthropic_messages"}, "protocol"),
-    ({"unsupported_parameter": 1}, "unsupported parameters"),
-    ({"extra_body": {"tools": [{}]}}, "extra_body"),
-    ({"system_prompt_boundary": "something"}, "system_prompt_boundary"),
 ])
 def test_unsupported_model_settings_fail_without_http_call(tmp_path, changes, match):
     with model_service() as (url, requests):
@@ -591,7 +594,7 @@ def test_repeated_unselected_structured_tool_is_bounded(tmp_path):
     assert not (tmp_path / "should-not-exist").exists()
 
 
-def test_profile_timeout_bounds_an_open_sse_stream(tmp_path):
+def test_profile_timeout_is_enforced_by_the_native_provider(tmp_path):
     from threading import Event
 
     from agentloom.app.run import ApplicationRunError
@@ -599,13 +602,12 @@ def test_profile_timeout_bounds_an_open_sse_stream(tmp_path):
     request_times = []
     with model_service(
         stall=release,
-        stall_stream=True,
         on_request=lambda *_: request_times.append(time.monotonic()),
     ) as (url, requests):
         app = project(tmp_path, url)
         change_model(tmp_path, timeout=1)
         try:
-            with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match="timed out"):
+            with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError):
                 execute_app(app, file_logging=False)
             failed_at = time.monotonic()
         finally:

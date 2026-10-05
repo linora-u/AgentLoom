@@ -289,6 +289,9 @@ def _execute_app(
         )
 
         checkpoint_config = effective_config.get("checkpoint", {})
+        from agentloom.config.redaction import bind_redaction_policy, redaction_enabled
+
+        effective_redaction = redaction_enabled(effective_config)
         if not isinstance(checkpoint_config, dict):
             checkpoint_config = {}
         ckpt_enabled = checkpoint_config.get("enabled", True)
@@ -367,6 +370,7 @@ def _execute_app(
         try:
             manifest_metadata = {}
             manifest_metadata["application_revision"] = running_revision
+            manifest_metadata["redaction"] = {"enabled": effective_redaction}
             if definition_snapshot_revision is not None:
                 manifest_metadata["definition_snapshot_revision"] = definition_snapshot_revision
             runtime_context.write_manifest(
@@ -389,7 +393,8 @@ def _execute_app(
 
         from agentloom.execution.observability import bind_trace_recorder
 
-        with bind_run_context(runtime_context), bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder:
+        with (bind_redaction_policy(effective_config), bind_run_context(runtime_context),
+              bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder):
             logger_backend = initialize_run_logger(
                 runtime_context,
                 logging_builder=logging_builder,
