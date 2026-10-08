@@ -19,6 +19,10 @@ to `origin` and open private PRs against `main`. The local pre-push hook rejects
 private `news_agent` history if a branch is accidentally pushed to `public`;
 the exporter creates separate commits with clean public parents.
 
+Public sync commits use `linora-u` and the verified GitHub noreply email
+`260928258+linora-u@users.noreply.github.com`. The commit identity must belong to
+the repository owner; an arbitrary noreply address can credit another account.
+
 Open a private pull request against `main`. Draft PRs stay unpublished. A ready
 PR is processed automatically:
 
