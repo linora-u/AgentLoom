@@ -45,10 +45,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !/applications/news_agent/
+          sparse-checkout: .github
 
       - name: Configure public-repository deploy key
         if: steps.pending.outputs.count != '0'
