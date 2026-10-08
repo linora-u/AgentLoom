@@ -1,6 +1,8 @@
 name: Public repository sync
 
 on:
+  push:
+    branches: [main]
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
@@ -31,16 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Find ready private PRs
-        id: pending
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          count=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=100" --jq '[.[] | select(.draft == false and .head.repo.full_name == .base.repo.full_name)] | length')
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-
       - name: Check out trusted coordinator
-        if: steps.pending.outputs.count != '0'
         uses: actions/checkout@v6
         with:
           ref: main
@@ -48,7 +41,6 @@ jobs:
           sparse-checkout: .github
 
       - name: Configure public-repository deploy key
-        if: steps.pending.outputs.count != '0'
         env:
           PUBLIC_SYNC_SSH_KEY: ${{ secrets.PUBLIC_SYNC_SSH_KEY }}
           GH_TOKEN: ${{ github.token }}
@@ -59,8 +51,7 @@ jobs:
           gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/public-sync-known-hosts"
           echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/public-sync-key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/public-sync-known-hosts" >> "$GITHUB_ENV"
 
-      - name: Publish public changes before merging private PRs
-        if: steps.pending.outputs.count != '0'
+      - name: Coordinate private PRs and recover public main
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_SYNC_TOKEN }}
           SYNC_PR_NUMBER: ${{ inputs.pr_number }}
