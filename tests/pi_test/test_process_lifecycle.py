@@ -76,6 +76,45 @@ def test_real_cli_stdout_contains_only_application_events(tmp_path):
     assert_gone(int(marker.read_text()))
 
 
+@pytest.mark.parametrize("proxy_value,ca_value", [
+    (None, None), ("0", ""), ("1", "/etc/ssl/certs/ca-certificates.crt"),
+])
+def test_real_bridge_preserves_only_explicit_proxy_ca(tmp_path, proxy_value, ca_value):
+    with model_service() as (url, requests):
+        app = project(tmp_path, url)
+        binary = sdk_node()
+        launcher = tmp_path / "bin/node"
+        launcher.parent.mkdir()
+        marker = tmp_path / "bridge-env.json"
+        launcher.write_text(f'''#!{sys.executable}
+import json,os,sys
+from pathlib import Path
+if sys.argv[1:] != ['--version'] and sys.argv[1:3] != ['-p','process.versions.modules']:
+ Path({str(marker)!r}).write_text(json.dumps({{key:value for key,value in os.environ.items() if key.startswith(('PI_','NODE_'))}}))
+os.execv({binary!r},[{binary!r},*sys.argv[1:]])
+''')
+        launcher.chmod(0o755)
+        if ca_value:
+            assert Path(ca_value).is_file()
+        env = {**os.environ, "PATH": str(launcher.parent) + os.pathsep + os.environ["PATH"],
+               "NODE_OPTIONS": "--max-old-space-size=256", "NODE_PATH": "/ignored/node/path",
+               "NODE_TLS_REJECT_UNAUTHORIZED": "0", "PI_TEST_SETTING": "must-be-removed",
+               "HTTPS_PROXY": os.environ.get("HTTPS_PROXY", "http://127.0.0.1:9"),
+               "NO_PROXY": "localhost,127.0.0.1"}
+        expected = {}
+        for name, value in (("NODE_USE_ENV_PROXY", proxy_value), ("NODE_EXTRA_CA_CERTS", ca_value)):
+            env.pop(name, None)
+            if value is not None:
+                env[name] = expected[name] = value
+        child = start_cli(tmp_path, app, env)
+        stdout, stderr = child.communicate(timeout=20)
+    assert child.returncode == 0, stderr
+    assert requests
+    assert marker.exists()
+    assert json.loads(marker.read_text()) == expected
+    assert "fixture-secret" not in stdout + stderr
+
+
 @pytest.mark.parametrize("interrupt", ["keyboard", "child_exit"])
 def test_pending_model_call_terminates_and_cleans_process(tmp_path, interrupt):
     release = Event()

@@ -34,7 +34,14 @@ def installation(tmp_path, monkeypatch):
     tsc_log = tmp_path / "tsc-calls.jsonl"
     node = install.find_node(os.environ.copy())
     launcher = binary / "node"
-    launcher.write_text(f"#!{sys.executable}\nimport os,sys\nos.execv({node!r}, [{node!r}, *sys.argv[1:]])\n")
+    launcher.write_text(f'''#!{sys.executable}
+import json,os,sys
+from pathlib import Path
+if os.environ.get('TEST_PI_ENV_LOG'):
+ with Path(os.environ['TEST_PI_ENV_LOG']).open('a') as f:
+  f.write(json.dumps({{'command':['node',*sys.argv[1:]],'env':{{k:v for k,v in os.environ.items() if k.startswith(('PI_','NODE_'))}}}})+'\\n')
+os.execv({node!r}, [{node!r}, *sys.argv[1:]])
+''')
     launcher.chmod(0o755)
     tsc_script = r"""
 const fs = require('node:fs');
@@ -71,6 +78,9 @@ input.on('line',line=>{
 import json,os,sys
 from pathlib import Path
 root=Path.cwd()
+if os.environ.get('TEST_PI_ENV_LOG'):
+ with Path(os.environ['TEST_PI_ENV_LOG']).open('a') as f:
+  f.write(json.dumps({{'command':['npm',*sys.argv[1:]],'env':{{k:v for k,v in os.environ.items() if k.startswith(('PI_','NODE_'))}}}})+'\\n')
 with Path(os.environ['TEST_NPM_CALLS']).open('a') as f:f.write(json.dumps(sys.argv[1:])+'\\n')
 if os.environ.get('TEST_NPM_FAIL'):
  print('PRIVATE-REGISTRY-CREDENTIAL');sys.exit(3)
@@ -117,6 +127,42 @@ def calls(installation):
 def tsc_calls(installation):
     path = tsc_log(installation)
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+@pytest.mark.parametrize("proxy_value,ca_value", [
+    (None, None), ("0", ""), ("1", "/etc/ssl/certs/ca-certificates.crt"),
+])
+def test_install_build_handshake_and_readiness_share_environment_policy(
+    installation, monkeypatch, proxy_value, ca_value,
+):
+    from agentloom.runtimes.pi.install import installed_pi_entry, pi_runtime_status
+
+    log = source_bridge(installation).parent / "env-calls.jsonl"
+    monkeypatch.setenv("TEST_PI_ENV_LOG", str(log))
+    expected = {}
+    for name, value in (("NODE_USE_ENV_PROXY", proxy_value), ("NODE_EXTRA_CA_CERTS", ca_value)):
+        monkeypatch.delenv(name, raising=False)
+        if value is not None:
+            monkeypatch.setenv(name, value)
+            expected[name] = value
+    for name, value in (("NODE_OPTIONS", "--max-old-space-size=256"),
+                        ("NODE_PATH", "/ignored/node/path"),
+                        ("NODE_TLS_REJECT_UNAUTHORIZED", "0"),
+                        ("PI_CODING_AGENT_DIR", "/ignored/pi/dir"),
+                        ("PI_TEST_SETTING", "must-be-removed")):
+        monkeypatch.setenv(name, value)
+
+    entry = install_pi(source_bridge(installation), runtime_root(installation))
+    assert installed_pi_entry(runtime_root(installation), source_bridge=source_bridge(installation)) == entry
+    assert pi_runtime_status(runtime_root(installation), source_bridge=source_bridge(installation))["state"] == "ready"
+    records = [json.loads(line) for line in log.read_text().splitlines()]
+    assert records and all(record["env"] == expected for record in records)
+    commands = [record["command"] for record in records]
+    assert any(command[:2] == ["npm", "ci"] for command in commands)
+    assert any(any(arg.endswith("typescript/bin/tsc") for arg in command) for command in commands)
+    assert any("--input-type=module" in command for command in commands)
+    assert any(any(arg.endswith("dist/index.js") for arg in command) for command in commands)
+    assert sum(command[1:3] == ["-p", "process.versions.modules"] for command in commands) >= 3
 
 
 def assert_installed_entry_handshakes(entry: Path) -> None:
