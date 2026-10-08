@@ -12,7 +12,7 @@ import { nativeTools } from "./tools.js";
 import { restoreSession, SessionPersistence } from "./checkpoint.js";
 import { enableInstructionOnlyTurns, runInstructionOnlyTurn } from "./session.js";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   ModelRuntime, SettingsManager, SessionManager, DefaultResourceLoader,
   createAgentSession, type AgentSession,
@@ -186,6 +186,13 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   const searchMode = subscription ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    // Register only the preflight catalogue: preserve AgentLoom precedence and
+    // metadata without discovering ambient Pi skills or parsing manifests twice.
+    skillsOverride: () => ({diagnostics: [], skills: (p.skills ?? []).map((skill: Obj) => ({
+      name: skill.name, description: skill.description, filePath: skill.location,
+      baseDir: dirname(skill.location), disableModelInvocation: false,
+      sourceInfo: {path: skill.location, source: "agentloom", scope: "temporary", origin: "top-level"},
+    }))}),
     systemPrompt: subscription && searchMode !== "off" ?
       `${p.instructions}\n\nNative web search is available. Use it for current information and cite the sources you use.` :
       p.tools.length ? p.instructions :

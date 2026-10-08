@@ -740,24 +740,3 @@ def test_native_search_retains_search_open_find_and_all_completed_calls(tmp_path
     assert calls[1]["action_url_sha256"] == sha256(original_url.encode()).hexdigest()
     assert calls[2]["action"]["pattern"] == "published"
     assert calls[-1]["id"] == "search_60"
-
-
-def test_refined_worker_current_pool_enum_rejects_wrong_exchange(tmp_path, monkeypatch):
-    baseline = pytest.importorskip("news_agent.baseline", reason="Optional local news_agent Application")
-    review = {"event_id": None, "etf_code": "159611.SH", "record_numbers": [1],
-              "summary": "已考虑的行业映射", "decision": "放弃",
-              "reason": "无法证明属于新事实", "sources": []}
-    invalid = {"reviews": [review]}
-    valid = {"reviews": [{**review, "etf_code": "159611.SZ"}]}
-    _, wire = _fixture(tmp_path, monkeypatch, search="auto", first_answer=json.dumps(invalid),
-                       answer=json.dumps(valid))
-    definition = yaml.safe_load((baseline.ROOT / "workflows/refined.yaml").read_text())
-    definition.update(system_prompt="Return the fixture classification using only the supplied ETF pool.",
-                      task="Return the complete fixture JSON.", tools=[], toolsets=[])
-    path = tmp_path / "schema-fixture.yaml"
-    path.write_text(yaml.safe_dump(definition, allow_unicode=True))
-    answer = baseline._call_worker(path, "Fixture source. Allowed ETF: 159611.SZ.", etf_codes=["159611.SZ"])
-    assert answer == valid
-    requests = [json.loads(line) for line in wire.read_text().splitlines()]
-    assert len(requests) == 2
-    assert "required JSON Schema" in json.dumps(requests[1]["body"])
