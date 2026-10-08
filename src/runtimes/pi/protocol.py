@@ -51,6 +51,12 @@ class OutputContract(WireValue):
     schema_: dict[str, JsonValue] = Field(alias="schema", repr=False)
 
 
+class Skill(WireValue):
+    name: NonEmpty
+    description: NonEmpty
+    location: NonEmpty
+
+
 class Run(WireValue):
     method: Literal["run"]
     application_id: NonEmpty
@@ -60,6 +66,7 @@ class Run(WireValue):
     instructions: str
     model: ModelSelection = Field(repr=False)
     tools: list[ToolManifestEntry]
+    skills: list[Skill] = Field(default_factory=list)
     serial_tools: list[NonEmpty] = Field(default_factory=list)
     runtime_options: dict[str, JsonValue] = Field(repr=False)
     output_contract: OutputContract | None = Field(default=None, repr=False)

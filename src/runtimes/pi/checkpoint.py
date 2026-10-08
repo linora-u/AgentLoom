@@ -45,6 +45,9 @@ def _configuration_key(definition: RuntimeDefinition) -> str:
         "instructions": definition.instructions,
         "runtime_options": dict(definition.runtime_options),
     }
+    if definition.skills:
+        value["skills"] = [{"name": skill.name, "description": skill.description,
+                            "location": str(skill.location)} for skill in definition.skills]
     return _digest(json.dumps(value, sort_keys=True).encode())
 
 

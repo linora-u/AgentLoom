@@ -143,9 +143,11 @@ class AgentInvocation:
 
         parent_context = capture_explicit_execution_context()
         current_task_id = parent_context.task_id
+        runtime_context = get_current_run_context()
         final_task_id = (
             current_task_id
             or self.task_id
+            or (runtime_context.task_id if runtime_context is not None else None)
             or generate_id(f"{owner._get_agent_type().value.lower()}_{owner.name}", prefix="task")
         )
         owner._task_id = final_task_id

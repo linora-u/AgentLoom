@@ -182,8 +182,7 @@ def test_same_run_can_reuse_provider_call_id_at_new_native_position(tmp_path):
     assert len(requests) == 3
 
 
-@pytest.mark.parametrize('damage', ['sdk', 'runtime', 'bridge_version', 'state_version', 'task', 'digest', 'symlink', 'parent', 'arguments', 'result_details', 'missing_journal'])
-def test_incompatible_or_unaligned_recovery_stops_before_model_or_tools(tmp_path, damage):
+def test_incompatible_or_unaligned_recovery_stops_before_model_or_tools(tmp_path):
     (tmp_path / 'proof.txt').write_text('unaltered-proof')
     with model_service(turns=[[('read-proof', 'read', {'path': 'proof.txt'})]], fail_requests={2: 500}) as (url, requests):
         app = project(tmp_path, url)
@@ -191,40 +190,53 @@ def test_incompatible_or_unaligned_recovery_stops_before_model_or_tools(tmp_path
         with bind_config(load_project_config(tmp_path)):
             with pytest.raises(ApplicationRunError) as first:
                 execute_app(app, file_logging=False)
-            [(path, data)] = checkpoints(tmp_path)
-            envelope = data['runtime_checkpoint']
-            artifact = path.parent / 'pi/sessions' / (envelope['payload']['artifact'] + '.json')
-            if damage == 'sdk': envelope['runtime_version'] = '0.79.4'
-            elif damage == 'runtime': envelope['runtime_id'] = 'smolagents'
-            elif damage == 'bridge_version': envelope['payload']['bridge_version'] = 999
-            elif damage == 'state_version': envelope['state_schema_version'] = 999
-            elif damage == 'task': envelope['task_id'] = 'another-task'
-            elif damage == 'digest': artifact.write_text('{}')
-            elif damage == 'symlink':
-                target = artifact.with_suffix('.original')
-                artifact.rename(target)
-                artifact.symlink_to(target)
-            elif damage == 'missing_journal':
-                next(tmp_path.rglob('native-tools/*.json')).unlink()
-            else:
-                bundle = json.loads(artifact.read_text())
-                if damage == 'parent': bundle['calls'][0]['identity']['native_parent_id'] = 'wrong-parent'
-                elif damage == 'arguments': bundle['calls'][0]['arguments']['path'] = 'wrong.txt'
-                else:
-                    next(e['message'] for e in bundle['session']['entries']
-                         if e.get('message', {}).get('role') == 'toolResult')['details'] = {'forged': True}
-                raw = json.dumps(bundle).encode()
-                digest = hashlib.sha256(raw).hexdigest()
-                artifact.with_name(digest + '.json').write_bytes(raw)
-                envelope['payload']['artifact'] = digest
-            path.write_text(json.dumps(data))
-            with pytest.raises(ApplicationRunError) as failure:
-                execute_app(app, resume_task_id=first.value.run.task_id, file_logging=False)
-            if damage == 'sdk':
-                assert 'start a new Task' in str(failure.value)
-            assert len(requests) == 2
-            assert (tmp_path / 'proof.txt').read_text() == 'unaltered-proof'
-            assert [e['details']['state'] for e in audit(failure.value.run) if e['kind'] == 'terminal'] == ['failed']
+            [(path, original)] = checkpoints(tmp_path)
+            artifact = path.parent / 'pi/sessions' / (original['runtime_checkpoint']['payload']['artifact'] + '.json')
+            artifact_bytes = artifact.read_bytes()
+            journal = next(tmp_path.rglob('native-tools/*.json'))
+            journal_bytes = journal.read_bytes()
+            for damage in ['sdk', 'runtime', 'bridge_version', 'state_version', 'task', 'digest',
+                           'symlink', 'parent', 'arguments', 'result_details', 'missing_journal']:
+                data = json.loads(json.dumps(original))
+                envelope = data['runtime_checkpoint']
+                try:
+                    if damage == 'sdk': envelope['runtime_version'] = '0.79.4'
+                    elif damage == 'runtime': envelope['runtime_id'] = 'smolagents'
+                    elif damage == 'bridge_version': envelope['payload']['bridge_version'] = 999
+                    elif damage == 'state_version': envelope['state_schema_version'] = 999
+                    elif damage == 'task': envelope['task_id'] = 'another-task'
+                    elif damage == 'digest': artifact.write_text('{}')
+                    elif damage == 'symlink':
+                        target = artifact.with_suffix('.original')
+                        artifact.rename(target)
+                        artifact.symlink_to(target)
+                    elif damage == 'missing_journal':
+                        next(tmp_path.rglob('native-tools/*.json')).unlink()
+                    else:
+                        bundle = json.loads(artifact.read_text())
+                        if damage == 'parent': bundle['calls'][0]['identity']['native_parent_id'] = 'wrong-parent'
+                        elif damage == 'arguments': bundle['calls'][0]['arguments']['path'] = 'wrong.txt'
+                        else:
+                            next(e['message'] for e in bundle['session']['entries']
+                                 if e.get('message', {}).get('role') == 'toolResult')['details'] = {'forged': True}
+                        raw = json.dumps(bundle).encode()
+                        digest = hashlib.sha256(raw).hexdigest()
+                        artifact.with_name(digest + '.json').write_bytes(raw)
+                        envelope['payload']['artifact'] = digest
+                    path.write_text(json.dumps(data))
+                    with pytest.raises(ApplicationRunError) as failure:
+                        execute_app(app, resume_task_id=first.value.run.task_id, file_logging=False)
+                    if damage == 'sdk':
+                        assert 'start a new Task' in str(failure.value)
+                    assert len(requests) == 2
+                    assert (tmp_path / 'proof.txt').read_text() == 'unaltered-proof'
+                    assert [e['details']['state'] for e in audit(failure.value.run) if e['kind'] == 'terminal'] == ['failed']
+                finally:
+                    if artifact.is_symlink():
+                        artifact.unlink()
+                    artifact.write_bytes(artifact_bytes)
+                    journal.write_bytes(journal_bytes)
+                    path.write_text(json.dumps(original))
 
 
 @pytest.mark.parametrize('stale', [False, True])

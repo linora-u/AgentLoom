@@ -808,3 +808,17 @@ def test_checkpoint_envelope_round_trips_through_json_shape() -> None:
     restored = RuntimeCheckpointEnvelope.from_dict(checkpoint.to_dict())
 
     assert restored == checkpoint
+
+
+def test_pi_resume_fingerprint_tracks_registered_skill_metadata(tmp_path) -> None:
+    from agentloom.execution.skills.catalog import SkillSummary
+    from agentloom.runtimes.pi.checkpoint import _configuration_key
+
+    definition = _definition('pi')
+    skill = SkillSummary(name='review', description='Review evidence.',
+                         location=tmp_path / 'review/SKILL.md', scope='agent')
+    registered = replace(definition, skills=(skill,))
+    assert _configuration_key(registered) != _configuration_key(definition)
+    for change in ({'name': 'other'}, {'description': 'Other evidence.'},
+                   {'location': tmp_path / 'other/SKILL.md'}):
+        assert _configuration_key(replace(registered, skills=(replace(skill, **change),))) != _configuration_key(registered)

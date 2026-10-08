@@ -1156,6 +1156,13 @@
           "title": "Tools",
           "type": "array"
         },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
         "serial_tools": {
           "items": {
             "minLength": 1,
@@ -1533,6 +1540,33 @@
         "state"
       ],
       "title": "SettleResult",
+      "type": "object"
+    },
+    "Skill": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "location"
+      ],
+      "title": "Skill",
       "type": "object"
     },
     "Snapshot": {

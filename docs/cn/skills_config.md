@@ -20,22 +20,37 @@ skills:
 
 ## 运行时语义
 
-Skill 的模型上下文加载始终按需进行：
+共享定义预检在分配 Run 前，发现并解析 Supervisor 和所有引用 Worker 的 `SKILL.md`，
+按 Agent > Application > 项目规则解析同名技能。`skills.paths` 增加的目录使用同一套规则。
 
-1. 共享定义预检在分配 Run 前，发现并解析 Supervisor 和所有引用 Worker 的 `SKILL.md` 包。
-2. system prompt 只获得允许使用的 Skill 的 `name` 和 `description`。
-3. 任务匹配时，模型调用 `skill(name)`。
-4. 工具结果只把被选中的说明、基础目录和抽样文件列表加入对话。
+Pi Agent 将预检后的技能名称、描述和入口路径注册到 Pi 原生 Skills 系统，不扫描
+用户级或项目 `.pi/skills`。选择原生 `read` 或 `bash` 工具时，Pi 在 system prompt 的
+`<available_skills>` 中提供名称、描述和位置；模型按任务需要读取 `SKILL.md`，
+再按技能目录解析相对参考文件路径。例如：
 
-Agent 没有 `skill` 工具时，catalogue 也不会显示。系统没有 eager 模式。
-激活 Skill 不会授予文件、Shell、脚本或网络权限；Agent 的常规工具和权限仍是唯一依据。
-读取包内资源或执行命令时，使用这些常规工具。
+```yaml
+agent_runtime: pi
+skills:
+  paths:
+    - skills/news-catalyst
+tools:
+  - name: read
+toolsets: []
+```
+
+技能注册不代表正文已经读取。Pi 的读取通过常规工具执行，可在工具记录中检查。
+注册后的名称、描述和路径使用定义快照，原生 `read` 按调用时的文件内容读取正文与参考文件。
+
+其他运行时继续使用平台 `skill(name)` 工具：system prompt 只提供名称和描述，
+激活后将选中技能的已解析正文、基础目录和抽样文件列表加入对话。
+Pi 仍兼容显式选择的平台 `skill` 工具；使用原生技能读取工具时不重复注入平台目录摘要。
+没有 `read`/`bash` 或平台 `skill` 工具时，技能目录不会显示。系统没有 eager 模式。
+技能不额外授予文件、Shell、脚本或网络权限，沿用 Agent 已有工具和权限配置。
 
 Studio 与执行使用同一次静态检查的结果。非法 frontmatter、名称及同层重名会在
 Run 分配前拒绝。检查只读取 Skill 数据，不创建模型、加载工具实现、连接 MCP 或执行 Hook。
-
-每个准备好的 Agent 定义保留已解析的 Skill 目录与正文。新的检查或调用看到磁盘编辑，
-已有调用继续使用原正文。激活时仍从当前目录采样资源文件位置，不冻结所有资源文件。
+平台激活使用准备好的正文；新的检查看到磁盘编辑，已有调用继续使用原正文。
+激活时仍从当前目录采样资源文件位置，不冻结所有资源文件。
 
 ## `SKILL.md` 契约
 

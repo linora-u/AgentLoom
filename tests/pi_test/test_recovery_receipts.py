@@ -112,39 +112,47 @@ def test_valid_native_negative_result_remains_recoverable(tmp_path, kind):
                 if event["kind"] == "terminal"] == ["success"]
 
 
-@pytest.mark.parametrize("damage", ["cancelled", "unknown", "missing_state", "missing_commit_id"])
-def test_native_commit_requires_consistent_state_and_commit_ack(tmp_path, damage):
+def test_native_commit_requires_consistent_state_and_commit_ack(tmp_path):
     with _interrupted_after_tool(tmp_path, "native") as (app, requests, first):
-        path, receipt = _receipt(tmp_path)
-        assert receipt["state"] == "committed"
-        assert receipt["record"]["status"] == "completed"
-        if damage == "missing_state":
-            del receipt["state"]
-        elif damage == "missing_commit_id":
-            del receipt["commit_id"]
-        else:
-            receipt["state"] = damage
-        path.write_text(json.dumps(receipt))
-        _assert_rejected_before_model(app, requests, first)
+        path, original = _receipt(tmp_path)
+        assert original["state"] == "committed"
+        assert original["record"]["status"] == "completed"
+        for damage in ["cancelled", "unknown", "missing_state", "missing_commit_id"]:
+            receipt = dict(original)
+            if damage == "missing_state":
+                del receipt["state"]
+            elif damage == "missing_commit_id":
+                del receipt["commit_id"]
+            else:
+                receipt["state"] = damage
+            path.write_text(json.dumps(receipt))
+            try:
+                _assert_rejected_before_model(app, requests, first)
+            finally:
+                path.write_text(json.dumps(original))
 
 
-@pytest.mark.parametrize("damage", [None, "prepared", "cancelled", "unknown", "missing_state"])
-def test_platform_commit_requires_consistent_terminal_state(tmp_path, damage):
+def test_platform_commit_requires_consistent_terminal_state(tmp_path):
     with _interrupted_after_tool(tmp_path, "platform") as (app, requests, first):
-        path, receipt = _receipt(tmp_path, platform=True)
-        assert receipt["state"] == "committed"
-        assert receipt["record"]["status"] == "completed"
-        if damage is None:
-            resumed = execute_app(app, resume_task_id=first.task_id, file_logging=False)
-            assert resumed.output == "Pi answer"
-            assert len(requests) == 3
-        else:
+        path, original = _receipt(tmp_path, platform=True)
+        assert original["state"] == "committed"
+        assert original["record"]["status"] == "completed"
+        for damage in ["prepared", "cancelled", "unknown", "missing_state"]:
+            receipt = dict(original)
             if damage == "missing_state":
                 del receipt["state"]
             else:
                 receipt["state"] = damage
             path.write_text(json.dumps(receipt))
-            _assert_rejected_before_model(app, requests, first)
+            try:
+                _assert_rejected_before_model(app, requests, first)
+            finally:
+                path.write_text(json.dumps(original))
+            assert _platform_calls == ["observed-once"]
+        # The same original evidence remains recoverable after all invalid variants.
+        resumed = execute_app(app, resume_task_id=first.task_id, file_logging=False)
+        assert resumed.output == "Pi answer"
+        assert len(requests) == 3
         assert _platform_calls == ["observed-once"]
 
 

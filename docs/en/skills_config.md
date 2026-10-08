@@ -22,29 +22,44 @@ mode or grant execution privileges.
 
 ## Runtime semantics
 
-Skill loading is always model-context-on-demand:
+Shared definition preflight discovers and parses the Supervisor and all referenced
+Workers' `SKILL.md` files before allocating a Run. Same-name precedence is
+Agent > Application > project, including directories added by `skills.paths`.
 
-1. Shared definition preflight discovers and parses `SKILL.md` packages for the
-   Supervisor and every referenced Worker before allocating a Run.
-2. The system prompt receives only each permitted Skill's `name` and `description`.
-3. When a task matches, the model calls `skill(name)`.
-4. That tool result adds only the selected instructions, base directory, and a
-   sampled file list to the conversation.
+Pi Agents register the resolved names, descriptions and entrypoint locations in
+Pi's native Skills system. User and project `.pi/skills` discovery stays disabled.
+With native `read` or `bash` selected, Pi adds names, descriptions and locations to
+`<available_skills>` in its system prompt. The model reads `SKILL.md` on demand and
+resolves relative references against the skill directory. For example:
 
-The catalogue is hidden when the Agent does not have the `skill` tool. There is
-no eager mode. Skill activation does not grant file, shell, script, or network
-access; the Agent's normal tools and permissions remain authoritative. Use
-those normal tools to read package resources or run commands.
+```yaml
+agent_runtime: pi
+skills:
+  paths:
+    - skills/news-catalyst
+tools:
+  - name: read
+toolsets: []
+```
 
-Studio and execution use the same static inspection result. Invalid frontmatter,
-names, and duplicate names within one scope reject the definition before Run
-allocation. Inspection reads Skill data without constructing models, loading tool
-implementations, connecting MCP servers, or executing Hooks.
+Registration does not mean the body has been read. Native reads appear in normal
+tool records. Registered metadata uses the definition snapshot; native `read`
+reads the current file contents for both instructions and references.
 
-Each prepared Agent definition retains its parsed Skill catalogue and instruction
-text. A fresh inspection or invocation sees file edits; an existing invocation
-keeps its original instructions. Activation still samples resource file locations
-from the current directory; it does not freeze all resource files.
+Other runtimes continue to use the platform `skill(name)` tool. Their system
+prompt contains names and descriptions; activation returns the selected parsed
+instructions, base directory and sampled file list. Pi still supports explicitly
+selected platform `skill` tools, but does not duplicate the platform summary when
+native skill reading tools are available. Without `read`/`bash` or platform `skill`,
+the catalogue is not shown. There is no eager mode. Skills grant no additional
+file, shell, script or network permissions; existing tool policies still apply.
+
+Studio and execution share the same static inspection. Invalid frontmatter,
+names and same-scope duplicates fail before Run allocation. Inspection reads
+Skill data without constructing models, loading tool implementations, connecting
+MCP or executing Hooks. Platform activation retains the prepared body; new
+inspections see disk edits while existing invocations retain their original
+instructions. Resource file locations are sampled at activation, not frozen.
 
 ## `SKILL.md` contract
 
