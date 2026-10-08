@@ -19,6 +19,10 @@ CONFIG_PATH = ".github/public-sync.json"
 STATUS_CONTEXT = "Public sync"
 
 
+class PublicDivergence(RuntimeError):
+    """Public main does not match the private PR's base."""
+
+
 def command(*args, cwd=None, data=None):
     result = subprocess.run(args, cwd=cwd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode:
@@ -166,6 +170,15 @@ class Coordinator:
         if current["base"]["sha"] != base:
             raise RuntimeError("Private main moved; update the PR and rerun before publishing")
 
+    def private_main(self):
+        return api(f"repos/{self.private}/git/ref/heads/main")["object"]["sha"]
+
+    def verify_source(self, number, head, base):
+        if number is not None:
+            self.verify_private_head(number, head, base)
+        elif self.private_main() != head:
+            raise RuntimeError("Private main moved during recovery; retry for its current head")
+
     def merge_private(self, number, head):
         result = api(f"repos/{self.private}/pulls/{number}/merge", "PUT",
                      {"sha": head, "merge_method": "merge"})
@@ -174,7 +187,8 @@ class Coordinator:
         print(f"Private PR #{number} merged after public synchronization", flush=True)
 
     def ensure_public_pr(self, number, source_ref, base, desired, expected_public_base, prefixes):
-        branch = f"codex/public-sync-{number}-{tree_digest(desired)[:12]}"
+        key = number if number is not None else "main-" + hashlib.sha256(source_ref.encode()).hexdigest()[:8]
+        branch = f"codex/public-sync-{key}-{tree_digest(desired)[:12]}"
         owner = self.public.split("/", 1)[0]
         matches = api(f"repos/{self.public}/pulls?state=all&head={owner}:{branch}&per_page=100")
         existing = next((pr for pr in matches if pr["state"] == "open"), None)
@@ -184,7 +198,7 @@ class Coordinator:
             return existing
         if matches:
             raise RuntimeError("Matching public PR is closed; restore/reconcile public main before retrying")
-        self.verify_private_head(number, source_ref, base)
+        self.verify_source(number, source_ref, base)
         with tempfile.TemporaryDirectory(prefix="agentloom-public-sync-") as target:
             command("git", "clone", "--filter=blob:none", "--no-checkout", "--single-branch",
                     "--branch", "main", f"https://github.com/{self.public}.git", target)
@@ -211,7 +225,7 @@ class Coordinator:
     def wait_public_checks(self, number, head, base, public_pr):
         deadline = time.monotonic() + self.wait_seconds
         while True:
-            self.verify_private_head(number, head, base)
+            self.verify_source(number, head, base)
             current = api(f"repos/{self.public}/pulls/{public_pr['number']}")
             if current["head"]["sha"] != public_pr["head"]["sha"] or current["state"] != "open":
                 raise RuntimeError("Public PR changed or closed while waiting for CI")
@@ -254,7 +268,7 @@ class Coordinator:
         actual = self.remote_tree(self.public, "main")
         if actual != desired:
             if actual != original:
-                raise RuntimeError("Public main diverged; bring public changes into private main before exporting")
+                raise PublicDivergence("Public main diverged; bring public changes into private main before exporting")
             public_pr = self.ensure_public_pr(number, head, base, desired, actual, head_prefixes)
             self.status(head, "pending", "Waiting for public PR to merge", public_pr["html_url"])
             public_pr = self.wait_public_checks(number, head, base, public_pr)
@@ -271,6 +285,48 @@ class Coordinator:
         self.verify_private_head(number, head, base)
         self.status(head, "success", "Matching public files are merged")
         self.merge_private(number, head)
+
+    def find_public_base(self, head, actual):
+        """Find a published first-parent snapshot; refuse unrelated public edits."""
+        ancestors = command("git", "rev-list", "--first-parent", head).decode().splitlines()[1:]
+        for base in ancestors:
+            if not command("git", "ls-tree", "--name-only", base, "--", CONFIG_PATH).strip():
+                break
+            if public_tree(local_tree(base), prefixes_at_ref(base)) == actual:
+                return base
+        raise PublicDivergence("Public main has independent changes; reconcile them in private main before recovery")
+
+    def reconcile_main(self):
+        """Recover public changes already merged/pushed to unprotected private main."""
+        head = self.private_main()
+        try:
+            command("git", "fetch", "--filter=blob:none", "origin", head)
+            prefixes = prefixes_at_ref(head)
+            desired = public_tree(local_tree(head), prefixes)
+            actual = self.remote_tree(self.public, "main")
+            if actual == desired:
+                print("Private main's public files are already synchronized", flush=True)
+                return
+            self.status(head, "pending", "Recovering public files from private main")
+            base = self.find_public_base(head, actual)
+            public_pr = self.ensure_public_pr(None, head, base, desired, actual, prefixes)
+            self.status(head, "pending", "Waiting for public recovery PR", public_pr["html_url"])
+            public_pr = self.wait_public_checks(None, head, base, public_pr)
+            self.verify_source(None, head, base)
+            if self.remote_tree(self.public, public_pr["head"]["sha"]) != desired:
+                raise RuntimeError("Tested public tree no longer matches private main")
+            result = api(f"repos/{self.public}/pulls/{public_pr['number']}/merge", "PUT",
+                         {"sha": public_pr["head"]["sha"], "merge_method": "squash"})
+            if not result.get("merged") or self.remote_tree(self.public, result["sha"]) != desired:
+                raise RuntimeError("Public recovery merge did not produce the expected tree")
+            self.verify_source(None, head, base)
+            if self.remote_tree(self.public, "main") != desired:
+                raise RuntimeError("Public main moved after recovery; reconcile before retrying")
+            self.status(head, "success", "Private main's public files are synchronized")
+            print(f"Public recovery PR #{public_pr['number']} merged", flush=True)
+        except Exception as exc:
+            self.status(head, "failure", str(exc))
+            raise
 
 
 def main():
@@ -296,10 +352,17 @@ def main():
         # Refresh the base after any preceding PR merged in this same run.
         pr = coordinator.private_pr(pr["number"])
         try:
-            coordinator.process(pr)
+            try:
+                coordinator.process(pr)
+            except PublicDivergence:
+                # Manual main updates can put public behind a later PR's base.
+                # Already-published PRs are resumed before this recovery path.
+                coordinator.reconcile_main()
+                coordinator.process(coordinator.private_pr(pr["number"]))
         except Exception as exc:
             coordinator.status(pr["head"]["sha"], "failure", str(exc))
             raise
+    coordinator.reconcile_main()
 
 
 if __name__ == "__main__":

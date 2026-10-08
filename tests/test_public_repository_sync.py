@@ -216,3 +216,100 @@ def test_already_published_tree_resumes_without_a_duplicate_public_pr(monkeypatc
     coordinator.ensure_public_pr = Mock(side_effect=AssertionError("duplicate publication"))
     coordinator.process(pr)
     coordinator.merge_private.assert_called_once_with(1, "head")
+
+
+def recovery_fixture(monkeypatch):
+    coordinator, _ = coordinator_fixture(monkeypatch)
+    desired = {"src/public.py": ("100644", "new-public")}
+    monkeypatch.setattr(sync, "local_tree", lambda ref: {
+        **desired, "applications/news_agent/private.py": ("100644", "private")
+    })
+    coordinator.private_main = Mock(return_value="main-head")
+    coordinator.remote_tree = Mock(side_effect=[
+        {"src/public.py": ("100644", "old-public")}, desired, desired, desired
+    ])
+    coordinator.find_public_base = Mock(return_value="published-base")
+    public_pr = {"number": 7, "head": {"sha": "tested-public"}, "html_url": "https://example.test/pr/7"}
+    coordinator.ensure_public_pr = Mock(return_value=public_pr)
+    coordinator.wait_public_checks = Mock(return_value=public_pr)
+    api = Mock(return_value={"merged": True, "sha": "public-merge"})
+    monkeypatch.setattr(sync, "api", api)
+    return coordinator, desired, api
+
+
+def test_main_recovery_does_nothing_for_already_synced_or_private_only_updates(monkeypatch):
+    coordinator, desired, api = recovery_fixture(monkeypatch)
+    coordinator.remote_tree = Mock(return_value=desired)
+    coordinator.reconcile_main()
+    coordinator.ensure_public_pr.assert_not_called()
+    coordinator.wait_public_checks.assert_not_called()
+    coordinator.merge_private.assert_not_called()
+    api.assert_not_called()
+
+
+def test_manual_private_merge_recovers_only_public_files_after_exact_head_checks(monkeypatch):
+    coordinator, desired, api = recovery_fixture(monkeypatch)
+    coordinator.reconcile_main()
+    coordinator.ensure_public_pr.assert_called_once_with(
+        None, "main-head", "published-base", desired,
+        {"src/public.py": ("100644", "old-public")}, PRIVATE_PATHS,
+    )
+    api.assert_called_once_with("repos/owner/public/pulls/7/merge", "PUT",
+                               {"sha": "tested-public", "merge_method": "squash"})
+    coordinator.merge_private.assert_not_called()
+    assert coordinator.status.call_args.args[1] == "success"
+
+
+def test_recovery_public_ci_failure_cannot_merge_public(monkeypatch):
+    coordinator, _, api = recovery_fixture(monkeypatch)
+    coordinator.wait_public_checks.side_effect = RuntimeError("Public CI failed")
+    with pytest.raises(RuntimeError, match="Public CI failed"):
+        coordinator.reconcile_main()
+    api.assert_not_called()
+    assert coordinator.status.call_args.args[1] == "failure"
+
+
+def test_private_main_update_during_recovery_invalidates_public_merge(monkeypatch):
+    coordinator, _, api = recovery_fixture(monkeypatch)
+    coordinator.private_main.side_effect = ["main-head", "new-main-head"]
+    with pytest.raises(RuntimeError, match="Private main moved"):
+        coordinator.reconcile_main()
+    api.assert_not_called()
+    coordinator.merge_private.assert_not_called()
+
+
+def test_recovery_rejects_independent_public_changes_before_publishing(monkeypatch):
+    coordinator, _, api = recovery_fixture(monkeypatch)
+    coordinator.find_public_base.side_effect = sync.PublicDivergence("Public main has independent changes")
+    with pytest.raises(sync.PublicDivergence, match="independent changes"):
+        coordinator.reconcile_main()
+    coordinator.ensure_public_pr.assert_not_called()
+    api.assert_not_called()
+
+
+def test_recovery_finds_published_main_before_multiple_manual_updates(tmp_path, monkeypatch):
+    sync.command("git", "init", "-b", "main", cwd=tmp_path)
+    sync.command("git", "config", "user.name", "Fixture", cwd=tmp_path)
+    sync.command("git", "config", "user.email", "fixture@example.test", cwd=tmp_path)
+    config = tmp_path / ".github/public-sync.json"
+    config.parent.mkdir()
+    config.write_text('{"private_prefixes": ["applications/news_agent/"]}')
+    private = tmp_path / "applications/news_agent/private.py"
+    private.parent.mkdir(parents=True)
+    private.write_text("private\n")
+    public = tmp_path / "public.py"
+    public.write_text("published\n")
+    sync.command("git", "add", ".", cwd=tmp_path)
+    sync.command("git", "commit", "-m", "Published baseline", cwd=tmp_path)
+    base = sync.command("git", "rev-parse", "HEAD", cwd=tmp_path).decode().strip()
+    actual = sync.public_tree(sync.local_tree("HEAD", tmp_path), PRIVATE_PATHS)
+    for contents in ["manual update one\n", "manual update two\n"]:
+        public.write_text(contents)
+        sync.command("git", "add", ".", cwd=tmp_path)
+        sync.command("git", "commit", "-m", "Manual private main update", cwd=tmp_path)
+    coordinator = sync.Coordinator({"private_repository": "owner/private", "public_repository": "owner/public",
+                                    "required_public_checks": []})
+    monkeypatch.chdir(tmp_path)
+    assert coordinator.find_public_base("HEAD", actual) == base
+    with pytest.raises(sync.PublicDivergence, match="independent changes"):
+        coordinator.find_public_base("HEAD", {"public.py": ("100644", "independent-edit")})
