@@ -1,0 +1,12 @@
+{
+  "day": "2025-08-15",
+  "download_url": "https://np-newsimg.dfcfw.com/download/A2_cms_f_20250815180517550518?abc2037.pdf=&direct=1",
+  "pdf_path": "version-0169352af1970d3edf19f1fe7abf2c3fec0692814e847e32f646234ec6866d60.pdf",
+  "text_path": "version-0169352af1970d3edf19f1fe7abf2c3fec0692814e847e32f646234ec6866d60.txt",
+  "pdf_sha256": "0169352af1970d3edf19f1fe7abf2c3fec0692814e847e32f646234ec6866d60",
+  "text_sha256": "523bbc116036877ad1920f4eea3455ccf4bed24ad7726039159e36917b837177",
+  "pdf_info": "Title:           2025年第二季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Fri Aug 15 16:00:13 2025 CST\nModDate:         Fri Aug 15 16:00:13 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           60\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1762399 bytes\nOptimized:       no\nPDF version:     1.7\n",
+  "chars": 56077,
+  "pages": 60,
+  "matches_official_text_without_whitespace": true
+}

@@ -1,0 +1,28 @@
+{
+  "raw_hash": "ebffb88bf6a4de52c8dd264841f4125fa15236cd8a8a6ed112b627c9e4157665",
+  "title": "2025年第三季度中国货币政策执行报告",
+  "pub_date": "2025-11-11",
+  "declared_pdf_url": "http://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/2025111413250965929/2025111111175096136.pdf",
+  "download_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/2025111413250965929/2025111111175096136.pdf",
+  "resolved_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/2025111413250965929/2025111111175096136.pdf",
+  "pdf_sha256": "9dcadcf181f1c8333e6493151d6893fcf8da50b03e5fa2bf195336b8dd8637b0",
+  "text_sha256": "b5b3f33a8ad03243321e4e3a33ae554201eb5b456f950ac590aa4d3053dc3799",
+  "pages": 54,
+  "characters": 50113,
+  "version_verified": true,
+  "text_path": "ebffb88bf6a4de52c8dd264841f4125fa15236cd8a8a6ed112b627c9e4157665.txt",
+  "pdf_path": "ebffb88bf6a4de52c8dd264841f4125fa15236cd8a8a6ed112b627c9e4157665.pdf",
+  "pdf_info": "Title:           2025年第三季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Tue Nov 11 16:00:26 2025 CST\nModDate:         Tue Nov 11 16:00:26 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           54\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1274418 bytes\nOptimized:       no\nPDF version:     1.7\n",
+  "downloaded_current_official_version": {
+    "download_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/2025111413250965929/2025111111175096136.pdf",
+    "pdf_path": "ebffb88bf6a4de52c8dd264841f4125fa15236cd8a8a6ed112b627c9e4157665.pdf",
+    "text_path": "ebffb88bf6a4de52c8dd264841f4125fa15236cd8a8a6ed112b627c9e4157665.txt",
+    "pdf_sha256": "9dcadcf181f1c8333e6493151d6893fcf8da50b03e5fa2bf195336b8dd8637b0",
+    "text_sha256": "b5b3f33a8ad03243321e4e3a33ae554201eb5b456f950ac590aa4d3053dc3799",
+    "pdf_info": "Title:           2025年第三季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Tue Nov 11 16:00:26 2025 CST\nModDate:         Tue Nov 11 16:00:26 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           54\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1274418 bytes\nOptimized:       no\nPDF version:     1.7\n"
+  },
+  "version_basis": "报告封面日期与原始记录发布日期一致；所选PDF创建和修改时间均为首发当日。官网后导出版本不替代首发版本。精筛仍需联网核实具体采用事实的公开时点。",
+  "publication_date_basis": "央行报告发布日期及首发日PDF；政府网站或当日新闻站点保存的原始报告。",
+  "later_official_text_matches_ignoring_whitespace": true,
+  "later_official_text_differences": []
+}

@@ -1,0 +1,64 @@
+{
+  "raw_hash": "a3eb68412b12a5a226030e217d8bc2643713b14e84ab156823e8425188d36f05",
+  "title": "2025年第一季度中国货币政策执行报告",
+  "pub_date": "2025-05-09",
+  "declared_pdf_url": "http://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/2025091218344076234/2025081517321679368.pdf",
+  "download_url": "https://jrj.sh.gov.cn/cmsres/95/959709217905451bb2b407bff4102d5d/3052ff00391c7a6a0360f1a5cbfb3948.pdf",
+  "resolved_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/2025091218344076234/2025081517321679368.pdf",
+  "pdf_sha256": "9cd8b49af1630d6b548ffb035127815a45b42004ebc859145863e62b5faaabe1",
+  "text_sha256": "bd57d8854adbd2f504a926de95a4c3cc78cbe56d85ce8b07a5a2166366a39bc6",
+  "pages": 58,
+  "characters": 53828,
+  "version_verified": true,
+  "text_path": "version-9cd8b49af1630d6b548ffb035127815a45b42004ebc859145863e62b5faaabe1.txt",
+  "pdf_path": "version-9cd8b49af1630d6b548ffb035127815a45b42004ebc859145863e62b5faaabe1.pdf",
+  "pdf_info": "Title:           2025年第一季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Fri May  9 16:00:45 2025 CST\nModDate:         Fri May  9 16:00:45 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           58\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1423665 bytes\nOptimized:       no\nPDF version:     1.7\n",
+  "downloaded_current_official_version": {
+    "download_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/2025091218344076234/2025081517321679368.pdf",
+    "pdf_path": "a3eb68412b12a5a226030e217d8bc2643713b14e84ab156823e8425188d36f05.pdf",
+    "text_path": "a3eb68412b12a5a226030e217d8bc2643713b14e84ab156823e8425188d36f05.txt",
+    "pdf_sha256": "ca0d0af85241dbde98f21bc9442120fe2c4bd944999555ac27668c4277d26408",
+    "text_sha256": "01334f688a61ec31c238f147b42c8c27eade0a3d8b599ca8b04a1694624b49e6",
+    "pdf_info": "Title:           2025年第一季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Thu Aug 14 16:00:22 2025 CST\nModDate:         Thu Aug 14 16:00:22 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           58\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1423468 bytes\nOptimized:       no\nPDF version:     1.7\n"
+  },
+  "version_basis": "报告封面日期与原始记录发布日期一致；所选PDF创建和修改时间均为首发当日。官网后导出版本不替代首发版本。精筛仍需联网核实具体采用事实的公开时点。",
+  "publication_date_basis": "央行报告发布日期及首发日PDF；政府网站或当日新闻站点保存的原始报告。",
+  "later_official_text_matches_ignoring_whitespace": false,
+  "later_official_text_differences": [
+    {
+      "operation": "replace",
+      "current_official_text": "+1.5%)LPR+3%)及以上2019年8月3.191.7910.5715.550.3284.1320.2626.9616.6920.232025年1月6.0318.2819.8444.155.8849.9713.7517.949.938.3",
+      "selected_original_text": "+1.5%)LPR+3%)及以上2019年8月3.191.7910.5715.550.3284.1320.2626.9620.2320.232025年1月6.0318.2819.8444.155.8849.9713.7517.949.938.3"
+    },
+    {
+      "operation": "replace",
+      "current_official_text": "5%)LPR+3%)及以上2019年8月3.191.7910.5715.550.3284.1320.2626.9616.6920.232025年1月6.0318.2819.8444.155.8849.9713.7517.949.938.3520",
+      "selected_original_text": "5%)LPR+3%)及以上2019年8月3.191.7910.5715.550.3284.1320.2626.9620.2320.232025年1月6.0318.2819.8444.155.8849.9713.7517.949.938.3520"
+    },
+    {
+      "operation": "delete",
+      "current_official_text": "况。这个过程中，10公开市场7天期逆回购利率发挥了短期政策利率作用，1年期MLF利率一定程度上也体现出中期政策利率信号。万亿元%2025年3月，MLF改为多重价位招标首次开展1年期MLF操作图MLF余额、利率与外汇占款三是逐步退出政策利率属性",
+      "selected_original_text": "况。这个过程中，10公开市场7天期逆回购利率发挥了短期政策利率作用，1年期MLF利率一定程度上也体现出中期政策利率信号。亿元%2025年3月，MLF改为多重价位招标首次开展1年期MLF操作图MLF余额、利率与外汇占款三是逐步退出政策利率属性"
+    },
+    {
+      "operation": "replace",
+      "current_official_text": "业存单发行加权平均利率为1.99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为9.0万亿元，同比增加3.5万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔",
+      "selected_original_text": "业存单发行加权平均利率为1.99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为12.5万亿元，同比增加6.9万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔"
+    },
+    {
+      "operation": "replace",
+      "current_official_text": "单发行加权平均利率为1.99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为9.0万亿元，同比增加3.5万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔，名",
+      "selected_original_text": "发行加权平均利率为1.99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为12.5万亿元，同比增加6.9万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔，名"
+    },
+    {
+      "operation": "replace",
+      "current_official_text": "为1.99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为9.0万亿元，同比增加3.5万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔，名义本金总额12.6",
+      "selected_original_text": "1.99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为12.5万亿元，同比增加6.9万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔，名义本金总额12.6"
+    },
+    {
+      "operation": "replace",
+      "current_official_text": ".99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为9.0万亿元，同比增加3.5万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔，名义本金总额12.6万亿",
+      "selected_original_text": "99%，比同期限Shibor高18个基点。一季度，金融机构发行大额存单2.9万期，发行总量为12.5万亿元，同比增加6.9万亿元。利率互换市场平稳运行。一季度，人民币利率互换市场（含标准利率互换）达成交易11.6万笔，名义本金总额12.6万亿"
+    }
+  ]
+}

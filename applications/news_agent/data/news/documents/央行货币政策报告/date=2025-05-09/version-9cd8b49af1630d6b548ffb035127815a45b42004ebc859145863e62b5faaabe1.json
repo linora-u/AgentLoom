@@ -1,0 +1,12 @@
+{
+  "day": "2025-05-09",
+  "download_url": "https://jrj.sh.gov.cn/cmsres/95/959709217905451bb2b407bff4102d5d/3052ff00391c7a6a0360f1a5cbfb3948.pdf",
+  "pdf_path": "version-9cd8b49af1630d6b548ffb035127815a45b42004ebc859145863e62b5faaabe1.pdf",
+  "text_path": "version-9cd8b49af1630d6b548ffb035127815a45b42004ebc859145863e62b5faaabe1.txt",
+  "pdf_sha256": "9cd8b49af1630d6b548ffb035127815a45b42004ebc859145863e62b5faaabe1",
+  "text_sha256": "bd57d8854adbd2f504a926de95a4c3cc78cbe56d85ce8b07a5a2166366a39bc6",
+  "pdf_info": "Title:           2025年第一季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Fri May  9 16:00:45 2025 CST\nModDate:         Fri May  9 16:00:45 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           58\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1423665 bytes\nOptimized:       no\nPDF version:     1.7\n",
+  "chars": 53828,
+  "pages": 58,
+  "matches_official_text_without_whitespace": false
+}

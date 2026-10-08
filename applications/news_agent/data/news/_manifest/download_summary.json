@@ -1,0 +1,47 @@
+{
+  "cutoff_date": "2025-12-31",
+  "available_start_date": "2024-12-31",
+  "available_end_date": "2025-12-31",
+  "year": 2025,
+  "categories": {
+    "新闻快讯": {
+      "files": 2965,
+      "rows": 1655278,
+      "bytes": 533265281
+    },
+    "长篇新闻": {
+      "files": 365,
+      "rows": 359037,
+      "bytes": 524775922
+    },
+    "新闻联播文字稿": {
+      "files": 365,
+      "rows": 5103,
+      "bytes": 8841374
+    },
+    "国家政策库": {
+      "files": 303,
+      "rows": 1005,
+      "bytes": 6991508
+    },
+    "央行货币政策报告": {
+      "files": 4,
+      "rows": 4,
+      "bytes": 37840
+    }
+  },
+  "excluded_categories": [
+    "上市公司公告",
+    "券商研究报告"
+  ],
+  "source_root": "/home/lin/code/data_processor/data/news",
+  "copied_at": "2026-09-30T16:23:19.082806+00:00",
+  "required_boundary_inputs": [
+    {
+      "news_date": "2024-12-31",
+      "first_entry_date": "2025-01-02",
+      "manifest": "copy_manifest_2025_boundary.json",
+      "raw_rows": 6068
+    }
+  ]
+}
