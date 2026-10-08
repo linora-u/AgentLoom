@@ -31,7 +31,7 @@ from agentloom.runtimes.pi.protocol import (
     decode_message,
     encode_message,
 )
-from agentloom.execution.subprocess_env import build_subprocess_env
+from agentloom.runtimes.pi.environment import build_pi_subprocess_env
 
 SDK_PACKAGE = "@earendil-works/pi-coding-agent"
 SDK_AI_PACKAGE = "@earendil-works/pi-ai"
@@ -128,10 +128,7 @@ def installed_pi_entry(
 ) -> Path:
     """Check an existing build without downloading or mutating dependencies."""
 
-    env = build_subprocess_env()
-    for name in list(env):
-        if name.startswith(("PI_", "NODE_")):
-            env.pop(name)
+    env = build_pi_subprocess_env()
     node = node or find_node(env)
     source_bridge = (source_bridge or source_bridge_dir()).resolve()
     runtime_root = (runtime_root or pi_runtime_root()).resolve()
@@ -327,10 +324,7 @@ def install_pi(source_bridge: Path | None = None, runtime_root: Path | None = No
     source_bridge = (source_bridge or source_bridge_dir()).resolve()
     runtime_root = (runtime_root or pi_runtime_root()).resolve()
     runtime_root.parent.mkdir(parents=True, exist_ok=True)
-    env = build_subprocess_env()
-    for name in list(env):
-        if name.startswith(("PI_", "NODE_")):
-            env.pop(name)
+    env = build_pi_subprocess_env()
     node = find_node(env)
     env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
     identity = _identity(source_bridge, node=node, env=env)
@@ -378,10 +372,7 @@ def install_pi(source_bridge: Path | None = None, runtime_root: Path | None = No
 
 
 def pi_runtime_status(runtime_root: Path | None = None, *, source_bridge: Path | None = None) -> dict[str, object]:
-    env = build_subprocess_env()
-    for name in list(env):
-        if name.startswith(("PI_", "NODE_")):
-            env.pop(name)
+    env = build_pi_subprocess_env()
     runtime_root = (runtime_root or pi_runtime_root()).resolve()
     source_bridge = (source_bridge or source_bridge_dir()).resolve()
     try:
