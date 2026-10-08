@@ -31,7 +31,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
              first_answer: str | None = None, provider: str = "openai-codex",
              response_tier: str = "default", search_actions: list[dict] | None = None,
              reported_usage: dict | None = None, propose_write: str | None = None,
-             first_reported_usage: dict | None = None, compaction_answer: str | None = None):
+             first_reported_usage: dict | None = None, compaction_answer: str | None = None,
+             tool_turns: list[dict | None] | None = None):
     app = project(tmp_path, "http://127.0.0.1:1/v1")
     configuration = tmp_path / "config/llm.yaml"
     data = yaml.safe_load(configuration.read_text())
@@ -73,7 +74,8 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
                                     "first_answer": first_answer, "provider": provider,
                                     "response_tier": response_tier, "search_actions": search_actions,
                                     "reported_usage": reported_usage, "propose_write": propose_write,
-                                    "first_reported_usage": first_reported_usage, "compaction_answer": compaction_answer}))
+                                    "first_reported_usage": first_reported_usage, "compaction_answer": compaction_answer,
+                                    "tool_turns": tool_turns}))
     bootstrap = tmp_path / "codex-bootstrap.mjs"
     bootstrap.write_text("""
 import {appendFileSync, readFileSync} from 'node:fs';
@@ -128,6 +130,12 @@ globalThis.fetch = async (input, init) => {
       ? [{type: 'url_citation', url: 'https://example.org/news', title: 'Example News', start_index: 0, end_index: 7}]
       : []}]};
   const writing = scenario.propose_write && count === 1;
+  const toolTurn = scenario.tool_turns?.[count - 1];
+  if (toolTurn) {
+    if (!payload.tools.some(tool => tool.name === toolTurn.name)) throw new Error('fixture tool unavailable');
+    message = {type: 'function_call', id: 'fc_1', call_id: `call_${count}`, name: toolTurn.name,
+      arguments: JSON.stringify(toolTurn.arguments)};
+  }
   if (writing) {
     const tool = payload.tools.find(tool => tool.type === 'function' && /write/i.test(tool.name)
       && tool.parameters?.properties?.content);
@@ -144,7 +152,7 @@ globalThis.fetch = async (input, init) => {
   const events = [
     {type: 'response.created', response: {id: 'resp_1', model: payload.model, status: 'in_progress', output: []}},
     ...calls.map((item, output_index) => ({type: 'response.output_item.done', output_index, item})),
-    ...(writing ? [
+    ...(writing || toolTurn ? [
       {type: 'response.output_item.added', output_index: messageIndex, item: {...message, arguments: ''}},
       {type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: messageIndex,
         delta: message.arguments},
