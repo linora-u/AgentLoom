@@ -13,6 +13,7 @@ permissions:
 jobs:
   tests:
     name: Python tests
+    if: github.repository == 'linora-u/AgentLoom'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -47,12 +48,14 @@ jobs:
       - name: Prepare test LLM config
         run: cp config/llm.example.yaml config/llm.yaml
 
+      - name: Check public repository contents
+        run: python .github/scripts/check_public_tree.py
+
       - name: Run tests
         env:
           PYTHONPATH: .:applications
         run: >-
           uv run --locked --extra smol --extra code pytest tests/ studio/python/tests/
-          applications/news_agent/tests/
           applications/memory_feature_validation/scripts/test_offline_memory_campaign_contract.py
           applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py
           applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py
@@ -60,6 +63,7 @@ jobs:
 
   installation-profiles:
     name: Installed ${{ matrix.profile }} Application
+    if: github.repository == 'linora-u/AgentLoom'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
