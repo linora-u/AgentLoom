@@ -140,7 +140,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
       api, baseUrl: s.base_url || "https://api.openai.com/v1", apiKey: "agentloom-runtime-key",
       models: [{id: modelId, name: modelId, reasoning: Boolean(s.extra_completion_params?.reasoning_effort), input: ["text"],
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: s.context_window,
-        maxTokens: s.max_output_tokens, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
+        maxTokens: s.max_output_tokens ?? s.context_window, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
     });
     await runtime.setRuntimeApiKey("agentloom", s.api_key || "no-key");
   }
@@ -148,7 +148,8 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   if (subscription) {
     runtime.registerProvider(providerId, {
       models: runtime.getModels(providerId).map(model => model.id === modelId
-        ? {...model, contextWindow: s.context_window, maxTokens: s.max_output_tokens} : model),
+        ? {...model, contextWindow: s.context_window,
+          ...(s.max_output_tokens != null ? {maxTokens: s.max_output_tokens} : {})} : model),
     });
   }
   const model = runtime.getModel(providerId, modelId);
@@ -222,7 +223,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     const projected = result;
     // The Codex backend enforces this cap, but Pi's Codex provider omits maxTokens.
     // The public ChatGPT subscription API does not support this request field.
-    if (codex) projected.max_output_tokens = s.max_output_tokens;
+    if (codex && s.max_output_tokens != null) projected.max_output_tokens = s.max_output_tokens;
     if (subscription && extra.service_tier !== undefined)
       projected.service_tier = codex && extra.service_tier === "fast" ? "priority" : extra.service_tier;
     const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));
