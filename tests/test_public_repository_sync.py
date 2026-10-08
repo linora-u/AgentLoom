@@ -13,6 +13,7 @@ SCRIPT = Path(__file__).parents[1] / ".github/scripts/public_sync.py"
 spec = importlib.util.spec_from_file_location("public_sync", SCRIPT)
 sync = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sync)
+PRIVATE_PATHS = ("applications/news_agent/",)
 
 
 def test_only_the_explicit_application_is_private():
@@ -24,7 +25,7 @@ def test_only_the_explicit_application_is_private():
         "applications/news_agent_demo/run.py": ("100644", "public-demo"),
         "src/framework.py": ("100644", "framework"),
     }
-    exported = sync.public_tree(tree)
+    exported = sync.public_tree(tree, PRIVATE_PATHS)
     assert set(tree) - set(exported) == {
         "applications/news_agent/run.py", "applications/news_agent/data/source.parquet"
     }
@@ -37,7 +38,7 @@ def test_only_the_explicit_application_is_private():
 ])
 def test_export_rejects_private_or_unsafe_entries(path, mode):
     with pytest.raises(RuntimeError):
-        sync.validate_public_path(path, mode)
+        sync.validate_public_path(path, mode, PRIVATE_PATHS)
 
 
 def test_public_commit_keeps_public_ancestry_and_exact_file_modes(tmp_path, monkeypatch):
@@ -58,8 +59,8 @@ def test_public_commit_keeps_public_ancestry_and_exact_file_modes(tmp_path, monk
     sync.command("git", "commit", "-m", "Public parent", cwd=public)
     parent = sync.command("git", "rev-parse", "HEAD", cwd=public).strip()
     monkeypatch.chdir(source)
-    desired = sync.public_tree(sync.local_tree("HEAD"))
-    sync.materialize_public_tree("HEAD", desired, public)
+    desired = sync.public_tree(sync.local_tree("HEAD"), PRIVATE_PATHS)
+    sync.materialize_public_tree("HEAD", desired, public, PRIVATE_PATHS)
     sync.command("git", "commit", "-m", "Sync public files", cwd=public)
     assert sync.local_tree("HEAD", public) == desired
     assert sync.command("git", "rev-parse", "HEAD^", cwd=public).strip() == parent
@@ -75,6 +76,7 @@ def coordinator_fixture(monkeypatch):
     coordinator.verify_private_head = Mock()
     coordinator.merge_private = Mock()
     monkeypatch.setattr(sync, "command", Mock())
+    monkeypatch.setattr(sync, "prefixes_at_ref", lambda ref: PRIVATE_PATHS)
     monkeypatch.setattr(subprocess, "run", Mock(return_value=Mock(returncode=0)))
     return coordinator, {"number": 1, "head": {"sha": "head"}, "base": {"sha": "base"}}
 
@@ -129,6 +131,8 @@ def test_public_guard_rejects_private_history_after_files_are_deleted(tmp_path):
     private = tmp_path / "applications/news_agent/private.py"
     private.parent.mkdir(parents=True)
     private.write_text("PRIVATE_ONLY = True\n")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/public-sync.json").write_text('{"private_prefixes": ["applications/news_agent/"]}')
     sync.command("git", "add", ".", cwd=tmp_path)
     sync.command("git", "commit", "-m", "Private ancestor", cwd=tmp_path)
     sync.command("git", "rm", "-r", "applications", cwd=tmp_path)
@@ -139,6 +143,70 @@ def test_public_guard_rejects_private_history_after_files_are_deleted(tmp_path):
                             cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode != 0
     assert "history contains private" in result.stderr
+
+
+def test_configuration_excludes_added_directories_and_exact_files():
+    prefixes = sync.configured_prefixes({"private_prefixes": ["applications/news_agent/", "internal/", "config/secret.yaml"]})
+    tree = {path: ("100644", path) for path in [
+        "applications/news_agent/run.py", "internal/strategy.py", "config/secret.yaml",
+        "internal_demo/public.py", "config/secret.yaml.example", "src/public.py",
+    ]}
+    assert set(sync.public_tree(tree, prefixes)) == {
+        "internal_demo/public.py", "config/secret.yaml.example", "src/public.py"
+    }
+    with pytest.raises(RuntimeError, match="Configured private"):
+        sync.validate_public_path("internal/strategy.py", "100644", prefixes)
+
+
+@pytest.mark.parametrize("prefix", ["", "/outside", "../outside", ".git/config", "internal/*", ".", "a\nb"])
+def test_invalid_private_configuration_is_rejected(prefix):
+    with pytest.raises(RuntimeError):
+        sync.configured_prefixes({"private_prefixes": [prefix]})
+
+
+def test_new_private_path_takes_effect_in_the_same_pr(tmp_path, monkeypatch):
+    sync.command("git", "init", "-b", "main", cwd=tmp_path)
+    sync.command("git", "config", "user.name", "Fixture", cwd=tmp_path)
+    sync.command("git", "config", "user.email", "fixture@example.test", cwd=tmp_path)
+    config = tmp_path / ".github/public-sync.json"
+    config.parent.mkdir()
+    config.write_text('{"private_prefixes": ["applications/news_agent/"]}')
+    sync.command("git", "add", ".", cwd=tmp_path)
+    sync.command("git", "commit", "-m", "Base configuration", cwd=tmp_path)
+    base = sync.command("git", "rev-parse", "HEAD", cwd=tmp_path).decode().strip()
+    config.write_text('{"private_prefixes": ["applications/news_agent/", "internal/"]}')
+    secret = tmp_path / "internal/strategy.py"
+    secret.parent.mkdir()
+    secret.write_text("PRIVATE_ONLY = True\n")
+    sync.command("git", "add", ".", cwd=tmp_path)
+    sync.command("git", "commit", "-m", "Add private directory and rule together", cwd=tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert sync.prefixes_at_ref(base) == ("applications/news_agent",)
+    head_prefixes = sync.prefixes_at_ref("HEAD")
+    assert head_prefixes == ("applications/news_agent", "internal")
+    assert "internal/strategy.py" not in sync.public_tree(sync.local_tree("HEAD"), head_prefixes)
+
+
+def test_guard_uses_custom_configuration_and_requested_ref(tmp_path):
+    sync.command("git", "init", "-b", "main", cwd=tmp_path)
+    sync.command("git", "config", "user.name", "Fixture", cwd=tmp_path)
+    sync.command("git", "config", "user.email", "fixture@example.test", cwd=tmp_path)
+    (tmp_path / "public.py").write_text("PUBLIC_ONLY = True\n")
+    sync.command("git", "add", ".", cwd=tmp_path)
+    sync.command("git", "commit", "-m", "Clean public ancestor", cwd=tmp_path)
+    clean = sync.command("git", "rev-parse", "HEAD", cwd=tmp_path).decode().strip()
+    private = tmp_path / "internal/strategy.py"
+    private.parent.mkdir()
+    private.write_text("PRIVATE_ONLY = True\n")
+    sync.command("git", "add", ".", cwd=tmp_path)
+    sync.command("git", "commit", "-m", "Private custom directory", cwd=tmp_path)
+    config = tmp_path / "rules.json"
+    config.write_text('{"private_prefixes": ["internal/"]}')
+    args = [sys.executable, str(SCRIPT.with_name("check_public_tree.py")), "--config", str(config)]
+    rejected = subprocess.run(args, cwd=tmp_path, capture_output=True, text=True)
+    allowed = subprocess.run([*args, "--ref", clean], cwd=tmp_path, capture_output=True, text=True)
+    assert rejected.returncode != 0 and "history contains private" in rejected.stderr
+    assert allowed.returncode == 0
 
 
 def test_already_published_tree_resumes_without_a_duplicate_public_pr(monkeypatch):
