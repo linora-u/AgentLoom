@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 from unittest.mock import Mock
 
 import pytest
@@ -119,6 +120,25 @@ def test_updated_private_head_invalidates_public_merge(monkeypatch):
                                                "head": {"sha": "new-head"}, "base": {"sha": "base"}})
     with pytest.raises(RuntimeError, match="changed"):
         coordinator.verify_private_head(1, "old-head", "base")
+
+
+def test_public_guard_rejects_private_history_after_files_are_deleted(tmp_path):
+    sync.command("git", "init", "-b", "main", cwd=tmp_path)
+    sync.command("git", "config", "user.name", "Fixture", cwd=tmp_path)
+    sync.command("git", "config", "user.email", "fixture@example.test", cwd=tmp_path)
+    private = tmp_path / "applications/news_agent/private.py"
+    private.parent.mkdir(parents=True)
+    private.write_text("PRIVATE_ONLY = True\n")
+    sync.command("git", "add", ".", cwd=tmp_path)
+    sync.command("git", "commit", "-m", "Private ancestor", cwd=tmp_path)
+    sync.command("git", "rm", "-r", "applications", cwd=tmp_path)
+    (tmp_path / "public.py").write_text("PUBLIC_ONLY = True\n")
+    sync.command("git", "add", ".", cwd=tmp_path)
+    sync.command("git", "commit", "-m", "Clean current tree", cwd=tmp_path)
+    result = subprocess.run([sys.executable, str(SCRIPT.with_name("check_public_tree.py"))],
+                            cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "history contains private" in result.stderr
 
 
 def test_already_published_tree_resumes_without_a_duplicate_public_pr(monkeypatch):

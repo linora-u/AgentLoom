@@ -161,7 +161,13 @@ class Coordinator:
             command("git", "push", f"git@github.com:{self.public}.git", f"HEAD:refs/heads/{branch}", cwd=target)
         return api(f"repos/{self.public}/pulls", "POST", {
             "title": "Sync public files", "head": branch, "base": "main",
-            "body": "Update public files from the development repository. Private Application files and private commit history are excluded. All public CI checks must pass before merge."
+            "body": (
+                "## Summary\n\n```text\ndevelopment tree -> public files -> public CI -> public merge\n```\n\n"
+                "Update public files without private Application files or private commit parents.\n\n"
+                "## Evidence\n\n- **Before:** Public main differs from the requested export.\n"
+                "  **After:** The staged public tree exactly matches the export; all four public checks must succeed before merge.\n\n"
+                "## Merge Danger\n\n**Door:** two-way\n\n**Blast Radius:** public-source\n"
+            )
         })
 
     def wait_public_checks(self, number, head, base, public_pr):
