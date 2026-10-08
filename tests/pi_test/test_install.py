@@ -140,6 +140,9 @@ def test_install_build_handshake_and_readiness_share_environment_policy(
     log = source_bridge(installation).parent / "env-calls.jsonl"
     monkeypatch.setenv("TEST_PI_ENV_LOG", str(log))
     expected = {}
+    if proxy_value is None and any(os.environ.get(name) for name in
+                                  ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")):
+        expected["NODE_USE_ENV_PROXY"] = "1"
     for name, value in (("NODE_USE_ENV_PROXY", proxy_value), ("NODE_EXTRA_CA_CERTS", ca_value)):
         monkeypatch.delenv(name, raising=False)
         if value is not None:

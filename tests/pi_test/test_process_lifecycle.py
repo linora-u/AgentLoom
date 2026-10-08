@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import signal
 import subprocess
 import sys
@@ -40,14 +39,10 @@ def node_launcher(root: Path):
 
 def sdk_node():
     """Select an installed SDK-compatible binary for the external fault shim."""
-    for directory in os.get_exec_path():
-        binary = shutil.which("node", path=directory)
-        if binary:
-            result = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5)
-            parts = result.stdout.strip().removeprefix("v").split(".")
-            if result.returncode == 0 and len(parts) == 3 and tuple(map(int, parts[:2])) >= (22, 19):
-                return binary
-    raise AssertionError("Install Node >=22.19 before running Pi SDK process tests")
+    from agentloom.runtimes.pi.environment import build_pi_subprocess_env
+    from agentloom.runtimes.pi.install import find_node
+
+    return find_node(build_pi_subprocess_env())
 
 
 def until(predicate, *, timeout=15):
@@ -79,7 +74,7 @@ def test_real_cli_stdout_contains_only_application_events(tmp_path):
 @pytest.mark.parametrize("proxy_value,ca_value", [
     (None, None), ("0", ""), ("1", "/etc/ssl/certs/ca-certificates.crt"),
 ])
-def test_real_bridge_preserves_only_explicit_proxy_ca(tmp_path, proxy_value, ca_value):
+def test_real_bridge_preserves_configured_or_default_proxy_ca(tmp_path, proxy_value, ca_value):
     with model_service() as (url, requests):
         app = project(tmp_path, url)
         binary = sdk_node()
@@ -101,7 +96,7 @@ os.execv({binary!r},[{binary!r},*sys.argv[1:]])
                "NODE_TLS_REJECT_UNAUTHORIZED": "0", "PI_TEST_SETTING": "must-be-removed",
                "HTTPS_PROXY": os.environ.get("HTTPS_PROXY", "http://127.0.0.1:9"),
                "NO_PROXY": "localhost,127.0.0.1"}
-        expected = {}
+        expected = {"NODE_USE_ENV_PROXY": "1"} if proxy_value is None else {}
         for name, value in (("NODE_USE_ENV_PROXY", proxy_value), ("NODE_EXTRA_CA_CERTS", ca_value)):
             env.pop(name, None)
             if value is not None:

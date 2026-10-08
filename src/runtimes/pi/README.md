@@ -7,7 +7,8 @@ Tool, Todo, final_answer implementation or message format is required.
 
 ## Install and run
 
-Node **22.19+** with npm is required. Use uv as the Python environment and
+Node **22.19+** with npm is required. Environment-proxy mode requires Node
+**22.21+ on the 22.x line, or 24+**. Use uv as the Python environment and
 installation entry point:
 
 ```sh
