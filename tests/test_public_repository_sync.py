@@ -1,13 +1,13 @@
 """Verify export isolation and that publication failures cannot merge private PRs."""
 
 import importlib.util
-from pathlib import Path
+import json
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-
 
 SCRIPT = Path(__file__).parents[1] / ".github/scripts/public_sync.py"
 spec = importlib.util.spec_from_file_location("public_sync", SCRIPT)
@@ -41,22 +41,27 @@ def test_export_rejects_private_or_unsafe_entries(path, mode):
         sync.validate_public_path(path, mode, PRIVATE_PATHS)
 
 
-def test_public_commit_keeps_owner_identity_public_ancestry_and_exact_file_modes(tmp_path, monkeypatch):
+def test_public_commit_keeps_source_author_public_ancestry_and_exact_file_modes(tmp_path, monkeypatch):
     source, public = tmp_path / "source", tmp_path / "public"
     for repo in [source, public]:
         repo.mkdir()
         sync.command("git", "init", "-b", "main", cwd=repo)
         sync.command("git", "config", "user.name", "Fixture", cwd=repo)
         sync.command("git", "config", "user.email", "fixture@example.test", cwd=repo)
+        (repo / ".github").mkdir()
+        (repo / ".github/public-sync.json").write_text('{"private_prefixes": ["applications/news_agent/"]}')
+        (repo / "obsolete.txt").write_text("removed\n")
+        sync.command("git", "add", ".", cwd=repo)
+        sync.command("git", "commit", "-m", "Public parent", cwd=repo)
+    base = sync.command("git", "rev-parse", "HEAD", cwd=source).decode().strip()
     (source / "applications/news_agent").mkdir(parents=True)
     (source / "applications/news_agent/private.py").write_text("PRIVATE_ONLY = True\n")
     (source / "public.sh").write_text("#!/bin/sh\necho public\n")
     (source / "public.sh").chmod(0o755)
+    (source / "obsolete.txt").unlink()
     sync.command("git", "add", ".", cwd=source)
     sync.command("git", "commit", "-m", "Private source message", cwd=source)
-    (public / "obsolete.txt").write_text("removed\n")
-    sync.command("git", "add", ".", cwd=public)
-    sync.command("git", "commit", "-m", "Public parent", cwd=public)
+    head = sync.command("git", "rev-parse", "HEAD", cwd=source).decode().strip()
     parent = sync.command("git", "rev-parse", "HEAD", cwd=public).strip()
     public_base = sync.local_tree("HEAD", public)
     monkeypatch.chdir(source)
@@ -64,23 +69,23 @@ def test_public_commit_keeps_owner_identity_public_ancestry_and_exact_file_modes
     real_command = sync.command
     published = []
 
-    def offline_command(*args, cwd=None, data=None):
+    def offline_command(*args, cwd=None, data=None, env=None):
         if args[:2] == ("git", "clone"):
-            return real_command("git", "clone", str(public), args[-1])
+            return real_command("git", "clone", "--no-checkout", str(public), args[-1])
         if args[:2] == ("git", "push"):
             # Inspect the real production commit before its temporary clone is deleted.
             assert sync.local_tree("HEAD", cwd) == desired
             assert real_command("git", "rev-parse", "HEAD^", cwd=cwd).strip() == parent
             identity = real_command("git", "show", "-s", "--format=%an%n%ae%n%cn%n%ce", cwd=cwd)
             assert identity.decode().splitlines() == [
-                "linora-u", "260928258+linora-u@users.noreply.github.com",
+                "Fixture", "fixture@example.test",
                 "linora-u", "260928258+linora-u@users.noreply.github.com",
             ]
             assert not (Path(cwd) / "applications/news_agent").exists()
             assert not (Path(cwd) / "obsolete.txt").exists()
             published.append(args)
             return b""
-        return real_command(*args, cwd=cwd, data=data)
+        return real_command(*args, cwd=cwd, data=data, env=env)
 
     monkeypatch.setattr(sync, "command", offline_command)
     monkeypatch.setattr(sync, "api", Mock(side_effect=[[], {"number": 1}]))
@@ -89,8 +94,9 @@ def test_public_commit_keeps_owner_identity_public_ancestry_and_exact_file_modes
         "required_public_checks": [],
     })
     coordinator.verify_private_head = Mock()
-    assert coordinator.ensure_public_pr(1, "HEAD", "base", desired, public_base, PRIVATE_PATHS) == {"number": 1}
-    coordinator.verify_private_head.assert_called_once_with(1, "HEAD", "base")
+    assert coordinator.ensure_public_pr(1, head, base, desired, public_base, PRIVATE_PATHS) == {"number": 1}
+    assert coordinator.verify_private_head.call_count == 2
+    assert coordinator.verify_private_head.call_args.args == (1, head, base)
     assert len(published) == 1
 
 
@@ -101,8 +107,16 @@ def coordinator_fixture(monkeypatch):
     coordinator.status = Mock()
     coordinator.verify_private_head = Mock()
     coordinator.merge_private = Mock()
+    coordinator.load_state = Mock(return_value=None)
+    coordinator.save_publication = Mock()
+    coordinator.matching_public_pr = Mock(return_value=None)
+    coordinator.public_main = Mock(return_value="public-main")
+    coordinator.recover_publication = Mock()
     monkeypatch.setattr(sync, "command", Mock())
     monkeypatch.setattr(sync, "prefixes_at_ref", lambda ref: PRIVATE_PATHS)
+    monkeypatch.setattr(sync, "public_history", lambda base, head, prefixes: [
+        {"tree": sync.public_tree(sync.local_tree(head), prefixes)}
+    ])
     monkeypatch.setattr(subprocess, "run", Mock(return_value=Mock(returncode=0)))
     return coordinator, {"number": 1, "head": {"sha": "head"}, "base": {"sha": "base"}}
 
@@ -123,7 +137,7 @@ def test_public_failure_never_merges_private_pr(monkeypatch):
     coordinator, pr = coordinator_fixture(monkeypatch)
     monkeypatch.setattr(sync, "local_tree", lambda ref: {"src/public.py": ("100644", ref)})
     coordinator.remote_tree = Mock(return_value={"src/public.py": ("100644", "base")})
-    coordinator.ensure_public_pr = Mock(return_value={"html_url": "https://example.test/pr/1"})
+    coordinator.ensure_public_pr = Mock(return_value={"html_url": "https://example.test/pr/1", "body": mapping_body()})
     coordinator.wait_public_checks = Mock(side_effect=RuntimeError("Public CI failed"))
     with pytest.raises(RuntimeError, match="Public CI failed"):
         coordinator.process(pr)
@@ -255,12 +269,19 @@ def recovery_fixture(monkeypatch):
         {"src/public.py": ("100644", "old-public")}, desired, desired, desired
     ])
     coordinator.find_public_base = Mock(return_value="published-base")
-    public_pr = {"number": 7, "head": {"sha": "tested-public"}, "html_url": "https://example.test/pr/7"}
+    public_pr = {"number": 7, "head": {"sha": "tested-public"}, "html_url": "https://example.test/pr/7",
+                 "body": mapping_body()}
     coordinator.ensure_public_pr = Mock(return_value=public_pr)
     coordinator.wait_public_checks = Mock(return_value=public_pr)
     api = Mock(return_value={"merged": True, "sha": "public-merge"})
     monkeypatch.setattr(sync, "api", api)
     return coordinator, desired, api
+
+
+def mapping_body():
+    return sync.HISTORY_MARKER + json.dumps({
+        "version": 1, "source_base": "a" * 40, "source_head": "b" * 40, "commits": []
+    }) + "\n-->\n"
 
 
 def test_main_recovery_does_nothing_for_already_synced_or_private_only_updates(monkeypatch):
@@ -281,7 +302,7 @@ def test_manual_private_merge_recovers_only_public_files_after_exact_head_checks
         {"src/public.py": ("100644", "old-public")}, PRIVATE_PATHS,
     )
     api.assert_called_once_with("repos/owner/public/pulls/7/merge", "PUT",
-                               {"sha": "tested-public", "merge_method": "squash"})
+                               {"sha": "tested-public", "merge_method": "merge"})
     coordinator.merge_private.assert_not_called()
     assert coordinator.status.call_args.args[1] == "success"
 
@@ -335,6 +356,7 @@ def test_recovery_finds_published_main_before_multiple_manual_updates(tmp_path, 
         sync.command("git", "commit", "-m", "Manual private main update", cwd=tmp_path)
     coordinator = sync.Coordinator({"private_repository": "owner/private", "public_repository": "owner/public",
                                     "required_public_checks": []})
+    coordinator.load_state = Mock(return_value=None)
     monkeypatch.chdir(tmp_path)
     assert coordinator.find_public_base("HEAD", actual) == base
     with pytest.raises(sync.PublicDivergence, match="independent changes"):
