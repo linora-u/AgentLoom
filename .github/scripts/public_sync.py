@@ -15,7 +15,7 @@ import tempfile
 import time
 
 
-PRIVATE_PREFIX = "applications/news_agent/"
+CONFIG_PATH = ".github/public-sync.json"
 STATUS_CONTEXT = "Public sync"
 
 
@@ -48,27 +48,64 @@ def local_tree(ref, cwd=None):
     return tree
 
 
-def public_tree(tree):
+def configured_prefixes(config):
+    prefixes = config.get("private_prefixes")
+    if not isinstance(prefixes, list):
+        raise RuntimeError("private_prefixes must be a list of repository-relative paths")
+    result = []
+    for prefix in prefixes:
+        if (not isinstance(prefix, str) or not prefix or prefix.startswith("/")
+                or any(char in prefix for char in "\0\n\r")):
+            raise RuntimeError("Invalid private path")
+        parts = PurePosixPath(prefix).parts
+        if not parts or ".." in parts or ".git" in parts or any(char in prefix for char in "*?[]"):
+            raise RuntimeError("Private paths must be relative file/directory names without wildcards")
+        result.append(PurePosixPath(prefix).as_posix().rstrip("/"))
+    return tuple(result)
+
+
+def load_config(path=CONFIG_PATH):
+    config = json.loads(Path(path).read_text())
+    configured_prefixes(config)
+    return config
+
+
+def prefixes_at_ref(ref):
+    return configured_prefixes(json.loads(command("git", "show", f"{ref}:{CONFIG_PATH}")))
+
+
+def is_private_path(path, prefixes):
+    return any(path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/")
+               for prefix in prefixes)
+
+
+def public_tree(tree, prefixes=None):
+    if prefixes is None:
+        prefixes = configured_prefixes(load_config())
     return {path: entry for path, entry in tree.items()
-            if path != PRIVATE_PREFIX.rstrip("/") and not path.startswith(PRIVATE_PREFIX)}
+            if not is_private_path(path, prefixes)}
 
 
 def tree_digest(tree):
     return hashlib.sha256(json.dumps(tree, sort_keys=True).encode()).hexdigest()
 
 
-def validate_public_path(path, mode):
+def validate_public_path(path, mode, prefixes=None):
+    if prefixes is None:
+        prefixes = configured_prefixes(load_config())
     parts = PurePosixPath(path).parts
     if not parts or path.startswith("/") or ".." in parts or ".git" in parts:
         raise RuntimeError("Unsafe public export path")
-    if path == PRIVATE_PREFIX.rstrip("/") or path.startswith(PRIVATE_PREFIX):
-        raise RuntimeError("news_agent cannot be exported")
+    if is_private_path(path, prefixes):
+        raise RuntimeError("Configured private paths cannot be exported")
     if mode not in {"100644", "100755"}:
         raise RuntimeError("Public export refuses symbolic links and special files")
 
 
-def materialize_public_tree(source_ref, desired, target):
+def materialize_public_tree(source_ref, desired, target, prefixes=None):
     """Replace a public worktree without copying private Git parents/history."""
+    if prefixes is None:
+        prefixes = configured_prefixes(load_config())
     current = local_tree("HEAD", target)
     removed = sorted(set(current) - set(desired))
     if removed:
@@ -80,7 +117,7 @@ def materialize_public_tree(source_ref, desired, target):
                 destination.unlink()
     changed = []
     for path, (mode, sha) in sorted(desired.items()):
-        validate_public_path(path, mode)
+        validate_public_path(path, mode, prefixes)
         if current.get(path) == (mode, sha):
             continue
         destination = Path(target) / path
@@ -136,7 +173,7 @@ class Coordinator:
             raise RuntimeError("Private merge did not complete")
         print(f"Private PR #{number} merged after public synchronization", flush=True)
 
-    def ensure_public_pr(self, number, source_ref, base, desired, expected_public_base):
+    def ensure_public_pr(self, number, source_ref, base, desired, expected_public_base, prefixes):
         branch = f"codex/public-sync-{number}-{tree_digest(desired)[:12]}"
         owner = self.public.split("/", 1)[0]
         matches = api(f"repos/{self.public}/pulls?state=all&head={owner}:{branch}&per_page=100")
@@ -151,11 +188,12 @@ class Coordinator:
         with tempfile.TemporaryDirectory(prefix="agentloom-public-sync-") as target:
             command("git", "clone", "--filter=blob:none", "--no-checkout", "--single-branch",
                     "--branch", "main", f"https://github.com/{self.public}.git", target)
-            command("git", "sparse-checkout", "set", "--no-cone", "/*", "!/applications/news_agent/", cwd=target)
+            command("git", "sparse-checkout", "set", "--no-cone", "/*",
+                    *(f"!/{prefix.rstrip('/')}" for prefix in prefixes), cwd=target)
             command("git", "checkout", "-b", branch, "origin/main", cwd=target)
             if local_tree("HEAD", target) != expected_public_base:
                 raise RuntimeError("Public main moved while preparing the export; retry before publishing")
-            materialize_public_tree(source_ref, desired, target)
+            materialize_public_tree(source_ref, desired, target, prefixes)
             command("git", "-c", "user.name=AgentLoom Sync", "-c", "user.email=sync@users.noreply.github.com",
                     "commit", "-m", "Sync public files", cwd=target)
             command("git", "push", f"git@github.com:{self.public}.git", f"HEAD:refs/heads/{branch}", cwd=target)
@@ -205,7 +243,9 @@ class Coordinator:
         if ancestor.returncode:
             api(f"repos/{self.private}/pulls/{number}/update-branch", "PUT", {"expected_head_sha": head})
             raise RuntimeError("Private PR updated to current main; rerun for the new head")
-        original, desired = public_tree(local_tree(base)), public_tree(local_tree(head))
+        base_prefixes, head_prefixes = prefixes_at_ref(base), prefixes_at_ref(head)
+        original = public_tree(local_tree(base), base_prefixes)
+        desired = public_tree(local_tree(head), head_prefixes)
         if original == desired:
             self.verify_private_head(number, head, base)
             self.status(head, "success", "Private-only change; no public PR or tests required")
@@ -215,7 +255,7 @@ class Coordinator:
         if actual != desired:
             if actual != original:
                 raise RuntimeError("Public main diverged; bring public changes into private main before exporting")
-            public_pr = self.ensure_public_pr(number, head, base, desired, actual)
+            public_pr = self.ensure_public_pr(number, head, base, desired, actual, head_prefixes)
             self.status(head, "pending", "Waiting for public PR to merge", public_pr["html_url"])
             public_pr = self.wait_public_checks(number, head, base, public_pr)
             self.verify_private_head(number, head, base)
@@ -234,7 +274,7 @@ class Coordinator:
 
 
 def main():
-    config = json.loads(Path(".github/public-sync.json").read_text())
+    config = load_config()
     if os.environ.get("GITHUB_REPOSITORY", config["private_repository"]) != config["private_repository"]:
         raise SystemExit("Coordinator only runs in the private repository")
     coordinator = Coordinator(config)
