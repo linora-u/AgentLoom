@@ -671,7 +671,9 @@ class RoleDrivenAgent(BaseAgent):
 
     def _build_runtime_instructions(self, gateway: AgentLoomToolGateway) -> str:
         sections = [str(self._config.get("_resolved_system_prompt") or self._config.get("system_prompt") or "").strip(), get_agent_environment_prompt()]
-        if any(item.name == "skill" for item in gateway.definitions):
+        names = {item.name for item in gateway.definitions}
+        native_skills = self._config.get("agent_runtime") == "pi" and bool(names & {"read", "bash"})
+        if "skill" in names and not native_skills:
             if self._skill_catalog is None:
                 raise RuntimeError("Skill Tool requires a resolved Skill catalog")
             sections.append(build_skills_prompt(self._skill_catalog.summaries()))
@@ -714,6 +716,7 @@ class RoleDrivenAgent(BaseAgent):
             instructions=self._build_runtime_instructions(gateway),
             output_contract=getattr(normalized, "output_contract", None),
             project_root=str(C.agent_root),
+            skills=self._skill_catalog.summaries() if self._skill_catalog is not None else (),
         )
 
     def build_runtime(self) -> AgentRuntime:

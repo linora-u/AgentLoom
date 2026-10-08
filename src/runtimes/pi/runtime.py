@@ -37,6 +37,7 @@ from agentloom.runtimes.pi.protocol import (
     OutputContract,
     Run,
     RunResult,
+    Skill,
 )
 from agentloom.runtimes.pi.protocol_handlers import PiProtocolCoordinator
 from agentloom.runtimes.pi.recovery import reconcile
@@ -230,6 +231,8 @@ class PiRuntime:
                         model_id=selection.model_id, protocol=selection.protocol, settings=wire_settings,
                         request_headers=dict(selection.request_headers)), tools=wire_tools, serial_tools=serial_tools, runtime_options=runtime_options,
                     output_contract=wire_output_contract,
+                    skills=[Skill(name=skill.name, description=skill.description, location=str(skill.location))
+                            for skill in definition.skills],
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
                     additional_args=dict(request.additional_args), checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)

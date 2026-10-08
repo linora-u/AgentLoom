@@ -13,6 +13,7 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.native_tools import ToolManifestEntry
 from agentloom.execution.schema_validation import reject_remote_schema_references
+from agentloom.execution.skills.catalog import SkillSummary
 from agentloom.execution.tool_gateway import ToolGateway, tool_manifest_snapshot
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
@@ -567,6 +568,7 @@ class RuntimeDefinition:
     instructions: str = ""
     output_contract: OutputContract | None = None
     project_root: str | None = None
+    skills: tuple[SkillSummary, ...] = ()
     metadata: Mapping[str, JSONValue] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -599,6 +601,8 @@ class RuntimeDefinition:
             raise TypeError("output_contract must be an OutputContract")
         if not isinstance(self.tool_gateway, ToolGateway):
             raise TypeError("tool_gateway must satisfy ToolGateway")
+        if not isinstance(self.skills, tuple) or any(not isinstance(skill, SkillSummary) for skill in self.skills):
+            raise TypeError("skills must be a tuple of SkillSummary values")
         object.__setattr__(self, "tool_manifest", tool_manifest_snapshot(self.tool_gateway))
         if self.project_root is not None:
             if not isinstance(self.project_root, str) or not self.project_root.strip():

@@ -172,50 +172,68 @@ def test_unmapped_basics_and_specialist_writes_are_rejected_before_application_e
     assert not requests
 
 
-def test_skill_activation_uses_one_platform_catalog_and_no_pi_discovery(tmp_path):
-    with model_service(turns=[[('activate-review', 'skill', {'name': 'review'})]]) as (url, requests):
+def test_native_skills_use_resolved_catalog_and_read_references_on_demand(tmp_path):
+    app_skill = tmp_path / 'applications/pi/skills/review'
+    manifest = app_skill / 'SKILL.md'
+    reference = app_skill / 'references/facts.md'
+    with model_service(turns=[[('activate-review', 'read', {'path': str(manifest)})],
+                              [('read-reference', 'read', {'path': str(reference)})]]) as (url, requests):
         app = project(tmp_path, url)
         for directory, token in [(tmp_path / 'skills/review', 'PROJECT-CONTENT-NOT-SELECTED'),
                                  (app.parents[1] / 'skills/review', 'APP-SKILL-SELECTED-6941'),
                                  (tmp_path / '.pi/skills/review', 'PI-CONTENT-NOT-SELECTED')]:
             directory.mkdir(parents=True)
             (directory / 'SKILL.md').write_text(f'---\nname: review\ndescription: Inspect the selected review token.\n---\n{token}\n')
-        select(app, tools=[{'name': 'skill'}])
+        reference.parent.mkdir()
+        reference.write_text('REFERENCE-ON-DEMAND-6942')
+        select(app, skills={'paths': ['skills/review']}, tools=[{'name': 'read'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     first = json.dumps(requests[0][1])
+    assert '<available_skills>' in first
+    assert str(manifest) in first
+    assert str(tmp_path / 'skills/review/SKILL.md') not in first
+    assert 'REFERENCE-ON-DEMAND-6942' not in json.dumps(requests[:2])
+    assert 'REFERENCE-ON-DEMAND-6942' in json.dumps(requests[2][1])
     assert 'APP-SKILL-SELECTED-6941' not in first
     assert 'APP-SKILL-SELECTED-6941' in json.dumps(requests[1][1])
     assert 'PI-CONTENT-NOT-SELECTED' not in json.dumps(requests)
     assert 'PROJECT-CONTENT-NOT-SELECTED' not in json.dumps(requests)
     records = [event['details']['record'] for event in audit(result) if event['kind'] == 'tool']
-    assert [record['tool_name'] for record in records] == ['skill']
+    assert [record['tool_name'] for record in records] == ['read', 'read']
+    assert all(record['status'] == 'completed' for record in records)
+    assert {tool['function']['name'] for tool in requests[0][1]['tools']} == {'read', 'loom_retrieve_context'}
 
 
-def test_standalone_pi_worker_can_activate_platform_skill(tmp_path):
-    """A Python caller may use a Pi Worker without an enclosing Application Run."""
+def test_python_caller_registers_explicit_native_skill_with_bound_run(tmp_path):
+    """A Python caller supplies native tool storage without execute_app()."""
     from agentloom.app.factory import YamlAgentFactory
     from agentloom.execution.logging import NullLoggerBackend
+    from agentloom.execution.context import RuntimeHome, bind_run_context
+    from agentloom.execution.observability import bind_trace_recorder
 
     source = tmp_path / 'reference.txt'
     source.write_text('STANDALONE-REFERENCE-6942')
-    with model_service(turns=[[('activate-review', 'skill', {'name': 'review'}),
-                               ('read-reference', 'file_probe', {'file_path': str(source)})]]) as (url, requests):
+    skill_dir = tmp_path / 'applications/pi/custom-skills/review'
+    with model_service(turns=[[('activate-review', 'read', {'path': str(skill_dir / 'SKILL.md')}),
+                               ('read-reference', 'read', {'path': str(source)})]]) as (url, requests):
         app = project(tmp_path, url)
-        skill_dir = app.parents[1] / 'skills' / 'review'
         skill_dir.mkdir(parents=True)
         (skill_dir / 'SKILL.md').write_text(
             '---\nname: review\ndescription: Inspect the review token.\n---\nSTANDALONE-SKILL-6941\n'
         )
-        select(app, tools=[{'name': 'skill'},
-                           {'name': 'file_probe', 'module': __name__, 'function': 'file_probe'}], toolsets=[],
+        select(app, skills={'paths': ['custom-skills/review']}, tools=[{'name': 'read'}], toolsets=[],
                input_schema={'type': 'object', 'properties': {'query': {'type': 'string'}},
                              'required': ['query'], 'additionalProperties': False})
-        with bind_config(load_project_config(tmp_path)):
+        context = RuntimeHome(tmp_path / "runtime").new_context(application_id="pi")
+        context.prepare_run()
+        with bind_config(load_project_config(tmp_path)), bind_run_context(context), bind_trace_recorder(context):
             worker = YamlAgentFactory.create_agent_as_tool(app, logger=NullLoggerBackend())
             assert worker is not None
             assert worker(query='activate the review skill') == 'Pi answer'
     assert len(requests) == 2
+    assert '<available_skills>' in json.dumps(requests[0][1])
+    assert 'STANDALONE-SKILL-6941' not in json.dumps(requests[0][1])
     assert 'STANDALONE-SKILL-6941' in json.dumps(requests[1][1])
     assert 'STANDALONE-REFERENCE-6942' in json.dumps(requests[1][1])
 
@@ -399,3 +417,31 @@ def test_pi_native_fixed_arguments_are_explicitly_unsupported(tmp_path):
         with bind_config(load_project_config(tmp_path)), pytest.raises(ValueError, match='fixed_args'):
             execute_app(app, file_logging=False)
     assert not requests
+
+
+def test_standalone_pi_worker_can_activate_platform_skill(tmp_path):
+    """A Python caller may use a Pi Worker without an enclosing Application Run."""
+    from agentloom.app.factory import YamlAgentFactory
+    from agentloom.execution.logging import NullLoggerBackend
+
+    source = tmp_path / 'reference.txt'
+    source.write_text('STANDALONE-REFERENCE-6942')
+    with model_service(turns=[[('activate-review', 'skill', {'name': 'review'}),
+                               ('read-reference', 'file_probe', {'file_path': str(source)})]]) as (url, requests):
+        app = project(tmp_path, url)
+        skill_dir = app.parents[1] / 'skills' / 'review'
+        skill_dir.mkdir(parents=True)
+        (skill_dir / 'SKILL.md').write_text(
+            '---\nname: review\ndescription: Inspect the review token.\n---\nSTANDALONE-SKILL-6941\n'
+        )
+        select(app, tools=[{'name': 'skill'},
+                           {'name': 'file_probe', 'module': __name__, 'function': 'file_probe'}], toolsets=[],
+               input_schema={'type': 'object', 'properties': {'query': {'type': 'string'}},
+                             'required': ['query'], 'additionalProperties': False})
+        with bind_config(load_project_config(tmp_path)):
+            worker = YamlAgentFactory.create_agent_as_tool(app, logger=NullLoggerBackend())
+            assert worker is not None
+            assert worker(query='activate the review skill') == 'Pi answer'
+    assert len(requests) == 2
+    assert 'STANDALONE-SKILL-6941' in json.dumps(requests[1][1])
+    assert 'STANDALONE-REFERENCE-6942' in json.dumps(requests[1][1])
