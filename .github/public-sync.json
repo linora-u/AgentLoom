@@ -1,0 +1,11 @@
+{
+  "private_repository": "linora-u/AgentLoom-private",
+  "public_repository": "linora-u/AgentLoom",
+  "private_prefixes": ["applications/news_agent/"],
+  "required_public_checks": [
+    "Python tests",
+    "Installed pi Application",
+    "Installed pi-code Application",
+    "Installed smol Application"
+  ]
+}

@@ -173,6 +173,10 @@ llm_config.yaml
 !.github/
 !.github/workflows/
 !.github/workflows/tests.yml
+!.github/workflows/public-sync.yml
+!.github/scripts/
+!.github/public-sync.json
+!.github/PUBLIC_SYNC.md
 !.github/pull_request_template.md
 .claude/
 AGENTS.md
