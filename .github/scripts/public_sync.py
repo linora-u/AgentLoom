@@ -208,7 +208,8 @@ class Coordinator:
             if local_tree("HEAD", target) != expected_public_base:
                 raise RuntimeError("Public main moved while preparing the export; retry before publishing")
             materialize_public_tree(source_ref, desired, target, prefixes)
-            command("git", "-c", "user.name=AgentLoom Sync", "-c", "user.email=sync@users.noreply.github.com",
+            command("git", "-c", "user.name=linora-u", "-c",
+                    "user.email=260928258+linora-u@users.noreply.github.com",
                     "commit", "-m", "Sync public files", cwd=target)
             command("git", "push", f"git@github.com:{self.public}.git", f"HEAD:refs/heads/{branch}", cwd=target)
         return api(f"repos/{self.public}/pulls", "POST", {
