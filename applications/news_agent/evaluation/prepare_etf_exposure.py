@@ -125,7 +125,7 @@ def collect(pro: Any, candidates: Path, output_root: Path,
                        "rows": rows}
             _atomic_text(path, json.dumps(payload, ensure_ascii=False, indent=2,
                                           allow_nan=False) + "\n")
-        files[fund] = {"path": str(path.resolve()), "sha256": _sha(path),
+        files[fund] = {"path": path.name, "sha256": _sha(path),
                        "rows": len(rows)}
         total_rows += len(rows)
         print(json.dumps({"fund": fund, "rows": len(rows)}), flush=True)
@@ -149,7 +149,7 @@ def exposure_as_of(output_root: Path, fund: str, news_day: date) -> dict[str, An
     entry = manifest["files"].get(fund)
     if entry is None:
         raise ValueError(f"{fund}: fund outside exposure universe")
-    path = Path(entry["path"])
+    path = output_root / entry["path"]
     if not path.is_file() or _sha(path) != entry["sha256"]:
         raise ValueError(f"{fund}: exposure source digest mismatch")
     source = json.loads(path.read_text(encoding="utf-8"))
@@ -218,7 +218,7 @@ def collect_namechanges(pro: Any, output_root: Path,
                                    "rows": rows}, ensure_ascii=False, indent=2) + "\n")
     manifest = {"source": "Tushare namechange", "start": start.isoformat(),
                 "end": end.isoformat(), "rows": len(rows), "sha256": _sha(path),
-                "file": str(path.resolve()),
+                "file": path.name,
                 "availability_rule": "ann_date and start_date must be no later than news day"}
     _atomic_text(output_root / "stock_name_changes_manifest.json",
                  json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
@@ -230,7 +230,7 @@ def stock_names_as_of(output_root: Path, stocks: set[str],
     """Resolve many holdings with one verified read of the dated name source."""
     manifest = json.loads((output_root / "stock_name_changes_manifest.json").read_text(
         encoding="utf-8"))
-    path = Path(manifest["file"])
+    path = output_root / manifest["file"]
     if _sha(path) != manifest["sha256"]:
         raise ValueError("namechange source digest mismatch")
     source = json.loads(path.read_text(encoding="utf-8"))

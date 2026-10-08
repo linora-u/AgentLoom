@@ -1,0 +1,1980 @@
+# ETF-only self-contained Tushare download configuration.
+# Set TUSHARE_TOKEN in the environment before downloading.
+# Blank end_date resolves to the current date.
+
+data_root: ./data/tushare
+start_date: '20100101'
+end_date: ''
+source_policy: tushare_only
+shared_apis:
+  trade_cal:
+    api: trade_cal
+    output_fields:
+      exchange: 交易所
+      cal_date: 日历日期
+      is_open: 是否开市
+      pretrade_date: 上一交易日
+theme_tags:
+  促消费:
+    event_keywords:
+      - 社零
+      - 扩大内需
+      - 白酒价格
+      - 经济复苏
+      - 国补
+      - 财政补贴
+      - 消费券
+      - 家电
+      - 楼市企稳回升
+      - 汽车
+      - 以旧换新
+      - 出海
+      - 新消费
+      - 养老
+      - 老龄化
+      - 适老经济
+      - 茅台
+      - 社零数据
+      - 春运
+      - 旅游
+      - 假期
+      - 茅台酒价上涨
+      - 服务消费
+      - 消费品提价
+      - 社零数据转暖
+  航空:
+    event_keywords:
+      - 卫星
+      - 火箭
+      - 商业航天
+      - 发射卫星
+      - 低空经济
+      - 航天
+      - 军工
+      - 两会
+  军工:
+    event_keywords:
+      - 卫星
+      - 军费支出
+      - 火箭
+      - 商业航天
+      - 发射卫星
+      - 低空经济
+      - 航天
+      - 军工
+      - 两会
+      - 建军
+      - 装备采购
+      - 无人机
+      - 地缘紧张
+      - 军贸出口
+      - 军工资产证券化
+  A股上涨:
+    event_keywords:
+      - 社融数据超预期
+      - 降息
+  日本:
+    event_keywords:
+      - 日经
+      - 退出负利率
+      - 日本汽车
+      - 巴菲特加仓五大商社
+  美国指数:
+    event_keywords:
+      - 纳指
+      - AI
+      - 科技
+      - 美联储降息
+      - 生物科技
+  互联网科技:
+    event_keywords:
+      - 美联储降息
+      - 港股
+      - 阿里巴巴
+      - 人民币升值
+      - AI Agent、AI 助手、AI 电商、AI 广告
+      - 平台经济
+  农业:
+    event_keywords:
+      - 美国
+      - 大豆
+      - 豆粕
+      - 粮食安全
+      - 两会
+      - 农业强国
+      - 厄尔尼诺气候
+      - 种业振兴
+      - 猪价触底回升
+      - 智慧农场
+      - 高标准农田建设
+      - 乡村振兴
+      - 农业现代化
+  债券:
+    event_keywords:
+      - 降息
+      - LPR下调
+      - 经济通缩
+  黄金:
+    event_keywords:
+      - 黄金价格
+      - 战争
+      - 冲突
+      - 通胀
+      - 美联储降息
+      - 央行购金
+      - 美国债务
+      - 负利率
+      - 低利率
+  出海:
+    event_keywords:
+      - 工程机械
+      - 工程
+      - 出海
+      - 挖掘机
+      - 造船业
+      - 船舶订单
+      - 中国船舶
+      - 航运
+      - 外循环
+      - 降低关税
+      - 新能源出海
+      - 汇率贬值
+  地产:
+    event_keywords:
+      - 房地产新政策
+      - 房产税
+      - 楼市调控
+      - 房贷利率
+      - 首付比例
+      - 公积金贷款
+      - 地方限购放松
+      - 房企融资
+      - 城中村改造
+      - 城镇化
+      - 银行信贷
+  非美国家:
+    event_keywords:
+      - 法国
+      - 奢侈品提价
+      - 东南亚
+      - 印度
+      - 德国
+      - 汽车
+      - 巴西
+  医药:
+    event_keywords:
+      - 医药
+      - 创新药
+      - 医疗服务
+      - CRO
+      - BD出海
+      - 医疗
+      - 生物药
+      - 疫苗
+      - 集采
+      - 中医
+      - 减肥药
+      - 脑机接口
+      - 医药出海
+      - 医保
+      - 医药行业监管
+      - 公立医院改革
+      - 人口老龄化
+      - 带量采购
+      - 传染病与公共卫生事件
+      - 医美、康养消费政策
+      - 宏观流动性
+  AI应用:
+    event_keywords:
+      - 国产替代
+      - 医疗
+      - 医疗器械
+      - 金融科技
+      - 券商
+      - 互联网券商
+      - 软件信创
+      - 教育
+      - AI
+      - 游戏
+      - 动漫
+      - 日本
+      - AI应用
+      - 影视
+      - 电影
+      - 消费电子
+      - 手机
+      - 电脑
+      - 3C
+      - 信创
+      - 国家采购
+      - 政府采购
+      - 数字经济
+      - 华为
+      - 人工智能
+      - 机器人
+      - 云计算
+  AI硬件:
+    event_keywords:
+      - 通信
+      - 光模块
+      - 6G
+      - CPO
+      - 存储芯片
+      - AI芯片
+      - 人工智能
+      - 半导体
+      - 国产替代
+      - 中美关系
+      - 日本
+      - 光刻机
+      - 英伟达
+      - deepseek升级
+      - 数据要素
+      - 港股
+      - 储能材料
+      - 化工材料
+      - 半导体材料
+      - 芯片提价
+      - 缺货
+      - 存储
+      - 半导体设备
+  光模块:
+    event_keywords:
+      - 通信
+      - 光模块
+      - 6G
+      - CPO
+      - 存储芯片
+      - AI芯片
+      - 人工智能
+      - 半导体
+      - 国产替代
+      - 中美关系
+      - 日本
+      - 光刻机
+      - 英伟达
+      - deepseek升级
+      - 数据要素
+      - 港股
+      - 储能材料
+      - 化工材料
+      - 半导体材料
+      - 芯片提价
+      - 缺货
+      - 存储
+      - 半导体设备
+  半导体:
+    event_keywords:
+      - 通信
+      - 光模块
+      - 6G
+      - CPO
+      - 存储芯片
+      - AI芯片
+      - 人工智能
+      - 半导体
+      - 国产替代
+      - 中美关系
+      - 日本
+      - 光刻机
+      - 英伟达
+      - deepseek升级
+      - 数据要素
+      - 港股
+      - 储能材料
+      - 化工材料
+      - 半导体材料
+      - 芯片提价
+      - 缺货
+      - 存储
+      - 半导体设备
+  工业母机:
+    event_keywords:
+      - 机器人
+      - 工业母机
+      - 工程机械
+      - 机械臂
+      - 科技创新
+  设备:
+    event_keywords:
+      - 机器人
+      - 工业母机
+      - 工程机械
+      - 机械臂
+      - 科技创新
+  反内卷:
+    event_keywords:
+      - 猪价上涨
+      - 牧原股份等龙头个股扭亏
+      - 统一大市场
+      - 反内卷
+      - 物流
+      - 化工品
+      - 磷化工
+      - 维生素
+      - 提价
+      - 钢铁
+      - 光伏
+      - 储能
+      - 新能源
+  新能源:
+    event_keywords:
+      - 智能汽车
+      - 整车
+      - 智能驾驶
+      - 新能源车
+      - 智能车
+      - 新能源
+      - 储能
+      - 反内卷
+      - 汽车整车
+      - 汽车政策
+      - 汽车零部件
+      - 机器人
+      - 电池
+      - 锂电池
+      - 碳中和
+      - 光伏装机
+  金融:
+    event_keywords:
+      - 证券
+      - 证券业并购
+      - A股暴涨
+      - 保险
+      - 保险业绩
+      - 分红
+      - 降息
+      - 高股息
+      - 避险
+      - LPR下调
+  提价:
+    event_keywords:
+      - 原油涨价
+      - 欧佩克会议
+      - 战争
+      - 冲突
+      - 通胀
+      - 稀土
+      - 中美关系冲突
+      - 铜涨价
+      - 铝涨价
+      - 有色金属涨价
+      - 小金属涨价
+      - 光刻胶
+      - 石油价格表现
+      - 缺电
+      - 电价
+      - 能源化工
+      - 玻璃
+      - 甲醇
+      - 粮食提价
+      - 种子
+      - 粮食安全
+      - 储能材料
+      - 化工材料
+      - 半导体材料
+  通胀:
+    event_keywords:
+      - 原油涨价
+      - 欧佩克会议
+      - 战争
+      - 冲突
+      - 通胀
+      - 稀土
+      - 中美关系冲突
+      - 铜涨价
+      - 铝涨价
+      - 有色金属涨价
+      - 小金属涨价
+      - 光刻胶
+      - 石油价格表现
+      - 缺电
+      - 电价
+      - 能源化工
+      - 玻璃
+      - 甲醇
+      - 粮食提价
+      - 种子
+      - 粮食安全
+      - 储能材料
+      - 化工材料
+      - 半导体材料
+  红利:
+    event_keywords:
+      - 动力煤提价
+      - 寒潮
+      - 国企改革
+      - 央企
+      - 红利
+      - 基建
+      - 统一大市场
+      - 工程
+      - 地产
+      - 港股
+      - 分红
+      - 高股息
+      - 避险
+      - 中特估
+      - 国九条
+      - 经济弱复苏
+  高股息:
+    event_keywords:
+      - 动力煤提价
+      - 寒潮
+      - 国企改革
+      - 央企
+      - 红利
+      - 基建
+      - 统一大市场
+      - 工程
+      - 地产
+      - 港股
+      - 分红
+      - 高股息
+      - 避险
+
+etf_dk_merge:
+  benchmark_policy: exact_or_proxy
+  output_dir: etf_dk_merge
+  primary_keys:
+    - ts_code
+    - trade_date
+  # SQLite-only derived ETF liquidity and primary-market flow metrics.
+  # fund_daily.vol is in hands and total_share is in ten-thousand shares,
+  # therefore vol / total_share is the turnover percentage.
+  derived_fields:
+    turnover_rate: 'ETF换手率(%): vol / total_share'
+    share_change: 'ETF份额净变化(万份): total_share - previous total_share'
+    estimated_primary_flow: '估算申购赎回金额(万元): share_change * nav; close fallback'
+    estimated_primary_flow_basis: '估算价格口径: nav or close_estimate'
+  tushare_supplemental:
+    # Used only when etf_share_size leaves share/size/NAV fields empty.
+    # fund_share.fd_share and etf_share_size.total_share are both in 万份.
+    share:
+      api: fund_share
+      date_field: trade_date
+      source_field: fd_share
+      target_field: total_share
+    nav:
+      api: fund_nav
+      date_field: nav_date
+      source_field: unit_nav
+      target_field: nav
+    derived:
+      total_size: total_share * nav
+  benchmarks:
+    - target_symbol: '159928'
+      theme_tags:
+        - "促消费"
+      name: 消费
+      benchmark_index:
+        code: 000932
+        name: 中证主要消费指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000932.SH
+        moneyflow: null
+    - target_symbol: '159996'
+      theme_tags:
+        - "促消费"
+      name: 家电
+      benchmark_index:
+        code: '930697'
+        name: 中证家电
+        daily:
+          sources:
+            - api: index_daily
+              code: 930697.CSI
+        moneyflow: null
+    - target_symbol: '516560'
+      theme_tags:
+        - "促消费"
+      name: 养老
+      benchmark_index:
+        code: '399812'
+        name: 养老
+        daily:
+          sources:
+            - api: index_daily
+              code: 399812.SZ
+        moneyflow: null
+    - target_symbol: '159699'
+      theme_tags:
+        - "促消费"
+      name: 恒生消费
+      benchmark_index:
+        code: HSCGSI.HI
+        name: 恒生消费指数
+        # Tushare has no direct HSCGSI series; use the original similar CSI proxy.
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 931454.CSI
+              relation: proxy
+        moneyflow: null
+    - target_symbol: '513590'
+      theme_tags:
+        - "促消费"
+      name: 港股通消费主题
+      benchmark_index:
+        code: 931454.CSI
+        name: 中证港股通消费主题指数
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 931454.CSI
+        moneyflow: null
+    - target_symbol: '515170'
+      theme_tags:
+        - "促消费"
+      name: 食品饮料
+      benchmark_index:
+        code: 000815
+        name: 中证细分食品饮料产业主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000815.CSI
+        moneyflow: null
+    - target_symbol: '561320'
+      theme_tags:
+        - "促消费"
+      name: 交运
+      benchmark_index:
+        code: H00945.CSI
+        name: 中证内地运输主题全收益指数
+        daily:
+          sources:
+            - api: index_daily
+              code: H00945.CSI
+              # The total-return series exposes close/change but no OHLC volume/amount.
+              allow_missing_ohlc: true
+              allow_missing_volume: true
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '512690'
+      theme_tags:
+        - "促消费"
+      name: 酒
+      benchmark_index:
+        code: '399987'
+        name: 中证酒指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 399987.SZ
+        moneyflow: null
+    - target_symbol: '562510'
+      theme_tags:
+        - "促消费"
+      name: 旅游股
+      benchmark_index:
+        code: '930633'
+        name: 中证旅游
+        daily:
+          sources:
+            - api: index_daily
+              code: 930633.CSI
+        moneyflow: null
+    - target_symbol: '563230'
+      theme_tags:
+        - "航空"
+        - "军工"
+      name: 卫星
+      benchmark_index:
+        code: '931594'
+        name: 中证卫星产业指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 931594.CSI
+        moneyflow: null
+    - target_symbol: '560170'
+      theme_tags:
+        - "航空"
+        - "军工"
+      name: 央企科技
+      benchmark_index:
+        code: '932038'
+        name: 央企科技引领
+        daily:
+          sources:
+            - api: index_daily
+              code: 932038.CSI
+        moneyflow: null
+    - target_symbol: '159227'
+      theme_tags:
+        - "航空"
+        - "军工"
+      name: 航空航天
+      benchmark_index:
+        code: CN5082
+        name: 国证航天航空
+        daily:
+          sources:
+            - api: index_daily
+              code: CN5082.CNI
+        moneyflow: null
+    - target_symbol: '512810'
+      theme_tags:
+        - "航空"
+        - "军工"
+      name: 军工
+      benchmark_index:
+        code: '399967'
+        name: 中证军工指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 399967.SZ
+        moneyflow: null
+    - target_symbol: '159231'
+      theme_tags:
+        - "航空"
+        - "军工"
+      name: 通用航空
+      benchmark_index:
+        code: '980076'
+        name: 国证通用航空
+        # Tushare has no direct 980076 series; use the original DC board proxy.
+        daily:
+          sources:
+            - api: dc_daily
+              code: BK0625.DC
+              relation: proxy
+        moneyflow: null
+    - target_symbol: '510050'
+      theme_tags:
+        - "A股上涨"
+      name: 上证50
+      benchmark_index:
+        code: '000016'
+        name: 上证50
+        daily:
+          sources:
+            - api: index_daily
+              code: 000016.SH
+        moneyflow: null
+    - target_symbol: '510300'
+      theme_tags:
+        - "A股上涨"
+      name: 沪深300
+      benchmark_index:
+        code: '000300'
+        name: 沪深300
+        daily:
+          sources:
+            - api: index_daily
+              code: 000300.SH
+        moneyflow: null
+    - target_symbol: '510500'
+      theme_tags:
+        - "A股上涨"
+      name: 中证500
+      benchmark_index:
+        code: 000905
+        name: 中证500
+        daily:
+          sources:
+            - api: index_daily
+              code: 000905.SH
+        moneyflow: null
+    - target_symbol: '512100'
+      theme_tags:
+        - "A股上涨"
+      name: 中证1000
+      benchmark_index:
+        code: 000852
+        name: 中证1000
+        daily:
+          sources:
+            - api: index_daily
+              code: 000852.SH
+        moneyflow: null
+    - target_symbol: '563300'
+      theme_tags:
+        - "A股上涨"
+      name: 中证2000
+      benchmark_index:
+        code: '932000'
+        name: 中证2000
+        daily:
+          sources:
+            - api: index_daily
+              code: 932000.CSI
+        moneyflow: null
+    - target_symbol: '588000'
+      theme_tags:
+        - "A股上涨"
+      name: 科创50
+      benchmark_index:
+        code: 000688
+        name: 科创50
+        daily:
+          sources:
+            - api: index_daily
+              code: 000688.SH
+        moneyflow: null
+    - target_symbol: '588190'
+      theme_tags:
+        - "A股上涨"
+      name: 科创100
+      benchmark_index:
+        code: 000698
+        name: 科创100
+        daily:
+          sources:
+            - api: index_daily
+              code: 000698.SH
+        moneyflow: null
+    - target_symbol: '159682'
+      theme_tags:
+        - "A股上涨"
+      name: 创业50
+      benchmark_index:
+        code: '399673'
+        name: 创业板50
+        daily:
+          sources:
+            - api: index_daily
+              code: 399673.SZ
+        moneyflow: null
+    - target_symbol: '563350'
+      theme_tags:
+        - "A股上涨"
+      name: 中证A50
+      benchmark_index:
+        code: '930050'
+        name: 中证A50
+        daily:
+          sources:
+            - api: index_daily
+              code: 930050.CSI
+        moneyflow: null
+    - target_symbol: '588380'
+      theme_tags:
+        - "A股上涨"
+      name: 双创50
+      benchmark_index:
+        code: '931643'
+        name: 科创创业50
+        daily:
+          sources:
+            - api: index_daily
+              code: 931643.CSI
+        moneyflow: null
+    - target_symbol: '159915'
+      theme_tags:
+        - "A股上涨"
+      name: 创业板
+      benchmark_index:
+        code: '399006'
+        name: 创业板指
+        daily:
+          sources:
+            - api: index_daily
+              code: 399006.SZ
+        moneyflow: null
+    - target_symbol: '513880'
+      theme_tags:
+        - "日本"
+      name: 日经225指数
+      benchmark_index:
+        code: N225.JT
+        name: 日经225指数
+        daily:
+          sources:
+            - api: index_global
+              code: N225
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '513520'
+      theme_tags:
+        - "日本"
+      name: 日经
+      benchmark_index:
+        code: N225.JT
+        name: 日经225指数
+        daily:
+          sources:
+            - api: index_global
+              code: N225
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '159659'
+      theme_tags:
+        - "美国指数"
+      name: 纳斯达克100
+      benchmark_index:
+        code: NDX.NASDAQ
+        name: 纳斯达克100指数
+        # Tushare index_global does not provide Nasdaq-100 (NDX).
+        daily: null
+        moneyflow: null
+    - target_symbol: '513600'
+      theme_tags:
+        - "互联网科技"
+      name: 恒生指数
+      benchmark_index:
+        code: HSI.HI
+        name: 恒生指数
+        daily:
+          sources:
+            - api: index_global
+              code: HSI
+        moneyflow: null
+    - target_symbol: '513010'
+      theme_tags:
+        - "互联网科技"
+      name: 恒生科技30
+      benchmark_index:
+        code: HSTECH.HI
+        name: 恒生科技指数
+        daily:
+          sources:
+            - api: index_global
+              code: HKTECH
+              allow_missing_volume: true
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '513130'
+      theme_tags:
+        - "互联网科技"
+      name: 恒生科技
+      benchmark_index:
+        code: HSTECH.HI
+        name: 恒生科技指数
+        daily:
+          sources:
+            - api: index_global
+              code: HKTECH
+              allow_missing_volume: true
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '159825'
+      theme_tags:
+        - "农业"
+      name: 农业股
+      benchmark_index:
+        code: 000949
+        name: 中证农业
+        daily:
+          sources:
+            - api: index_daily
+              code: 000949.CSI
+        moneyflow: null
+    - target_symbol: '517520'
+      theme_tags:
+        - "黄金"
+      name: 黄金股
+      benchmark_index:
+        code: '931238'
+        name: 中证黄金股
+        daily:
+          sources:
+            - api: index_daily
+              code: 931238.CSI
+        moneyflow: null
+    - target_symbol: '560280'
+      theme_tags:
+        - "出海"
+      name: 工程机械
+      benchmark_index:
+        code: '931752'
+        name: 中证工程机械
+        daily:
+          sources:
+            - api: index_daily
+              code: 931752.CSI
+        moneyflow: null
+    - target_symbol: '560710'
+      theme_tags:
+        - "出海"
+      name: 船舶
+      benchmark_index:
+        code: '932420'
+        name: 船舶
+        daily:
+          sources:
+            - api: index_daily
+              code: 932420.CSI
+        moneyflow: null
+    - target_symbol: '512200'
+      theme_tags:
+        - "地产"
+      name: 房地产
+      benchmark_index:
+        code: '931775'
+        name: 房地产
+        daily:
+          sources:
+            - api: index_daily
+              code: 931775.CSI
+        moneyflow: null
+    - target_symbol: '513080'
+      theme_tags:
+        - "非美国家"
+      name: 法国CAC40
+      benchmark_index:
+        code: FCHI.FP
+        name: 巴黎CAC40指数
+        daily:
+          sources:
+            - api: index_global
+              code: FCHI
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '513030'
+      theme_tags:
+        - "非美国家"
+      name: 德国
+      benchmark_index:
+        code: GDAXI.GY
+        name: 德国法兰克福DAX指数
+        daily:
+          sources:
+            - api: index_global
+              code: GDAXI
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '520870'
+      theme_tags:
+        - "非美国家"
+      name: 巴西
+      benchmark_index:
+        code: IBOV.OTH
+        name: 巴西IBOVESPA指数
+        daily:
+          sources:
+            - api: index_global
+              code: IBOVESPA
+              allow_missing_amount: true
+        moneyflow: null
+    - target_symbol: '159647'
+      theme_tags:
+        - "医药"
+      name: 中药
+      benchmark_index:
+        code: '930641'
+        name: 中证中药
+        daily:
+          sources:
+            - api: index_daily
+              code: 930641.CSI
+        moneyflow: null
+    - target_symbol: '512010'
+      theme_tags:
+        - "医药"
+      name: 医药
+      benchmark_index:
+        code: 000913
+        name: 沪深300医药卫生指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000913.SH
+        moneyflow: null
+    - target_symbol: '516610'
+      theme_tags:
+        - "医药"
+      name: 医疗服务
+      benchmark_index:
+        code: H30178
+        name: 中证医疗服
+        daily:
+          sources:
+            - api: index_daily
+              code: H30178.CSI
+        moneyflow: null
+    - target_symbol: '159506'
+      theme_tags:
+        - "医药"
+      name: 恒生医疗
+      benchmark_index:
+        code: HSSCHI.HI
+        name: 恒生港股通创新药及医疗保健指数
+        # Tushare has no direct HSSCHI series; use the original similar CSI proxy.
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 931787.CSI
+              relation: proxy
+        moneyflow: null
+    - target_symbol: '513120'
+      theme_tags:
+        - "医药"
+      name: 港股创新药
+      benchmark_index:
+        code: 931787.CSI
+        name: 中证香港创新药指数
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 931787.CSI
+        moneyflow: null
+    - target_symbol: '159839'
+      theme_tags:
+        - "医药"
+      name: 生物药
+      benchmark_index:
+        code: '399441'
+        name: 国证生物医药
+        daily:
+          sources:
+            - api: index_daily
+              code: 399441.SZ
+        moneyflow: null
+    - target_symbol: '588860'
+      theme_tags:
+        - "医药"
+      name: 科创医药
+      benchmark_index:
+        code: 000683
+        name: 上证科创板生物医药指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000683.SH
+        moneyflow: null
+    - target_symbol: '515120'
+      theme_tags:
+        - "医药"
+      name: 创新药
+      benchmark_index:
+        code: '931152'
+        name: 中证创新药产业指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 931152.CSI
+        moneyflow: null
+    - target_symbol: '513200'
+      theme_tags:
+        - "AI应用"
+      name: 港股通医药
+      benchmark_index:
+        code: 930965.CSI
+        name: 中证港股通医药卫生综合指数
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 930965.CSI
+        moneyflow: null
+    - target_symbol: '562600'
+      theme_tags:
+        - "AI应用"
+      name: 医疗器械
+      benchmark_index:
+        code: H30217
+        name: 医疗器械
+        daily:
+          sources:
+            - api: index_daily
+              code: H30217.CSI
+        moneyflow: null
+    - target_symbol: '159828'
+      theme_tags:
+        - "AI应用"
+      name: 医疗
+      benchmark_index:
+        code: '399989'
+        name: 中证医疗
+        daily:
+          sources:
+            - api: index_daily
+              code: 399989.SZ
+        moneyflow: null
+    - target_symbol: '516860'
+      theme_tags:
+        - "AI应用"
+      name: 金融科技
+      benchmark_index:
+        code: '930986'
+        name: 中证金融科技主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930986.CSI
+        moneyflow: null
+    - target_symbol: '516010'
+      theme_tags:
+        - "AI应用"
+      name: 游戏
+      benchmark_index:
+        code: '930901'
+        name: 中证游戏
+        daily:
+          sources:
+            - api: index_daily
+              code: 930901.CSI
+        moneyflow: null
+    - target_symbol: '159805'
+      theme_tags:
+        - "AI应用"
+      name: 传媒
+      benchmark_index:
+        code: '399971'
+        name: 中证传媒
+        daily:
+          sources:
+            - api: index_daily
+              code: 399971.SZ
+        moneyflow: null
+    - target_symbol: '516620'
+      theme_tags:
+        - "AI应用"
+      name: 影视
+      benchmark_index:
+        code: '930781'
+        name: 中证影视
+        daily:
+          sources:
+            - api: index_daily
+              code: 930781.CSI
+        moneyflow: null
+    - target_symbol: '159732'
+      theme_tags:
+        - "AI应用"
+      name: 消费电子
+      benchmark_index:
+        code: 980030.SZ
+        name: 国证消费电子主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 980030.SZ
+        moneyflow: null
+    - target_symbol: '512720'
+      theme_tags:
+        - "AI应用"
+      name: 计算机
+      benchmark_index:
+        code: '930651'
+        name: 中证计算机主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930651.CSI
+        moneyflow: null
+    - target_symbol: '515230'
+      theme_tags:
+        - "AI应用"
+      name: 软件
+      benchmark_index:
+        code: H30202
+        name: 中证软件服务
+        daily:
+          sources:
+            - api: index_daily
+              code: H30202.CSI
+        moneyflow: null
+    - target_symbol: '560800'
+      theme_tags:
+        - "AI应用"
+      name: 数字经济
+      benchmark_index:
+        code: '931582'
+        name: 中证数字经济主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 931582.CSI
+        moneyflow: null
+    - target_symbol: '588730'
+      theme_tags:
+        - "AI应用"
+      name: 科创人工智能
+      benchmark_index:
+        code: '950180'
+        name: 中证科创人工智能
+        daily:
+          sources:
+            - api: index_daily
+              code: 950180.CSI
+        moneyflow: null
+    - target_symbol: '159770'
+      theme_tags:
+        - "AI应用"
+      name: 机器人
+      benchmark_index:
+        code: H30590
+        name: 机器人
+        daily:
+          sources:
+            - api: index_daily
+              code: H30590.CSI
+        moneyflow: null
+    - target_symbol: '516510'
+      theme_tags:
+        - "AI应用"
+      name: 云计算
+      benchmark_index:
+        code: '930851'
+        name: 云计算
+        daily:
+          sources:
+            - api: index_daily
+              code: 930851.CSI
+        moneyflow: null
+    - target_symbol: '515880'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 通信
+      benchmark_index:
+        code: '931160'
+        name: 中证通信
+        daily:
+          sources:
+            - api: index_daily
+              code: 931160.CSI
+        moneyflow: null
+    - target_symbol: '588200'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 科创芯片
+      benchmark_index:
+        code: 000685
+        name: 科创芯片
+        daily:
+          sources:
+            - api: index_daily
+              code: 000685.SH
+        moneyflow: null
+    - target_symbol: '159516'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 半导体设备
+      benchmark_index:
+        code: '931743'
+        name: 中证半导体设备
+        daily:
+          sources:
+            - api: index_daily
+              code: 931743.CSI
+        moneyflow: null
+    - target_symbol: '159363'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 创业人工智能
+      benchmark_index:
+        code: '970070'
+        name: 创业板人工智能
+        # Tushare has no direct 970070 series; use the original DC board proxy.
+        daily:
+          sources:
+            - api: dc_daily
+              code: BK0800.DC
+              relation: proxy
+        moneyflow: null
+    - target_symbol: '515400'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 大数据
+      benchmark_index:
+        code: 930902.CSI
+        name: 中证大数据产业指数
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 930902.CSI
+        moneyflow: null
+    - target_symbol: '159819'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 人工智能
+      benchmark_index:
+        code: '930713'
+        name: 中证人工智能主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930713.CSI
+        moneyflow: null
+    - target_symbol: '159131'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 港股通信息技术
+      benchmark_index:
+        code: 930977.CSI
+        name: 中证港股通信息技术综合人民币指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930977.CSI
+              # Tushare supplies close/change/volume/amount but not open/high/low.
+              allow_missing_ohlc: true
+        moneyflow: null
+    - target_symbol: '588010'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 科创新材料
+      benchmark_index:
+        code: 000689
+        name: 上证科创板新材料指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000689.SH
+        moneyflow: null
+    - target_symbol: '159995'
+      theme_tags:
+        - "AI硬件"
+        - "光模块"
+        - "半导体"
+      name: 芯片
+      benchmark_index:
+        code: '980017'
+        name: 国证芯片
+        daily:
+          sources:
+            - api: index_daily
+              code: 980017.SZ
+        moneyflow: null
+    - target_symbol: '159667'
+      theme_tags:
+        - "工业母机"
+        - "设备"
+      name: 工业母机
+      benchmark_index:
+        code: '931866'
+        name: 中证工业母机
+        daily:
+          sources:
+            - api: index_daily
+              code: 931866.CSI
+        moneyflow: null
+    - target_symbol: '588230'
+      theme_tags:
+        - "工业母机"
+        - "设备"
+      name: 科创200
+      benchmark_index:
+        code: 000699
+        name: 科创200
+        daily:
+          sources:
+            - api: index_daily
+              code: 000699.SH
+        moneyflow: null
+    - target_symbol: '588850'
+      theme_tags:
+        - "工业母机"
+        - "设备"
+      name: 科创机械
+      benchmark_index:
+        code: 000693
+        name: 科创机械
+        daily:
+          sources:
+            - api: index_daily
+              code: 000693.SH
+        moneyflow: null
+    - target_symbol: '159865'
+      theme_tags:
+        - "反内卷"
+      name: 养殖股
+      benchmark_index:
+        code: '930707'
+        name: 中证养殖
+        daily:
+          sources:
+            - api: index_daily
+              code: 930707.CSI
+        moneyflow: null
+    - target_symbol: '516910'
+      theme_tags:
+        - "反内卷"
+      name: 物流
+      benchmark_index:
+        code: '930716'
+        name: 中证物流
+        daily:
+          sources:
+            - api: index_daily
+              code: 930716.CSI
+        moneyflow: null
+    - target_symbol: '516020'
+      theme_tags:
+        - "反内卷"
+      name: 化工
+      benchmark_index:
+        code: 000813
+        name: 细分化工
+        daily:
+          sources:
+            - api: index_daily
+              code: 000813.CSI
+        moneyflow: null
+    - target_symbol: '515210'
+      theme_tags:
+        - "反内卷"
+      name: 钢铁
+      benchmark_index:
+        code: '930606'
+        name: 中证钢铁
+        daily:
+          sources:
+            - api: index_daily
+              code: 930606.CSI
+        moneyflow: null
+    - target_symbol: '515790'
+      theme_tags:
+        - "反内卷"
+      name: 光伏
+      benchmark_index:
+        code: '931151'
+        name: 光伏产业
+        daily:
+          sources:
+            - api: index_daily
+              code: 931151.CSI
+        moneyflow: null
+    - target_symbol: '515030'
+      theme_tags:
+        - "新能源"
+      name: 新能源车
+      benchmark_index:
+        code: '399976'
+        name: 中证新能源汽车指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 399976.SZ
+        moneyflow: null
+    - target_symbol: '515250'
+      theme_tags:
+        - "新能源"
+      name: 智能汽车
+      benchmark_index:
+        code: '930721'
+        name: 中证智能汽车主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930721.CSI
+        moneyflow: null
+    - target_symbol: '516520'
+      theme_tags:
+        - "新能源"
+      name: 智能驾驶
+      benchmark_index:
+        code: '930721'
+        name: 中证智能驾驶
+        daily:
+          sources:
+            - api: index_daily
+              code: 930721.CSI
+        moneyflow: null
+    - target_symbol: '588830'
+      theme_tags:
+        - "新能源"
+      name: 科创新能源
+      benchmark_index:
+        code: 000692
+        name: 科创新能源
+        daily:
+          sources:
+            - api: index_daily
+              code: 000692.SH
+        moneyflow: null
+    - target_symbol: '159512'
+      theme_tags:
+        - "新能源"
+      name: 汽车整车
+      benchmark_index:
+        code: '931008'
+        name: 国证汽车
+        daily:
+          sources:
+            - api: index_daily
+              code: 931008.CSI
+        moneyflow: null
+    - target_symbol: '159565'
+      theme_tags:
+        - "新能源"
+      name: 汽车零部件
+      benchmark_index:
+        code: '931230'
+        name: 汽车零部件
+        daily:
+          sources:
+            - api: index_daily
+              code: 931230.CSI
+        moneyflow: null
+    - target_symbol: '561910'
+      theme_tags:
+        - "新能源"
+      name: 电池
+      benchmark_index:
+        code: '931719'
+        name: 中证电池
+        daily:
+          sources:
+            - api: index_daily
+              code: 931719.CSI
+        moneyflow: null
+    - target_symbol: '512580'
+      theme_tags:
+        - "新能源"
+      name: 环保
+      benchmark_index:
+        code: 000827
+        name: 中证环保
+        daily:
+          sources:
+            - api: index_daily
+              code: 000827.SH
+        moneyflow: null
+    - target_symbol: '159861'
+      theme_tags:
+        - "新能源"
+      name: 碳中和
+      benchmark_index:
+        code: '930614'
+        name: 中证环保产业50指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930614.CSI
+        moneyflow: null
+    - target_symbol: '512880'
+      theme_tags:
+        - "金融"
+      name: 券商
+      benchmark_index:
+        code: '399975'
+        name: 中证全指证券
+        daily:
+          sources:
+            - api: index_daily
+              code: 399975.SZ
+        moneyflow: null
+    - target_symbol: '512070'
+      theme_tags:
+        - "金融"
+      name: 证券保险
+      benchmark_index:
+        code: H30035
+        name: 沪深300非银行金融指数
+        daily:
+          sources:
+            - api: index_daily
+              code: H30035.CSI
+        moneyflow: null
+    - target_symbol: '513750'
+      theme_tags:
+        - "金融"
+      name: 港股非银
+      benchmark_index:
+        code: 931028.CSI
+        name: 中证港股通非银行金融主题人民币指数
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 931028.CSI
+        moneyflow: null
+    - target_symbol: '513090'
+      theme_tags:
+        - "金融"
+      name: 香港证券
+      benchmark_index:
+        code: 930709.CSI
+        name: 中证香港证券投资主题指数
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 930709.CSI
+        moneyflow: null
+    - target_symbol: '159887'
+      theme_tags:
+        - "金融"
+      name: 银行
+      benchmark_index:
+        code: H30022
+        name: 中证银行
+        daily:
+          sources:
+            - api: index_daily
+              code: H30022.CSI
+        moneyflow: null
+    - target_symbol: '159930'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 能源股
+      benchmark_index:
+        code: 000928
+        name: 中证能源
+        daily:
+          sources:
+            - api: index_daily
+              code: 000928.SH
+        moneyflow: null
+    - target_symbol: '159713'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 稀土
+      benchmark_index:
+        code: '930598'
+        name: 稀土产业
+        daily:
+          sources:
+            - api: index_daily
+              code: 930598.CSI
+        moneyflow: null
+    - target_symbol: '159944'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 材料
+      benchmark_index:
+        code: 000987
+        name: 中证材料
+        daily:
+          sources:
+            - api: index_daily
+              code: 000987.SH
+        moneyflow: null
+    - target_symbol: '159876'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 有色股
+      benchmark_index:
+        code: '930708'
+        name: 中证有色金属指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930708.CSI
+        moneyflow: null
+    - target_symbol: '512400'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 有色金属
+      benchmark_index:
+        code: 000819
+        name: 中证申万有色金属指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000819.SH
+        moneyflow: null
+    - target_symbol: '510170'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 大宗商品
+      benchmark_index:
+        code: '000066'
+        name: 上证大宗商品股票指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000066.SH
+        moneyflow: null
+    - target_symbol: '561360'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 石油股
+      benchmark_index:
+        code: H30198
+        name: 中证石油
+        daily:
+          sources:
+            - api: index_daily
+              code: H30198.CSI
+        moneyflow: null
+    - target_symbol: '159697'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 油气
+      benchmark_index:
+        code: '399439'
+        name: 国证石油天然气指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 399439.SZ
+        moneyflow: null
+    - target_symbol: '561330'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 矿业
+      benchmark_index:
+        code: '931892'
+        name: 有色矿业
+        daily:
+          sources:
+            - api: index_daily
+              code: 931892.CSI
+        moneyflow: null
+    - target_symbol: '159611'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 电力
+      benchmark_index:
+        code: H30199
+        name: 国证电力
+        daily:
+          sources:
+            - api: index_daily
+              code: H30199.CSI
+        moneyflow: null
+    - target_symbol: '159870'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 化工
+      benchmark_index:
+        code: 000813
+        name: 中证细分化工产业主题指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000813.CSI
+        moneyflow: null
+    - target_symbol: '159698'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 粮食
+      benchmark_index:
+        code: '399365'
+        name: 国证粮食
+        daily:
+          sources:
+            - api: index_daily
+              code: 399365.SZ
+        moneyflow: null
+    - target_symbol: '516360'
+      theme_tags:
+        - "提价"
+        - "通胀"
+      name: 新材料
+      benchmark_index:
+        code: H30597
+        name: 新材料
+        daily:
+          sources:
+            - api: index_daily
+              code: H30597.CSI
+        moneyflow: null
+    - target_symbol: '515220'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 煤炭股
+      benchmark_index:
+        code: '399998'
+        name: 中证煤炭指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 399998.SZ
+        moneyflow: null
+    - target_symbol: '515900'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 央企创新
+      benchmark_index:
+        code: 000861
+        name: 中证央企创新驱动指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000861.CSI
+        moneyflow: null
+    - target_symbol: '510880'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 红利
+      benchmark_index:
+        code: '000015'
+        name: 红利指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 000015.SH
+        moneyflow: null
+    - target_symbol: '512890'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 红利低波
+      benchmark_index:
+        code: H30269
+        name: 红利低波
+        daily:
+          sources:
+            - api: index_daily
+              code: H30269.CSI
+        moneyflow: null
+    - target_symbol: '512750'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 基本面50
+      benchmark_index:
+        code: 000925
+        name: 基本面50
+        daily:
+          sources:
+            - api: index_daily
+              code: 000925.CSI
+        moneyflow: null
+    - target_symbol: '516750'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 建材
+      benchmark_index:
+        code: '931009'
+        name: 中证建材
+        daily:
+          sources:
+            - api: index_daily
+              code: 931009.CSI
+        moneyflow: null
+    - target_symbol: '516950'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 基建
+      benchmark_index:
+        code: '930608'
+        name: 中证基建指数
+        daily:
+          sources:
+            - api: index_daily
+              code: 930608.CSI
+        moneyflow: null
+    - target_symbol: '513690'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 恒生高股息
+      benchmark_index:
+        code: HSSCHKY.HI
+        name: 恒生港股通高股息率指数
+        # Tushare has no direct HSSCHKY series; use the original similar CSI proxy.
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 930914.CSI
+              relation: proxy
+        moneyflow: null
+    - target_symbol: '159726'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 恒生红利
+      benchmark_index:
+        code: HSMCHYI.HI
+        name: 恒生港股通中国内地企业高股息率指数
+        # Tushare has no direct HSMCHYI series; use the original similar CSI proxy.
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 930914.CSI
+              relation: proxy
+        moneyflow: null
+    - target_symbol: '159302'
+      theme_tags:
+        - "红利"
+        - "高股息"
+      name: 港股高股息
+      benchmark_index:
+        code: 930914.CSI
+        name: 中证港股通高股息投资指数
+        daily:
+          sources:
+            - api: idx_factor_pro
+              code: 930914.CSI
+        moneyflow: null
+  apis:
+    - api: etf_basic
+      join_keys:
+        - ts_code
+      field_aliases:
+        name: extname
+      output_fields:
+        ts_code: TS代码
+        name: 名称
+        exchange: 交易所
+        index_code: 指数代码
+    - api: fund_daily
+      output_fields:
+        ts_code: TS代码
+        trade_date: 交易日期
+        open: 开盘价(元)
+        high: 最高价(元)
+        low: 最低价(元)
+        close: 收盘价(元)
+        pre_close: 昨收盘价(元)
+        change: 涨跌额(元)
+        pct_chg: 涨跌幅(%)
+        vol: 成交量(手)
+        amount: 成交额(千元)
+    - api: fund_adj
+      output_fields:
+        ts_code: TS代码
+        trade_date: 交易日期
+        adj_factor: 复权因子
+    - api: etf_share_size
+      output_fields:
+        trade_date: 交易日期
+        ts_code: TS代码
+        total_share: 总份额(万份)
+        total_size: 规模(万元)
+        nav: 基金份额净值(元)
+    - api: benchmark_daily
+      source_group: true
+      source_apis:
+        - index_daily
+        - idx_factor_pro
+        - index_global
+        - dc_daily
+      join_keys:
+        - trade_date
+      output_fields:
+        trade_date: 交易日期
+        idx_open: 指数开盘
+        idx_high: 指数最高
+        idx_low: 指数最低
+        idx_close: 指数收盘
+        idx_pre_close: 指数昨收
+        idx_change: 指数涨跌点
+        idx_pct_chg: 指数涨跌幅(%)
+        idx_vol: 指数成交量(原始Tushare接口单位)
+        idx_amount: 指数成交额(原始Tushare接口单位)
+        idx_source: 指数行情来源接口
+        idx_code: 实际使用指数代码
+        idx_relation: 指数关系(exact或proxy)
+download:
+  - etf_dk_merge

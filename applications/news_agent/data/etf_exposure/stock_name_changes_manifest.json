@@ -1,0 +1,9 @@
+{
+  "source": "Tushare namechange",
+  "start": "1990-01-01",
+  "end": "2026-09-30",
+  "rows": 14229,
+  "sha256": "94c48f423440d4535ed28c416f6c2c76f87a2addac26bad6aa61e5b1102c6705",
+  "file": "stock_name_changes.json",
+  "availability_rule": "ann_date and start_date must be no later than news day"
+}

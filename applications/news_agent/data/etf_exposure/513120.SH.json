@@ -1,0 +1,9 @@
+{
+  "fund": "513120.SH",
+  "fund_name": "港股创新药",
+  "start": "2024-01-01",
+  "end": "2026-09-29",
+  "source": "Tushare fund_portfolio",
+  "weight_basis": "percent_of_stock_market_value_not_fund_nav",
+  "rows": []
+}

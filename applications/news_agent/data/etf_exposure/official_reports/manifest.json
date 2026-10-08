@@ -1,0 +1,13 @@
+{
+  "source": "official fund manager dated quarterly reports",
+  "asof_rule": "ann_date strictly before news_day; only reported positions are positive evidence",
+  "files": {
+    "513120.SH": [
+      {
+        "ann_date": "20260720",
+        "path": "513120_20260720.json",
+        "sha256": "e2b87224a2af8022c823ad9fd7a651d6e1e56d56c322d63b62ac7f6d886a5002"
+      }
+    ]
+  }
+}

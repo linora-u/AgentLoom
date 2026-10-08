@@ -2,8 +2,29 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
-# Keep processed data, caches and local configuration ignored.
+# Keep generated data, caches and other local files ignored.
 /data/*
+
+# ETF universe, evaluation prices and dated exposure inputs.
+!/data/etf_universe.yaml
+!/data/etf_dk_merge/
+/data/etf_dk_merge/**
+!/data/etf_dk_merge/ts_code=*/
+!/data/etf_dk_merge/ts_code=*/data.parquet
+!/data/etf_dk_merge/copy_manifest.json
+!/data/etf_exposure/
+/data/etf_exposure/*
+!/data/etf_exposure/??????.SH.json
+!/data/etf_exposure/??????.SZ.json
+!/data/etf_exposure/manifest.json
+!/data/etf_exposure/stock_name_changes.json
+!/data/etf_exposure/stock_name_changes_manifest.json
+!/data/etf_exposure/stock_names_current_*.json
+!/data/etf_exposure/official_reports/
+/data/etf_exposure/official_reports/*
+!/data/etf_exposure/official_reports/*.json
+!/data/etf_exposure/official_reports/*.pdf
+
 !/data/news/
 /data/news/*
 

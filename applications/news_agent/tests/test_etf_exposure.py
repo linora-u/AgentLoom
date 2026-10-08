@@ -50,6 +50,9 @@ def test_exposure_uses_publication_date_not_report_period(tmp_path: Path) -> Non
     manifest = collect(Pro(), candidates, output,
                        start=date(2026, 1, 1), end=date(2026, 9, 1))
     assert manifest["funds"] == 1 and manifest["rows"] == 3
+    relocated = tmp_path / "relocated-exposure"
+    output.rename(relocated)
+    output = relocated
     august = exposure_as_of(output, "159516.SZ", date(2026, 8, 3))
     assert august["ann_date"] == "20260721"
     assert august["reported_positions"] == 1
@@ -117,6 +120,9 @@ def test_historical_stock_name_excludes_future_rename(tmp_path: Path) -> None:
     manifest = collect_namechanges(NamePro(), output,
                                    start=date(2019, 1, 1), end=date(2026, 9, 30))
     assert manifest["rows"] == 4
+    relocated = tmp_path / "relocated-names"
+    output.rename(relocated)
+    output = relocated
     assert stock_name_as_of(output, "688012.SH", date(2026, 8, 3))["name"] == "中微公司"
     assert stock_name_as_of(output, "688012.SH", date(2026, 8, 31))["name"] == "中微公司"
     assert stock_name_as_of(output, "688012.SH", date(2026, 9, 1))["name"] == "未来改名"

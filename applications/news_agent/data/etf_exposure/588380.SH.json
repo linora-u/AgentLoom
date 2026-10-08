@@ -1,0 +1,6030 @@
+{
+  "fund": "588380.SH",
+  "fund_name": "双创50",
+  "start": "2024-01-01",
+  "end": "2026-09-29",
+  "source": "Tushare fund_portfolio",
+  "weight_basis": "percent_of_stock_market_value_not_fund_nav",
+  "rows": [
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "300122.SZ",
+      "mkv": 78391908.0,
+      "amount": 1282800.0,
+      "stk_mkv_ratio": 3.57,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "300124.SZ",
+      "mkv": 144066538.0,
+      "amount": 2281700.0,
+      "stk_mkv_ratio": 6.56,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "300274.SZ",
+      "mkv": 97356285.0,
+      "amount": 1111500.0,
+      "stk_mkv_ratio": 4.43,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "300308.SZ",
+      "mkv": 77538232.66,
+      "amount": 686726.0,
+      "stk_mkv_ratio": 3.53,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "300750.SZ",
+      "mkv": 221660387.64,
+      "amount": 1357714.0,
+      "stk_mkv_ratio": 10.09,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "300760.SZ",
+      "mkv": 188143448.6,
+      "amount": 647431.0,
+      "stk_mkv_ratio": 8.56,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "301348.SZ",
+      "mkv": 27321.41,
+      "amount": 613.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "603296.SH",
+      "mkv": 46105.75,
+      "amount": 593.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "688012.SH",
+      "mkv": 71136153.6,
+      "amount": 463126.0,
+      "stk_mkv_ratio": 3.24,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "688041.SH",
+      "mkv": 70553694.12,
+      "amount": 993994.0,
+      "stk_mkv_ratio": 3.21,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "688111.SH",
+      "mkv": 78138079.2,
+      "amount": 247116.0,
+      "stk_mkv_ratio": 3.56,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "688548.SH",
+      "mkv": 51612.0,
+      "amount": 4048.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "688563.SH",
+      "mkv": 81359.05,
+      "amount": 1345.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "688702.SH",
+      "mkv": 26450.82,
+      "amount": 549.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240122",
+      "end_date": "20231231",
+      "symbol": "688981.SH",
+      "mkv": 111869283.9,
+      "amount": 2109945.0,
+      "stk_mkv_ratio": 5.09,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "001239.SZ",
+      "mkv": 3764.88,
+      "amount": 189.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "001306.SZ",
+      "mkv": 4823.04,
+      "amount": 64.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "001326.SZ",
+      "mkv": 4815.36,
+      "amount": 99.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "001358.SZ",
+      "mkv": 3841.92,
+      "amount": 87.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "001378.SZ",
+      "mkv": 6410.35,
+      "amount": 205.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300014.SZ",
+      "mkv": 55361800.2,
+      "amount": 1311891.0,
+      "stk_mkv_ratio": 2.52,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300142.SZ",
+      "mkv": 40392531.0,
+      "amount": 1718100.0,
+      "stk_mkv_ratio": 1.84,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300223.SZ",
+      "mkv": 19957455.0,
+      "amount": 308700.0,
+      "stk_mkv_ratio": 0.91,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300316.SZ",
+      "mkv": 30849773.0,
+      "amount": 699700.0,
+      "stk_mkv_ratio": 1.4,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300347.SZ",
+      "mkv": 30822228.7,
+      "amount": 560710.0,
+      "stk_mkv_ratio": 1.4,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300408.SZ",
+      "mkv": 42231300.0,
+      "amount": 1434000.0,
+      "stk_mkv_ratio": 1.92,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300433.SZ",
+      "mkv": 28126546.8,
+      "amount": 2130799.0,
+      "stk_mkv_ratio": 1.28,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300442.SZ",
+      "mkv": 14001703.0,
+      "amount": 551900.0,
+      "stk_mkv_ratio": 0.64,
+      "stk_float_ratio": 0.15
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300450.SZ",
+      "mkv": 29994496.0,
+      "amount": 1171660.0,
+      "stk_mkv_ratio": 1.37,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300454.SZ",
+      "mkv": 19337575.0,
+      "amount": 267500.0,
+      "stk_mkv_ratio": 0.88,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300496.SZ",
+      "mkv": 31511616.0,
+      "amount": 393600.0,
+      "stk_mkv_ratio": 1.43,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300628.SZ",
+      "mkv": 15974139.0,
+      "amount": 540580.0,
+      "stk_mkv_ratio": 0.73,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300661.SZ",
+      "mkv": 31083360.12,
+      "amount": 349212.0,
+      "stk_mkv_ratio": 1.41,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300751.SZ",
+      "mkv": 19273937.22,
+      "amount": 148822.0,
+      "stk_mkv_ratio": 0.88,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300759.SZ",
+      "mkv": 27615331.8,
+      "amount": 952910.0,
+      "stk_mkv_ratio": 1.26,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300763.SZ",
+      "mkv": 17983872.0,
+      "amount": 257280.0,
+      "stk_mkv_ratio": 0.82,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300782.SZ",
+      "mkv": 56354880.0,
+      "amount": 399680.0,
+      "stk_mkv_ratio": 2.56,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300832.SZ",
+      "mkv": 26238446.0,
+      "amount": 335530.0,
+      "stk_mkv_ratio": 1.19,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300904.SZ",
+      "mkv": 18705.12,
+      "amount": 304.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "300919.SZ",
+      "mkv": 17560683.29,
+      "amount": 357433.0,
+      "stk_mkv_ratio": 0.8,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301202.SZ",
+      "mkv": 9730.8,
+      "amount": 306.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301251.SZ",
+      "mkv": 11103.39,
+      "amount": 321.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301261.SZ",
+      "mkv": 10068.3,
+      "amount": 198.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301269.SZ",
+      "mkv": 24616899.4,
+      "amount": 232564.0,
+      "stk_mkv_ratio": 1.12,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301272.SZ",
+      "mkv": 9234.74,
+      "amount": 173.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301329.SZ",
+      "mkv": 10181.34,
+      "amount": 458.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301362.SZ",
+      "mkv": 16178.4,
+      "amount": 420.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301393.SZ",
+      "mkv": 15436.2,
+      "amount": 260.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301395.SZ",
+      "mkv": 9718.8,
+      "amount": 520.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301413.SZ",
+      "mkv": 9543.16,
+      "amount": 164.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301418.SZ",
+      "mkv": 9487.8,
+      "amount": 189.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301421.SZ",
+      "mkv": 19710.84,
+      "amount": 332.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301456.SZ",
+      "mkv": 12368.73,
+      "amount": 407.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301468.SZ",
+      "mkv": 18071.56,
+      "amount": 598.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301469.SZ",
+      "mkv": 9099.75,
+      "amount": 275.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301486.SZ",
+      "mkv": 22774.5,
+      "amount": 482.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301488.SZ",
+      "mkv": 18101.58,
+      "amount": 262.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301498.SZ",
+      "mkv": 21500.74,
+      "amount": 554.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301500.SZ",
+      "mkv": 9504.95,
+      "amount": 455.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301505.SZ",
+      "mkv": 6947.14,
+      "amount": 194.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301508.SZ",
+      "mkv": 11178.92,
+      "amount": 419.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301510.SZ",
+      "mkv": 13863.96,
+      "amount": 396.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301511.SZ",
+      "mkv": 22261.94,
+      "amount": 982.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301515.SZ",
+      "mkv": 6502.1,
+      "amount": 230.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301516.SZ",
+      "mkv": 9368.04,
+      "amount": 604.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301517.SZ",
+      "mkv": 8082.65,
+      "amount": 185.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301518.SZ",
+      "mkv": 8858.85,
+      "amount": 385.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301520.SZ",
+      "mkv": 8438.4,
+      "amount": 160.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301525.SZ",
+      "mkv": 21668.36,
+      "amount": 266.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301528.SZ",
+      "mkv": 10198.68,
+      "amount": 148.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301533.SZ",
+      "mkv": 7461.0,
+      "amount": 225.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301550.SZ",
+      "mkv": 11328.2,
+      "amount": 260.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301555.SZ",
+      "mkv": 7266.56,
+      "amount": 224.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301566.SZ",
+      "mkv": 12752.64,
+      "amount": 576.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301568.SZ",
+      "mkv": 8752.68,
+      "amount": 246.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "301578.SZ",
+      "mkv": 8061.76,
+      "amount": 118.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "601083.SH",
+      "mkv": 13981.41,
+      "amount": 1263.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "601096.SH",
+      "mkv": 15907.08,
+      "amount": 3918.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603004.SH",
+      "mkv": 6082.05,
+      "amount": 195.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603062.SH",
+      "mkv": 7284.06,
+      "amount": 126.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603107.SH",
+      "mkv": 5311.48,
+      "amount": 292.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603193.SH",
+      "mkv": 5047.98,
+      "amount": 303.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603231.SH",
+      "mkv": 3466.33,
+      "amount": 161.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603275.SH",
+      "mkv": 7662.1,
+      "amount": 193.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603276.SH",
+      "mkv": 3333.92,
+      "amount": 134.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "603373.SH",
+      "mkv": 3058.0,
+      "amount": 88.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688008.SH",
+      "mkv": 57199804.48,
+      "amount": 973448.0,
+      "stk_mkv_ratio": 2.6,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688009.SH",
+      "mkv": 12107971.26,
+      "amount": 2764377.0,
+      "stk_mkv_ratio": 0.55,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688032.SH",
+      "mkv": 11936160.0,
+      "amount": 44208.0,
+      "stk_mkv_ratio": 0.54,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688036.SH",
+      "mkv": 47661084.8,
+      "amount": 344372.0,
+      "stk_mkv_ratio": 2.17,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688063.SH",
+      "mkv": 11850800.0,
+      "amount": 111800.0,
+      "stk_mkv_ratio": 0.54,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688114.SH",
+      "mkv": 19148052.0,
+      "amount": 222600.0,
+      "stk_mkv_ratio": 0.87,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688126.SH",
+      "mkv": 30510392.4,
+      "amount": 1761570.0,
+      "stk_mkv_ratio": 1.39,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688180.SH",
+      "mkv": 20541960.06,
+      "amount": 491082.0,
+      "stk_mkv_ratio": 0.93,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688187.SH",
+      "mkv": 10126769.52,
+      "amount": 278744.0,
+      "stk_mkv_ratio": 0.46,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688223.SH",
+      "mkv": 18942130.68,
+      "amount": 2137938.0,
+      "stk_mkv_ratio": 0.86,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688256.SH",
+      "mkv": 30126715.92,
+      "amount": 223227.0,
+      "stk_mkv_ratio": 1.37,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688271.SH",
+      "mkv": 60352905.0,
+      "amount": 440500.0,
+      "stk_mkv_ratio": 2.75,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688303.SH",
+      "mkv": 20343568.6,
+      "amount": 687980.0,
+      "stk_mkv_ratio": 0.93,
+      "stk_float_ratio": 0.13
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688349.SH",
+      "mkv": 7382042.46,
+      "amount": 257933.0,
+      "stk_mkv_ratio": 0.34,
+      "stk_float_ratio": 0.14
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688396.SH",
+      "mkv": 25228354.11,
+      "amount": 564519.0,
+      "stk_mkv_ratio": 1.15,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688472.SH",
+      "mkv": 5689322.43,
+      "amount": 450461.0,
+      "stk_mkv_ratio": 0.26,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688561.SH",
+      "mkv": 11741679.47,
+      "amount": 292883.0,
+      "stk_mkv_ratio": 0.53,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688591.SH",
+      "mkv": 19081.62,
+      "amount": 681.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688592.SH",
+      "mkv": 10914.48,
+      "amount": 216.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688599.SH",
+      "mkv": 33138108.54,
+      "amount": 1161518.0,
+      "stk_mkv_ratio": 1.51,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688602.SH",
+      "mkv": 11789.96,
+      "amount": 1066.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688603.SH",
+      "mkv": 10379.6,
+      "amount": 140.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688610.SH",
+      "mkv": 14025.0,
+      "amount": 275.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688612.SH",
+      "mkv": 16023.34,
+      "amount": 422.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688627.SH",
+      "mkv": 19473.84,
+      "amount": 222.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688638.SH",
+      "mkv": 8414.88,
+      "amount": 141.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688646.SH",
+      "mkv": 7899.33,
+      "amount": 219.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688648.SH",
+      "mkv": 6493.29,
+      "amount": 303.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688651.SH",
+      "mkv": 8196.9,
+      "amount": 178.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688652.SH",
+      "mkv": 21736.0,
+      "amount": 416.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688653.SH",
+      "mkv": 10361.52,
+      "amount": 648.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688657.SH",
+      "mkv": 7901.23,
+      "amount": 101.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688671.SH",
+      "mkv": 7751.8,
+      "amount": 226.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688716.SH",
+      "mkv": 9716.13,
+      "amount": 267.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688719.SH",
+      "mkv": 11659.4,
+      "amount": 194.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688720.SH",
+      "mkv": 8223.6,
+      "amount": 165.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688728.SH",
+      "mkv": 17074456.87,
+      "amount": 834121.0,
+      "stk_mkv_ratio": 0.78,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240330",
+      "end_date": "20231231",
+      "symbol": "688777.SH",
+      "mkv": 26993136.3,
+      "amount": 595218.0,
+      "stk_mkv_ratio": 1.23,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "001389.SZ",
+      "mkv": 38677.17,
+      "amount": 2219.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "300124.SZ",
+      "mkv": 134237094.0,
+      "amount": 2192700.0,
+      "stk_mkv_ratio": 6.63,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "300274.SZ",
+      "mkv": 110744220.0,
+      "amount": 1066900.0,
+      "stk_mkv_ratio": 5.47,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "300308.SZ",
+      "mkv": 103145798.56,
+      "amount": 658826.0,
+      "stk_mkv_ratio": 5.1,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "300750.SZ",
+      "mkv": 241839783.2,
+      "amount": 1271770.0,
+      "stk_mkv_ratio": 11.95,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "300760.SZ",
+      "mkv": 176033809.26,
+      "amount": 625431.0,
+      "stk_mkv_ratio": 8.7,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "601033.SH",
+      "mkv": 15863.38,
+      "amount": 1258.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "601096.SH",
+      "mkv": 17631.0,
+      "amount": 3918.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "688012.SH",
+      "mkv": 66671258.7,
+      "amount": 446559.0,
+      "stk_mkv_ratio": 3.29,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "688036.SH",
+      "mkv": 56114679.6,
+      "amount": 333480.0,
+      "stk_mkv_ratio": 2.77,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "688041.SH",
+      "mkv": 73775110.44,
+      "amount": 954894.0,
+      "stk_mkv_ratio": 3.64,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "688111.SH",
+      "mkv": 68622456.0,
+      "amount": 235816.0,
+      "stk_mkv_ratio": 3.39,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "688652.SH",
+      "mkv": 17621.76,
+      "amount": 416.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "688709.SH",
+      "mkv": 20273.0,
+      "amount": 1045.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240422",
+      "end_date": "20240331",
+      "symbol": "688981.SH",
+      "mkv": 88684156.7,
+      "amount": 2031245.0,
+      "stk_mkv_ratio": 4.38,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "300124.SZ",
+      "mkv": 93135150.0,
+      "amount": 1815500.0,
+      "stk_mkv_ratio": 5.27,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "300274.SZ",
+      "mkv": 87175721.4,
+      "amount": 1405380.0,
+      "stk_mkv_ratio": 4.93,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "300308.SZ",
+      "mkv": 119753743.68,
+      "amount": 868536.0,
+      "stk_mkv_ratio": 6.78,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "300750.SZ",
+      "mkv": 171059105.1,
+      "amount": 950170.0,
+      "stk_mkv_ratio": 9.68,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "300760.SZ",
+      "mkv": 170744097.21,
+      "amount": 586931.0,
+      "stk_mkv_ratio": 9.66,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "601033.SH",
+      "mkv": 20077.68,
+      "amount": 1258.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "603285.SH",
+      "mkv": 24002.55,
+      "amount": 1287.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688008.SH",
+      "mkv": 50543615.68,
+      "amount": 884248.0,
+      "stk_mkv_ratio": 2.86,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688012.SH",
+      "mkv": 59394038.34,
+      "amount": 420459.0,
+      "stk_mkv_ratio": 3.36,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688041.SH",
+      "mkv": 63315706.08,
+      "amount": 900394.0,
+      "stk_mkv_ratio": 3.58,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688111.SH",
+      "mkv": 50872640.0,
+      "amount": 223616.0,
+      "stk_mkv_ratio": 2.88,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688584.SH",
+      "mkv": 13760.74,
+      "amount": 866.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688692.SH",
+      "mkv": 30612.75,
+      "amount": 175.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688709.SH",
+      "mkv": 19635.55,
+      "amount": 1045.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240719",
+      "end_date": "20240630",
+      "symbol": "688981.SH",
+      "mkv": 88108394.5,
+      "amount": 1911245.0,
+      "stk_mkv_ratio": 4.99,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "001359.SZ",
+      "mkv": 3790.4,
+      "amount": 184.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "001379.SZ",
+      "mkv": 2871.24,
+      "amount": 213.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "001387.SZ",
+      "mkv": 2638.25,
+      "amount": 173.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "001389.SZ",
+      "mkv": 7672.32,
+      "amount": 222.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300014.SZ",
+      "mkv": 47456536.72,
+      "amount": 1188791.0,
+      "stk_mkv_ratio": 2.69,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300122.SZ",
+      "mkv": 32489573.0,
+      "amount": 1159100.0,
+      "stk_mkv_ratio": 1.84,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300142.SZ",
+      "mkv": 17660622.0,
+      "amount": 1551900.0,
+      "stk_mkv_ratio": 1.0,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300223.SZ",
+      "mkv": 18090072.0,
+      "amount": 326300.0,
+      "stk_mkv_ratio": 1.02,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300316.SZ",
+      "mkv": 18200455.0,
+      "amount": 633500.0,
+      "stk_mkv_ratio": 1.03,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300347.SZ",
+      "mkv": 24436566.0,
+      "amount": 502810.0,
+      "stk_mkv_ratio": 1.38,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300394.SZ",
+      "mkv": 28478313.6,
+      "amount": 322080.0,
+      "stk_mkv_ratio": 1.61,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300408.SZ",
+      "mkv": 37923648.0,
+      "amount": 1299200.0,
+      "stk_mkv_ratio": 2.15,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300433.SZ",
+      "mkv": 35227956.75,
+      "amount": 1930299.0,
+      "stk_mkv_ratio": 1.99,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300442.SZ",
+      "mkv": 11946260.0,
+      "amount": 498800.0,
+      "stk_mkv_ratio": 0.68,
+      "stk_float_ratio": 0.14
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300450.SZ",
+      "mkv": 17628797.8,
+      "amount": 1060060.0,
+      "stk_mkv_ratio": 1.0,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300454.SZ",
+      "mkv": 12324267.0,
+      "amount": 243900.0,
+      "stk_mkv_ratio": 0.7,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300496.SZ",
+      "mkv": 16243717.0,
+      "amount": 356300.0,
+      "stk_mkv_ratio": 0.92,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300628.SZ",
+      "mkv": 17998179.6,
+      "amount": 489480.0,
+      "stk_mkv_ratio": 1.02,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300661.SZ",
+      "mkv": 26432647.36,
+      "amount": 319312.0,
+      "stk_mkv_ratio": 1.5,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300751.SZ",
+      "mkv": 16120480.56,
+      "amount": 134922.0,
+      "stk_mkv_ratio": 0.91,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300759.SZ",
+      "mkv": 16040299.8,
+      "amount": 863310.0,
+      "stk_mkv_ratio": 0.91,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300782.SZ",
+      "mkv": 28155873.2,
+      "amount": 362180.0,
+      "stk_mkv_ratio": 1.59,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300832.SZ",
+      "mkv": 20557735.2,
+      "amount": 304830.0,
+      "stk_mkv_ratio": 1.16,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "300919.SZ",
+      "mkv": 14178110.94,
+      "amount": 457506.0,
+      "stk_mkv_ratio": 0.8,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301269.SZ",
+      "mkv": 16193136.2,
+      "amount": 210164.0,
+      "stk_mkv_ratio": 0.92,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301538.SZ",
+      "mkv": 13686.0,
+      "amount": 150.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301539.SZ",
+      "mkv": 7155.02,
+      "amount": 361.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301565.SZ",
+      "mkv": 13494.78,
+      "amount": 711.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301566.SZ",
+      "mkv": 9774.72,
+      "amount": 576.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301580.SZ",
+      "mkv": 13317.86,
+      "amount": 202.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301588.SZ",
+      "mkv": 5461.25,
+      "amount": 257.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "301591.SZ",
+      "mkv": 8098.62,
+      "amount": 219.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "603082.SH",
+      "mkv": 3155.43,
+      "amount": 107.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "603312.SH",
+      "mkv": 3296.8,
+      "amount": 130.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "603341.SH",
+      "mkv": 11172.02,
+      "amount": 298.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "603344.SH",
+      "mkv": 4124.12,
+      "amount": 182.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "603375.SH",
+      "mkv": 2800.8,
+      "amount": 72.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "603381.SH",
+      "mkv": 4473.14,
+      "amount": 178.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688009.SH",
+      "mkv": 14999262.0,
+      "amount": 2499877.0,
+      "stk_mkv_ratio": 0.85,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688036.SH",
+      "mkv": 33605040.08,
+      "amount": 439052.0,
+      "stk_mkv_ratio": 1.9,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688047.SH",
+      "mkv": 13629150.0,
+      "amount": 155000.0,
+      "stk_mkv_ratio": 0.77,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688072.SH",
+      "mkv": 16143744.88,
+      "amount": 134408.0,
+      "stk_mkv_ratio": 0.91,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688082.SH",
+      "mkv": 7293213.0,
+      "amount": 86300.0,
+      "stk_mkv_ratio": 0.41,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688114.SH",
+      "mkv": 9501532.92,
+      "amount": 200412.0,
+      "stk_mkv_ratio": 0.54,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688126.SH",
+      "mkv": 22041726.7,
+      "amount": 1596070.0,
+      "stk_mkv_ratio": 1.25,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688187.SH",
+      "mkv": 12436056.72,
+      "amount": 251844.0,
+      "stk_mkv_ratio": 0.7,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688223.SH",
+      "mkv": 27517739.8,
+      "amount": 3875738.0,
+      "stk_mkv_ratio": 1.56,
+      "stk_float_ratio": 0.12
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688256.SH",
+      "mkv": 40015714.06,
+      "amount": 201418.0,
+      "stk_mkv_ratio": 2.26,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688271.SH",
+      "mkv": 35039386.7,
+      "amount": 319411.0,
+      "stk_mkv_ratio": 1.98,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688303.SH",
+      "mkv": 12678094.2,
+      "amount": 621780.0,
+      "stk_mkv_ratio": 0.72,
+      "stk_float_ratio": 0.12
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688349.SH",
+      "mkv": 5798674.44,
+      "amount": 233441.0,
+      "stk_mkv_ratio": 0.33,
+      "stk_float_ratio": 0.12
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688396.SH",
+      "mkv": 19196199.36,
+      "amount": 512719.0,
+      "stk_mkv_ratio": 1.09,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688472.SH",
+      "mkv": 4725158.98,
+      "amount": 464161.0,
+      "stk_mkv_ratio": 0.27,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688506.SH",
+      "mkv": 14131060.0,
+      "amount": 77900.0,
+      "stk_mkv_ratio": 0.8,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688599.SH",
+      "mkv": 17855980.56,
+      "amount": 1055318.0,
+      "stk_mkv_ratio": 1.01,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688695.SH",
+      "mkv": 5868.3,
+      "amount": 186.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688728.SH",
+      "mkv": 9149359.31,
+      "amount": 755521.0,
+      "stk_mkv_ratio": 0.52,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20240831",
+      "end_date": "20240630",
+      "symbol": "688777.SH",
+      "mkv": 23069308.6,
+      "amount": 611918.0,
+      "stk_mkv_ratio": 1.31,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "300124.SZ",
+      "mkv": 108344505.0,
+      "amount": 1734900.0,
+      "stk_mkv_ratio": 4.96,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "300274.SZ",
+      "mkv": 133765814.0,
+      "amount": 1343300.0,
+      "stk_mkv_ratio": 6.13,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "300308.SZ",
+      "mkv": 128694234.96,
+      "amount": 831036.0,
+      "stk_mkv_ratio": 5.89,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "300502.SZ",
+      "mkv": 85338302.0,
+      "amount": 656600.0,
+      "stk_mkv_ratio": 3.91,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "300750.SZ",
+      "mkv": 218154372.3,
+      "amount": 866070.0,
+      "stk_mkv_ratio": 9.99,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "300760.SZ",
+      "mkv": 164645783.0,
+      "amount": 561931.0,
+      "stk_mkv_ratio": 7.54,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "301551.SZ",
+      "mkv": 82080.28,
+      "amount": 652.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "301565.SZ",
+      "mkv": 14696.37,
+      "amount": 711.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "301580.SZ",
+      "mkv": 11954.36,
+      "amount": 202.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "301611.SZ",
+      "mkv": 24071.76,
+      "amount": 804.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "688012.SH",
+      "mkv": 65875520.0,
+      "amount": 401680.0,
+      "stk_mkv_ratio": 3.02,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "688041.SH",
+      "mkv": 88605357.92,
+      "amount": 857914.0,
+      "stk_mkv_ratio": 4.06,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "688111.SH",
+      "mkv": 56481062.4,
+      "amount": 212016.0,
+      "stk_mkv_ratio": 2.59,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "688692.SH",
+      "mkv": 51353.75,
+      "amount": 175.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20241025",
+      "end_date": "20240930",
+      "symbol": "688981.SH",
+      "mkv": 109482169.93,
+      "amount": 1825007.0,
+      "stk_mkv_ratio": 5.01,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "300124.SZ",
+      "mkv": 133949028.0,
+      "amount": 2286600.0,
+      "stk_mkv_ratio": 5.05,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "300274.SZ",
+      "mkv": 113779413.0,
+      "amount": 1541100.0,
+      "stk_mkv_ratio": 4.29,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "300308.SZ",
+      "mkv": 117709476.36,
+      "amount": 953036.0,
+      "stk_mkv_ratio": 4.44,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "300502.SZ",
+      "mkv": 86950834.0,
+      "amount": 752300.0,
+      "stk_mkv_ratio": 3.28,
+      "stk_float_ratio": 0.12
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "300750.SZ",
+      "mkv": 268359420.0,
+      "amount": 1008870.0,
+      "stk_mkv_ratio": 10.11,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "300760.SZ",
+      "mkv": 164304405.0,
+      "amount": 644331.0,
+      "stk_mkv_ratio": 6.19,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "301551.SZ",
+      "mkv": 28185.96,
+      "amount": 652.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "301611.SZ",
+      "mkv": 45104.4,
+      "amount": 804.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "688012.SH",
+      "mkv": 87533600.84,
+      "amount": 462749.0,
+      "stk_mkv_ratio": 3.3,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "688041.SH",
+      "mkv": 148084491.06,
+      "amount": 988614.0,
+      "stk_mkv_ratio": 5.58,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "688256.SH",
+      "mkv": 144616556.0,
+      "amount": 219782.0,
+      "stk_mkv_ratio": 5.45,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "688449.SH",
+      "mkv": 41392.64,
+      "amount": 1406.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "688708.SH",
+      "mkv": 38181.0,
+      "amount": 780.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "688726.SH",
+      "mkv": 32365.74,
+      "amount": 979.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250122",
+      "end_date": "20241231",
+      "symbol": "688981.SH",
+      "mkv": 199689548.94,
+      "amount": 2110437.0,
+      "stk_mkv_ratio": 7.52,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300014.SZ",
+      "mkv": 60836363.34,
+      "amount": 1301591.0,
+      "stk_mkv_ratio": 2.29,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300122.SZ",
+      "mkv": 33448340.0,
+      "amount": 1271800.0,
+      "stk_mkv_ratio": 1.26,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300223.SZ",
+      "mkv": 24504260.0,
+      "amount": 359300.0,
+      "stk_mkv_ratio": 0.92,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300316.SZ",
+      "mkv": 22125840.0,
+      "amount": 693600.0,
+      "stk_mkv_ratio": 0.83,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300347.SZ",
+      "mkv": 30041546.2,
+      "amount": 550010.0,
+      "stk_mkv_ratio": 1.13,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300394.SZ",
+      "mkv": 32357884.8,
+      "amount": 354180.0,
+      "stk_mkv_ratio": 1.22,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300408.SZ",
+      "mkv": 54892154.0,
+      "amount": 1425400.0,
+      "stk_mkv_ratio": 2.07,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300433.SZ",
+      "mkv": 46331618.1,
+      "amount": 2115599.0,
+      "stk_mkv_ratio": 1.75,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300442.SZ",
+      "mkv": 37947842.88,
+      "amount": 730328.0,
+      "stk_mkv_ratio": 1.43,
+      "stk_float_ratio": 0.13
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300450.SZ",
+      "mkv": 23276453.2,
+      "amount": 1162660.0,
+      "stk_mkv_ratio": 0.88,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300628.SZ",
+      "mkv": 20654088.0,
+      "amount": 535080.0,
+      "stk_mkv_ratio": 0.78,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300661.SZ",
+      "mkv": 28779363.36,
+      "amount": 351912.0,
+      "stk_mkv_ratio": 1.08,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300751.SZ",
+      "mkv": 15638118.3,
+      "amount": 148722.0,
+      "stk_mkv_ratio": 0.59,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300759.SZ",
+      "mkv": 28398757.0,
+      "amount": 1105010.0,
+      "stk_mkv_ratio": 1.07,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300782.SZ",
+      "mkv": 35510436.0,
+      "amount": 395880.0,
+      "stk_mkv_ratio": 1.34,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300832.SZ",
+      "mkv": 29482810.5,
+      "amount": 416130.0,
+      "stk_mkv_ratio": 1.11,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "300919.SZ",
+      "mkv": 18027708.72,
+      "amount": 499106.0,
+      "stk_mkv_ratio": 0.68,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301269.SZ",
+      "mkv": 27715430.4,
+      "amount": 228864.0,
+      "stk_mkv_ratio": 1.04,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301308.SZ",
+      "mkv": 11352000.0,
+      "amount": 132000.0,
+      "stk_mkv_ratio": 0.43,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301522.SZ",
+      "mkv": 20269.44,
+      "amount": 816.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301552.SZ",
+      "mkv": 8132.41,
+      "amount": 143.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301556.SZ",
+      "mkv": 15766.35,
+      "amount": 267.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301571.SZ",
+      "mkv": 14290.5,
+      "amount": 350.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301585.SZ",
+      "mkv": 7528.5,
+      "amount": 210.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301586.SZ",
+      "mkv": 11425.1,
+      "amount": 215.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301603.SZ",
+      "mkv": 9781.34,
+      "amount": 233.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301606.SZ",
+      "mkv": 14450.04,
+      "amount": 396.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301607.SZ",
+      "mkv": 9287.98,
+      "amount": 257.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301608.SZ",
+      "mkv": 12029.92,
+      "amount": 184.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301613.SZ",
+      "mkv": 11528.52,
+      "amount": 276.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "301617.SZ",
+      "mkv": 10066.87,
+      "amount": 253.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "603194.SH",
+      "mkv": 8185.83,
+      "amount": 291.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "603207.SH",
+      "mkv": 4930.25,
+      "amount": 185.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "603285.SH",
+      "mkv": 2916.69,
+      "amount": 129.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "603310.SH",
+      "mkv": 4559.3,
+      "amount": 254.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "603395.SH",
+      "mkv": 5508.58,
+      "amount": 154.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688008.SH",
+      "mkv": 82350953.3,
+      "amount": 1212827.0,
+      "stk_mkv_ratio": 3.1,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688009.SH",
+      "mkv": 17234787.86,
+      "amount": 2753161.0,
+      "stk_mkv_ratio": 0.65,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688036.SH",
+      "mkv": 46116420.0,
+      "amount": 485436.0,
+      "stk_mkv_ratio": 1.74,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688047.SH",
+      "mkv": 22150815.12,
+      "amount": 167454.0,
+      "stk_mkv_ratio": 0.83,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688072.SH",
+      "mkv": 23208780.1,
+      "amount": 151030.0,
+      "stk_mkv_ratio": 0.87,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688082.SH",
+      "mkv": 9520000.0,
+      "amount": 95200.0,
+      "stk_mkv_ratio": 0.36,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688111.SH",
+      "mkv": 69927273.52,
+      "amount": 244168.0,
+      "stk_mkv_ratio": 2.64,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688126.SH",
+      "mkv": 32963418.2,
+      "amount": 1751510.0,
+      "stk_mkv_ratio": 1.24,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688169.SH",
+      "mkv": 33672418.08,
+      "amount": 153552.0,
+      "stk_mkv_ratio": 1.27,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688187.SH",
+      "mkv": 13290612.0,
+      "amount": 277350.0,
+      "stk_mkv_ratio": 0.5,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688188.SH",
+      "mkv": 17110705.5,
+      "amount": 88086.0,
+      "stk_mkv_ratio": 0.64,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688223.SH",
+      "mkv": 30205590.75,
+      "amount": 4248325.0,
+      "stk_mkv_ratio": 1.14,
+      "stk_float_ratio": 0.14
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688271.SH",
+      "mkv": 55246027.2,
+      "amount": 437073.0,
+      "stk_mkv_ratio": 2.08,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688303.SH",
+      "mkv": 16533196.32,
+      "amount": 684888.0,
+      "stk_mkv_ratio": 0.62,
+      "stk_float_ratio": 0.12
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688349.SH",
+      "mkv": 8041769.6,
+      "amount": 260420.0,
+      "stk_mkv_ratio": 0.3,
+      "stk_float_ratio": 0.14
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688396.SH",
+      "mkv": 26473070.91,
+      "amount": 560989.0,
+      "stk_mkv_ratio": 1.0,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688472.SH",
+      "mkv": 19683152.8,
+      "amount": 1567130.0,
+      "stk_mkv_ratio": 0.74,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688506.SH",
+      "mkv": 16488780.0,
+      "amount": 86000.0,
+      "stk_mkv_ratio": 0.62,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688599.SH",
+      "mkv": 22301034.2,
+      "amount": 1155494.0,
+      "stk_mkv_ratio": 0.84,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688721.SH",
+      "mkv": 15861.15,
+      "amount": 279.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688728.SH",
+      "mkv": 11150106.24,
+      "amount": 829621.0,
+      "stk_mkv_ratio": 0.42,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688750.SH",
+      "mkv": 26016.4,
+      "amount": 1685.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250331",
+      "end_date": "20241231",
+      "symbol": "688777.SH",
+      "mkv": 33417926.33,
+      "amount": 672799.0,
+      "stk_mkv_ratio": 1.26,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "300124.SZ",
+      "mkv": 141950391.0,
+      "amount": 2082300.0,
+      "stk_mkv_ratio": 5.99,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "300274.SZ",
+      "mkv": 97375289.0,
+      "amount": 1402900.0,
+      "stk_mkv_ratio": 4.11,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "300308.SZ",
+      "mkv": 85494839.04,
+      "amount": 866736.0,
+      "stk_mkv_ratio": 3.61,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "300750.SZ",
+      "mkv": 251895357.8,
+      "amount": 995870.0,
+      "stk_mkv_ratio": 10.63,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "300760.SZ",
+      "mkv": 137061054.0,
+      "amount": 585731.0,
+      "stk_mkv_ratio": 5.79,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "301658.SZ",
+      "mkv": 51554.2,
+      "amount": 4369.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688008.SH",
+      "mkv": 86587465.0,
+      "amount": 1106125.0,
+      "stk_mkv_ratio": 3.65,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688012.SH",
+      "mkv": 77638420.64,
+      "amount": 421124.0,
+      "stk_mkv_ratio": 3.28,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688041.SH",
+      "mkv": 126887400.0,
+      "amount": 898000.0,
+      "stk_mkv_ratio": 5.36,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688256.SH",
+      "mkv": 126379911.0,
+      "amount": 202857.0,
+      "stk_mkv_ratio": 5.33,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688449.SH",
+      "mkv": 62243.62,
+      "amount": 1406.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688708.SH",
+      "mkv": 42689.4,
+      "amount": 780.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688726.SH",
+      "mkv": 42508.18,
+      "amount": 979.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688750.SH",
+      "mkv": 34744.7,
+      "amount": 1685.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250422",
+      "end_date": "20250331",
+      "symbol": "688981.SH",
+      "mkv": 171745232.69,
+      "amount": 1922593.0,
+      "stk_mkv_ratio": 7.25,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "300124.SZ",
+      "mkv": 113733598.0,
+      "amount": 1761400.0,
+      "stk_mkv_ratio": 4.91,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "300274.SZ",
+      "mkv": 91747026.0,
+      "amount": 1353800.0,
+      "stk_mkv_ratio": 3.96,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "300308.SZ",
+      "mkv": 121112808.96,
+      "amount": 830336.0,
+      "stk_mkv_ratio": 5.23,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "300502.SZ",
+      "mkv": 117503661.6,
+      "amount": 925080.0,
+      "stk_mkv_ratio": 5.07,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "300750.SZ",
+      "mkv": 229588299.4,
+      "amount": 910270.0,
+      "stk_mkv_ratio": 9.91,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "300760.SZ",
+      "mkv": 127350317.25,
+      "amount": 566631.0,
+      "stk_mkv_ratio": 5.5,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "301275.SZ",
+      "mkv": 22307.43,
+      "amount": 397.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "301458.SZ",
+      "mkv": 23911.11,
+      "amount": 701.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "603049.SH",
+      "mkv": 31023.4,
+      "amount": 724.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "688008.SH",
+      "mkv": 87608144.0,
+      "amount": 1068392.0,
+      "stk_mkv_ratio": 3.78,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "688041.SH",
+      "mkv": 122841623.41,
+      "amount": 869429.0,
+      "stk_mkv_ratio": 5.3,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "688256.SH",
+      "mkv": 115980628.5,
+      "amount": 192819.0,
+      "stk_mkv_ratio": 5.01,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "688411.SH",
+      "mkv": 46754.4,
+      "amount": 560.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "688545.SH",
+      "mkv": 26788.3,
+      "amount": 994.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250721",
+      "end_date": "20250630",
+      "symbol": "688981.SH",
+      "mkv": 163447518.09,
+      "amount": 1853777.0,
+      "stk_mkv_ratio": 7.06,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "001335.SZ",
+      "mkv": 2244.0,
+      "amount": 80.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "001356.SZ",
+      "mkv": 10237.96,
+      "amount": 709.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "001382.SZ",
+      "mkv": 7396.86,
+      "amount": 366.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "001388.SZ",
+      "mkv": 15385.54,
+      "amount": 937.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "001390.SZ",
+      "mkv": 3225.36,
+      "amount": 178.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "001395.SZ",
+      "mkv": 3780.0,
+      "amount": 80.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300014.SZ",
+      "mkv": 52364998.71,
+      "amount": 1143091.0,
+      "stk_mkv_ratio": 2.26,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300122.SZ",
+      "mkv": 21907497.0,
+      "amount": 1118300.0,
+      "stk_mkv_ratio": 0.95,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300223.SZ",
+      "mkv": 21901800.0,
+      "amount": 316500.0,
+      "stk_mkv_ratio": 0.95,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300316.SZ",
+      "mkv": 16550640.0,
+      "amount": 609600.0,
+      "stk_mkv_ratio": 0.71,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300347.SZ",
+      "mkv": 25636789.2,
+      "amount": 480810.0,
+      "stk_mkv_ratio": 1.11,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300394.SZ",
+      "mkv": 34831956.48,
+      "amount": 436272.0,
+      "stk_mkv_ratio": 1.5,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300408.SZ",
+      "mkv": 41860220.0,
+      "amount": 1253300.0,
+      "stk_mkv_ratio": 1.81,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300433.SZ",
+      "mkv": 41473517.7,
+      "amount": 1859799.0,
+      "stk_mkv_ratio": 1.79,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300442.SZ",
+      "mkv": 31799646.84,
+      "amount": 642028.0,
+      "stk_mkv_ratio": 1.37,
+      "stk_float_ratio": 0.12
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300450.SZ",
+      "mkv": 25395706.0,
+      "amount": 1021960.0,
+      "stk_mkv_ratio": 1.1,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300628.SZ",
+      "mkv": 16343456.8,
+      "amount": 470180.0,
+      "stk_mkv_ratio": 0.71,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300661.SZ",
+      "mkv": 29394422.72,
+      "amount": 403936.0,
+      "stk_mkv_ratio": 1.27,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300759.SZ",
+      "mkv": 20307095.4,
+      "amount": 827510.0,
+      "stk_mkv_ratio": 0.88,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300782.SZ",
+      "mkv": 24821058.6,
+      "amount": 347780.0,
+      "stk_mkv_ratio": 1.07,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300832.SZ",
+      "mkv": 20744205.6,
+      "amount": 365730.0,
+      "stk_mkv_ratio": 0.9,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "300919.SZ",
+      "mkv": 14398349.28,
+      "amount": 437906.0,
+      "stk_mkv_ratio": 0.62,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301173.SZ",
+      "mkv": 7781.54,
+      "amount": 173.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301269.SZ",
+      "mkv": 24883032.32,
+      "amount": 200864.0,
+      "stk_mkv_ratio": 1.07,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301308.SZ",
+      "mkv": 10227581.0,
+      "amount": 116900.0,
+      "stk_mkv_ratio": 0.44,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301479.SZ",
+      "mkv": 14172.34,
+      "amount": 182.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301501.SZ",
+      "mkv": 15781.78,
+      "amount": 349.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301560.SZ",
+      "mkv": 5215.5,
+      "amount": 190.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301590.SZ",
+      "mkv": 10182.04,
+      "amount": 73.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301595.SZ",
+      "mkv": 5703.6,
+      "amount": 196.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301602.SZ",
+      "mkv": 16318.4,
+      "amount": 658.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301636.SZ",
+      "mkv": 6074.88,
+      "amount": 128.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301658.SZ",
+      "mkv": 10042.26,
+      "amount": 437.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301662.SZ",
+      "mkv": 11797.5,
+      "amount": 143.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301665.SZ",
+      "mkv": 8799.27,
+      "amount": 393.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "301678.SZ",
+      "mkv": 17014.28,
+      "amount": 382.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "302132.SZ",
+      "mkv": 24180685.92,
+      "amount": 274968.0,
+      "stk_mkv_ratio": 1.04,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603014.SH",
+      "mkv": 6699.4,
+      "amount": 205.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603120.SH",
+      "mkv": 2172.95,
+      "amount": 65.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603124.SH",
+      "mkv": 4075.28,
+      "amount": 88.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603202.SH",
+      "mkv": 15049.56,
+      "amount": 166.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603210.SH",
+      "mkv": 4464.46,
+      "amount": 286.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603257.SH",
+      "mkv": 2922.66,
+      "amount": 78.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603271.SH",
+      "mkv": 4420.08,
+      "amount": 126.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603382.SH",
+      "mkv": 2350.95,
+      "amount": 105.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "603409.SH",
+      "mkv": 3332.0,
+      "amount": 100.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688009.SH",
+      "mkv": 12429959.2,
+      "amount": 2418280.0,
+      "stk_mkv_ratio": 0.54,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688012.SH",
+      "mkv": 74469914.6,
+      "amount": 408502.0,
+      "stk_mkv_ratio": 3.21,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688036.SH",
+      "mkv": 33953873.7,
+      "amount": 426021.0,
+      "stk_mkv_ratio": 1.47,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688047.SH",
+      "mkv": 19566312.15,
+      "amount": 146685.0,
+      "stk_mkv_ratio": 0.84,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688072.SH",
+      "mkv": 20839848.09,
+      "amount": 135579.0,
+      "stk_mkv_ratio": 0.9,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688082.SH",
+      "mkv": 9740730.6,
+      "amount": 85490.0,
+      "stk_mkv_ratio": 0.42,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688111.SH",
+      "mkv": 60110492.1,
+      "amount": 214642.0,
+      "stk_mkv_ratio": 2.59,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688126.SH",
+      "mkv": 28831083.84,
+      "amount": 1540122.0,
+      "stk_mkv_ratio": 1.24,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688169.SH",
+      "mkv": 29907312.0,
+      "amount": 191040.0,
+      "stk_mkv_ratio": 1.29,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688187.SH",
+      "mkv": 10349107.8,
+      "amount": 242652.0,
+      "stk_mkv_ratio": 0.45,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688188.SH",
+      "mkv": 14758032.72,
+      "amount": 112092.0,
+      "stk_mkv_ratio": 0.64,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688223.SH",
+      "mkv": 19371638.67,
+      "amount": 3732493.0,
+      "stk_mkv_ratio": 0.84,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688271.SH",
+      "mkv": 59154988.86,
+      "amount": 463089.0,
+      "stk_mkv_ratio": 2.55,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688303.SH",
+      "mkv": 12842187.28,
+      "amount": 602354.0,
+      "stk_mkv_ratio": 0.55,
+      "stk_float_ratio": 0.11
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688349.SH",
+      "mkv": 5684150.22,
+      "amount": 227913.0,
+      "stk_mkv_ratio": 0.25,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688396.SH",
+      "mkv": 23323543.92,
+      "amount": 494562.0,
+      "stk_mkv_ratio": 1.01,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688472.SH",
+      "mkv": 12628189.5,
+      "amount": 1380130.0,
+      "stk_mkv_ratio": 0.55,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688506.SH",
+      "mkv": 22759190.96,
+      "amount": 76858.0,
+      "stk_mkv_ratio": 0.98,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688583.SH",
+      "mkv": 18087.36,
+      "amount": 227.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688599.SH",
+      "mkv": 17738776.14,
+      "amount": 1220838.0,
+      "stk_mkv_ratio": 0.77,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688728.SH",
+      "mkv": 11237272.2,
+      "amount": 729693.0,
+      "stk_mkv_ratio": 0.49,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688755.SH",
+      "mkv": 7983.99,
+      "amount": 203.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688757.SH",
+      "mkv": 13903.84,
+      "amount": 536.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688758.SH",
+      "mkv": 13185.69,
+      "amount": 777.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20250830",
+      "end_date": "20250630",
+      "symbol": "688777.SH",
+      "mkv": 26574773.94,
+      "amount": 591734.0,
+      "stk_mkv_ratio": 1.15,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "300124.SZ",
+      "mkv": 107306364.0,
+      "amount": 1280200.0,
+      "stk_mkv_ratio": 3.66,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "300274.SZ",
+      "mkv": 160117230.0,
+      "amount": 988500.0,
+      "stk_mkv_ratio": 5.46,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "300308.SZ",
+      "mkv": 244160196.48,
+      "amount": 604836.0,
+      "stk_mkv_ratio": 8.32,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "300476.SZ",
+      "mkv": 117196608.0,
+      "amount": 410496.0,
+      "stk_mkv_ratio": 3.99,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "300502.SZ",
+      "mkv": 247509243.6,
+      "amount": 676680.0,
+      "stk_mkv_ratio": 8.44,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "300750.SZ",
+      "mkv": 316681530.0,
+      "amount": 787765.0,
+      "stk_mkv_ratio": 10.79,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "301656.SZ",
+      "mkv": 184579.2,
+      "amount": 7395.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "301662.SZ",
+      "mkv": 17806.36,
+      "amount": 143.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "301678.SZ",
+      "mkv": 28501.02,
+      "amount": 382.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "603049.SH",
+      "mkv": 35924.88,
+      "amount": 724.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "688008.SH",
+      "mkv": 120531769.2,
+      "amount": 778629.0,
+      "stk_mkv_ratio": 4.11,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "688041.SH",
+      "mkv": 159463348.8,
+      "amount": 631288.0,
+      "stk_mkv_ratio": 5.43,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "688256.SH",
+      "mkv": 191903725.0,
+      "amount": 144833.0,
+      "stk_mkv_ratio": 6.54,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "688729.SH",
+      "mkv": 82402.55,
+      "amount": 3505.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20251028",
+      "end_date": "20250930",
+      "symbol": "688981.SH",
+      "mkv": 188939380.95,
+      "amount": 1348315.0,
+      "stk_mkv_ratio": 6.44,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "300124.SZ",
+      "mkv": 102478932.0,
+      "amount": 1360400.0,
+      "stk_mkv_ratio": 3.37,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "300274.SZ",
+      "mkv": 178976256.0,
+      "amount": 1046400.0,
+      "stk_mkv_ratio": 5.89,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "300308.SZ",
+      "mkv": 325761960.0,
+      "amount": 534036.0,
+      "stk_mkv_ratio": 10.72,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "300476.SZ",
+      "mkv": 126016405.68,
+      "amount": 438196.0,
+      "stk_mkv_ratio": 4.15,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "300502.SZ",
+      "mkv": 309018518.4,
+      "amount": 717180.0,
+      "stk_mkv_ratio": 10.17,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "300750.SZ",
+      "mkv": 284834001.9,
+      "amount": 775565.0,
+      "stk_mkv_ratio": 9.38,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "301656.SZ",
+      "mkv": 188276.7,
+      "amount": 7395.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688008.SH",
+      "mkv": 97079922.4,
+      "amount": 824108.0,
+      "stk_mkv_ratio": 3.2,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688041.SH",
+      "mkv": 150124230.93,
+      "amount": 668973.0,
+      "stk_mkv_ratio": 4.94,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688256.SH",
+      "mkv": 206680708.5,
+      "amount": 152470.0,
+      "stk_mkv_ratio": 6.8,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688783.SH",
+      "mkv": 815964.3,
+      "amount": 44370.0,
+      "stk_mkv_ratio": 0.03,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688790.SH",
+      "mkv": 271485.33,
+      "amount": 2319.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688795.SH",
+      "mkv": 4504664.56,
+      "amount": 10828.0,
+      "stk_mkv_ratio": 0.15,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688802.SH",
+      "mkv": 1595203.6,
+      "amount": 3994.0,
+      "stk_mkv_ratio": 0.05,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260122",
+      "end_date": "20251231",
+      "symbol": "688981.SH",
+      "mkv": 176654351.66,
+      "amount": 1438202.0,
+      "stk_mkv_ratio": 5.81,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "001221.SZ",
+      "mkv": 9110.4,
+      "amount": 160.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "001280.SZ",
+      "mkv": 103284.72,
+      "amount": 2277.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "001285.SZ",
+      "mkv": 7682.96,
+      "amount": 137.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "001369.SZ",
+      "mkv": 11562.33,
+      "amount": 897.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "001386.SZ",
+      "mkv": 30129.78,
+      "amount": 1626.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "001388.SZ",
+      "mkv": 4036.36,
+      "amount": 94.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "001396.SZ",
+      "mkv": 2441.91,
+      "amount": 69.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300014.SZ",
+      "mkv": 58795424.16,
+      "amount": 894091.0,
+      "stk_mkv_ratio": 1.94,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300122.SZ",
+      "mkv": 16260279.0,
+      "amount": 861700.0,
+      "stk_mkv_ratio": 0.54,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300316.SZ",
+      "mkv": 17276175.0,
+      "amount": 470100.0,
+      "stk_mkv_ratio": 0.57,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300347.SZ",
+      "mkv": 20939877.0,
+      "amount": 369310.0,
+      "stk_mkv_ratio": 0.69,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300394.SZ",
+      "mkv": 68113519.55,
+      "amount": 335485.0,
+      "stk_mkv_ratio": 2.24,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300408.SZ",
+      "mkv": 44208225.0,
+      "amount": 966300.0,
+      "stk_mkv_ratio": 1.46,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300433.SZ",
+      "mkv": 43488878.73,
+      "amount": 1436699.0,
+      "stk_mkv_ratio": 1.43,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300442.SZ",
+      "mkv": 30973958.4,
+      "amount": 586628.0,
+      "stk_mkv_ratio": 1.02,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300628.SZ",
+      "mkv": 12972322.0,
+      "amount": 363880.0,
+      "stk_mkv_ratio": 0.43,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300661.SZ",
+      "mkv": 21397559.04,
+      "amount": 311736.0,
+      "stk_mkv_ratio": 0.7,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300759.SZ",
+      "mkv": 21166334.01,
+      "amount": 744507.0,
+      "stk_mkv_ratio": 0.7,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300760.SZ",
+      "mkv": 83118283.95,
+      "amount": 436431.0,
+      "stk_mkv_ratio": 2.74,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300782.SZ",
+      "mkv": 21843158.4,
+      "amount": 268080.0,
+      "stk_mkv_ratio": 0.72,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "300832.SZ",
+      "mkv": 15813562.5,
+      "amount": 281130.0,
+      "stk_mkv_ratio": 0.52,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301165.SZ",
+      "mkv": 6009984.0,
+      "amount": 67680.0,
+      "stk_mkv_ratio": 0.2,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301269.SZ",
+      "mkv": 16562386.12,
+      "amount": 155764.0,
+      "stk_mkv_ratio": 0.55,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301308.SZ",
+      "mkv": 29454252.0,
+      "amount": 120300.0,
+      "stk_mkv_ratio": 0.97,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301449.SZ",
+      "mkv": 7305.76,
+      "amount": 112.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301491.SZ",
+      "mkv": 13501.95,
+      "amount": 245.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301563.SZ",
+      "mkv": 14705.9,
+      "amount": 110.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301575.SZ",
+      "mkv": 6243.3,
+      "amount": 126.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301584.SZ",
+      "mkv": 11988.54,
+      "amount": 447.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301609.SZ",
+      "mkv": 11354.23,
+      "amount": 277.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301632.SZ",
+      "mkv": 15534.08,
+      "amount": 656.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301638.SZ",
+      "mkv": 32995.62,
+      "amount": 2322.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301667.SZ",
+      "mkv": 8617.57,
+      "amount": 151.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "301687.SZ",
+      "mkv": 10606.05,
+      "amount": 195.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "302132.SZ",
+      "mkv": 16729672.0,
+      "amount": 211768.0,
+      "stk_mkv_ratio": 0.55,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "601026.SH",
+      "mkv": 6440.28,
+      "amount": 451.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603092.SH",
+      "mkv": 8126.36,
+      "amount": 146.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603175.SH",
+      "mkv": 8206.64,
+      "amount": 169.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603248.SH",
+      "mkv": 4238.0,
+      "amount": 260.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603262.SH",
+      "mkv": 4355.5,
+      "amount": 155.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603334.SH",
+      "mkv": 2888.16,
+      "amount": 88.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603370.SH",
+      "mkv": 3800.7,
+      "amount": 82.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603376.SH",
+      "mkv": 2909.31,
+      "amount": 111.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603406.SH",
+      "mkv": 6144.48,
+      "amount": 153.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "603418.SH",
+      "mkv": 8209.34,
+      "amount": 139.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688009.SH",
+      "mkv": 10183034.05,
+      "amount": 1861615.0,
+      "stk_mkv_ratio": 0.34,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688012.SH",
+      "mkv": 86180338.16,
+      "amount": 316003.0,
+      "stk_mkv_ratio": 2.84,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688036.SH",
+      "mkv": 27450577.92,
+      "amount": 414912.0,
+      "stk_mkv_ratio": 0.9,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688047.SH",
+      "mkv": 19374195.72,
+      "amount": 146652.0,
+      "stk_mkv_ratio": 0.64,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688072.SH",
+      "mkv": 40633560.0,
+      "amount": 123132.0,
+      "stk_mkv_ratio": 1.34,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688082.SH",
+      "mkv": 12340048.7,
+      "amount": 70094.0,
+      "stk_mkv_ratio": 0.41,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688111.SH",
+      "mkv": 51682030.49,
+      "amount": 168307.0,
+      "stk_mkv_ratio": 1.7,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688126.SH",
+      "mkv": 29762703.84,
+      "amount": 1375356.0,
+      "stk_mkv_ratio": 0.98,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688169.SH",
+      "mkv": 22955433.78,
+      "amount": 150963.0,
+      "stk_mkv_ratio": 0.76,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688187.SH",
+      "mkv": 9671447.56,
+      "amount": 188564.0,
+      "stk_mkv_ratio": 0.32,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688188.SH",
+      "mkv": 11455119.33,
+      "amount": 84297.0,
+      "stk_mkv_ratio": 0.38,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688223.SH",
+      "mkv": 16254666.12,
+      "amount": 2882033.0,
+      "stk_mkv_ratio": 0.54,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688249.SH",
+      "mkv": 24018441.35,
+      "amount": 723665.0,
+      "stk_mkv_ratio": 0.79,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688271.SH",
+      "mkv": 44543213.0,
+      "amount": 354926.0,
+      "stk_mkv_ratio": 1.47,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688303.SH",
+      "mkv": 12365468.28,
+      "amount": 461054.0,
+      "stk_mkv_ratio": 0.41,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688396.SH",
+      "mkv": 20105882.46,
+      "amount": 380361.0,
+      "stk_mkv_ratio": 0.66,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688472.SH",
+      "mkv": 15842888.88,
+      "amount": 1062568.0,
+      "stk_mkv_ratio": 0.52,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688506.SH",
+      "mkv": 19473560.1,
+      "amount": 60271.0,
+      "stk_mkv_ratio": 0.64,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688521.SH",
+      "mkv": 36076528.3,
+      "amount": 263390.0,
+      "stk_mkv_ratio": 1.19,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688727.SH",
+      "mkv": 19631.81,
+      "amount": 563.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688728.SH",
+      "mkv": 8271635.58,
+      "amount": 553657.0,
+      "stk_mkv_ratio": 0.27,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688729.SH",
+      "mkv": 3356779.96,
+      "amount": 137152.0,
+      "stk_mkv_ratio": 0.11,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688759.SH",
+      "mkv": 70031.79,
+      "amount": 2789.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688765.SH",
+      "mkv": 185695.98,
+      "amount": 3529.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688775.SH",
+      "mkv": 5248605.6,
+      "amount": 22344.0,
+      "stk_mkv_ratio": 0.17,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688796.SH",
+      "mkv": 17871.75,
+      "amount": 423.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688805.SH",
+      "mkv": 8578.05,
+      "amount": 265.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688807.SH",
+      "mkv": 17758.36,
+      "amount": 131.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260331",
+      "end_date": "20251231",
+      "symbol": "688809.SH",
+      "mkv": 52657.29,
+      "amount": 259.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "300274.SZ",
+      "mkv": 133844728.0,
+      "amount": 887800.0,
+      "stk_mkv_ratio": 5.26,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "300308.SZ",
+      "mkv": 281388756.16,
+      "amount": 494176.0,
+      "stk_mkv_ratio": 11.05,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "300394.SZ",
+      "mkv": 86373716.0,
+      "amount": 286385.0,
+      "stk_mkv_ratio": 3.39,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "300476.SZ",
+      "mkv": 93747496.0,
+      "amount": 373496.0,
+      "stk_mkv_ratio": 3.68,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "300502.SZ",
+      "mkv": 269692659.88,
+      "amount": 609007.0,
+      "stk_mkv_ratio": 10.59,
+      "stk_float_ratio": 0.07
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "300750.SZ",
+      "mkv": 292102180.5,
+      "amount": 727165.0,
+      "stk_mkv_ratio": 11.47,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688008.SH",
+      "mkv": 88006694.4,
+      "amount": 702480.0,
+      "stk_mkv_ratio": 3.46,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688041.SH",
+      "mkv": 119988022.9,
+      "amount": 570665.0,
+      "stk_mkv_ratio": 4.71,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688256.SH",
+      "mkv": 127449882.0,
+      "amount": 129654.0,
+      "stk_mkv_ratio": 5.01,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688765.SH",
+      "mkv": 221127.14,
+      "amount": 3529.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688781.SH",
+      "mkv": 188149.5,
+      "amount": 6335.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688790.SH",
+      "mkv": 235772.73,
+      "amount": 2319.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688795.SH",
+      "mkv": 4261684.24,
+      "amount": 10828.0,
+      "stk_mkv_ratio": 0.17,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688802.SH",
+      "mkv": 1653516.0,
+      "amount": 3994.0,
+      "stk_mkv_ratio": 0.06,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260422",
+      "end_date": "20260331",
+      "symbol": "688981.SH",
+      "mkv": 115368313.5,
+      "amount": 1226670.0,
+      "stk_mkv_ratio": 4.53,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "300274.SZ",
+      "mkv": 126373194.0,
+      "amount": 794700.0,
+      "stk_mkv_ratio": 3.55,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "300308.SZ",
+      "mkv": 316263020.0,
+      "amount": 249026.0,
+      "stk_mkv_ratio": 8.89,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "300408.SZ",
+      "mkv": 122371080.0,
+      "amount": 733200.0,
+      "stk_mkv_ratio": 3.44,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "300502.SZ",
+      "mkv": 338772770.0,
+      "amount": 558110.0,
+      "stk_mkv_ratio": 9.53,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "300750.SZ",
+      "mkv": 288141176.65,
+      "amount": 733165.0,
+      "stk_mkv_ratio": 8.1,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "301666.SZ",
+      "mkv": 565262.6,
+      "amount": 1220.0,
+      "stk_mkv_ratio": 0.02,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688008.SH",
+      "mkv": 193233806.4,
+      "amount": 623536.0,
+      "stk_mkv_ratio": 5.43,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688012.SH",
+      "mkv": 190459773.5,
+      "amount": 406531.0,
+      "stk_mkv_ratio": 5.36,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688041.SH",
+      "mkv": 188478997.0,
+      "amount": 508990.0,
+      "stk_mkv_ratio": 5.3,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688256.SH",
+      "mkv": 272971480.65,
+      "amount": 171083.0,
+      "stk_mkv_ratio": 7.68,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688781.SH",
+      "mkv": 267083.6,
+      "amount": 6335.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688790.SH",
+      "mkv": 293237.55,
+      "amount": 2319.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688808.SH",
+      "mkv": 258245.79,
+      "amount": 163.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688820.SH",
+      "mkv": 338302.59,
+      "amount": 2391.0,
+      "stk_mkv_ratio": 0.01,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260721",
+      "end_date": "20260630",
+      "symbol": "688981.SH",
+      "mkv": 177255984.42,
+      "amount": 1116081.0,
+      "stk_mkv_ratio": 4.99,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "001220.SZ",
+      "mkv": 1583.46,
+      "amount": 57.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "001237.SZ",
+      "mkv": 16740.9,
+      "amount": 285.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "001257.SZ",
+      "mkv": 36149.82,
+      "amount": 1743.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "001312.SZ",
+      "mkv": 2248.52,
+      "amount": 134.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "001365.SZ",
+      "mkv": 22511.89,
+      "amount": 719.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "001393.SZ",
+      "mkv": 15089.13,
+      "amount": 387.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300014.SZ",
+      "mkv": 54366965.87,
+      "amount": 836029.0,
+      "stk_mkv_ratio": 1.53,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300122.SZ",
+      "mkv": 7703710.0,
+      "amount": 659000.0,
+      "stk_mkv_ratio": 0.22,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300124.SZ",
+      "mkv": 68804109.0,
+      "amount": 1037300.0,
+      "stk_mkv_ratio": 1.94,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300316.SZ",
+      "mkv": 21822520.0,
+      "amount": 361300.0,
+      "stk_mkv_ratio": 0.61,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300394.SZ",
+      "mkv": 108552852.52,
+      "amount": 358639.0,
+      "stk_mkv_ratio": 3.05,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300433.SZ",
+      "mkv": 58585934.34,
+      "amount": 1091799.0,
+      "stk_mkv_ratio": 1.65,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300442.SZ",
+      "mkv": 37483509.96,
+      "amount": 451228.0,
+      "stk_mkv_ratio": 1.05,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300450.SZ",
+      "mkv": 24537872.0,
+      "amount": 602600.0,
+      "stk_mkv_ratio": 0.69,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300476.SZ",
+      "mkv": 115463733.28,
+      "amount": 333296.0,
+      "stk_mkv_ratio": 3.25,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300661.SZ",
+      "mkv": 34139057.28,
+      "amount": 237936.0,
+      "stk_mkv_ratio": 0.96,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300760.SZ",
+      "mkv": 44950357.73,
+      "amount": 330931.0,
+      "stk_mkv_ratio": 1.26,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "300832.SZ",
+      "mkv": 9106860.0,
+      "amount": 216830.0,
+      "stk_mkv_ratio": 0.26,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301165.SZ",
+      "mkv": 5849680.4,
+      "amount": 72712.0,
+      "stk_mkv_ratio": 0.16,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301269.SZ",
+      "mkv": 14720186.88,
+      "amount": 123264.0,
+      "stk_mkv_ratio": 0.41,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301308.SZ",
+      "mkv": 97898580.0,
+      "amount": 139100.0,
+      "stk_mkv_ratio": 2.75,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301513.SZ",
+      "mkv": 7032.48,
+      "amount": 138.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301531.SZ",
+      "mkv": 14952.4,
+      "amount": 290.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301599.SZ",
+      "mkv": 14059.51,
+      "amount": 433.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301638.SZ",
+      "mkv": 3210675.0,
+      "amount": 133500.0,
+      "stk_mkv_ratio": 0.09,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301656.SZ",
+      "mkv": 2091722.0,
+      "amount": 121400.0,
+      "stk_mkv_ratio": 0.06,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301682.SZ",
+      "mkv": 114282.84,
+      "amount": 714.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301683.SZ",
+      "mkv": 11689.92,
+      "amount": 96.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301687.SZ",
+      "mkv": 15167.1,
+      "amount": 195.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "301696.SZ",
+      "mkv": 18748.8,
+      "amount": 216.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "302132.SZ",
+      "mkv": 9375989.76,
+      "amount": 160768.0,
+      "stk_mkv_ratio": 0.26,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "601112.SH",
+      "mkv": 13632.25,
+      "amount": 775.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "603284.SH",
+      "mkv": 1604.02,
+      "amount": 46.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "603293.SH",
+      "mkv": 2442.96,
+      "amount": 72.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "603352.SH",
+      "mkv": 2858.24,
+      "amount": 112.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "603407.SH",
+      "mkv": 10064.02,
+      "amount": 137.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "603435.SH",
+      "mkv": 4857.84,
+      "amount": 104.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "603459.SH",
+      "mkv": 27825.6,
+      "amount": 330.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688009.SH",
+      "mkv": 6737470.6,
+      "amount": 1415435.0,
+      "stk_mkv_ratio": 0.19,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688036.SH",
+      "mkv": 18591474.15,
+      "amount": 315377.0,
+      "stk_mkv_ratio": 0.52,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688047.SH",
+      "mkv": 17340827.05,
+      "amount": 112115.0,
+      "stk_mkv_ratio": 0.49,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688072.SH",
+      "mkv": 92173952.0,
+      "amount": 110786.0,
+      "stk_mkv_ratio": 2.59,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688082.SH",
+      "mkv": 33008256.0,
+      "amount": 76408.0,
+      "stk_mkv_ratio": 0.93,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688111.SH",
+      "mkv": 27497724.35,
+      "amount": 129067.0,
+      "stk_mkv_ratio": 0.77,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688126.SH",
+      "mkv": 35804545.98,
+      "amount": 897582.0,
+      "stk_mkv_ratio": 1.01,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688183.SH",
+      "mkv": 23968107.2,
+      "amount": 181028.0,
+      "stk_mkv_ratio": 0.67,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688223.SH",
+      "mkv": 10703179.75,
+      "amount": 2253301.0,
+      "stk_mkv_ratio": 0.3,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688249.SH",
+      "mkv": 32426772.81,
+      "amount": 549327.0,
+      "stk_mkv_ratio": 0.91,
+      "stk_float_ratio": 0.05
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688271.SH",
+      "mkv": 27491840.94,
+      "amount": 271578.0,
+      "stk_mkv_ratio": 0.77,
+      "stk_float_ratio": 0.03
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688303.SH",
+      "mkv": 6198561.18,
+      "amount": 355626.0,
+      "stk_mkv_ratio": 0.17,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688396.SH",
+      "mkv": 28545958.95,
+      "amount": 292629.0,
+      "stk_mkv_ratio": 0.8,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688472.SH",
+      "mkv": 8683396.24,
+      "amount": 802532.0,
+      "stk_mkv_ratio": 0.24,
+      "stk_float_ratio": 0.02
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688506.SH",
+      "mkv": 12486277.98,
+      "amount": 42466.0,
+      "stk_mkv_ratio": 0.35,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688521.SH",
+      "mkv": 85570409.54,
+      "amount": 230561.0,
+      "stk_mkv_ratio": 2.41,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688525.SH",
+      "mkv": 102152345.13,
+      "amount": 206481.0,
+      "stk_mkv_ratio": 2.87,
+      "stk_float_ratio": 0.04
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688635.SH",
+      "mkv": 39448.32,
+      "amount": 128.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688729.SH",
+      "mkv": 5658198.0,
+      "amount": 131586.0,
+      "stk_mkv_ratio": 0.16,
+      "stk_float_ratio": 0.06
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688775.SH",
+      "mkv": 2556428.7,
+      "amount": 18438.0,
+      "stk_mkv_ratio": 0.07,
+      "stk_float_ratio": 0.01
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688783.SH",
+      "mkv": 10191254.04,
+      "amount": 167812.0,
+      "stk_mkv_ratio": 0.29,
+      "stk_float_ratio": 0.09
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688785.SH",
+      "mkv": 53725.4,
+      "amount": 116.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688795.SH",
+      "mkv": 20238190.16,
+      "amount": 28844.0,
+      "stk_mkv_ratio": 0.57,
+      "stk_float_ratio": 0.1
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688802.SH",
+      "mkv": 12339623.66,
+      "amount": 15184.0,
+      "stk_mkv_ratio": 0.35,
+      "stk_float_ratio": 0.08
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688811.SH",
+      "mkv": 20124.42,
+      "amount": 834.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688813.SH",
+      "mkv": 40269.06,
+      "amount": 234.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688816.SH",
+      "mkv": 10106.7,
+      "amount": 177.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    },
+    {
+      "ts_code": "588380.SH",
+      "ann_date": "20260831",
+      "end_date": "20260630",
+      "symbol": "688818.SH",
+      "mkv": 120430.38,
+      "amount": 1717.0,
+      "stk_mkv_ratio": 0.0,
+      "stk_float_ratio": 0.0
+    }
+  ]
+}

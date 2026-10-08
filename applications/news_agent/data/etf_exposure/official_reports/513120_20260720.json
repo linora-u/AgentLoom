@@ -1,0 +1,113 @@
+{
+  "fund": "513120.SH",
+  "ann_date": "20260720",
+  "published_at": "2026-07-20T09:02:00+08:00",
+  "portfolio_end_date": "20260630",
+  "weight_basis": "fund_nav",
+  "report_scope": "top_ten_reported_stocks_only",
+  "source_url": "https://www.gffunds.com.cn/jjgg/dqgg/202607/P020260720325322190485.pdf",
+  "pdf_path": "513120_20260720.pdf",
+  "pdf_sha256": "d13a49d2b2251dd06f68329d6d44cf5bf42583899e288c69b69b0b18c0b47d8f",
+  "positions": [
+    {
+      "symbol": "01801.HK",
+      "reported_name": "信达生物制药",
+      "match_names": [
+        "信达生物"
+      ],
+      "reported_rank": 1,
+      "stk_mkv_ratio": 10.15,
+      "source_page": 12
+    },
+    {
+      "symbol": "06160.HK",
+      "reported_name": "百济神州有限公司",
+      "match_names": [
+        "百济神州"
+      ],
+      "reported_rank": 2,
+      "stk_mkv_ratio": 9.76,
+      "source_page": 12
+    },
+    {
+      "symbol": "02359.HK",
+      "reported_name": "无锡药明康德新药开发股份有限公司",
+      "match_names": [
+        "药明康德"
+      ],
+      "reported_rank": 3,
+      "stk_mkv_ratio": 8.6,
+      "source_page": 12
+    },
+    {
+      "symbol": "02269.HK",
+      "reported_name": "药明生物技术有限公司",
+      "match_names": [
+        "药明生物"
+      ],
+      "reported_rank": 4,
+      "stk_mkv_ratio": 8.51,
+      "source_page": 13
+    },
+    {
+      "symbol": "09926.HK",
+      "reported_name": "康方生物科技（开曼）有限公司",
+      "match_names": [
+        "康方生物"
+      ],
+      "reported_rank": 5,
+      "stk_mkv_ratio": 7.34,
+      "source_page": 13
+    },
+    {
+      "symbol": "01093.HK",
+      "reported_name": "石药集团有限公司",
+      "match_names": [
+        "石药集团"
+      ],
+      "reported_rank": 6,
+      "stk_mkv_ratio": 6.36,
+      "source_page": 13
+    },
+    {
+      "symbol": "03692.HK",
+      "reported_name": "翰森制药集团有限公司",
+      "match_names": [
+        "翰森制药"
+      ],
+      "reported_rank": 7,
+      "stk_mkv_ratio": 6.1,
+      "source_page": 13
+    },
+    {
+      "symbol": "01177.HK",
+      "reported_name": "中国生物制药有限公司",
+      "match_names": [
+        "中国生物制药"
+      ],
+      "reported_rank": 8,
+      "stk_mkv_ratio": 5.59,
+      "source_page": 14
+    },
+    {
+      "symbol": "01530.HK",
+      "reported_name": "三生制药",
+      "match_names": [
+        "三生制药"
+      ],
+      "reported_rank": 9,
+      "stk_mkv_ratio": 3.86,
+      "source_page": 14
+    },
+    {
+      "symbol": "06990.HK",
+      "reported_name": "四川科伦博泰生物医药股份有限公司",
+      "match_names": [
+        "科伦博泰"
+      ],
+      "reported_rank": 10,
+      "stk_mkv_ratio": 3.37,
+      "source_page": 14
+    }
+  ]
+}

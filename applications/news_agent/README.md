@@ -10,6 +10,8 @@
 
 数据位于 data/：news/raw/ 为五类原文，etf_dk_merge/ 为评测行情，etf_exposure/ 为历史持仓线索；evaluation/ 保存输入、结果、失败、用量和报告。原文完整分段，保持来源及字符区间，不缩减总新闻。所有初筛批次只分类一次，不再复读全部剔除项。
 
+Git 跟踪新闻原文与来源文件、etf_universe.yaml、etf_dk_merge/ 和 etf_exposure/；评测中间数据、运行缓存和输出继续忽略。持仓与股票名称清单按所在数据目录解析相对文件路径，可随仓库迁移。
+
 从 AgentLoom 根目录运行：
 
 ```bash
