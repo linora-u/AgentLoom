@@ -1,0 +1,28 @@
+{
+  "raw_hash": "333259eae1948a080612be5aec8efd1cc65b7574cb19d8d0cdcd43d5195d4633",
+  "title": "2025年第二季度中国货币政策执行报告",
+  "pub_date": "2025-08-15",
+  "declared_pdf_url": "http://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/b3e8c1a2b07d4facb38f4a7426415252/2025081819132397368.pdf",
+  "download_url": "https://np-newsimg.dfcfw.com/download/A2_cms_f_20250815180517550518?abc2037.pdf=&direct=1",
+  "resolved_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/b3e8c1a2b07d4facb38f4a7426415252/2025081819132397368.pdf",
+  "pdf_sha256": "0169352af1970d3edf19f1fe7abf2c3fec0692814e847e32f646234ec6866d60",
+  "text_sha256": "523bbc116036877ad1920f4eea3455ccf4bed24ad7726039159e36917b837177",
+  "pages": 60,
+  "characters": 56077,
+  "version_verified": true,
+  "text_path": "version-0169352af1970d3edf19f1fe7abf2c3fec0692814e847e32f646234ec6866d60.txt",
+  "pdf_path": "version-0169352af1970d3edf19f1fe7abf2c3fec0692814e847e32f646234ec6866d60.pdf",
+  "pdf_info": "Title:           2025年第二季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Fri Aug 15 16:00:13 2025 CST\nModDate:         Fri Aug 15 16:00:13 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           60\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1762399 bytes\nOptimized:       no\nPDF version:     1.7\n",
+  "downloaded_current_official_version": {
+    "download_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/f5c4690f2cbd40918bf24c2d39ac58af/b3e8c1a2b07d4facb38f4a7426415252/2025081819132397368.pdf",
+    "pdf_path": "333259eae1948a080612be5aec8efd1cc65b7574cb19d8d0cdcd43d5195d4633.pdf",
+    "text_path": "333259eae1948a080612be5aec8efd1cc65b7574cb19d8d0cdcd43d5195d4633.txt",
+    "pdf_sha256": "6c456ec683bb622c61eafbad95da6125739f739a0432e31156f61dbdbaea7fb2",
+    "text_sha256": "d4c82e4813ac2dd13a57f6d4c7fd59b8290501467465b1b8d0ce961d9392060c",
+    "pdf_info": "Title:           2025年第二季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Mon Aug 18 16:00:18 2025 CST\nModDate:         Mon Aug 18 16:00:18 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           60\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1761434 bytes\nOptimized:       no\nPDF version:     1.7\n"
+  },
+  "version_basis": "报告封面日期与原始记录发布日期一致；所选PDF创建和修改时间均为首发当日。官网后导出版本不替代首发版本。精筛仍需联网核实具体采用事实的公开时点。",
+  "publication_date_basis": "央行报告发布日期及首发日PDF；政府网站或当日新闻站点保存的原始报告。",
+  "later_official_text_matches_ignoring_whitespace": true,
+  "later_official_text_differences": []
+}

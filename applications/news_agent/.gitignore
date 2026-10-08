@@ -2,7 +2,29 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
-/data/
+# Keep processed data, caches and local configuration ignored.
+/data/*
+!/data/news/
+/data/news/*
+
+# Original news records and complete source documents.
+!/data/news/raw/
+/data/news/raw/**
+!/data/news/raw/**/
+!/data/news/raw/**/data.parquet
+!/data/news/documents/
+/data/news/documents/**
+!/data/news/documents/央行货币政策报告/
+!/data/news/documents/央行货币政策报告/date=*/
+!/data/news/documents/央行货币政策报告/date=*/*.pdf
+!/data/news/documents/央行货币政策报告/date=*/*.txt
+!/data/news/documents/央行货币政策报告/date=*/*.json
+
+# Source inventory and hashes are part of the reproducible input snapshot.
+!/data/news/_manifest/
+/data/news/_manifest/*
+!/data/news/_manifest/download_summary.json
+!/data/news/_manifest/copy_manifest*.json
 
 # Generated evaluation datasets and runtime outputs stay local.
 /evaluation/data/

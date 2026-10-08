@@ -1,0 +1,39 @@
+{
+  "raw_hash": "9cf2a70726b84364766a2fb25f049968e2aadba949e40cea2eec219c3f41997e",
+  "title": "2024年第四季度中国货币政策执行报告",
+  "pub_date": "2025-02-13",
+  "declared_pdf_url": "http://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/5347949/ad0bc3efe0234fed8cc6260a134a6e95/2025022618190099812.pdf",
+  "download_url": "https://np-newsimg.dfcfw.com/download/A2_cms_f_20250213171044710337?abc8958.pdf=&direct=1",
+  "resolved_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/5347949/ad0bc3efe0234fed8cc6260a134a6e95/2025022618190099812.pdf",
+  "pdf_sha256": "f03192ac5e97a61b2eabe7bc8b3ac08c4bfcc9afa683b9603f00aed97a16aa93",
+  "text_sha256": "2f7aab1d8b25d04ab12176e49d7fc0da8cfda04135638b9ec588f30c0f317127",
+  "pages": 59,
+  "characters": 55584,
+  "version_verified": true,
+  "text_path": "version-f03192ac5e97a61b2eabe7bc8b3ac08c4bfcc9afa683b9603f00aed97a16aa93.txt",
+  "pdf_path": "version-f03192ac5e97a61b2eabe7bc8b3ac08c4bfcc9afa683b9603f00aed97a16aa93.pdf",
+  "pdf_info": "Title:           2024年第四季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Thu Feb 13 16:00:43 2025 CST\nModDate:         Thu Feb 13 16:00:43 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           59\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1270150 bytes\nOptimized:       no\nPDF version:     1.7\n",
+  "downloaded_current_official_version": {
+    "download_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/5347949/ad0bc3efe0234fed8cc6260a134a6e95/2025022618190099812.pdf",
+    "pdf_path": "9cf2a70726b84364766a2fb25f049968e2aadba949e40cea2eec219c3f41997e.pdf",
+    "text_path": "9cf2a70726b84364766a2fb25f049968e2aadba949e40cea2eec219c3f41997e.txt",
+    "pdf_sha256": "1a642956b21b758c04ae002a2eda12e12d64a4c00ff7a2e39201e75e9ba73ea3",
+    "text_sha256": "7dcf0442cdfbce64ee5c1d4d69275f2d8fcc154dd1d57691c5e499950e55466c",
+    "pdf_info": "Title:           2024年第四季度中国货币政策执行报告\nSubject:         \nKeywords:        \nAuthor:          PBC\nCreator:         WPS 文字\nProducer:        \nCreationDate:    Wed Feb 26 16:00:06 2025 CST\nModDate:         Wed Feb 26 16:00:06 2025 CST\nCustom Metadata: yes\nMetadata Stream: no\nTagged:          no\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           59\nEncrypted:       no\nPage size:       595.3 x 841.9 pts (A4)\nPage rot:        0\nFile size:       1270128 bytes\nOptimized:       no\nPDF version:     1.7\n"
+  },
+  "version_basis": "报告封面日期与原始记录发布日期一致；所选PDF创建和修改时间均为首发当日。官网后导出版本不替代首发版本。精筛仍需联网核实具体采用事实的公开时点。",
+  "publication_date_basis": "央行原始发布页标明2025-02-13 17:05:21；首发当日转载保存的央行PDF。",
+  "later_official_text_matches_ignoring_whitespace": false,
+  "later_official_text_differences": [
+    {
+      "operation": "replace",
+      "current_official_text": "014年以来，随着外汇占款的下降，再贷款再次成为基础货币供应的主要渠道。截至2024年末，再贷款（含中期借贷便利）余额12.7万亿元，占央行总资产的28.8%，在调节货币供给总量上发挥了重要作用。中国人民银行创设新的再贷款工具，促进信贷结构优",
+      "selected_original_text": "014年以来，随着外汇占款的下降，再贷款再次成为基础货币供应的主要渠道。截至2024年末，再贷款（含中期借贷便利）余额11.4万亿元，占央行总资产的28.8%，在调节货币供给总量上发挥了重要作用。中国人民银行创设新的再贷款工具，促进信贷结构优"
+    },
+    {
+      "operation": "replace",
+      "current_official_text": "4年以来，随着外汇占款的下降，再贷款再次成为基础货币供应的主要渠道。截至2024年末，再贷款（含中期借贷便利）余额12.7万亿元，占央行总资产的28.8%，在调节货币供给总量上发挥了重要作用。中国人民银行创设新的再贷款工具，促进信贷结构优化。",
+      "selected_original_text": "4年以来，随着外汇占款的下降，再贷款再次成为基础货币供应的主要渠道。截至2024年末，再贷款（含中期借贷便利）余额11.4万亿元，占央行总资产的28.8%，在调节货币供给总量上发挥了重要作用。中国人民银行创设新的再贷款工具，促进信贷结构优化。"
+    }
+  ]
+}

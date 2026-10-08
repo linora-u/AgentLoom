@@ -1,0 +1,87 @@
+{
+  "copied_at": "2026-10-03T07:44:12.674285+00:00",
+  "scope": "required_predecessor_session_for_2025_first_entry",
+  "news_date": "2024-12-31",
+  "first_2025_entry_date": "2025-01-02",
+  "source_root": "/home/lin/code/data_processor/data/news",
+  "allowed_categories": [
+    "国家政策库",
+    "央行货币政策报告",
+    "新闻快讯",
+    "新闻联播文字稿",
+    "长篇新闻"
+  ],
+  "excluded_categories": [
+    "上市公司公告",
+    "券商研究报告"
+  ],
+  "files": [
+    {
+      "path": "raw/国家政策库/date=2024-12-31/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/国家政策库/date=2024-12-31/data.parquet",
+      "rows": 10,
+      "bytes": 27494,
+      "sha256": "04b7211bc4820243ceef8b13b0a755b17d18dfcd09c7ff84cc155878f4c3bb25"
+    },
+    {
+      "path": "raw/新闻快讯/date=2024-12-31/source=东方财富/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/新闻快讯/date=2024-12-31/source=东方财富/data.parquet",
+      "rows": 509,
+      "bytes": 177730,
+      "sha256": "5707c484d6444565eae3d81f5030311a95818229cee9166e250d03fb1848994f"
+    },
+    {
+      "path": "raw/新闻快讯/date=2024-12-31/source=凤凰新闻/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/新闻快讯/date=2024-12-31/source=凤凰新闻/data.parquet",
+      "rows": 392,
+      "bytes": 136902,
+      "sha256": "924ea160178e8703b19793494c6423b38332a02f5565b4fd73e34ad5b4c7c7cb"
+    },
+    {
+      "path": "raw/新闻快讯/date=2024-12-31/source=华尔街见闻/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/新闻快讯/date=2024-12-31/source=华尔街见闻/data.parquet",
+      "rows": 551,
+      "bytes": 173100,
+      "sha256": "b4c96fce7dbe27697c991e30a64bd780a8bcdecf065cefa0f8bf6362337743dc"
+    },
+    {
+      "path": "raw/新闻快讯/date=2024-12-31/source=同花顺/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/新闻快讯/date=2024-12-31/source=同花顺/data.parquet",
+      "rows": 650,
+      "bytes": 168288,
+      "sha256": "a00582c7648d9347c34166c3065f38becf9bb06c249690d65d89a4fa9b18045c"
+    },
+    {
+      "path": "raw/新闻快讯/date=2024-12-31/source=新浪财经/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/新闻快讯/date=2024-12-31/source=新浪财经/data.parquet",
+      "rows": 1374,
+      "bytes": 494125,
+      "sha256": "b4f16a8c8cb2e012fd19277230a9a397f2b216f50bbca7287c5a689704b6a70a"
+    },
+    {
+      "path": "raw/新闻快讯/date=2024-12-31/source=金融界/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/新闻快讯/date=2024-12-31/source=金融界/data.parquet",
+      "rows": 1461,
+      "bytes": 471929,
+      "sha256": "c5b6a9b224d9e9e580a3907fbf80b6b6d9657d7a758e007613751b4bb8c0a5d1"
+    },
+    {
+      "path": "raw/新闻联播文字稿/date=2024-12-31/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/新闻联播文字稿/date=2024-12-31/data.parquet",
+      "rows": 17,
+      "bytes": 28699,
+      "sha256": "6b37829cf4ee620914c25a277ef4666cd9eed7a25f9868b6cdf43cdab50be9d9"
+    },
+    {
+      "path": "raw/长篇新闻/date=2024-12-31/data.parquet",
+      "source_path": "/home/lin/code/data_processor/data/news/raw/长篇新闻/date=2024-12-31/data.parquet",
+      "rows": 1104,
+      "bytes": 1528986,
+      "sha256": "adf29d71ef6c816e864a1284821a1c5e6087d159a0163d4ac87816e7213f563d"
+    }
+  ],
+  "raw_rows": 6068,
+  "source_copy_integrity_verified": true,
+  "external_collection_completeness": "not_proved_by_copy_integrity",
+  "outcomes_read": false
+}
