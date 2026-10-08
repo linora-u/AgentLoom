@@ -36,8 +36,15 @@ Private repository test jobs are disabled. This uses GitHub Free-compatible
 Actions and the existing public branch protection. It does not enforce private
 branch protection or prevent manual private merges. Keep routine changes on PR
 branches so the coordinator can maintain the merge order.
-Manually merging or directly pushing private `main` does not trigger a public
-export. Submit a ready private PR and let the coordinator merge both repositories.
+Manually merging or directly pushing private `main` triggers a recovery run.
+The coordinator compares public files, creates a public PR if needed, and merges
+it only after all four public checks pass. Changes only to private files need no
+public PR or tests. Normal PR delivery still merges public first, then private;
+recovery cannot enforce that order once private `main` has already been updated.
+For recovery, public `main` must match a previous private `main` snapshot. The
+coordinator stops rather than overwriting independent public changes. A private
+main update while recovery CI is running invalidates that recovery attempt;
+the next push, hourly recovery, or manual run resumes from the latest main.
 
 Actions run from trusted private `main` and never execute private PR code. The
 deploy key only pushes public sync branches. `PUBLIC_SYNC_TOKEN`, stored only in
@@ -45,7 +52,8 @@ the private repository, authenticates PR/status API operations. Ready private
 PRs expose their public files when the public sync branch is created.
 
 Use **Actions -> Public repository sync -> Run workflow** to retry one PR or all
-ready PRs. An hourly recovery run also resumes interrupted operations. A public
+ready PRs. Every run also checks private `main` for unpublished public changes,
+even when no PRs are open. An hourly recovery run resumes interrupted operations. A public
 merge followed by a private merge failure is resumable; the two merges are not
 one transaction. Changes in either PR invalidate older checks.
 
