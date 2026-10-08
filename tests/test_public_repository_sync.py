@@ -41,7 +41,7 @@ def test_export_rejects_private_or_unsafe_entries(path, mode):
         sync.validate_public_path(path, mode, PRIVATE_PATHS)
 
 
-def test_public_commit_keeps_public_ancestry_and_exact_file_modes(tmp_path, monkeypatch):
+def test_public_commit_keeps_owner_identity_public_ancestry_and_exact_file_modes(tmp_path, monkeypatch):
     source, public = tmp_path / "source", tmp_path / "public"
     for repo in [source, public]:
         repo.mkdir()
@@ -58,14 +58,40 @@ def test_public_commit_keeps_public_ancestry_and_exact_file_modes(tmp_path, monk
     sync.command("git", "add", ".", cwd=public)
     sync.command("git", "commit", "-m", "Public parent", cwd=public)
     parent = sync.command("git", "rev-parse", "HEAD", cwd=public).strip()
+    public_base = sync.local_tree("HEAD", public)
     monkeypatch.chdir(source)
     desired = sync.public_tree(sync.local_tree("HEAD"), PRIVATE_PATHS)
-    sync.materialize_public_tree("HEAD", desired, public, PRIVATE_PATHS)
-    sync.command("git", "commit", "-m", "Sync public files", cwd=public)
-    assert sync.local_tree("HEAD", public) == desired
-    assert sync.command("git", "rev-parse", "HEAD^", cwd=public).strip() == parent
-    assert not (public / "applications/news_agent").exists()
-    assert not (public / "obsolete.txt").exists()
+    real_command = sync.command
+    published = []
+
+    def offline_command(*args, cwd=None, data=None):
+        if args[:2] == ("git", "clone"):
+            return real_command("git", "clone", str(public), args[-1])
+        if args[:2] == ("git", "push"):
+            # Inspect the real production commit before its temporary clone is deleted.
+            assert sync.local_tree("HEAD", cwd) == desired
+            assert real_command("git", "rev-parse", "HEAD^", cwd=cwd).strip() == parent
+            identity = real_command("git", "show", "-s", "--format=%an%n%ae%n%cn%n%ce", cwd=cwd)
+            assert identity.decode().splitlines() == [
+                "linora-u", "260928258+linora-u@users.noreply.github.com",
+                "linora-u", "260928258+linora-u@users.noreply.github.com",
+            ]
+            assert not (Path(cwd) / "applications/news_agent").exists()
+            assert not (Path(cwd) / "obsolete.txt").exists()
+            published.append(args)
+            return b""
+        return real_command(*args, cwd=cwd, data=data)
+
+    monkeypatch.setattr(sync, "command", offline_command)
+    monkeypatch.setattr(sync, "api", Mock(side_effect=[[], {"number": 1}]))
+    coordinator = sync.Coordinator({
+        "private_repository": "owner/private", "public_repository": "owner/public",
+        "required_public_checks": [],
+    })
+    coordinator.verify_private_head = Mock()
+    assert coordinator.ensure_public_pr(1, "HEAD", "base", desired, public_base, PRIVATE_PATHS) == {"number": 1}
+    coordinator.verify_private_head.assert_called_once_with(1, "HEAD", "base")
+    assert len(published) == 1
 
 
 def coordinator_fixture(monkeypatch):
