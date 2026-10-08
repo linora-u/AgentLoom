@@ -21,9 +21,9 @@ from agentloom.runtimes.pi.protocol import (
     decode_message, encode_message,
 )
 from agentloom.runtimes.pi.install import find_node, installed_pi_entry
+from agentloom.runtimes.pi.environment import build_pi_subprocess_env
 from agentloom.execution.agent_runtime import AgentRuntimeError, RuntimeErrorCategory
 from agentloom.execution.resources import register_resource
-from agentloom.execution.subprocess_env import build_subprocess_env
 from agentloom.execution.process import terminate_process_tree
 
 
@@ -41,10 +41,7 @@ class PiTransport:
         pi_agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or Path.home() / ".pi" / "agent").expanduser().resolve()
         pi_auth_path = pi_agent_dir / "auth.json"
         self.pi_auth_path = pi_auth_path
-        env = build_subprocess_env()
-        for name in list(env):
-            if name.startswith(("PI_", "NODE_")):
-                env.pop(name)
+        env = build_pi_subprocess_env()
         # AgentLoom's other tools may prepend their bundled Node 18. Select a
         # compatible executable without mutating the process-wide PATH.
         try:
