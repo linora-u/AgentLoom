@@ -4,6 +4,12 @@ Develop in `linora-u/AgentLoom-private`. The only private source directory is
 `applications/news_agent/`. All other tracked files are public, including this
 automation. Deleted files are deleted from both repositories.
 
+The local checkout at `/home/lin/code/AgentLoom` uses `origin` for the private
+repository and `public` for the open-source repository. Push development branches
+to `origin` and open private PRs against `main`. The local pre-push hook rejects
+private `news_agent` history if a branch is accidentally pushed to `public`;
+the exporter creates separate commits with clean public parents.
+
 Open a private pull request against `main`. Draft PRs stay unpublished. A ready
 PR is processed automatically:
 
