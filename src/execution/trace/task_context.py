@@ -7,9 +7,11 @@ sub-task ID, and agent ID handling.
 Note on threading:
     ContextVar values do NOT propagate automatically to child threads spawned
     by ``concurrent.futures.ThreadPoolExecutor``. Legacy identity/config
-    getters retain thread-safe global fallbacks. Run-scoped values, including
-    HookRun and root/local run ids, never fall back globally and must cross
-    thread boundaries through an explicit context snapshot.
+    getters retain locked global fallbacks for unscoped legacy integrations.
+    Scoped sub-task identities use ContextVar tokens, never those fallbacks.
+    Run-scoped values, including HookRun and root/local run ids, never fall
+    back globally and must cross thread boundaries through an explicit context
+    snapshot.
 """
 
 import logging
@@ -548,30 +550,17 @@ def sub_task_context(
     if sub_task_id is None:
         sub_task_id = generate_id(agent_name, prefix="agent")
 
-    # Save previous state.
-    previous_sub_task_id = get_current_sub_task_id()
-    previous_agent_id = get_current_agent_id()
-    previous_agent_name = get_current_agent_name()
-
+    # A legacy fallback can belong to a sibling thread/task. Bind only the
+    # current context, restoring its exact parent without publishing or
+    # promoting any process-global identity.
+    bindings = (
+        (_current_sub_task_id, sub_task_id),
+        (_current_agent_id, agent_id or agent_name),
+        (_current_agent_name, agent_name),
+    )
+    tokens = [(variable, variable.set(value)) for variable, value in bindings]
     try:
-        # Set new sub-task and agent context.
-        set_current_sub_task_id(sub_task_id)
-        set_current_agent_id(agent_id or agent_name)
-        set_current_agent_name(agent_name)
         yield sub_task_id
     finally:
-        # Restore previous state.
-        if previous_sub_task_id is not None:
-            set_current_sub_task_id(previous_sub_task_id)
-        else:
-            clear_current_sub_task_id()
-
-        if previous_agent_id is not None:
-            set_current_agent_id(previous_agent_id)
-        else:
-            clear_current_agent_id()
-
-        if previous_agent_name is not None:
-            set_current_agent_name(previous_agent_name)
-        else:
-            clear_current_agent_name()
+        for variable, token in reversed(tokens):
+            variable.reset(token)

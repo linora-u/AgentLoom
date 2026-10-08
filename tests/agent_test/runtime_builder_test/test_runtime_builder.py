@@ -1851,6 +1851,58 @@ def test_root_task_lifecycle_never_reads_legacy_subtask_fallback() -> None:
     assert events == [HookEvent.TASK_COMPLETED]
 
 
+def test_parallel_then_serial_workers_do_not_suppress_root_task_events(monkeypatch):
+    from importlib import import_module
+
+    from agentloom.execution.trace import sub_task_context
+
+    contexts = import_module("agentloom.execution.trace.task_context")
+    for name in ("_global_sub_task_id_fallback", "_global_agent_id_fallback", "_global_agent_name_fallback"):
+        monkeypatch.setattr(contexts, name, None)
+    entered = {name: threading.Event() for name in ("A", "B")}
+    release = {name: threading.Event() for name in ("A", "B")}
+    events = []
+    agent = _make_agent(logger=DummyLoggerBackend())
+    monkeypatch.setattr(agent, "build_runtime", lambda: RecordingAgentRuntime("root-result"))
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+
+    def record(context):
+        events.append((HookEvent(context.hook_event_name), context.tool_input["task_id"]))
+        return HookResult()
+
+    _append_hook_handler(agent, HookEvent.TASK_CREATED, record)
+    _append_hook_handler(agent, HookEvent.TASK_COMPLETED, record)
+
+    def worker(name):
+        with sub_task_context(name, f"sub-{name}", agent_id=f"instance-{name}"):
+            entered[name].set()
+            assert release[name].wait(5)
+
+    parent = replace(capture_explicit_execution_context(), sub_task_id=None, agent_id=None, agent_name=None)
+    with bind_explicit_execution_context(parent):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            try:
+                first = pool.submit(worker, "A")
+                assert entered["A"].wait(5)
+                second = pool.submit(worker, "B")
+                assert entered["B"].wait(5)
+                release["A"].set()
+                first.result(timeout=5)
+                release["B"].set()
+                second.result(timeout=5)
+            finally:
+                for event in release.values():
+                    event.set()
+        serial = base_agent_module.SubTaskTrackedAgent(RecordingAgentRuntime("serial-result"), "serial-worker")
+        assert serial.run(AgentRuntimeRequest(task="serial after parallel")).output == "serial-result"
+        assert _run_configured_task(agent, "root after workers", task_id="root-after-workers") == "root-result"
+        assert events == [
+            (HookEvent.TASK_CREATED, "root-after-workers"),
+            (HookEvent.TASK_COMPLETED, "root-after-workers"),
+        ]
+        assert capture_explicit_execution_context() == parent
+
+
 def test_each_run_rebinds_message_sink_for_fresh_runtime(monkeypatch):
     agent = _make_agent(logger=DummyLoggerBackend())
     runtimes: list[RecordingAgentRuntime] = []
