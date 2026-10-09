@@ -74,9 +74,19 @@ def test_real_cli_stdout_contains_only_application_events(tmp_path):
 @pytest.mark.parametrize("proxy_value,ca_value", [
     (None, None), ("0", ""), ("1", "/etc/ssl/certs/ca-certificates.crt"),
 ])
-def test_real_bridge_preserves_configured_or_default_proxy_ca(tmp_path, proxy_value, ca_value):
+def test_real_bridge_preserves_configured_or_default_proxy_ca(tmp_path, monkeypatch, proxy_value, ca_value):
     with model_service() as (url, requests):
         app = project(tmp_path, url)
+        if ca_value:
+            assert Path(ca_value).is_file()
+        monkeypatch.setenv("HTTPS_PROXY", os.environ.get("HTTPS_PROXY", "http://127.0.0.1:9"))
+        expected = {"NODE_USE_ENV_PROXY": "1"} if proxy_value is None else {}
+        for name, value in (("NODE_USE_ENV_PROXY", proxy_value), ("NODE_EXTRA_CA_CERTS", ca_value)):
+            monkeypatch.delenv(name, raising=False)
+            if value is not None:
+                monkeypatch.setenv(name, value)
+                expected[name] = value
+        # Select the launcher target after applying the case's proxy policy.
         binary = sdk_node()
         launcher = tmp_path / "bin/node"
         launcher.parent.mkdir()
@@ -89,18 +99,11 @@ if sys.argv[1:] != ['--version'] and sys.argv[1:3] != ['-p','process.versions.mo
 os.execv({binary!r},[{binary!r},*sys.argv[1:]])
 ''')
         launcher.chmod(0o755)
-        if ca_value:
-            assert Path(ca_value).is_file()
         env = {**os.environ, "PATH": str(launcher.parent) + os.pathsep + os.environ["PATH"],
                "NODE_OPTIONS": "--max-old-space-size=256", "NODE_PATH": "/ignored/node/path",
                "NODE_TLS_REJECT_UNAUTHORIZED": "0", "PI_TEST_SETTING": "must-be-removed",
                "HTTPS_PROXY": os.environ.get("HTTPS_PROXY", "http://127.0.0.1:9"),
                "NO_PROXY": "localhost,127.0.0.1"}
-        expected = {"NODE_USE_ENV_PROXY": "1"} if proxy_value is None else {}
-        for name, value in (("NODE_USE_ENV_PROXY", proxy_value), ("NODE_EXTRA_CA_CERTS", ca_value)):
-            env.pop(name, None)
-            if value is not None:
-                env[name] = expected[name] = value
         child = start_cli(tmp_path, app, env)
         stdout, stderr = child.communicate(timeout=20)
     assert child.returncode == 0, stderr

@@ -41,7 +41,7 @@ def validate(output, profiles, node):
         assert result.returncode == 0, f"{label} failed; inspect {logs / (label + '.log')}"
 
     version = subprocess.check_output([str(node), "--version"], env=env, text=True).strip()
-    assert version == "v22.19.0", f"Release verification pins Node 22.19.0, got {version}"
+    assert version == "v22.21.0", f"Release verification pins Node 22.21.0, got {version}"
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
     report = {"revision": revision, "dirty": dirty, "node": version,
