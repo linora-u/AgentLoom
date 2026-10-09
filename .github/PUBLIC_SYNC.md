@@ -1,8 +1,9 @@
 # AgentLoom repository synchronization
 
-Develop in `linora-u/AgentLoom-private`. The only private source directory is
-`applications/news_agent/`. All other tracked files are public, including this
-automation. Deleted files are deleted from both repositories.
+Develop in `linora-u/AgentLoom-private`. The private application source directory
+is `applications/news_agent/`. Other tracked files are public, including this
+automation; shared uv configuration is exported with private workspace metadata
+removed. Deleted public files are deleted from both repositories.
 
 Define private files/directories in `.github/public-sync.json`, under
 `private_prefixes`. Paths are relative to the repository root. A directory entry
@@ -13,6 +14,17 @@ later commits in the same export are also hidden from earlier snapshots, so a ne
 private path cannot leak through an intermediate commit. Public CI and the local
 push guard use the same configuration. Adding an already-published path may
 require cleaning its public history before the public history guard can pass.
+
+Root `pyproject.toml` workspace members and excludes under private paths are
+removed from the public projection. Root `uv.lock` excludes private local
+packages, their membership and references, and packages reachable only from
+private applications. Public workspace members and framework dependencies stay
+in the exported files. An equivalent public lock from source ancestry is reused
+when adding a private member only changes lock formatting or redundant markers;
+real framework dependency updates are still exported. This filtering applies to
+every source snapshot, so intermediate private workspace additions are skipped
+even if the source commits are already on private `main`. The public history
+guard also rejects shared uv metadata referencing private paths.
 
 The local checkout at `/home/lin/code/AgentLoom` uses `origin` for the private
 repository and `public` for the open-source repository. Push development branches
