@@ -32,7 +32,13 @@ def installation(tmp_path, monkeypatch):
     binary.mkdir()
     log = tmp_path / "npm-calls.jsonl"
     tsc_log = tmp_path / "tsc-calls.jsonl"
-    node = install.find_node(os.environ.copy())
+    # The same launcher must support both direct and proxy-enabled test cases.
+    # Otherwise find_node can bypass it when a case enables environment proxies.
+    from agentloom.runtimes.pi.environment import build_pi_subprocess_env
+
+    node_env = build_pi_subprocess_env()
+    node_env["NODE_USE_ENV_PROXY"] = "1"
+    node = install.find_node(node_env)
     launcher = binary / "node"
     launcher.write_text(f'''#!{sys.executable}
 import json,os,sys
@@ -140,6 +146,9 @@ def test_install_build_handshake_and_readiness_share_environment_policy(
     log = source_bridge(installation).parent / "env-calls.jsonl"
     monkeypatch.setenv("TEST_PI_ENV_LOG", str(log))
     expected = {}
+    if proxy_value is None and any(os.environ.get(name) for name in
+                                  ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")):
+        expected["NODE_USE_ENV_PROXY"] = "1"
     for name, value in (("NODE_USE_ENV_PROXY", proxy_value), ("NODE_EXTRA_CA_CERTS", ca_value)):
         monkeypatch.delenv(name, raising=False)
         if value is not None:

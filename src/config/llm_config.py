@@ -91,7 +91,7 @@ class LlmModelTypeSettings(BaseModel):
     temperature: float = DEFAULT_MODEL_TEMPERATURE
     max_tokens: int = DEFAULT_MAX_TOKENS
     context_window: int = DEFAULT_MAX_TOKENS
-    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    max_output_tokens: int | None = Field(default=DEFAULT_MAX_OUTPUT_TOKENS, ge=1)
     input_token_limit: int = DEFAULT_MAX_TOKENS - DEFAULT_MAX_OUTPUT_TOKENS
     timeout: int = DEFAULT_MODEL_TIMEOUT
     num_retries: int = DEFAULT_MODEL_NUM_RETRIES
@@ -172,18 +172,21 @@ class LLMConfig(BaseModel):
                     v.get("context_window", DEFAULT_MAX_TOKENS),
                     default=DEFAULT_MAX_TOKENS,
                 )
-                parsed_max_output_tokens = IntParser.parse(
-                    v.get("max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
-                    default=DEFAULT_MAX_OUTPUT_TOKENS,
-                )
+                # Codex can use its native generation limit when no cap is set.
+                # Other adapters retain their existing default budget.
+                output_default = None if v.get("adapter") == "openai_codex_responses" else DEFAULT_MAX_OUTPUT_TOKENS
+                output_value = v.get("max_output_tokens", output_default)
+                parsed_max_output_tokens = (None if output_value is None and v.get("adapter") == "openai_codex_responses" else IntParser.parse(
+                    output_value, default=DEFAULT_MAX_OUTPUT_TOKENS,
+                ))
                 resolved_context_window = int(parsed_context_window)
-                resolved_max_output_tokens = int(parsed_max_output_tokens)
-                if resolved_max_output_tokens >= resolved_context_window:
+                resolved_max_output_tokens = int(parsed_max_output_tokens) if parsed_max_output_tokens is not None else None
+                if resolved_max_output_tokens is not None and resolved_max_output_tokens >= resolved_context_window:
                     raise ValueError(
                         f"Model type '{k}' max_output_tokens ({resolved_max_output_tokens}) must be smaller "
                         f"than context_window ({resolved_context_window})."
                     )
-                resolved_input_token_limit = resolved_context_window - resolved_max_output_tokens
+                resolved_input_token_limit = resolved_context_window - (resolved_max_output_tokens or 0)
             resolved_timeout = v.get("timeout", DEFAULT_MODEL_TIMEOUT)
             resolved_num_retries = v.get("num_retries", DEFAULT_MODEL_NUM_RETRIES)
             resolved_retry_delay = v.get("retry_delay", DEFAULT_MODEL_RETRY_DELAY)
