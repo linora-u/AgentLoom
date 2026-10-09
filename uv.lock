@@ -3,15 +3,21 @@ revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform != 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version < '3.13' and sys_platform != 'win32'",
 ]
 
 [options]
 prerelease-mode = "allow"
+
+[manifest]
+members = [
+    "agentloom",
+    "news-agent",
+]
 
 [[package]]
 name = "agentloom"
@@ -1918,6 +1924,27 @@ wheels = [
 ]
 
 [[package]]
+name = "news-agent"
+version = "0.1.0"
+source = { editable = "applications/news_agent" }
+dependencies = [
+    { name = "agentloom" },
+    { name = "jsonschema" },
+    { name = "pyarrow" },
+    { name = "pyyaml" },
+    { name = "tiktoken" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentloom", extras = ["pi"], editable = "." },
+    { name = "jsonschema", specifier = ">=4.25.1,<5" },
+    { name = "pyarrow", specifier = ">=22.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "tiktoken", specifier = ">=0.12.0" },
+]
+
+[[package]]
 name = "numpy"
 version = "2.3.5"
 source = { registry = "https://pypi.org/simple" }
@@ -3777,8 +3804,8 @@ name = "wexpect"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "psutil", marker = "sys_platform == 'win32'" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "psutil" },
+    { name = "pywin32" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/78/2a8ca6478f26593e036eef5462afd9f0fb0d3c209ecc448244875b6f5119/wexpect-4.0.0.tar.gz", hash = "sha256:de9e739e78ec4d74a39bf8499904dacb6c594007a674fb7e10752c9b131f6522", size = 78094, upload-time = "2020-04-08T14:58:26.072Z" }
 

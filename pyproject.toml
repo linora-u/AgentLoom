@@ -156,3 +156,6 @@ dev = [
 
 [tool.uv]
 prerelease = "allow"
+
+[tool.uv.workspace]
+members = ["applications/news_agent"]
