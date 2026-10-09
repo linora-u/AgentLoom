@@ -3,7 +3,7 @@
 import argparse
 import subprocess
 
-from public_sync import configured_prefixes, is_private_path, load_config
+from public_sync import configured_prefixes, is_private_path, load_config, local_tree, public_tree
 
 
 def main():
@@ -21,7 +21,14 @@ def main():
     forbidden = [p for p in paths if is_private_path(p, prefixes)]
     if forbidden:
         raise SystemExit(f"Public repository contains {len(forbidden)} configured private files")
-    print("Public repository and commit history contain no configured private files")
+    commits = subprocess.check_output([
+        "git", "rev-list", args.ref, "--", "pyproject.toml", "uv.lock"
+    ]).decode().splitlines()
+    for commit in dict.fromkeys([args.ref, *commits]):
+        tree = local_tree(commit)
+        if public_tree(tree, prefixes) != tree:
+            raise SystemExit("Public commit history contains private uv workspace configuration")
+    print("Public repository and commit history contain no configured private files or workspace metadata")
 
 
 if __name__ == "__main__":
