@@ -7,6 +7,7 @@ objects, never imported or executed. The public repository gets its own commits.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -14,6 +15,8 @@ import re
 import subprocess
 import tempfile
 import time
+import tomllib
+from collections import defaultdict
 from pathlib import Path, PurePosixPath
 
 CONFIG_PATH = ".github/public-sync.json"
@@ -49,8 +52,17 @@ def api(path, method="GET", payload=None, *, missing_ok=False):
     return json.loads(raw) if raw else None
 
 
+class GitTree(dict):
+    """Keep the source location when projecting shared configuration blobs."""
+
+    def __init__(self, ref, cwd):
+        super().__init__()
+        self.source_ref = ref
+        self.cwd = cwd
+
+
 def local_tree(ref, cwd=None):
-    tree = {}
+    tree = GitTree(ref, cwd)
     for entry in command("git", "ls-tree", "-rz", ref, cwd=cwd).split(b"\0"):
         if entry:
             metadata, path = entry.split(b"\t", 1)
@@ -92,11 +104,189 @@ def is_private_path(path, prefixes):
                for prefix in prefixes)
 
 
+def normalized_name(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def toml_value(value):
+    if isinstance(value, dict):
+        return "{ " + ", ".join(f"{json.dumps(k)} = {toml_value(v)}" for k, v in value.items()) + " }"
+    if isinstance(value, list):
+        return "[" + ", ".join(toml_value(item) for item in value) + "]"
+    if isinstance(value, (str, int, float, bool)):
+        return json.dumps(value, ensure_ascii=False)
+    raise RuntimeError("Unsupported uv configuration value")
+
+
+def replace_toml_table(text, header, fields):
+    headers = list(re.finditer(r"(?m)^(\[[^\n]+\])[ \t]*\r?\n", text))
+    matches = [(i, match) for i, match in enumerate(headers) if match.group(1) == header]
+    if len(matches) != 1:
+        raise RuntimeError(f"Cannot safely filter uv table {header}")
+    index, match = matches[0]
+    end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+    before = text[:match.start()]
+    if fields:
+        replacement = header + "\n" + "".join(f"{key} = {toml_value(value)}\n" for key, value in fields.items()) + "\n"
+    else:
+        replacement = ""
+        if before.endswith("\n\n"):
+            before = before[:-1]
+    return before + replacement + text[end:]
+
+
+def public_project_blob(blob, prefixes):
+    text = blob.decode()
+    document = tomllib.loads(text)
+    workspace = document.get("tool", {}).get("uv", {}).get("workspace")
+    if not workspace:
+        return blob
+    filtered = {}
+    changed = False
+    for key, values in workspace.items():
+        if key not in {"members", "exclude"} or not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+            raise RuntimeError("Unsupported uv workspace configuration")
+        filtered[key] = [value for value in values if not is_private_path(PurePosixPath(value).as_posix(), prefixes)]
+        changed |= filtered[key] != values
+    if not changed:
+        return blob
+    fields = filtered if filtered.get("members") else {}
+    result = replace_toml_table(text, "[tool.uv.workspace]", fields)
+    tomllib.loads(result)
+    return result.encode()
+
+
+def package_dependencies(package):
+    yield package.get("dependencies", [])
+    for key in ("optional-dependencies", "dev-dependencies"):
+        yield from package.get(key, {}).values()
+
+
+def private_uv_package(package, prefixes):
+    return any(isinstance(value, str) and is_private_path(PurePosixPath(value).as_posix(), prefixes)
+               for value in package.get("source", {}).values())
+
+
+def public_package_record(package, private):
+    result = copy.deepcopy(package)
+    groups = list(package_dependencies(result))
+    metadata = result.get("metadata", {})
+    groups.append(metadata.get("requires-dist", []))
+    groups.extend(metadata.get("requires-dev", {}).values())
+    for dependencies in groups:
+        dependencies[:] = [d for d in dependencies if normalized_name(d["name"]) not in private]
+    return result
+
+
+def public_lock_blob(blob, prefixes):
+    text = blob.decode()
+    document = tomllib.loads(text)
+    records = document.get("package", [])
+    private = {normalized_name(p["name"]) for p in records if private_uv_package(p, prefixes)}
+    if not private:
+        return blob
+    roots = {normalized_name(p["name"]) for p in records
+             if "editable" in p.get("source", {}) or "virtual" in p.get("source", {})}
+    roots -= private
+    if not roots:
+        raise RuntimeError("Cannot identify the public uv project root")
+    public = [public_package_record(p, private) for p in records if normalized_name(p["name"]) not in private]
+    reachable = set(roots)
+    while True:
+        dependencies = {normalized_name(d["name"]) for p in public if normalized_name(p["name"]) in reachable
+                        for group in package_dependencies(p) for d in group}
+        if dependencies <= reachable:
+            break
+        reachable.update(dependencies)
+    public = [p for p in public if normalized_name(p["name"]) in reachable]
+    kept = {normalized_name(p["name"]) for p in public}
+    headers = list(re.finditer(r"(?m)^\[\[package\]\][ \t]*\r?\n", text))
+    if len(headers) != len(records):
+        raise RuntimeError("Cannot safely filter uv lock records")
+    preamble = text[:headers[0].start()] if headers else text
+    manifest = document.get("manifest")
+    if manifest and "members" in manifest:
+        manifest = copy.deepcopy(manifest)
+        manifest["members"] = [name for name in manifest["members"] if normalized_name(name) in kept]
+        if set(map(normalized_name, manifest["members"])) == roots and len(roots) == 1:
+            manifest.pop("members")
+        preamble = replace_toml_table(preamble, "[manifest]", manifest)
+    chunks = [preamble]
+    for index, package in enumerate(records):
+        name = normalized_name(package["name"])
+        if name not in kept:
+            continue
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        updated = public_package_record(package, private)
+        if updated == package:
+            chunks.append(text[headers[index].start():end])
+        else:
+            chunks.append("[[package]]\n" + "".join(f"{json.dumps(k)} = {toml_value(v)}\n" for k, v in updated.items()) + "\n")
+    result = "".join(chunks).encode()
+    tomllib.loads(result.decode())
+    return result
+
+
+def lock_fingerprint(blob):
+    """Ignore ordering and dependency markers implied by the parent's condition."""
+    document = tomllib.loads(blob.decode())
+    if "resolution-markers" in document:
+        document["resolution-markers"].sort()
+    incoming = defaultdict(set)
+    for package in document.get("package", []):
+        for dependencies in package_dependencies(package):
+            for dependency in dependencies:
+                incoming[normalized_name(dependency["name"])].add(dependency.get("marker"))
+    for package in document.get("package", []):
+        conditions = incoming[normalized_name(package["name"])]
+        condition = next(iter(conditions)) if len(conditions) == 1 else None
+        for dependencies in package_dependencies(package):
+            if condition and not re.search(r"\b(extra|extras|dependency_groups)\b", condition):
+                for dependency in dependencies:
+                    if dependency.get("marker") == condition:
+                        dependency.pop("marker")
+            dependencies.sort(key=lambda value: json.dumps(value, sort_keys=True))
+    document.get("package", []).sort(key=lambda value: json.dumps(value, sort_keys=True))
+    return hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest()
+
+
+def prior_public_lock(tree, blob, prefixes):
+    """Keep an identical published lock when private membership only reformats it."""
+    ref = getattr(tree, "source_ref", None)
+    cwd = getattr(tree, "cwd", None)
+    if ref is None:
+        return blob
+    fingerprint = lock_fingerprint(blob)
+    seen = {tree["uv.lock"][1]}
+    for commit in command("git", "log", "--format=%H", ref, "--", "uv.lock", cwd=cwd).decode().splitlines():
+        sha = command("git", "rev-parse", f"{commit}:uv.lock", cwd=cwd).decode().strip()
+        if sha in seen:
+            continue
+        seen.add(sha)
+        candidate = command("git", "cat-file", "blob", sha, cwd=cwd)
+        if public_lock_blob(candidate, prefixes) == candidate and lock_fingerprint(candidate) == fingerprint:
+            return candidate
+    return blob
+
+
 def public_tree(tree, prefixes=None):
     if prefixes is None:
         prefixes = configured_prefixes(load_config())
-    return {path: entry for path, entry in tree.items()
-            if not is_private_path(path, prefixes)}
+    projected = {path: entry for path, entry in tree.items() if not is_private_path(path, prefixes)}
+    cwd = getattr(tree, "cwd", None)
+    for path, filter_blob in (("pyproject.toml", public_project_blob), ("uv.lock", public_lock_blob)):
+        if path not in projected or not prefixes:
+            continue
+        mode, sha = projected[path]
+        original = command("git", "cat-file", "blob", sha, cwd=cwd)
+        filtered = filter_blob(original, prefixes)
+        if filtered == original:
+            continue
+        if path == "uv.lock":
+            filtered = prior_public_lock(tree, filtered, prefixes)
+        public_sha = command("git", "hash-object", "-w", "--stdin", cwd=cwd, data=filtered).decode().strip()
+        projected[path] = (mode, public_sha)
+    return projected
 
 
 def validate_public_path(path, mode, prefixes=None):
@@ -127,7 +317,7 @@ def materialize_public_tree(source_ref, desired, target, prefixes=None):
         if current.get(path) == (mode, sha):
             continue
         blob = command("git", "hash-object", "-w", "--stdin", cwd=target,
-                       data=command("git", "show", f"{source_ref}:{path}")).decode().strip()
+                       data=command("git", "cat-file", "blob", sha)).decode().strip()
         if blob != sha:
             raise RuntimeError("Exported blob differs from the source")
         changed.append(f"{mode} {sha}\t{path}".encode() + b"\0")
