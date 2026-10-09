@@ -40,7 +40,8 @@ jobs:
       - name: Set up the supported Node runtime
         uses: actions/setup-node@v6
         with:
-          node-version: '22.19.0'
+          # Pi's environment proxy mode requires Node 22.21+ on the 22.x line.
+          node-version: '22.21.0'
 
       - name: Install the locked Pi SDK
         run: uv run --locked --extra smol --extra code loom runtime install pi
@@ -75,7 +76,7 @@ jobs:
       - uses: astral-sh/setup-uv@v8.1.0
       - uses: actions/setup-node@v6
         with:
-          node-version: '22.19.0'
+          node-version: '22.21.0'
       - run: uv python install 3.12
       - name: Build and verify an isolated locked profile
         run: >-

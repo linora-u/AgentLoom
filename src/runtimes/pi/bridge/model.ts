@@ -126,7 +126,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
       const fetch = options?.fetch ?? globalThis.fetch;
       const stream = await nativeStream(model, selectedContext, {...options,
         temperature: subscription ? undefined : settings.temperature,
-        maxTokens: settings.max_output_tokens, headers,
+        ...(settings.max_output_tokens != null ? {maxTokens: settings.max_output_tokens} : {}), headers,
         cacheRetention: settings.context_cache ? "short" : "none",
         samplingParams: {...samplingParams, ...extraBody},
         fetch: async (input, init) => {

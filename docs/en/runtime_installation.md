@@ -3,8 +3,9 @@
 AgentLoom requires Python 3.12 or newer. Choose a Python profile explicitly:
 
 - `pi` installs the shared platform without `smolagents` or its instrumentation.
-  Pi additionally requires Node.js **22.19 or newer** and npm. Release validation
-  and CI use **22.19.0**.
+  Pi additionally requires Node.js **22.19 or newer** and npm. Environment proxy
+  mode requires **22.21+ on the 22.x line, or 24+**. Release validation and CI use
+  **22.21.0**.
 - `smol` adds the pinned **smolagents 1.26.0** runtime and its instrumentation.
   The existing `./install` source installer selects `smol` plus `code`, preserving
   its original default Agent and professional-tool environment.
@@ -100,7 +101,7 @@ starts. Application execution never runs npm or downloads dependencies.
 
 ## Reproduce the release acceptance
 
-With Node 22.19.0 on PATH, run:
+With Node 22.21.0 on PATH, run:
 
 ```sh
 uv run --no-project --python 3.12 tests/packaging/validate_profiles.py \

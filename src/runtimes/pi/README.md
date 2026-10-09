@@ -7,7 +7,8 @@ Tool, Todo, final_answer implementation or message format is required.
 
 ## Install and run
 
-Node **22.19+** with npm is required. Use uv as the Python environment and
+Node **22.19+** with npm is required. Environment-proxy mode requires Node
+**22.21+ on the 22.x line, or 24+**. Use uv as the Python environment and
 installation entry point:
 
 ```sh
@@ -97,7 +98,7 @@ or protected Shell query mapping are rejected before execution.
 | `model` | Preserve the model ID, removing the legacy `openai/` or `gemini/` routing prefix |
 | `base_url`, `api_key` | Selected endpoint and in-memory credentials; no user auth discovery |
 | Effective request headers | Literal private headers; no Pi command/env interpolation |
-| `temperature`, `max_output_tokens` | Native `temperature` / `maxTokens` stream options; the provider decides the wire format. Pi Codex currently omits `max_output_tokens` from its HTTP body |
+| `temperature`, `max_output_tokens` | Native stream options. AgentLoom injects an explicitly configured Codex `max_output_tokens` into its payload; omitted/null Codex limits leave the provider's native model limit and send no cap |
 | `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved window is applied to the SDK model before session creation, including Codex and ChatGPT subscription models; `max_output_tokens` sets its generation limit |
 | `timeout` | Converted from seconds to native `retry.provider.timeoutMs`; the SDK owns timeout behavior |
 | `num_retries`, `retry_delay`, `max_retry_delay` | Mapped to native retry counts, `baseDelayMs`, `maxAgentDelayMs` and provider `maxRetryDelayMs`; the SDK owns retries and fallback |

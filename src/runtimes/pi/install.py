@@ -153,10 +153,16 @@ def find_node(env: dict[str, str]) -> str:
             probe = subprocess.run([candidate, "--version"], env=env,
                 capture_output=True, timeout=5, text=True, check=True)
             version = re.fullmatch(r"v(\d+)\.(\d+)\.\d+\s*", probe.stdout)
-            if version and (int(version[1]), int(version[2])) >= (22, 19):
-                return candidate
+            if version:
+                major, minor = int(version[1]), int(version[2])
+                compatible = (major, minor) >= (22, 19)
+                proxy_compatible = major >= 24 or (major == 22 and minor >= 21)
+                if compatible and (env.get("NODE_USE_ENV_PROXY") != "1" or proxy_compatible):
+                    return candidate
         except (OSError, subprocess.SubprocessError):
             continue
+    if env.get("NODE_USE_ENV_PROXY") == "1":
+        raise RuntimeError("Pi requires Node 22.21+ (22.x) or >=24 for environment proxy mode. Install a compatible Node.js runtime first.")
     raise RuntimeError("Pi requires Node >=22.19. Install a compatible Node.js runtime first.")
 
 

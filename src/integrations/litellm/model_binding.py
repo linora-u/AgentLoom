@@ -88,7 +88,7 @@ class ModelProfileOverlay:
                 updates.get(
                     "max_output_tokens",
                     settings.max_output_tokens,
-                )
+                ) or 0
             )
             if max_output_tokens >= context_window:
                 raise ValueError(
@@ -137,7 +137,6 @@ def _turn_options(
         else "max_tokens"
     )
     options: dict[str, Any] = {
-        output_token_key: settings.max_output_tokens,
         "temperature": settings.temperature,
         "timeout": settings.timeout,
         "num_retries": settings.num_retries,
@@ -145,6 +144,8 @@ def _turn_options(
         "max_retry_delay": settings.max_retry_delay,
         "_agent_loom_model_type": model_type,
     }
+    if settings.max_output_tokens is not None:
+        options[output_token_key] = settings.max_output_tokens
     if settings.base_url:
         options["api_base"] = settings.base_url
     if settings.api_key:
@@ -181,7 +182,7 @@ def _build_binding(
         options=_turn_options(normalized_type, settings, request_headers),
         max_tokens=settings.max_tokens,
         context_window=settings.context_window,
-        max_output_tokens=settings.max_output_tokens,
+        max_output_tokens=settings.max_output_tokens or 0,
         input_token_limit=settings.input_token_limit,
         requests_per_minute=requests_per_minute,
         description=settings.description,
