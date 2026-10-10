@@ -41,6 +41,7 @@ from .yaml_loader import load_unique_yaml
 
 SYSTEM_CONFIG_NAME = "system.yaml"
 MODEL_CONFIG_NAME = "model.yaml"
+LOCAL_MODEL_CONFIG_NAME = "model.local.yaml"
 _CAMPAIGN_LLM_CONFIG_FD_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD"
 _MAX_CAMPAIGN_LLM_CONFIG_BYTES = 1024 * 1024
 APP_CONFIG_RELATIVE_PATH = Path("config") / SYSTEM_CONFIG_NAME
@@ -606,6 +607,9 @@ def build_effective_agent_config_snapshot(
         else:
             if model_root != base.agent_root:
                 llm_config = base.llm.overlay_from_yaml(model_root / "config" / MODEL_CONFIG_NAME)
+                llm_config = llm_config.overlay_from_yaml(
+                    model_root / "config" / LOCAL_MODEL_CONFIG_NAME
+                )
     layers: list[ConfigLayerSnapshot] = []
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)

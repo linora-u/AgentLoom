@@ -178,6 +178,36 @@ def test_application_only_models_are_used_and_changes_apply_to_next_run(tmp_path
     assert [payload["model"] for _, payload, _ in requests] == ["application-before", "application-after"]
 
 
+def test_application_local_model_profiles_override_tracked_profiles_and_refresh(tmp_path):
+    with model_service() as (url, requests):
+        app = project(tmp_path, url)
+        global_path = tmp_path / "config/model.yaml"
+        profile = yaml.safe_load(global_path.read_text())["model"]["test"]
+        global_path.unlink()
+        config = app.parent.parent / "config"
+        config.mkdir()
+        tracked = {**profile, "model": "openai/tracked", "api_key": ""}
+        local = {**tracked, "model": "openai/local-before", "api_key": "private-before"}
+        (config / "model.yaml").write_text(
+            yaml.safe_dump({"model": {"default_model_type": "test", "test": tracked}})
+        )
+        local_path = config / "model.local.yaml"
+        local_path.write_text(yaml.safe_dump({"model": {"test": local}}))
+        with bind_config(load_project_config(tmp_path)):
+            first = execute_app(app, file_logging=False)
+            local["model"] = "openai/local-after"
+            local["api_key"] = "private-after"
+            local_path.write_text(yaml.safe_dump({"model": {"test": local}}))
+            second = execute_app(app, file_logging=False)
+    assert first.output == second.output == "Pi answer"
+    assert [payload["model"] for _, payload, _ in requests] == [
+        "local-before", "local-after",
+    ]
+    assert [headers["authorization"] for _, _, headers in requests] == [
+        "Bearer private-before", "Bearer private-after",
+    ]
+
+
 def test_textual_tool_call_without_tools_gets_feedback_and_continues(tmp_path):
     pseudo_call = (
         'I will inspect the project.\n<｜DSML｜tool_calls>\n'
