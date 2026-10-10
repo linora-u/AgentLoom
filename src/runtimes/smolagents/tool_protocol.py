@@ -101,6 +101,14 @@ def action_step_to_protocol_messages(
                 raw={TOOL_RESULT_RAW_KEY: record.to_dict()},
             )
         )
+    if is_recoverable_agent_error(getattr(step, "error", None)):
+        # Runtime validation can fail after tools have already settled (for
+        # example, two final answers). Keep their replies and separate feedback.
+        for feedback in reversed(step.to_messages(summary_mode=summary_mode)):
+            if feedback.role == MessageRole.TOOL_RESPONSE:
+                feedback.raw = {RUNTIME_FEEDBACK_RAW_KEY: True}
+                messages.append(feedback)
+                break
     return messages
 
 
