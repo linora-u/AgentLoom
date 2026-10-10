@@ -154,4 +154,9 @@ dev = [
 ]
 
 [tool.uv]
-prerelease = "allow"
+constraint-dependencies = [
+    "grpcio>=1.75.1 ; python_version >= '3.14'",
+    "graphql-core<3.3",
+    "sqlean-py>=3.50.4.5 ; python_version >= '3.14' and sys_platform != 'win32'",
+    "tiktoken>=0.14.0 ; python_version >= '3.14'",
+]
