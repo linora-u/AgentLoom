@@ -24,6 +24,7 @@ Environment:
 
 Defaults: Python environment in the checkout's .venv; launchers and installation
 records in the checkout's .agentloom.
+Uses the uv-managed Python pinned in .python-version unless UV_PYTHON is set.
 EOF
 }
 
@@ -115,6 +116,9 @@ if [[ "$RUNTIME_PROFILE" == smol ]]; then
   RUNTIME_EXTRAS+=(--extra code)
 fi
 SYNC_OPTIONS=(--locked)
+if [[ -z "${UV_PYTHON:-}" ]]; then
+  SYNC_OPTIONS+=(--managed-python --python "$(cat "$REPO_ROOT/.python-version")")
+fi
 if [[ "$VENV_DIR" == "$REPO_ROOT/.venv" ]]; then
   # This environment is shared with workspace applications and development tools.
   SYNC_OPTIONS+=(--inexact)

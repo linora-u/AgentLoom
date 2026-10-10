@@ -76,6 +76,8 @@ cd AgentLoom
 It currently supports macOS and Linux shells and requires Git and Bash. It
 installs missing `uv` through its official installer, then places the environment
 in this checkout's `.venv` and the launchers/install records in `.agentloom`.
+The project pins its managed Python version in `.python-version`; `./install`
+uses that version even when another Python is available on PATH.
 No environment activation is needed. Set `AGENTLOOM_INSTALL_DIR=/path/to/install`
 for a custom installation with its environment in `/path/to/install/venv`.
 Open a new terminal and verify it:
@@ -271,7 +273,7 @@ Framework source lives directly in `src/app/`, `src/execution/`,
 `src/integrations/`, and the other responsibility modules. Installation maps `src/`
 to the Python package name `agentloom`: the import above loads
 `src/app/runner.py`. There is no extra `agentloom` source directory.
-Use `uv sync --python 3.12 --locked --all-groups --extra smol --extra code` to install the checkout before
+Use `uv sync --managed-python --locked --all-groups --extra smol --extra code` to install the checkout before
 calling Python APIs. The old `src.*` imports and module commands are removed;
 supported commands are `agentloom`, `loom`, and `python -m agentloom`. See the
 [architecture and migration map](docs/specs/architecture-migration-inventory.md)

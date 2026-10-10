@@ -21,6 +21,7 @@ def installer(tmp_path: Path):
     checkout.mkdir()
     source_installer = checkout / "install"
     shutil.copy2(ROOT / "install", source_installer)
+    shutil.copy2(ROOT / ".python-version", checkout / ".python-version")
     tools = tmp_path / "tools"
     tools.mkdir()
     home = tmp_path / "home"
@@ -51,14 +52,17 @@ def installer(tmp_path: Path):
         "INSTALLER_TEST_LOG": str(log),
     }
     env.pop("UV_PROJECT_ENVIRONMENT", None)
+    env.pop("UV_PYTHON", None)
 
     def run(*args: str, command: Path = source_installer,
-            install_dir: Path | None = install_root):
+            install_dir: Path | None = install_root, python: str | None = None):
         invocation_env = dict(env)
         if install_dir is None:
             invocation_env.pop("AGENTLOOM_INSTALL_DIR", None)
         else:
             invocation_env["AGENTLOOM_INSTALL_DIR"] = str(install_dir)
+        if python is not None:
+            invocation_env["UV_PYTHON"] = python
         return subprocess.run(
             [str(command), *args], cwd=tmp_path, env=invocation_env,
             capture_output=True, text=True, timeout=30,
@@ -108,6 +112,9 @@ def test_default_install_uses_checkout_environment_when_called_elsewhere(install
     assert not (home / ".agentloom").exists()
     assert not (checkout.parent / ".venv").exists()
     assert "--inexact" in json.loads(log.read_text().splitlines()[0])
+    invocation = json.loads(log.read_text().splitlines()[0])
+    assert "--managed-python" in invocation
+    assert invocation[invocation.index("--python") + 1] == (checkout / ".python-version").read_text().strip()
     for name in ("agentloom", "loom"):
         result = run("--help", command=install_root / "bin" / name, install_dir=None)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -128,3 +135,12 @@ def test_default_update_reuses_checkout_environment_and_runtime(installer):
     assert len(invocations) == 2
     assert all(command[command.index("--extra") + 1] == "pi" for command in invocations)
     assert all("--inexact" in command for command in invocations)
+
+
+def test_explicit_python_selection_is_left_to_uv(installer):
+    run, _, log, _, _ = installer
+    result = run("--no-modify-path", python="/explicit/python")
+    assert result.returncode == 0, result.stdout + result.stderr
+    invocation = json.loads(log.read_text().splitlines()[0])
+    assert "--managed-python" not in invocation
+    assert "--python" not in invocation

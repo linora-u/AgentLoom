@@ -1,6 +1,9 @@
 # Runtime installation profiles
 
-AgentLoom requires Python 3.12 or newer. Choose a Python profile explicitly:
+AgentLoom requires Python 3.12 or newer. Checkout environments use the managed
+Python version pinned in `.python-version` (currently 3.14.8). `./install`
+downloads it through uv and upgrades an existing `.venv` to that version.
+An explicit `UV_PYTHON` overrides this selection. Choose a runtime profile:
 
 - `pi` installs the shared platform without `smolagents` or its instrumentation.
   Pi additionally requires Node.js **22.19 or newer** and npm. Environment proxy

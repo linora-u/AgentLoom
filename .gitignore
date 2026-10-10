@@ -83,8 +83,7 @@ target/
 profile_default/
 ipython_config.py
 
-# pyenv
-.python-version
+# Python version is pinned for uv-managed project environments.
 
 # pipenv
 Pipfile.lock
