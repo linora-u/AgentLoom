@@ -176,9 +176,13 @@ def run_captured_process(
     process_env = dict(env)
     process_env[_PROCESS_RUN_TOKEN_ENV] = run_token
     started = time.monotonic()
-    with tempfile.TemporaryFile(mode="w+b") as stdout_stream, tempfile.TemporaryFile(
+    with tempfile.TemporaryFile(mode="w+b") as stdin_stream, tempfile.TemporaryFile(
         mode="w+b"
-    ) as stderr_stream:
+    ) as stdout_stream, tempfile.TemporaryFile(mode="w+b") as stderr_stream:
+        # A child that never reads stdin must not block a pipe write before
+        # communicate can enforce its deadline. The complete payload is known.
+        stdin_stream.write(stdin)
+        stdin_stream.seek(0)
         from agentloom.execution.resources import register_resource, unregister_resource
         resource_key = f"captured-process:{run_token}"
         process = None
@@ -201,10 +205,10 @@ def run_captured_process(
                     raise InterruptedError("Execution resources are closed")
                 process = subprocess.Popen(
                     command, shell=shell, cwd=cwd, env=process_env,
-                    stdin=subprocess.PIPE, stdout=stdout_stream, stderr=stderr_stream,
+                    stdin=stdin_stream, stdout=stdout_stream, stderr=stderr_stream,
                     start_new_session=os.name == "posix",
                 )
-            process.communicate(input=stdin, timeout=timeout)
+            process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             close_process()
             raise CapturedProcessTimeout(f"process timed out after {timeout:g}s") from exc
