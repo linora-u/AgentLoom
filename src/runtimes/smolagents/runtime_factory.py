@@ -114,6 +114,9 @@ class SmolagentsRuntimeFactory:
         if definition.project_root is None:
             raise ValueError("Smolagents runtime requires RuntimeDefinition.project_root")
         options = options_from_definition(definition)
+        from agentloom.config import C
+
+        C.llm.validate_runtime(self.runtime_id, options)
         gateway = _SmolToolGateway(
             definition.tool_gateway,
             options["todo_mode"],

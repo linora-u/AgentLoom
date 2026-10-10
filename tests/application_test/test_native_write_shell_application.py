@@ -13,7 +13,7 @@ def test_application_governs_native_mutation_and_shell(tmp_path, scenario):
     config = tmp_path / "config"
     config.mkdir()
     (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(tmp_path / "runtime")}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "default_toolsets": []}))
-    (config / "llm.yaml").write_text("model:\n  default_model_type: test\n  test: {model: fixture, adapter: openai_chat}\n  summary: {model: fixture, adapter: openai_chat}\n")
+    (config / "model.yaml").write_text("model:\n  default_model_type: test\n  test: {model: fixture, adapter: openai_chat}\n  summary: {model: fixture, adapter: openai_chat}\n")
     workflow, marker = write_application(tmp_path, "write_case", "test", scenario)
     plan = planned_calls(workflow.parent.parent / "files", scenario, marker)
     class Model:

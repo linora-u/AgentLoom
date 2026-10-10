@@ -50,7 +50,7 @@ applications/browser_harness_probe/
 
 `config/system.yaml` 的 `skills.paths: []` 表示不增加额外 Skill 路径；它不会关闭项目级和 Application 级 Skill 发现。Hook 是独立顶层配置，不由 Skill 发现触发。
 
-README 记录本次验收事实；`skills/browser-harness-agentloom/SKILL.md` 记录后续执行手册。后续遇到 browser-harness doctor、isolated/real Chrome、`config/llm.yaml`、Tool 注册等问题时，优先读取该 Skill。
+README 记录本次验收事实；`skills/browser-harness-agentloom/SKILL.md` 记录后续执行手册。后续遇到 browser-harness doctor、isolated/real Chrome、`config/model.yaml`、Tool 注册等问题时，优先读取该 Skill。
 
 ## 安装
 
@@ -139,10 +139,10 @@ PY
 
 | 命令 | 结果 |
 |---|---|
-| `git status --short` | 通过：新增 `applications/browser_harness_probe/`；`config/llm.yaml` 为 ignored 本地环境文件 |
+| `git status --short` | 通过：新增 `applications/browser_harness_probe/`；`config/model.yaml` 为 ignored 本地环境文件 |
 | `.venv/bin/loom --help` | 通过 |
 | `.venv/bin/loom run --help` | 通过：确认可直接运行 Agent YAML |
-| `.venv/bin/loom run applications/browser_harness_probe/workflows/browser_harness_probe_agent.yaml` | 环境阻塞：当前 main worktree 缺 ignored 的 `config/llm.yaml`，运行在模型调用前失败，错误为 `Model type 'powerful' is not defined in config/llm.yaml` |
+| `.venv/bin/loom run applications/browser_harness_probe/workflows/browser_harness_probe_agent.yaml` | 环境阻塞：当前 main worktree 缺 ignored 的 `config/model.yaml`，运行在模型调用前失败，错误为 `Model type 'powerful' is not defined in config/model.yaml` |
 | `command -v browser-harness` | 通过：`/Users/bytedance/.local/bin/browser-harness` |
 | `browser-harness --doctor` | 部分通过：Chrome running ok；daemon/active connections fail 是未建立持久连接的初始状态；`profile-use` 和 `BROWSER_USE_API_KEY` 是 cloud/profile sync 可选项 |
 | `validate_application_yaml.py --app-root applications/browser_harness_probe` | 通过：`valid=true`，`files_checked=2`，`error_count=0`（新增 `zsxq_scraper_agent.yaml` 后） |
@@ -164,4 +164,4 @@ PY
 
 - `real` 模式依赖用户真实 Chrome 的 remote debugging 授权。若 `browser-harness` 提示勾选 `chrome://inspect/#remote-debugging` 或点击 Allow，这是浏览器授权问题，不代表 AgentLoom Tool 注册失败。
 - `isolated` 模式会打开一个独立 Chrome 窗口，使用缓存目录下的新 profile，不复用真实登录态。
-- 干净 main worktree 不包含 ignored 的 `config/llm.yaml`。直接 `loom run` 或运行 Python wrapper 前，需要把本地 `config/llm.yaml` 放到该 worktree；否则会在模型调用前报 `Model type 'powerful' is not defined in config/llm.yaml`。
+- 干净 main worktree 不包含 ignored 的 `config/model.yaml`。直接 `loom run` 或运行 Python wrapper 前，需要把本地 `config/model.yaml` 放到该 worktree；否则会在模型调用前报 `Model type 'powerful' is not defined in config/model.yaml`。

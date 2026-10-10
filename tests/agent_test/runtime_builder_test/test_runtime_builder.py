@@ -1243,7 +1243,7 @@ def test_real_config_builder_compiles_global_application_and_agent_hook_layers(
         },
     )
     write_yaml(
-        config_dir / "llm.yaml",
+        config_dir / "model.yaml",
         {
             "model": {
                 "default_model_type": "powerful",

@@ -30,21 +30,21 @@ def _available_types_text(available: list[str]) -> str:
 
 def _missing_default_model_type_error(available: list[str]) -> str:
     return (
-        "No model_type was provided and config/llm.yaml does not set "
+        "No model_type was provided and config/model.yaml does not set "
         "`model.default_model_type`; the model call was not started. "
         "Fix: add `model_type: <type>` to the Agent YAML, or set "
-        "`model.default_model_type: <type>` in config/llm.yaml. "
+        "`model.default_model_type: <type>` in config/model.yaml. "
         f"Available model types: {_available_types_text(available)}."
     )
 
 
 def _unknown_model_type_error(model_type: str, available: list[str]) -> str:
     return (
-        f"Model type '{model_type}' is not defined in config/llm.yaml; "
+        f"Model type '{model_type}' is not defined in config/model.yaml; "
         "the model call was not started. "
         f"Available model types: {_available_types_text(available)}. "
         "Fix: set Agent YAML `model_type` to one of the available types, "
-        f"or add `model.{model_type}.model: <provider/model>` in config/llm.yaml."
+        f"or add `model.{model_type}.model: <provider/model>` in config/model.yaml."
     )
 
 
@@ -215,12 +215,12 @@ class ModelTypeManager:
         """
         Resolve a model type string to a ModelType instance.
 
-        If `model_type` is None or empty, uses the global default model type
+        If `model_type` is None or empty, uses the effective default model type
         from YAML (model.default_model_type). If that key is unset, the
         framework raises ``ValueError`` immediately.
 
         If `model_type` is explicitly specified but not defined in
-        llm.yaml, a ``ValueError`` is raised to surface configuration
+        model.yaml, a ``ValueError`` is raised to surface configuration
         errors early.
 
         Args:
@@ -232,7 +232,7 @@ class ModelTypeManager:
 
         Raises:
             ValueError: When the explicitly requested model type is not
-                defined in llm.yaml.
+                defined in model.yaml.
         """
         if not model_type:
             default_type = (C.default_model_type or "").strip()

@@ -876,7 +876,7 @@ def _checkout_state(root: Path, expected_commit: str) -> tuple[bool, str]:
         if not relative_path.parts or relative_path.parts[0] == ".venv":
             continue
         relative = relative_path.as_posix()
-        if relative in {".git", _TOKEN_FILE, "config/llm.yaml"}:
+        if relative in {".git", _TOKEN_FILE, "config/model.yaml"}:
             continue
         try:
             metadata = path.lstat()
@@ -1196,7 +1196,7 @@ def _secure_cleanup(repo_root: Path, temporary_root: Path, capsule_root: Path) -
     # New capsules never write the credential-bearing config. Remove a file
     # defensively so interrupted runs from an older harness are also cleaned.
     _thaw_tree(capsule_root)
-    private_config = capsule_root / "config" / "llm.yaml"
+    private_config = capsule_root / "config" / "model.yaml"
     try:
         if private_config.exists():
             private_config.write_bytes(b"")
@@ -1258,7 +1258,7 @@ def provision_capsule(
     uv = _trusted_uv()
     if not re.fullmatch(r"[0-9a-f]{40}", expected_commit):
         raise RuntimeError("capsule requires one fixed commit")
-    model_config = repo_root / "config" / "llm.yaml"
+    model_config = repo_root / "config" / "model.yaml"
     if not model_config.is_file():
         raise RuntimeError("summary model configuration is missing")
     model_config_bytes = model_config.read_bytes()
@@ -1455,7 +1455,7 @@ def build_capsule_descriptor(
         if loom.is_file()
         else ""
     )
-    model_config = repo_root / "config" / "llm.yaml"
+    model_config = repo_root / "config" / "model.yaml"
     expected_commit = str(source.get("commit") or "")
     checkout_exact, checkout_manifest_hash = _checkout_state(
         repo_root,

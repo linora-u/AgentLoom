@@ -135,9 +135,9 @@ runtime_options:
 ## 模型与配置
 
 - Agent YAML 不写 `model`、`llm`、`langfuse`。
-- `model_type` 必须存在于 `config/llm.yaml`。
+- `model_type` 必须存在于项目与 Agent 所属应用 `config/model.yaml` 合并后的有效模型目录。
 - 不写 `model_type` 时依赖 `model.default_model_type`，但生成新 Application 时推荐显式写出实际可用类型。
-- `summary` 模型类型是 `smart_summary` 依赖；`config/llm.yaml` 中只要配置了模型类型，就必须包含 `summary`。
+- 仅 smolagents 开启 `runtime_options.smart_summary` 时要求 `summary`；Pi 使用当前模型压缩上下文。
 - 每个模型类型（包括 `summary`）必须显式声明 `adapter`，合法值为 `openai_chat`、`openai_responses`、`anthropic_messages`。
 - `model` 只是传给 LiteLLM 的不透明模型名；不能根据名称或前缀推断 `adapter`。
 - 未知字段会作为 `extra_completion_params` 透传给 LiteLLM；`adapter` 是已知字段，不会透传给 provider。

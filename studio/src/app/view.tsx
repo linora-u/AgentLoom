@@ -607,7 +607,7 @@ function Header(props: {
     if (props.assistantBusy) return `${props.spinner} AgentLoom 正在思考…`
     if (props.updatePhase === "available") return "发现可用更新 · Ctrl+X"
     return props.studioEnabled
-      ? `Studio: ${props.studioModel ?? "config/llm.yaml default"}`
+      ? `Studio: ${props.studioModel ?? "config/model.yaml default"}`
       : `model: ${props.model ?? "未配置"}`
   }
   return (
@@ -654,7 +654,7 @@ function BuilderView(props: {
   const modelSummary = () => props.state.studioEnabled
     ? props.state.studioModel
       ? `${props.state.studioModel.providerName} · ${props.state.studioModel.name}`
-      : "config/llm.yaml default"
+      : "config/model.yaml default"
     : props.state.snapshot.models.items
       .filter((item) => item.configured)
       .map((item) => `${item.type}${item.default ? "*" : ""}`)
@@ -1337,7 +1337,7 @@ function CommandPalette(props: {
         <box flexDirection="row" justifyContent="space-between" flexShrink={0}>
           <text fg={props.theme.text} attributes={TextAttributes.BOLD}>
             {props.scope === "models"
-              ? "Studio 模型 · config/llm.yaml"
+              ? "Studio 模型 · config/model.yaml"
               : "Commands · Models · Applications · Main Agents · Skills · Schedules · Runs"}
           </text>
           <text fg={props.theme.muted}>esc</text>
@@ -1348,7 +1348,7 @@ function CommandPalette(props: {
             value={props.query}
             onInput={props.onQuery}
             placeholder={props.scope === "models"
-              ? "搜索并选择 llm.yaml 模型类型"
+              ? "搜索并选择 model.yaml 模型类型"
               : "搜索 Model、Application、主 Agent、Skill、Schedule、Run 或命令"}
             placeholderColor={props.theme.muted}
             textColor={props.theme.text}

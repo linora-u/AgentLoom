@@ -82,7 +82,7 @@ Run five real canaries, then the full campaign with at most two independent
 cohorts in parallel. The fixed canary includes the reviewer-driven
 Application-scope writer:
 
-The local, untracked `config/llm.yaml` must provide a tool-capable `summary`
+The local, untracked `config/model.yaml` must provide a tool-capable `summary`
 profile with `num_retries: 0` and `parallel_tool_calls: false`. The campaign
 rejects `thinking.type: disabled` for the validated endpoint, records only a
 secret-free fingerprint of the complete provider behavior config, and fails

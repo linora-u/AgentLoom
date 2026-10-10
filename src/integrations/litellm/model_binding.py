@@ -11,7 +11,7 @@ from typing import Any
 
 from agentloom.config import C
 from agentloom.config.http_headers import normalize_http_headers
-from agentloom.config.llm_config import LlmModelTypeSettings
+from agentloom.config.llm_config import LLMConfig, LlmModelTypeSettings
 from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnAdapter
@@ -130,6 +130,7 @@ def _turn_options(
     model_type: str,
     settings: LlmModelTypeSettings,
     request_headers: Mapping[str, str],
+    rate_limit_key: str,
 ) -> dict[str, Any]:
     output_token_key = (
         "max_output_tokens"
@@ -143,6 +144,7 @@ def _turn_options(
         "retry_delay": settings.retry_delay,
         "max_retry_delay": settings.max_retry_delay,
         "_agent_loom_model_type": model_type,
+        "_agent_loom_rate_limit_key": rate_limit_key,
     }
     if settings.max_output_tokens is not None:
         options[output_token_key] = settings.max_output_tokens
@@ -167,8 +169,12 @@ def _build_binding(
     normalized_type = _normalized_model_type(model_type)
     _install_existing_model_governance()
     requests_per_minute = settings.requests_per_minute or 60
+    # Same profile names in different Applications may address different
+    # providers or have different RPM limits. Match the actual model settings.
+    encoded = json.dumps(settings.model_dump(mode="json"), sort_keys=True).encode()
+    rate_limit_key = f"{normalized_type}:{hashlib.sha256(encoded).hexdigest()}"
     GlobalRateLimiterRegistry.get_limiter(
-        normalized_type,
+        rate_limit_key,
         rpm=requests_per_minute,
     )
     return ModelTurnBinding(
@@ -179,7 +185,7 @@ def _build_binding(
             context_cache=settings.context_cache,
             system_prompt_boundary=settings.system_prompt_boundary,
         ),
-        options=_turn_options(normalized_type, settings, request_headers),
+        options=_turn_options(normalized_type, settings, request_headers, rate_limit_key),
         max_tokens=settings.max_tokens,
         context_window=settings.context_window,
         max_output_tokens=settings.max_output_tokens or 0,
@@ -229,17 +235,19 @@ def _cache_key(
 def resolve_litellm_model_turn_binding(
     model_type: str | None,
     *,
+    llm_config: LLMConfig | None = None,
     profile_overlay: ModelProfileOverlay | None = None,
     model_cache: bool = True,
     adapter_factory: AdapterFactory = create_model_turn_adapter,
 ) -> ModelTurnBinding:
     """Resolve a configured model type without inferring or falling back protocols."""
 
-    settings = C.llm.for_type(model_type)
+    catalog = llm_config if llm_config is not None else C.llm
+    settings = catalog.for_type(model_type)
     if profile_overlay is not None:
         settings = profile_overlay.apply(settings)
     resolved_type = _normalized_model_type(
-        model_type if model_type else C.llm.default_model_type
+        model_type if model_type else catalog.default_model_type
     )
     request_headers = normalize_http_headers(settings.extra_headers)
     if not model_cache:

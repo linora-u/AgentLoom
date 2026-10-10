@@ -500,7 +500,7 @@ describe("AgentLoom Studio view", () => {
               description: "Finds facts",
               role: "worker",
               task: "research",
-              model: { type: "powerful", source: "global" },
+              model: { type: "powerful", source: "config" },
               tools: [],
               skills: [],
               permissions: { value: { mode: "denylist" }, source: "application", source_path: "applications/new/config/system.yaml" },
@@ -910,7 +910,7 @@ describe("AgentLoom Studio view", () => {
               description: "not run",
               role: "supervisor",
               task: "coordinate",
-              model: { type: "powerful", source: "global" },
+              model: { type: "powerful", source: "config" },
               tools: [],
               skills: [],
               permissions: capability,
@@ -924,7 +924,7 @@ describe("AgentLoom Studio view", () => {
                 description: "assist the supervisor",
                 role: "worker",
                 task: "help",
-                model: { type: "powerful", source: "global" },
+                model: { type: "powerful", source: "config" },
                 tools: [],
                 skills: [],
                 permissions: capability,
@@ -1288,7 +1288,7 @@ describe("AgentLoom Studio view", () => {
     await Bun.sleep(20)
     await setup.renderOnce()
 
-    expect(setup.captureCharFrame()).toContain("Studio 模型 · config/llm.yaml")
+    expect(setup.captureCharFrame()).toContain("Studio 模型 · config/model.yaml")
     expect(setup.captureCharFrame()).toContain("powerful")
     expect(setup.captureCharFrame()).toContain("fast")
 
@@ -1300,7 +1300,7 @@ describe("AgentLoom Studio view", () => {
     expect(session.state.notice).toBe("已切换模型: fast")
   })
 
-  test("Ctrl+X selects the Studio model from the shared llm.yaml catalog", async () => {
+  test("Ctrl+X selects the Studio model from the shared model.yaml catalog", async () => {
     const selections: string[] = []
     const studio: StudioClient = {
       async openNewApplication() { throw new Error("not expected") },
@@ -1313,7 +1313,7 @@ describe("AgentLoom Studio view", () => {
             providerID: "agentloom-fast",
             modelID: "configured",
             name: "fast",
-            providerName: "config/llm.yaml",
+            providerName: "config/model.yaml",
             default: true,
           },
           {
@@ -1321,7 +1321,7 @@ describe("AgentLoom Studio view", () => {
             providerID: "agentloom-powerful",
             modelID: "configured",
             name: "powerful",
-            providerName: "config/llm.yaml",
+            providerName: "config/model.yaml",
             default: false,
           },
         ]
@@ -1353,18 +1353,18 @@ describe("AgentLoom Studio view", () => {
     await setup.renderOnce()
 
     expect(session.state.studioModel?.id).toBe("fast")
-    expect(setup.captureCharFrame()).toContain("Studio: config/llm.yaml · fast")
+    expect(setup.captureCharFrame()).toContain("Studio: config/model.yaml · fast")
 
     setup.mockInput.pressKey("x", { ctrl: true })
     await Bun.sleep(5)
-    await setup.mockInput.typeText("从 llm.yaml 选择 Studio 模型")
+    await setup.mockInput.typeText("从 model.yaml 选择 Studio 模型")
     await setup.renderOnce()
-    expect(setup.captureCharFrame()).toContain("模型类型、Provider 与认证统一读取项目 config/llm.yaml")
+    expect(setup.captureCharFrame()).toContain("模型类型、Provider 与认证统一读取项目 config/model.yaml")
     setup.mockInput.pressEnter()
     await Bun.sleep(10)
     await setup.renderOnce()
 
-    expect(setup.captureCharFrame()).toContain("Studio 模型 · config/llm.yaml")
+    expect(setup.captureCharFrame()).toContain("Studio 模型 · config/model.yaml")
     expect(setup.captureCharFrame()).toContain("fast")
     expect(setup.captureCharFrame()).toContain("powerful")
     setup.mockInput.pressArrow("down")
@@ -1372,7 +1372,7 @@ describe("AgentLoom Studio view", () => {
     await Bun.sleep(10)
 
     expect(selections).toEqual(["powerful"])
-    expect(session.state.notice).toBe("Studio 模型已切换为 config/llm.yaml · powerful")
+    expect(session.state.notice).toBe("Studio 模型已切换为 config/model.yaml · powerful")
   })
 
   test("switching Applications restores the model selected for that Studio Session", async () => {
@@ -1400,7 +1400,7 @@ describe("AgentLoom Studio view", () => {
             providerID: "agentloom-fast",
             modelID: "configured",
             name: "fast",
-            providerName: "config/llm.yaml",
+            providerName: "config/model.yaml",
             default: true,
           },
           {
@@ -1408,7 +1408,7 @@ describe("AgentLoom Studio view", () => {
             providerID: "agentloom-powerful",
             modelID: "configured",
             name: "powerful",
-            providerName: "config/llm.yaml",
+            providerName: "config/model.yaml",
           },
         ]
       },

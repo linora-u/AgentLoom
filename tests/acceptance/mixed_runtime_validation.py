@@ -192,8 +192,8 @@ def child(case: str, workspace: Path, profile: str) -> None:
     shutil.copytree(ROOT / f'applications/{APP}', workspace / f'applications/{APP}')
     config = workspace / 'config'
     config.mkdir(mode=0o700)
-    shutil.copyfile(ROOT / 'config/llm.yaml', config / 'llm.yaml')
-    (config / 'llm.yaml').chmod(0o600)
+    shutil.copyfile(ROOT / 'config/model.yaml', config / 'model.yaml')
+    (config / 'model.yaml').chmod(0o600)
     write_yaml(config / 'system.yaml', {'runtime': {'root_dir': str(workspace / 'runtime')},
         'self_learning': review_settings(profile), 'default_toolsets': [], 'checkpoint': {'enabled': False},
         'logging': {'console_enabled': False},

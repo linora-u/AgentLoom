@@ -9,9 +9,9 @@
 
 `config/system.yaml` 是 AgentLoom 框架的**核心全局配置文件**，控制系统元数据、上下文压缩策略、顶层 prompt、全局 Skills、日志、工具系统、工作空间等。
 
-> ⚠️ **system.yaml 与 llm.yaml 的隔离**：所有 LLM 相关配置（`model`、`llm`、`langfuse`）**必须且只能**放在 `config/llm.yaml` 中。如果在 `system.yaml` 中写入这些键，框架会在加载时自动过滤并输出 warning 日志。详见 [LLM 配置文档](llm_config.md)。
+> ⚠️ **system.yaml 与 model.yaml 的隔离**：所有 LLM 相关配置（`model`、`llm`、`langfuse`）**必须且只能**放在 `config/model.yaml` 中。如果在 `system.yaml` 中写入这些键，框架会在加载时自动过滤并输出 warning 日志。详见 [LLM 配置文档](llm_config.md)。
 
-配置加载顺序为 `config/system.yaml` -> `config/llm.yaml` -> `applications/<app>/config/system.yaml`（可选）。应用级 `system.yaml` 的发现基于 Agent YAML 配置文件路径：框架从该文件所在目录向上查找 `workflows/` 目录，其父目录即为应用根目录（app_root）。若 `app_root/config/system.yaml` 存在则自动叠加覆盖，不存在则跳过。嵌套应用（如 `my_app/sub_module`）会命中最近的 `workflows/` 目录，天然隔离。
+配置加载顺序为 `config/system.yaml` -> `config/model.yaml` -> `applications/<app>/config/system.yaml`（可选）。应用级 `system.yaml` 的发现基于 Agent YAML 配置文件路径：框架从该文件所在目录向上查找 `workflows/` 目录，其父目录即为应用根目录（app_root）。若 `app_root/config/system.yaml` 存在则自动叠加覆盖，不存在则跳过。嵌套应用（如 `my_app/sub_module`）会命中最近的 `workflows/` 目录，天然隔离。
 
 ---
 

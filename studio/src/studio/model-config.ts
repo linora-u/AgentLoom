@@ -20,15 +20,15 @@ export type StudioModelConfiguration = {
 }
 
 export async function loadStudioModelConfiguration(projectRoot: string): Promise<StudioModelConfiguration> {
-  const path = join(projectRoot, "config/llm.yaml")
+  const path = join(projectRoot, "config/model.yaml")
   let raw: unknown
   try {
     raw = Bun.YAML.parse(await readFile(path, "utf8"))
   } catch (error) {
-    throw new Error(`无法读取 Studio 模型配置 config/llm.yaml：${safeConfigError(error)}`)
+    throw new Error(`无法读取 Studio 模型配置 config/model.yaml：${safeConfigError(error)}`)
   }
   if (!isRecord(raw) || !isRecord(raw.model)) {
-    throw new Error("Studio 模型配置无效：config/llm.yaml 缺少 model 配置")
+    throw new Error("Studio 模型配置无效：config/model.yaml 缺少 model 配置")
   }
 
   const defaultModelType = stringValue(raw.model.default_model_type)
@@ -36,10 +36,10 @@ export async function loadStudioModelConfiguration(projectRoot: string): Promise
     .filter(([name, value]) => name !== "default_model_type" && name !== "common" && isRecord(value))
     .map(([name, value]) => toProfile(name, value as ModelProfile))
   if (profiles.length === 0) {
-    throw new Error("Studio 模型配置无效：config/llm.yaml 没有可用模型类型")
+    throw new Error("Studio 模型配置无效：config/model.yaml 没有可用模型类型")
   }
   if (!defaultModelType) {
-    throw new Error("Studio 模型配置无效：config/llm.yaml 未设置 model.default_model_type")
+    throw new Error("Studio 模型配置无效：config/model.yaml 未设置 model.default_model_type")
   }
   const selected = profiles.find((profile) => profile.type === defaultModelType)
   if (!selected) {
@@ -85,7 +85,7 @@ export async function loadStudioModelConfiguration(projectRoot: string): Promise
       providerID: profile.providerID,
       modelID: "configured",
       name: profile.type,
-      providerName: "config/llm.yaml",
+      providerName: "config/model.yaml",
       default: profile.type === defaultModelType,
     })),
     requestParameters: Object.fromEntries(profiles.map((profile) => [

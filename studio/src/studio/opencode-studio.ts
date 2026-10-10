@@ -289,7 +289,7 @@ export class OpenCodeStudioClient implements StudioClient {
     if (selected) return selected
     const configuredDefault = (await this.api.models()).find((model) => model.default)
     if (!configuredDefault) {
-      throw new Error("config/llm.yaml does not expose a default Studio model")
+      throw new Error("config/model.yaml does not expose a default Studio model")
     }
     this.modelsBySession.set(sessionID, configuredDefault)
     return configuredDefault

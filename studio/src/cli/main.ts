@@ -24,7 +24,7 @@ Inside the Studio:
   /help               Show context-aware Studio help
   /new                Start a blank conversation; retain Application history for Agent retrieval
   /compact            Compact the current Session context without starting a new conversation
-  /models             Select a Studio model from config/llm.yaml
+  /models             Select a Studio model from config/model.yaml
   /refresh            Re-index the project catalog
   /schedule           Show durable schedule commands
   Ctrl-X              Commands, permissions, Applications, main Agents, Runs and Skills

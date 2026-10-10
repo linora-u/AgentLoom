@@ -128,7 +128,7 @@ def test_smol_provider_retries_share_one_step_and_record_attempts(tmp_path):
         definition = yaml.safe_load(workflow.read_text())
         definition['worker_agents'] = []
         write_yaml(workflow, definition)
-        model_path = tmp_path / 'config/llm.yaml'
+        model_path = tmp_path / 'config/model.yaml'
         profiles = yaml.safe_load(model_path.read_text())
         profiles['model']['supervisor'].update(num_retries=2, retry_delay=0, max_retry_delay=0)
         write_yaml(model_path, profiles)
@@ -190,7 +190,7 @@ def test_smol_responses_request_matches_provider_http_body(tmp_path):
         definition = yaml.safe_load(workflow.read_text())
         definition['worker_agents'] = []
         write_yaml(workflow, definition)
-        profile_path = tmp_path / 'config/llm.yaml'
+        profile_path = tmp_path / 'config/model.yaml'
         profiles = yaml.safe_load(profile_path.read_text())
         profiles['model']['supervisor']['adapter'] = 'openai_responses'
         write_yaml(profile_path, profiles)
@@ -404,7 +404,7 @@ def test_tool_projection_uses_model_input_budget(tmp_path, runtime):
         definition['worker_agents'] = []
         definition['tools'] = [{'name': 'read' if runtime == 'pi' else 'read_file'}]
         write_yaml(workflow, definition)
-        profile_path = tmp_path / 'config/llm.yaml'
+        profile_path = tmp_path / 'config/model.yaml'
         profiles = yaml.safe_load(profile_path.read_text())
         profiles['model']['supervisor'].update(context_window=8192, max_output_tokens=1000)
         write_yaml(profile_path, profiles)

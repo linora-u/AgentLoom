@@ -243,7 +243,7 @@ def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_p
                   [('root-complete', 'update_goal', {'status': 'complete', 'evidence': 'Root verified denied Worker completion.'})]]
     with model_service(turns=[[('worker-complete', 'update_goal', {'status': 'complete', 'evidence': 'Worker must not settle root.'})]]) as (worker_url, worker_requests), model_service(turns=root_turns) as (url, requests):
         app = project(tmp_path, url)
-        llm = tmp_path / 'config/llm.yaml'
+        llm = tmp_path / 'config/model.yaml'
         config = yaml.safe_load(llm.read_text())
         config['model']['worker'] = {**config['model']['test'], 'base_url': worker_url}
         llm.write_text(yaml.safe_dump(config))

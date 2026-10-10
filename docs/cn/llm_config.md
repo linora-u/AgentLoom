@@ -1,20 +1,23 @@
-# AgentLoom LLM 模型配置 (`llm.yaml`) 完整参考
+# AgentLoom LLM 模型配置 (`model.yaml`) 完整参考
 
-> **文档定位**：本文档详细说明 `config/llm.yaml` 的**每一个**配置参数。
+> **文档定位**：本文档详细说明 `config/model.yaml` 的**每一个**配置参数。
 > 关于配置文件之间的覆盖关系，请参阅 [配置体系总览](config-overview.md)。
 > 关于全局系统配置，请参阅 [系统配置文档](system_config.md)。
 > 关于 Agent YAML 参数，请参阅 [Agent 配置文档](agent_config.md)。
 
-`config/llm.yaml` 是 AgentLoom 框架的**模型协议、路由与参数配置文件**，控制不同智能体使用的 LLM 模型类型（powerful/fast/summary 或自定义类型）、wire adapter、API 凭据、推理参数和重试策略。
+`config/model.yaml` 是 AgentLoom 框架的**模型协议、路由与参数配置文件**，控制不同智能体使用的 LLM 模型类型（powerful/fast/summary 或自定义类型）、wire adapter、API 凭据、推理参数和重试策略。
 
 > ⚠️ **重要**：LLM 配置是**独立加载**的，不参与 `system.yaml` 的 deep merge 覆盖链。在 `config/system.yaml` 或 `applications/<app>/config/system.yaml` 中出现 `model`/`llm` 会被自动过滤并输出警告。
+
+
+框架自动加载项目 `config/model.yaml` 与 Agent 所属应用的 `config/model.yaml`。同名模型整条替换，其他项目模型保留；应用可声明自己的 `model.default_model_type`，未声明则继承项目默认值。跨应用 Worker 按自己的定义目录加载，应用之间不会互相覆盖。项目模型文件可省略，只需有效模型目录包含实际所需类型。新执行或任务重试读取最新配置，一次运行内固定模型；SDK 请求重试及断点恢复兼容规则沿用现有行为。旧 `llm.yaml` 必须迁移。
 
 ---
 
 ## 目录
 
 - [快速参考：完整 YAML 结构](#快速参考完整-yaml-结构)
-- [1. model.default_model_type — 全局默认模型类型](#1-modeldefault_model_type--全局默认模型类型)
+- [1. model.default_model_type — 默认模型类型](#1-modeldefault_model_type--默认模型类型)
 - [2. 模型类型命名规则](#2-模型类型命名规则)
 - [3. model.\<type\> — 模型类型配置](#3-modeltype--模型类型配置)
 - [4. 参数默认值](#4-参数默认值)
@@ -29,14 +32,14 @@
 
 ## 快速参考：完整 YAML 结构
 
-以下展示 `config/llm.yaml` 的**完整结构**，所有字段及其默认值：
+以下展示 `config/model.yaml` 的**完整结构**，所有字段及其默认值：
 
 ```yaml
 # ============================================
 # 模型配置
 # ============================================
 model:
-  # 全局默认模型类型；若省略，未写 model_type 的 Agent 会直接报错
+  # 默认模型类型；若省略，未写 model_type 的 Agent 会直接报错
   default_model_type: "powerful"
 
   # ━━━ 必填：摘要模型（上下文压缩 smart_summary 功能依赖） ━━━
@@ -84,13 +87,13 @@ model:
 
 ---
 
-## 1. model.default_model_type — 全局默认模型类型
+## 1. model.default_model_type — 默认模型类型
 
 控制整个 Agent 系统中，当 Agent YAML 未指定 `model_type` 时使用哪个模型类型。
 
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
-| `model.default_model_type` | `str` | `""` | ❌ 否 | 全局默认模型类型。值必须是 `model` 块下定义的某个类型 key（如 `powerful`、`fast`、`summary`，或自定义类型名）。未配置时，未指定 `model_type` 的 Agent 会直接抛出 `ValueError` |
+| `model.default_model_type` | `str` | `""` | ❌ 否 | 默认模型类型。值必须是 `model` 块下定义的某个类型 key（如 `powerful`、`fast`、`summary`，或自定义类型名）。未配置时，未指定 `model_type` 的 Agent 会直接抛出 `ValueError` |
 
 ### 1.1 解析规则
 
@@ -99,12 +102,12 @@ model:
 ```
 Agent YAML 中的 model_type（如 model_type: "fast"）
        ↓ (未指定时)
-config/llm.yaml 中的 default_model_type（如 default_model_type: "powerful"）
+config/model.yaml 中的 default_model_type（如 default_model_type: "powerful"）
        ↓ (default_model_type 未配置时)
 ValueError
 ```
 
-> ⚠️ **注意**：最终解析出的模型类型必须存在于 `llm.yaml`。如果 Agent YAML 明确指定了不存在的 `model_type`，全局默认类型指向不存在的类型，或 Agent 与全局配置都没有提供模型类型，框架都会**直接报错**（`ValueError`）。
+> ⚠️ **注意**：最终解析出的模型类型必须存在于 `model.yaml`。如果 Agent YAML 明确指定了不存在的 `model_type`，全局默认类型指向不存在的类型，或 Agent 与全局配置都没有提供模型类型，框架都会**直接报错**（`ValueError`）。
 
 **示例**：
 
@@ -133,7 +136,7 @@ model_type: "powerful"    # 使用 powerful 类型；如果不写，则使用已
 
 `model` 块下除 `default_model_type` 外，所有值为 dict 的 key 都是模型类型名。框架不会对类型名做特殊语义处理，`powerful`、`fast`、`summary` 只是示例命名。
 
-- `summary` 是上下文压缩（`smart_summary`）依赖的必需类型。
+- 仅 smolagents 开启 `runtime_options.smart_summary` 时要求 `summary`，且须使用 Python 支持的 adapter；Pi 使用当前模型压缩上下文，不要求独立 `summary`。
 - `default_model_type` 是保留 key，不是模型类型。
 
 **示例：**
@@ -169,7 +172,7 @@ model:
 
 | Key | 是否必填 | 说明 |
 |-----|---------|------|
-| `summary` | ❗ **必填** | 上下文压缩（`smart_summary`）功能硬依赖此类型 |
+| `summary` | 条件必填 | 仅 smolagents 开启 `smart_summary` 时需要 |
 | `default_model_type` | ❌ 可选 | 保留 key。没有隐式默认值；仅当所有 Agent 都显式指定 `model_type` 时才可省略 |
 | 其他任意 key | ❌ 可选 | 自由定义、删除、改名，如 `powerful`、`fast`、`code_review` 等 |
 
@@ -312,7 +315,7 @@ Agent YAML 通过 `model_type` 字段引用你定义的类型名。
 **示例 1：完全自定义命名**
 
 ```yaml
-# config/llm.yaml — 不使用 powerful/fast/summary，完全自定义
+# config/model.yaml — 不使用 powerful/fast/summary，完全自定义
 model:
   default_model_type: "main"
 
@@ -351,13 +354,13 @@ model:
 ```yaml
 # Agent YAML — 引用自定义类型
 name: "code_review_agent"
-model_type: "code_review"        # 引用 llm.yaml 中定义的 code_review
+model_type: "code_review"        # 引用 model.yaml 中定义的 code_review
 ```
 
 **示例 2：最简配置（只保留一个类型）**
 
 ```yaml
-# config/llm.yaml — 所有 Agent 共用一个模型
+# config/model.yaml — 所有 Agent 共用一个模型
 model:
   default_model_type: "default"
 
@@ -446,9 +449,9 @@ model:
 
 ## 5. langfuse — 可观测性配置（后续支持）
 
-> ⚠️ **当前版本尚未集成 Langfuse 自动追踪功能。** 代码中已预留 `LangfuseSettings` 配置模型，但尚未接入 LiteLLM 的回调链路。`config/llm.yaml` 中**不需要**配置 langfuse 段。
+> ⚠️ **当前版本尚未集成 Langfuse 自动追踪功能。** 代码中已预留 `LangfuseSettings` 配置模型，但尚未接入 LiteLLM 的回调链路。`config/model.yaml` 中**不需要**配置 langfuse 段。
 
-后续版本计划集成 Langfuse，届时只需在 `config/llm.yaml` 中添加以下配置即可启用：
+后续版本计划集成 Langfuse，届时只需在 `config/model.yaml` 中添加以下配置即可启用：
 
 ```yaml
 # 后续版本启用 Langfuse 时的配置方式（当前无效）

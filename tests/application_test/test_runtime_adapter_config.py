@@ -368,7 +368,7 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
 def test_shipped_llm_example_declares_adapter_for_every_model_type() -> None:
     from agentloom.config.model_adapters import MODEL_ADAPTERS
 
-    config = LLMConfig.load_from_yaml(PROJECT_ROOT / "config/llm.example.yaml")
+    config = LLMConfig.load_from_yaml(PROJECT_ROOT / "config/model.example.yaml")
 
     assert config.models
     assert all(settings.adapter in MODEL_ADAPTERS for settings in config.models.values())

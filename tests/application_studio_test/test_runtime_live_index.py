@@ -23,7 +23,7 @@ def _write(path: Path, content: str) -> Path:
 def _bridge(tmp_path: Path) -> StudioQueryService:
     _write(tmp_path / "config/system.yaml", "runtime:\n  root_dir: .runtime-live\n")
     _write(
-        tmp_path / "config/llm.yaml",
+        tmp_path / "config/model.yaml",
         "model:\n  default_model_type: test\n  test:\n    model: openai/test\n",
     )
     _write(

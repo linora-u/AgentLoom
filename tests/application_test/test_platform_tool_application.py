@@ -28,7 +28,7 @@ def platform_project(tmp_path, monkeypatch):
         "logging": {"console_enabled": False},
         "runtime": {"root_dir": "state/runtime"},
     }))
-    (config / "llm.yaml").write_text(yaml.safe_dump({"model": {
+    (config / "model.yaml").write_text(yaml.safe_dump({"model": {
         "default_model_type": "fixture", "fixture": {"model": "fixture/model", "adapter": "openai_chat"},
         "summary": {"model": "fixture/model", "adapter": "openai_chat"},
     }}))
@@ -821,7 +821,7 @@ def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(plat
 
 def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project):
     root, _, programs, _, run = platform_project
-    llm_path = root / "config/llm.yaml"
+    llm_path = root / "config/model.yaml"
     llm_config = yaml.safe_load(llm_path.read_text(encoding="utf-8"))
     for model in llm_config["model"].values():
         if isinstance(model, dict):
