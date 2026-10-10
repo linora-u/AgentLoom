@@ -2246,11 +2246,9 @@ class StudioQueryService:
         return value if isinstance(value, str) and value else None
 
     def _model_catalog(self) -> dict[str, Any]:
-        config = self._read_yaml(self.project_root / "config" / "llm.yaml")
-        model_config = config.get("model", {}) if isinstance(config, dict) else {}
-        if not isinstance(model_config, dict):
-            model_config = {}
-        default = str(model_config.get("default_model_type") or "")
+        from agentloom.app.definition import model_types
+
+        default, model_config = model_types(self.project_root)
         items: list[dict[str, Any]] = []
         for model_type, raw_settings in model_config.items():
             if model_type in {"default_model_type", "common"}:

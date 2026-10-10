@@ -72,8 +72,8 @@ model:
   # 摘要模型配置（用于文本摘要、内容提取）
   summary:
     adapter: openai_chat
-    # Compact reads ModelType.SUMMARY directly. Configure this to any
-    # compatible, working summary model endpoint for your environment.
+    # smolagents smart_summary requires this profile. Pi compacts using
+    # its selected model and does not require a separate summary profile.
     base_url: "xxxxxxx"
     api_key: "xxxxxxx"
     model: "openai/gpt-5_5"

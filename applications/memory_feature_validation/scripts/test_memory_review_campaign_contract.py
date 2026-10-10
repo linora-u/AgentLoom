@@ -409,7 +409,7 @@ def test_workflows_are_natural_and_do_not_script_memory_calls() -> None:
 def test_real_campaign_model_contract_is_safe_reproducible_metadata(
     tmp_path: Path,
 ) -> None:
-    llm_path = tmp_path / "llm.yaml"
+    llm_path = tmp_path / "model.yaml"
     llm_path.write_text(
         yaml.safe_dump(
             {
@@ -515,7 +515,7 @@ def test_real_campaign_model_preflight_requires_no_hidden_retries_or_parallel_ca
     ) == ["summary model must not disable thinking"]
 
     example = campaign_runner._safe_model_contract(
-        REPO_ROOT / "config" / "llm.example.yaml"
+        REPO_ROOT / "config" / "model.example.yaml"
     )
     assert campaign_runner._model_contract_issues(example) == []
 
@@ -935,7 +935,7 @@ def test_review_off_cohort_uses_real_global_summary_application_opt_out(
     agent_root = REPO_ROOT / specs[0].agent_root
     workflow = REPO_ROOT / specs[0].workflow
     fixture_llm = config_module.LLMConfig.load_from_yaml(
-        REPO_ROOT / "config" / "llm.example.yaml"
+        REPO_ROOT / "config" / "model.example.yaml"
     )
     monkeypatch.setattr(config_module, "_load_llm_config", lambda _path: fixture_llm)
     base = config_module._load_merged_config(config_dir=agent_root / "config")
@@ -1004,7 +1004,7 @@ print("NESTED_TOOL_OK")
         [sys.executable, "-I", "-P", "-B", "-c", script],
         cwd=agent_root,
         env=env,
-        input=(REPO_ROOT / "config" / "llm.example.yaml").read_bytes(),
+        input=(REPO_ROOT / "config" / "model.example.yaml").read_bytes(),
         capture_output=True,
         check=False,
         timeout=30,
@@ -1184,7 +1184,7 @@ def test_active_capsule_preflight_outputs_only_safe_issue_codes(
     capsys,
 ) -> None:
     sensitive_failure = (
-        "failed to parse /private/alice/config/llm.yaml "
+        "failed to parse /private/alice/config/model.yaml "
         "with api_key=campaign-secret"
     )
 

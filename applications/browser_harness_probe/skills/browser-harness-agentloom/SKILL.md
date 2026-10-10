@@ -1,6 +1,6 @@
 ---
 name: browser-harness-agentloom
-description: "Use when working on AgentLoom browser-harness integration or debugging applications/browser_harness_probe: creating or updating the probe Application, installing the external browser-harness CLI, validating isolated or real Chrome browser control, and diagnosing browser-harness doctor, daemon, Chrome remote debugging, config/llm.yaml, or AgentLoom tool-registration issues."
+description: "Use when working on AgentLoom browser-harness integration or debugging applications/browser_harness_probe: creating or updating the probe Application, installing the external browser-harness CLI, validating isolated or real Chrome browser control, and diagnosing browser-harness doctor, daemon, Chrome remote debugging, config/model.yaml, or AgentLoom tool-registration issues."
 ---
 
 # Browser Harness AgentLoom
@@ -34,11 +34,11 @@ If `/Users/bytedance/code/browser-harness` already exists, do not reclone. Reuse
 ## AgentLoom Environment
 
 - Work in the clean worktree that contains this Application; do not modify an unrelated dirty checkout.
-- A clean worktree may not contain ignored `config/llm.yaml`. If AgentLoom raises `Model type 'powerful' is not defined`, copy the local ignored file from the main checkout:
+- A clean worktree may not contain ignored `config/model.yaml`. If AgentLoom raises `Model type 'powerful' is not defined`, copy the local ignored file from the main checkout:
 
 ```bash
-cp /Users/bytedance/code/data_clear/AgentLoom/config/llm.yaml \
-   /Users/bytedance/code/data_clear/AgentLoom-config-env/config/llm.yaml
+cp /Users/bytedance/code/data_clear/AgentLoom/config/model.yaml \
+   /Users/bytedance/code/data_clear/AgentLoom-config-env/config/model.yaml
 ```
 
 - `applications/browser_harness_probe/config/system.yaml` uses `skills.paths: []` to add no extra Skill directories; project and Application Skill discovery still apply.

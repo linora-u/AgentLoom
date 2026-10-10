@@ -24,7 +24,7 @@ NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
 def _supervisor(project_root: Path, relative: str = "applications/test/workflows/agent.yaml") -> Path:
     config = project_root / "config"
     config.mkdir(parents=True, exist_ok=True)
-    (config / "llm.yaml").write_text(
+    (config / "model.yaml").write_text(
         (
             "model:\n"
             "  default_model_type: test\n"

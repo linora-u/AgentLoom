@@ -24,7 +24,7 @@ REPORT_AGENT_PATH = "applications/reports/workflows/report_agent.yaml"
 def _configured_model_catalog(tmp_path: Path) -> None:
     config = tmp_path / "config"
     config.mkdir(exist_ok=True)
-    (config / "llm.yaml").write_text(
+    (config / "model.yaml").write_text(
         "model:\n"
         "  summary:\n"
         "    model: openai/test-summary\n"
@@ -713,7 +713,7 @@ def test_stage_tool_rejects_paths_outside_application_workflows(tmp_path: Path) 
     service = BuilderService(tmp_path)
 
     with pytest.raises(ValueError, match="applications/.+/workflows"):
-        _stage_yaml(service, "../../config/llm.yaml", VALID_AGENT_YAML)
+        _stage_yaml(service, "../../config/model.yaml", VALID_AGENT_YAML)
 
 
 def test_stage_tool_rejects_symlinked_application_parent(tmp_path: Path) -> None:
@@ -801,7 +801,7 @@ def test_validation_rejects_runtime_invalid_structure_model_and_worker_reference
     tmp_path: Path,
 ) -> None:
     (tmp_path / "config").mkdir(exist_ok=True)
-    (tmp_path / "config/llm.yaml").write_text(
+    (tmp_path / "config/model.yaml").write_text(
         "model:\n"
         "  summary:\n"
         "    model: openai/test-summary\n"

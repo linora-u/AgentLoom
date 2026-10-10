@@ -60,7 +60,7 @@ For development and the complete test suite:
 ```sh
 uv sync --locked --all-groups --extra smol --extra code
 uv run --locked --extra smol --extra code loom runtime install pi
-cp config/llm.example.yaml config/llm.yaml  # Only when no local config exists.
+cp config/model.example.yaml config/model.yaml  # Only when no local config exists.
 uv run --locked --extra smol --extra code pytest tests/
 ```
 

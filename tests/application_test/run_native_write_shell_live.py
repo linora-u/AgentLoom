@@ -39,13 +39,13 @@ def main():
     root.mkdir(parents=True, mode=0o700, exist_ok=False)
     config = root / "config"
     config.mkdir(mode=0o700)
-    shutil.copyfile("config/llm.yaml", config / "llm.yaml")
-    os.chmod(config / "llm.yaml", 0o600)
-    private = yaml.safe_load((config / "llm.yaml").read_text())
+    shutil.copyfile("config/model.yaml", config / "model.yaml")
+    os.chmod(config / "model.yaml", 0o600)
+    private = yaml.safe_load((config / "model.yaml").read_text())
     profiles = args.profiles.split(",")
     for profile in profiles:
         private["model"][profile].update(timeout=60, num_retries=0, max_tokens=2048, max_output_tokens=2048)
-    (config / "llm.yaml").write_text(yaml.safe_dump(private))
+    (config / "model.yaml").write_text(yaml.safe_dump(private))
     (config / "system.yaml").write_text(
         yaml.safe_dump(
             {

@@ -16,16 +16,17 @@ applications/<app_name>/
 │       ├── HOOK.yaml
 │       └── scripts/
 ├── config/
-│   └── system.yaml
+│   ├── system.yaml                    # 可选应用行为覆盖
+│   └── model.yaml                     # 可选应用模型覆盖
 └── workflows/
     ├── <app_name>_agent.yaml
     └── worker_agents/
         └── <worker>.yaml
 ```
 
-`workflows/` 是 Application 标识；`agent_tools/` 只在需要确定性工具时创建；`skills/` 只存放应用私有 Skill；`hooks/` 只存放显式引用的独立 Hook Bundle；`config/` 只在需要应用级系统配置时创建。
+`workflows/` 是 Application 标识；`agent_tools/` 只在需要确定性工具时创建；`skills/` 只存放应用私有 Skill；`hooks/` 只存放显式引用的独立 Hook Bundle；`config/` 在需要应用级系统或模型配置时创建。
 
-不要在 Application 目录里新建 `llm.yaml`。模型路由、密钥、温度、重试、限流等只写全局本地 `config/llm.yaml`，Agent 通过 `model_type` 选择。
+模型路由、密钥、温度、重试、限流等写在项目或所属应用的 `config/model.yaml`，Agent 通过 `model_type` 选择。框架自动按模型名整条覆盖；应用未覆盖的项目模型仍可使用。
 
 ## 文件生成顺序
 

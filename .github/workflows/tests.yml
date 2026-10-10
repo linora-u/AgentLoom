@@ -47,7 +47,7 @@ jobs:
         run: uv run --locked --extra smol --extra code loom runtime install pi
 
       - name: Prepare test LLM config
-        run: cp config/llm.example.yaml config/llm.yaml
+        run: cp config/model.example.yaml config/model.yaml
 
       - name: Check public repository contents
         run: python .github/scripts/check_public_tree.py

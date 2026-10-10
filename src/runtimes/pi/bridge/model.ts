@@ -121,14 +121,18 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         messages: permit.agent_context.length ? [...context.messages,
           {role: "user" as const, content: permit.agent_context.join("\n"), timestamp: Date.now()}] : context.messages};
       const events: unknown[] = [];
-      const {reasoning_effort: _reasoning, web_search: _search, service_tier: _tier,
+      const {reasoning_effort: reasoningEffort, reasoning_summary: reasoningSummary,
+        web_search: _search, service_tier: _tier,
         extra_body: extraBody, ...samplingParams} = settings.extra_completion_params || {};
+      // Responses-compatible providers can reject the SDK's default summary field.
+      const reasoningParams = model.api === "openai-responses" && reasoningSummary === false
+          && reasoningEffort !== undefined ? {reasoning: {effort: reasoningEffort}} : {};
       const fetch = options?.fetch ?? globalThis.fetch;
       const stream = await nativeStream(model, selectedContext, {...options,
         temperature: subscription ? undefined : settings.temperature,
         ...(settings.max_output_tokens != null ? {maxTokens: settings.max_output_tokens} : {}), headers,
         cacheRetention: settings.context_cache ? "short" : "none",
-        samplingParams: {...samplingParams, ...extraBody},
+        samplingParams: {...samplingParams, ...reasoningParams, ...extraBody},
         fetch: async (input, init) => {
           const request = new Request(input, init);
           const baseUrl = codex ? "https://chatgpt.com/backend-api" : settings.base_url || "https://api.openai.com/v1";

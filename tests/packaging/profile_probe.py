@@ -124,7 +124,7 @@ def configure(workspace, profile, case, url):
     if case == "shipped_yaml":
         system.pop("default_toolsets")  # Exercise the shipped sample's default toolsets.
     (config / "system.yaml").write_text(yaml.safe_dump(system))
-    (config / "llm.yaml").write_text(yaml.safe_dump({"model": {
+    (config / "model.yaml").write_text(yaml.safe_dump({"model": {
         "default_model_type": "probe", "probe": model, "summary": model, "powerful": model}}))
     definition = {"name": "installed_profile", "agent_runtime": "pi" if profile == "pi" else "smolagents",
         "description": "Verify installed Application tools.", "task": "Execute the selected tool and report its result.",

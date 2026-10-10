@@ -111,7 +111,7 @@ def test_smol_runtime_options_execute_tools_todo_and_goal_through_application(
             }
         )
     )
-    (config_dir / "llm.yaml").write_text(
+    (config_dir / "model.yaml").write_text(
         yaml.safe_dump(
             {
                 "model": {

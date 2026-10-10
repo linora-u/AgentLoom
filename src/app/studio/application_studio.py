@@ -89,6 +89,8 @@ def _agent_detail(root, path, definition, *, role, inspection, catalog, errors, 
     projection = {"values": {}, "sources": {}}
     snapshot = inspection.snapshots.get(path.resolve()) if inspection is not None else None
     if snapshot is not None:
+        if snapshot.llm is not None:
+            catalog = model_catalog(snapshot.llm)
         try:
             projection = configuration_projection(snapshot, root)
         except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
@@ -144,7 +146,7 @@ def _agent_detail(root, path, definition, *, role, inspection, catalog, errors, 
         "description": str(definition.get("description") or ""),
         "role": role,
         "task": _task_summary(definition.get("task")),
-        "model": {"type": model, "source": "agent" if str(definition.get("model_type") or "").strip() else "global"},
+        "model": {"type": model, "source": "agent" if str(definition.get("model_type") or "").strip() else "config"},
         "tools": [
             {"name": str(tool["name"]), "source": sources.get("tools", {}).get("source", "agent")}
             for tool in values.get("tools", definition.get("tools")) or []

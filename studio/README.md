@@ -16,8 +16,8 @@ state, Runs, and command input. It is not a static product mockup.
 ```bash
 cd /path/to/AgentLoom
 ./install
-cp config/llm.example.yaml config/llm.yaml
-# Edit config/llm.yaml with at least one working model profile.
+cp config/model.example.yaml config/model.yaml
+# Edit config/model.yaml with at least one working model profile.
 agentloom --project /path/to/AgentLoom
 ```
 
@@ -123,7 +123,7 @@ old turn cannot finish against a new target.
 - Runtime-initiated context compaction appears in the Studio and follows the same
   continuity contract.
 
-Studio and Application Agents share project-root `config/llm.yaml` as their only
+Studio and Application Agents share project-root `config/model.yaml` as their only
 model catalog, Provider configuration, and authentication source. `/models`
 changes the Studio model for the current Session; it never changes an
 Application Agent's YAML `model_type`. Missing or invalid configuration is an

@@ -365,7 +365,7 @@ def _safe_model_contract(
     *,
     config_bytes: bytes | None = None,
 ) -> dict[str, Any]:
-    path = path or (REPO_ROOT / "config" / "llm.yaml")
+    path = path or (REPO_ROOT / "config" / "model.yaml")
     if config_bytes is None and capsule_is_active():
         config_bytes = _ACTIVE_MODEL_CONFIG_BYTES
     if not path.exists() and config_bytes is None:

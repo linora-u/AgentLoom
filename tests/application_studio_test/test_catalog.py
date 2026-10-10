@@ -116,7 +116,7 @@ def test_bootstrap_parses_each_agent_definition_once_and_keeps_shared_worker_tre
     monkeypatch,
 ) -> None:
     _write(
-        tmp_path / "config/llm.yaml",
+        tmp_path / "config/model.yaml",
         "model:\n  summary:\n    model: openai/test-summary\n  default_model_type: test\n  test:\n    model: openai/test\n",
     )
     alpha = "applications/demo/workflows/alpha.yaml"

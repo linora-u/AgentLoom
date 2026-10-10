@@ -98,7 +98,7 @@ checkout/release commands and clean Application verification.
 Create the local model configuration:
 
 ```bash
-cp config/llm.example.yaml config/llm.yaml
+cp config/model.example.yaml config/model.yaml
 ```
 
 ```yaml
@@ -116,7 +116,7 @@ model:
     tool_choice: "auto"
 ```
 
-`config/llm.yaml` is ignored by Git and is the only model catalog used by both
+`config/model.yaml` is ignored by Git and is the only model catalog used by both
 Studio and Application Agents. Start the Studio from any AgentLoom project:
 
 ```bash
@@ -131,7 +131,7 @@ Try a request with explicit roles and acceptance criteria:
 ```text
 Create an Application named release_review.
 Use one Supervisor and two Workers for API review and test review.
-Choose model types from config/llm.yaml.
+Choose model types from config/model.yaml.
 Validate it and ask before the first real Run.
 ```
 
