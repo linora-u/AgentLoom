@@ -607,7 +607,7 @@ def build_effective_agent_config_snapshot(
         else:
             if model_root != base.agent_root:
                 llm_config = base.llm.overlay_from_yaml(model_root / "config" / MODEL_CONFIG_NAME)
-                llm_config = llm_config.overlay_from_yaml(
+                llm_config = llm_config.patch_from_yaml(
                     model_root / "config" / LOCAL_MODEL_CONFIG_NAME
                 )
     layers: list[ConfigLayerSnapshot] = []

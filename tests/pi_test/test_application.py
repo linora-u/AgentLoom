@@ -187,7 +187,7 @@ def test_application_local_model_profiles_override_tracked_profiles_and_refresh(
         config = app.parent.parent / "config"
         config.mkdir()
         tracked = {**profile, "model": "openai/tracked", "api_key": ""}
-        local = {**tracked, "model": "openai/local-before", "api_key": "private-before"}
+        local = {"model": "openai/local-before", "api_key": "private-before"}
         (config / "model.yaml").write_text(
             yaml.safe_dump({"model": {"default_model_type": "test", "test": tracked}})
         )
@@ -195,8 +195,7 @@ def test_application_local_model_profiles_override_tracked_profiles_and_refresh(
         local_path.write_text(yaml.safe_dump({"model": {"test": local}}))
         with bind_config(load_project_config(tmp_path)):
             first = execute_app(app, file_logging=False)
-            local["model"] = "openai/local-after"
-            local["api_key"] = "private-after"
+            local = {"model": "openai/local-after", "api_key": "private-after"}
             local_path.write_text(yaml.safe_dump({"model": {"test": local}}))
             second = execute_app(app, file_logging=False)
     assert first.output == second.output == "Pi answer"
