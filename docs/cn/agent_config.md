@@ -12,7 +12,7 @@ Agent YAML 定义单个 Agent 的可选长期指令、必填用户任务、工�
 Agent 运行时通过必填的 `agent_runtime` 选择；当前注册值为
 `smolagents` 和 `pi`。所有 Tool 均通过模型原生结构化 tool call 调用。
 
-两种角色只使用 `.yaml` 或 `.yml` 定义。Markdown 可作为 `system_prompt.path` 指向的提示词正文，不能直接作为 Agent 定义。Application Studio、CLI、Schedule 和 Python 入口读取同一份 YAML 任务。
+两种角色只使用 `.yaml` 或 `.yml` 定义。Markdown 可作为 `system_prompt.path` 指向的提示词正文，不能直接作为 Agent 定义。CLI、Schedule 和 Python 入口读取同一份 YAML 任务。
 
 > ⚠️ **LLM 配置隔离**：Agent YAML 中的 `model`/`llm`/`langfuse` 会被自动过滤并输出 warning。LLM 参数只能在 `config/model.yaml` 中定义，Agent 通过 `model_type` 字段选择使用哪个预定义模型类型。
 

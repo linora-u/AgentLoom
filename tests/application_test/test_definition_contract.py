@@ -122,7 +122,7 @@ def test_markdown_file_is_not_an_agent_definition(tmp_path):
 
 
 def test_effective_values_sources_and_secret_projection_are_independent(tmp_path):
-    from agentloom.app.studio.application_studio import application_detail
+    from agentloom.app.presentation import configuration_projection
     from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
@@ -142,10 +142,7 @@ toolsets: []
     )
     parsed = load_agent_definition(path)
     snapshot = build_effective_agent_config_snapshot(parsed, base_config=base)
-    detail = application_detail(
-        tmp_path, "group/demo", systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "group/demo"}]
-    )
-    public = detail["agents"][0]["effective_config"]
+    public = configuration_projection(snapshot, tmp_path)
     assert snapshot.values["runtime_options"] == {"todo_mode": "off", "smart_summary": False}
     assert snapshot.values["toolsets"] == []
     assert snapshot.values["context_engine"] == {"min_chars": 789, "preview_max_chars": 456}
@@ -154,7 +151,7 @@ toolsets: []
     assert public["sources"]["runtime_options.todo_mode"]["source"] == "agent"
     assert public["sources"]["context_engine.min_chars"]["source"] == "application"
     assert public["sources"]["context_engine.preview_max_chars"]["source"] == "global"
-    assert "hidden-key" not in str(detail)
+    assert "hidden-key" not in str(public)
     public["values"]["context_engine"]["min_chars"] = -1
     snapshot.values["context_engine"]["min_chars"] = -2
     assert base.raw["context_engine"]["min_chars"] == 123
@@ -322,7 +319,6 @@ def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(
     from types import SimpleNamespace
 
     import agentloom.app.runner as runner
-    from agentloom.app.studio.application_studio import application_detail
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/demo"
@@ -335,14 +331,6 @@ def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(
     for directory, content in manifests.items():
         write(app / directory / "SKILL.md", content)
 
-    detail = application_detail(
-        tmp_path, "demo", systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}]
-    )
-    assert detail["application"]["health"] == "invalid"
-    agent = detail["agents"][0]
-    assert any(message in error for error in agent["validation"]["errors"])
-    if target == "worker":
-        assert any(message in error for error in agent["workers"][0]["validation"]["errors"])
     errors = validate_agent_definition(tmp_path, str(path), load_agent_definition(path))
     assert any(message in error for error in errors), errors
 
@@ -401,39 +389,6 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
             assert "_skill_catalog_snapshot" not in public
             assert "instructions." not in public
     assert "_skill_catalog_snapshot" not in base.raw
-
-
-def test_studio_uses_the_catalog_parsed_during_its_single_definition_inspection(tmp_path, monkeypatch):
-    import json
-
-    from agentloom.app.studio.application_studio import application_detail
-    from agentloom.execution.skills.catalog import SkillCatalog
-
-    project_config(tmp_path)
-    app = tmp_path / "applications/demo"
-    path = write(app / "workflows/root.yaml", BASE)
-    manifest = write(
-        app / "skills/review/SKILL.md",
-        "---\nname: review\ndescription: Original summary.\n---\nPrivate instructions.\n",
-    )
-    discover = SkillCatalog.discover
-    calls = []
-
-    def edit_after_discovery(sources, **kwargs):
-        catalog = discover(sources, **kwargs)
-        calls.append(catalog)
-        write(manifest, "---\nname: review\ndescription: Edited summary.\n---\nEdited private instructions.\n")
-        return catalog
-
-    monkeypatch.setattr(SkillCatalog, "discover", edit_after_discovery)
-    systems = [{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}]
-    first = application_detail(tmp_path, "demo", systems=systems)
-    assert len(calls) == 1
-    assert first["agents"][0]["skills"][0]["description"] == "Original summary."
-    assert "Private instructions." not in json.dumps(first)
-    second = application_detail(tmp_path, "demo", systems=systems)
-    assert len(calls) == 2
-    assert second["agents"][0]["skills"][0]["description"] == "Edited summary."
 
 
 def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
@@ -524,12 +479,7 @@ mcp_servers: config/test.mcp.json
     program = """
 import json, sys
 from pathlib import Path
-from agentloom.app.studio.query_service import StudioQueryService
 root = Path(sys.argv[1])
-detail = StudioQueryService(root).application_detail('demo')
-assert detail['agents'][0]['validation']['valid'], detail
-assert detail['agents'][0]['skills'][0]['name'] == 'review'
-assert 'Private review instructions.' not in json.dumps(detail)
 from agentloom.app.definition import load_agent_definition, prepare_application_definition
 from agentloom.config.config import load_project_config
 path = root / 'applications/demo/workflows/root.yaml'
@@ -708,7 +658,7 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
 def test_public_connection_urls_never_expose_authentication(tmp_path):
     import json
 
-    from agentloom.app.studio.application_studio import application_detail
+    from agentloom.app.presentation import configuration_projection
     from agentloom.config.config import build_effective_agent_config_snapshot
 
     base = project_config(tmp_path)
@@ -718,12 +668,7 @@ def test_public_connection_urls_never_expose_authentication(tmp_path):
         BASE + f"mcp_servers:\n  remote:\n    url: {url}\n    headers:\n      Authorization: synthetic-header\n",
     )
     snapshot = build_effective_agent_config_snapshot(load_agent_definition(path), base_config=base)
-    detail = application_detail(
-        tmp_path,
-        "demo",
-        systems=[{"path": str(path.relative_to(tmp_path)), "application_id": "demo"}],
-    )
-    public = detail["agents"][0]["effective_config"]
+    public = configuration_projection(snapshot, tmp_path)
     for secret in ("synthetic-user", "synthetic-password", "synthetic-token", "synthetic-header"):
         assert secret not in json.dumps(public)
     assert public["values"]["mcp_servers"]["remote"]["url"] == "[redacted]"
@@ -739,8 +684,6 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     from agentloom.app.definition import prepare_application_definition
     from agentloom.app.factory import YamlConfiguredAgent, YamlConfiguredSupervisorAgent
     from agentloom.app.readiness import validate_runtime_agent_config, validate_runtime_worker_config
-    from agentloom.app.studio.domain_actions import execute_domain_action
-    from agentloom.app.studio.query_service import StudioQueryService
 
     base = project_config(tmp_path)
     path = tmp_path / "applications/demo/workflows/root.yaml"
@@ -765,20 +708,6 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     assert f"{invalid_path}: {message}" in errors
     with pytest.raises(ValueError, match="tools_mapping was removed"):
         prepare_application_definition(tmp_path, path, definition, base_config=base)
-
-    detail = StudioQueryService(tmp_path).application_detail("demo")
-    assert detail["application"]["health"] == "invalid"
-    entry = detail["agents"][0]
-    if target == "worker":
-        entry = entry["workers"][0]
-    assert f"{invalid_path}: {message}" in entry["validation"]["errors"]
-    public = execute_domain_action(
-        tmp_path,
-        "application.validate",
-        {"application_id": "demo"},
-    )
-    assert public["valid"] is False
-    assert f"{invalid_path}: {message}" in public["errors"]
 
     # Exercise the existing runtime validation entry, without constructing a model.
     cls = YamlConfiguredSupervisorAgent if target == "supervisor" else YamlConfiguredAgent

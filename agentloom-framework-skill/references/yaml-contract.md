@@ -18,7 +18,7 @@ task: |
 不从 `description` 或运行参数伪造任务。
 
 Supervisor 和 Worker 的定义格式只支持 `.yaml`、`.yml`。Markdown 文件可作为
-`system_prompt.path` 引用的正文，但不能作为 Agent 定义。Studio 目录/详情、公开预检、
+`system_prompt.path` 引用的正文，但不能作为 Agent 定义。公开预检、
 schedule 目标与执行复用同一解析语义，包含嵌套 Application 和 workflow 目录；
 不要把 Markdown Worker 当成独立 Supervisor。重复 key、非法定义和越界/符号链接
 引用仍须拒绝，结构读取不得构造模型或分配 Run。

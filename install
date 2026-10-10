@@ -7,7 +7,6 @@ RED='\033[0;31m'
 NC='\033[0m'
 NO_MODIFY_PATH=false
 RUNTIME_PROFILE=""
-EXPECTED_OPENCODE_VERSION="1.18.3"
 
 usage() {
   cat <<'EOF'
@@ -51,7 +50,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-STUDIO_ROOT="$REPO_ROOT/studio"
 INSTALL_ROOT=${AGENTLOOM_INSTALL_DIR:-"$HOME/.agentloom"}
 mkdir -p "$INSTALL_ROOT"
 INSTALL_ROOT=$(cd -- "$INSTALL_ROOT" && pwd -P)
@@ -86,16 +84,6 @@ find_uv() {
   fi
 }
 
-find_bun() {
-  if command -v bun >/dev/null 2>&1; then
-    command -v bun
-  elif [[ -x "$HOME/.bun/bin/bun" ]]; then
-    printf '%s\n' "$HOME/.bun/bin/bun"
-  else
-    return 1
-  fi
-}
-
 if ! UV_BIN=$(find_uv); then
   require_curl
   printf '%b\n' "${MUTED}uv not found; installing it with Astral's official installer...${NC}"
@@ -109,19 +97,6 @@ if ! UV_BIN=$(find_uv); then
   fi
 fi
 
-if ! BUN_BIN=$(find_bun); then
-  require_curl
-  printf '%b\n' "${MUTED}Bun not found; installing it with Bun's official installer...${NC}"
-  if ! curl -fsSL https://bun.sh/install | bash; then
-    printf '%b\n' "${RED}Error: the official Bun installer failed.${NC}" >&2
-    exit 1
-  fi
-  if ! BUN_BIN=$(find_bun); then
-    printf '%b\n' "${RED}Error: Bun was installed but its executable could not be found.${NC}" >&2
-    exit 1
-  fi
-fi
-
 printf '%b\n' "${MUTED}Creating the locked AgentLoom Python environment...${NC}"
 RUNTIME_EXTRAS=(--extra "$RUNTIME_PROFILE")
 if [[ "$RUNTIME_PROFILE" == smol ]]; then
@@ -129,7 +104,7 @@ if [[ "$RUNTIME_PROFILE" == smol ]]; then
   RUNTIME_EXTRAS+=(--extra code)
 fi
 UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync \
-  --frozen \
+  --locked \
   "${RUNTIME_EXTRAS[@]}" \
   --no-editable \
   --no-dev \
@@ -141,37 +116,6 @@ if [[ "$RUNTIME_PROFILE" == pi ]]; then
   "$VENV_DIR/bin/python" -I -m agentloom runtime install pi
 fi
 
-BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agentloom-install.XXXXXX")
-cleanup() {
-  rm -rf "$BUILD_DIR"
-}
-trap cleanup EXIT
-BUILD_BINARY="$BUILD_DIR/agentloom-studio"
-
-printf '%b\n' "${MUTED}Building the native AgentLoom Studio...${NC}"
-(
-  cd -- "$STUDIO_ROOT"
-  "$BUN_BIN" install --frozen-lockfile
-  "$BUN_BIN" run build -- --outfile "$BUILD_BINARY"
-)
-"$BUILD_BINARY" --version >/dev/null
-
-OPENCODE_SOURCE=${AGENTLOOM_OPENCODE_SOURCE:-"$STUDIO_ROOT/node_modules/.bin/opencode"}
-if [[ ! -x "$OPENCODE_SOURCE" ]]; then
-  printf '%b\n' "${RED}Error: bundled OpenCode Runtime was not installed at $OPENCODE_SOURCE.${NC}" >&2
-  exit 1
-fi
-OPENCODE_VERSION=$($OPENCODE_SOURCE --version | tr -d '[:space:]')
-if [[ "$OPENCODE_VERSION" != "$EXPECTED_OPENCODE_VERSION" ]]; then
-  printf '%b\n' "${RED}Error: expected OpenCode Runtime $EXPECTED_OPENCODE_VERSION, found $OPENCODE_VERSION.${NC}" >&2
-  exit 1
-fi
-
-install -m 755 "$BUILD_BINARY" "$BIN_DIR/.agentloom-studio.$$.tmp"
-mv -f "$BIN_DIR/.agentloom-studio.$$.tmp" "$BIN_DIR/agentloom-studio"
-rm -f "$BIN_DIR/agentloom-tui"
-install -m 755 "$OPENCODE_SOURCE" "$BIN_DIR/.agentloom-opencode.$$.tmp"
-mv -f "$BIN_DIR/.agentloom-opencode.$$.tmp" "$BIN_DIR/agentloom-opencode"
 printf '%s\n' "$REPO_ROOT" > "$INSTALL_ROOT/.source-root.$$.tmp"
 mv -f "$INSTALL_ROOT/.source-root.$$.tmp" "$INSTALL_ROOT/source-root"
 
@@ -180,46 +124,20 @@ cat > "$WRAPPER_TMP" <<'EOF'
 #!/bin/sh
 set -eu
 install_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
-if [ -z "${AGENTLOOM_PYTHON:-}" ]; then
-  if [ -x "$install_root/venv/bin/python" ]; then
-    AGENTLOOM_PYTHON="$install_root/venv/bin/python"
-  else
-    AGENTLOOM_PYTHON="$install_root/venv/Scripts/python.exe"
-  fi
-  export AGENTLOOM_PYTHON
-fi
-if [ -z "${AGENTLOOM_OPENCODE_BIN:-}" ]; then
-  AGENTLOOM_OPENCODE_BIN="$install_root/bin/agentloom-opencode"
-  export AGENTLOOM_OPENCODE_BIN
-fi
-if [ -z "${AGENTLOOM_INSTALL_ROOT:-}" ]; then
-  AGENTLOOM_INSTALL_ROOT="$install_root"
-  export AGENTLOOM_INSTALL_ROOT
-fi
-if [ -z "${AGENTLOOM_COMMAND:-}" ]; then
-  AGENTLOOM_COMMAND="$install_root/bin/agentloom"
-  export AGENTLOOM_COMMAND
-fi
-if [ -z "${AGENTLOOM_SOURCE_ROOT:-}" ] && [ -f "$install_root/source-root" ]; then
-  AGENTLOOM_SOURCE_ROOT=$(sed -n '1p' "$install_root/source-root")
-  export AGENTLOOM_SOURCE_ROOT
-fi
 if [ "${1:-}" = "update" ]; then
   shift
-  if [ -z "${AGENTLOOM_SOURCE_ROOT:-}" ] || [ ! -x "$AGENTLOOM_SOURCE_ROOT/install" ]; then
+  source_root=$(sed -n '1p' "$install_root/source-root")
+  if [ ! -x "$source_root/install" ]; then
     printf '%s\n' 'agentloom: the trusted source directory is unavailable; update from a checkout with ./install' >&2
     exit 1
   fi
-  AGENTLOOM_INSTALL_DIR="$install_root" exec "$AGENTLOOM_SOURCE_ROOT/install" --no-modify-path "$@"
+  AGENTLOOM_INSTALL_DIR="$install_root" exec "$source_root/install" --no-modify-path "$@"
 fi
-if [ "${1:-}" = "schedules" ]; then
-  shift
-  exec "$AGENTLOOM_PYTHON" -I -m agentloom schedules "$@"
-fi
-exec "$install_root/bin/agentloom-studio" "$@"
+exec "$install_root/venv/bin/python" -I -m agentloom "$@"
 EOF
 chmod 755 "$WRAPPER_TMP"
 mv -f "$WRAPPER_TMP" "$BIN_DIR/agentloom"
+ln -sfn agentloom "$BIN_DIR/loom"
 date +%s > "$INSTALL_ROOT/.installed-at.$$.tmp"
 mv -f "$INSTALL_ROOT/.installed-at.$$.tmp" "$INSTALL_ROOT/installed-at"
 printf '%s\n' "$RUNTIME_PROFILE" > "$INSTALL_ROOT/.runtime-profile.$$.tmp"
@@ -280,6 +198,6 @@ if [[ "$NO_MODIFY_PATH" != true ]] && [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 fi
 
 printf '\n%s installed successfully.\n' "$APP"
-printf 'Run now: %s/agentloom\n' "$BIN_DIR"
+printf 'Run now: %s/agentloom --help\n' "$BIN_DIR"
 printf 'Run schedules: %s/agentloom schedules --project /path/to/project serve\n' "$BIN_DIR"
-printf 'After opening a new shell: agentloom\n'
+printf 'After opening a new shell: agentloom --help\n'
