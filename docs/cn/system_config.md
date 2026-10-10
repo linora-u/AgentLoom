@@ -11,7 +11,7 @@
 
 > ⚠️ **system.yaml 与 model.yaml 的隔离**：所有 LLM 相关配置（`model`、`llm`、`langfuse`）**必须且只能**放在 `config/model.yaml` 中。如果在 `system.yaml` 中写入这些键，框架会在加载时自动过滤并输出 warning 日志。详见 [LLM 配置文档](llm_config.md)。
 
-配置加载顺序为 `config/system.yaml` -> `config/model.yaml` -> `applications/<app>/config/system.yaml`（可选）。应用级 `system.yaml` 的发现基于 Agent YAML 配置文件路径：框架从该文件所在目录向上查找 `workflows/` 目录，其父目录即为应用根目录（app_root）。若 `app_root/config/system.yaml` 存在则自动叠加覆盖，不存在则跳过。嵌套应用（如 `my_app/sub_module`）会命中最近的 `workflows/` 目录，天然隔离。
+系统配置加载顺序为 `config/system.yaml` -> `applications/<app>/config/system.yaml`（可选）-> Agent 白名单覆盖。模型配置独立加载项目与所属应用的 `config/model.yaml`，应用同名模型整条覆盖项目模型。应用级 `system.yaml` 的发现基于 Agent YAML 配置文件路径：框架从该文件所在目录向上查找 `workflows/` 目录，其父目录即为应用根目录（app_root）。若 `app_root/config/system.yaml` 存在则自动叠加覆盖，不存在则跳过。嵌套应用（如 `my_app/sub_module`）会命中最近的 `workflows/` 目录，天然隔离。
 
 ---
 

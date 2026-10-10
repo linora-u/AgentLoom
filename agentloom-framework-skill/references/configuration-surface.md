@@ -22,7 +22,8 @@
 | 配置面 | 写在哪里 | 用途 | 关键规则 |
 |---|---|---|---|
 | 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、skills、checkpoint 等系统行为 | `runtime`/`logging` 只在此处生效；其他字段参与 deep merge；列表整段替换 |
-| 本地模型配置 | `config/model.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立加载，不被 app/Agent YAML 覆盖；通常被 `.gitignore` 忽略 |
+| 项目模型配置 | `config/model.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立于系统配置；应用可按模型名整条覆盖；通常被 `.gitignore` 忽略 |
+| 应用模型覆盖 | `applications/<app>/config/model.yaml` | 当前应用的模型及默认类型 | 同名模型整条替换，其他项目模型保留；Agent YAML 只选择模型类型 |
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
 | Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的可选长期指令、必填任务、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
 | Worker YAML | `applications/<app>/workflows/worker_agents/*.yaml` | 被 Supervisor 调用的 Agent 工具 | 仅被 `worker_agents` 显式引用时注册；Tool 复用 Worker 的 `name` 和 `description` |

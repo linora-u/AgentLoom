@@ -15,6 +15,7 @@ AgentLoom 的配置主要分为三大类，分别存放在不同的配置文件�
 | `model.yaml` | `config/model.yaml` | **全局模型配置**。每个模型类型显式选择 wire adapter，并独立管理模型名、凭据、网关和请求参数。 |
 | `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、runtime、必填 task、可选 system_prompt、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
 | *应用级系统配置* | `applications/<app>/config/system.yaml` | **可选的应用级覆盖**。用于覆盖特定应用的默认系统行为（例如修改工作区或替换默认工具）。 |
+| *应用级模型配置* | `applications/<app>/config/model.yaml` | **可选的模型覆盖**。按模型名整条替换项目模型，其他项目模型保留。 |
 
 > 详情参考：
 > - [Agent YAML 配置参考](agent_config.md)
@@ -133,7 +134,7 @@ Goal Mode 只能配置在顶层 Supervisor Agent YAML，不属于全局或 Appli
 
 Python 包统一为 `agentloom`，使用 `python -m agentloom` 或 `loom` 命令。
 原有 `src` 包和模块命令已移除。安装 wheel 后从项目外启动时，将
-`AGENTLOOM_PROJECT_ROOT` 设置为包含 `config/system.yaml` 和 `config/model.yaml`
+`AGENTLOOM_PROJECT_ROOT` 设置为包含 `config/system.yaml`
 的项目目录；没有显式配置时，继续沿父目录发现项目。生成的脚本记录相对输出
 文件的项目位置，也接受该环境变量覆盖。项目工具仍使用 `applications.*`，
 运行时从选定项目加载，不将整个项目加入框架的模块搜索路径。

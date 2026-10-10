@@ -89,11 +89,11 @@ model:
 
 ## 1. model.default_model_type — 默认模型类型
 
-控制整个 Agent 系统中，当 Agent YAML 未指定 `model_type` 时使用哪个模型类型。
+Agent YAML 未指定 `model_type` 时使用该默认类型。应用声明的默认值覆盖项目默认值。
 
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
-| `model.default_model_type` | `str` | `""` | ❌ 否 | 默认模型类型。值必须是 `model` 块下定义的某个类型 key（如 `powerful`、`fast`、`summary`，或自定义类型名）。未配置时，未指定 `model_type` 的 Agent 会直接抛出 `ValueError` |
+| `model.default_model_type` | `str` | `""` | ❌ 否 | 应用覆盖后的默认模型类型。值必须是有效模型目录中的类型 key（如 `powerful`、`fast`、`summary`，或自定义类型名）。未配置时，未指定 `model_type` 的 Agent 会直接抛出 `ValueError` |
 
 ### 1.1 解析规则
 
@@ -102,12 +102,12 @@ model:
 ```
 Agent YAML 中的 model_type（如 model_type: "fast"）
        ↓ (未指定时)
-config/model.yaml 中的 default_model_type（如 default_model_type: "powerful"）
+应用 default_model_type；应用未声明时使用项目 default_model_type
        ↓ (default_model_type 未配置时)
 ValueError
 ```
 
-> ⚠️ **注意**：最终解析出的模型类型必须存在于 `model.yaml`。如果 Agent YAML 明确指定了不存在的 `model_type`，全局默认类型指向不存在的类型，或 Agent 与全局配置都没有提供模型类型，框架都会**直接报错**（`ValueError`）。
+> ⚠️ **注意**：最终解析出的模型类型必须存在于 `model.yaml`。如果 Agent YAML 明确指定了不存在的 `model_type`，有效默认类型指向不存在的类型，或 Agent 与有效配置都没有提供模型类型，框架都会**直接报错**（`ValueError`）。
 
 **示例**：
 
