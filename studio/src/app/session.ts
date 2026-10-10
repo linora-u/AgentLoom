@@ -1414,7 +1414,7 @@ export class AgentLoomSession {
         ?? null
       this.patch({ studioModels, studioModel: selected })
     } catch (error) {
-      this.patch({ notice: `读取 config/llm.yaml Studio 模型失败: ${errorMessage(error)}` })
+      this.patch({ notice: `读取 config/model.yaml Studio 模型失败: ${errorMessage(error)}` })
     }
   }
 
@@ -1605,7 +1605,7 @@ function studioHelpMessage(): string {
     "- /new：在当前 Application 中开始空白新对话；旧会话仍持久保存，Agent 可按需读取",
     "- /compact：压缩当前 Session 上下文，保留任务连续性、历史记忆和文件修改",
     "- Ctrl+X：搜索命令、权限、Applications、主 Agents、Skills、Schedules 与 Runs",
-    "- /models：从 config/llm.yaml 选择 Studio 模型；不会修改 Application model_type",
+    "- /models：从 config/model.yaml 选择 Studio 模型；不会修改 Application model_type",
     "- /refresh：重新索引 AgentLoom 项目状态",
     "- Application Only：默认只直接写当前 Application；权限卡 1 仅本次、2 本次会话、3 拒绝",
     "- Full Access：从 Ctrl+X 开关；未选择 Application 时可预设，切换 Application 后继续生效",

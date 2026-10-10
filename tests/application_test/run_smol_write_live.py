@@ -20,12 +20,12 @@ def main():
     root.mkdir(parents=True, mode=0o700, exist_ok=False)
     config = root / "config"
     config.mkdir(mode=0o700)
-    shutil.copyfile("config/llm.yaml", config / "llm.yaml")
-    os.chmod(config / "llm.yaml", 0o600)
-    settings = yaml.safe_load((config / "llm.yaml").read_text())
+    shutil.copyfile("config/model.yaml", config / "model.yaml")
+    os.chmod(config / "model.yaml", 0o600)
+    settings = yaml.safe_load((config / "model.yaml").read_text())
     for profile in args.profiles.split(","):
         settings["model"][profile].update(timeout=60, num_retries=0, max_tokens=2048, max_output_tokens=2048)
-    (config / "llm.yaml").write_text(yaml.safe_dump(settings))
+    (config / "model.yaml").write_text(yaml.safe_dump(settings))
     (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(root / "runtime")}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "default_toolsets": [], "skills": {"paths": []}, "logging": {"console_enabled": False, "file_enabled": False}}))
     cases = []
     for profile in args.profiles.split(","):

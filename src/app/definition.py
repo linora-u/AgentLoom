@@ -626,18 +626,14 @@ def read_agent_definition(path: Path, *, cache: AgentDefinitionCache | None = No
 def model_types(project_root: Path) -> tuple[str, dict[str, object]]:
     """Return the catalog used by model selection, without constructing a model."""
     try:
-        raw = load_unique_yaml((project_root / "config/llm.yaml").read_text(encoding="utf-8")) or {}
+        return model_catalog(LLMConfig.load_from_yaml(project_root / "config/model.yaml"))
     except (OSError, UnicodeError, yaml.YAMLError, TypeError, ValueError):
         return "", {}
-    model = raw.get("model", {}) if isinstance(raw, dict) else {}
-    if not isinstance(model, dict):
-        return "", {}
-    default = model.get("default_model_type")
-    return (default.strip() if isinstance(default, str) else ""), model
 
 
-def model_catalog(base: UnifiedConfig) -> tuple[str, dict[str, object]]:
-    return base.llm.default_model_type, {name: settings.model_dump() for name, settings in base.llm.models.items()}
+def model_catalog(base: UnifiedConfig | LLMConfig) -> tuple[str, dict[str, object]]:
+    llm = base.llm if isinstance(base, UnifiedConfig) else base
+    return llm.default_model_type, {name: settings.model_dump() for name, settings in llm.models.items()}
 
 
 def selected_model_type(parsed: Mapping[str, Any], catalog: tuple[str, dict[str, object]]) -> str:
@@ -738,7 +734,7 @@ def _walk_definitions(
                 validator(config, path, agent_root=project_root)
             except (TypeError, ValueError) as exc:
                 errors.append(f"{path}: {definition_error(exc)}")
-            errors.extend(_validate_model_reference(path, config, catalog))
+            effective_catalog = catalog
             if base is not None:
                 try:
                     application_config = None
@@ -760,6 +756,10 @@ def _walk_definitions(
                         source_path_is_pinned=path_is_pinned,
                         application_config=application_config,
                     )
+                    # Explicit inspection catalogues remain supported for tools
+                    # that validate in-memory definitions without project models.
+                    if snapshots[path].llm is not None and snapshots[path].llm.models:
+                        effective_catalog = model_catalog(snapshots[path].llm)
                     AgentConfigNormalizer.validate_agent_runtime_config(
                         config,
                         effective_config=snapshots[path].values,
@@ -784,6 +784,7 @@ def _walk_definitions(
                     )
                 except (TypeError, ValueError, OSError, yaml.YAMLError) as exc:
                     errors.append(f"{path}: {definition_error(exc)}")
+            errors.extend(_validate_model_reference(path, config, effective_catalog))
             raw_workers = config.get("worker_agents", [])
             try:
                 AgentConfigNormalizer.validate_worker_agents_config(raw_workers)
@@ -872,6 +873,8 @@ def validate_effective_definition(
         )
     )
     if runtime_id == "smolagents":
+        if snapshot.llm is not None:
+            snapshot.llm.validate_runtime(runtime_id, runtime_options or {})
         prompt_path = (
             runtime_options.get("prompt_template_path") if runtime_options is not None
             else None

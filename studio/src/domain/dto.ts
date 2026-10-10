@@ -94,7 +94,7 @@ export interface EffectiveAgentDetailDto {
   description: string
   role: "supervisor" | "worker"
   task: string
-  model: { type: string; source: "global" | "agent" }
+  model: { type: string; source: "config" | "agent" }
   tools: Array<{ name: string; source: "agent" }>
   skills: EffectiveSkillDto[]
   permissions: SourcedCapabilityDto

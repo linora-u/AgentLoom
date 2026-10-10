@@ -547,7 +547,7 @@ describe("bundled OpenCode Runtime", () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-composition-"))
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
     await mkdir(join(projectRoot, "config"), { recursive: true })
-    await writeFile(join(projectRoot, "config/llm.yaml"), [
+    await writeFile(join(projectRoot, "config/model.yaml"), [
       "model:",
       "  default_model_type: test",
       "  test:",
@@ -568,11 +568,11 @@ describe("bundled OpenCode Runtime", () => {
     expect(opened.sessionID).toStartWith("ses_")
   }, 20_000)
 
-  test("production Studio exposes only the shared llm.yaml model catalog", async () => {
+  test("production Studio exposes only the shared model.yaml model catalog", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-shared-models-"))
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
     await mkdir(join(projectRoot, "config"), { recursive: true })
-    await writeFile(join(projectRoot, "config/llm.yaml"), [
+    await writeFile(join(projectRoot, "config/model.yaml"), [
       "model:",
       "  default_model_type: fast",
       "  fast:",
@@ -600,14 +600,14 @@ describe("bundled OpenCode Runtime", () => {
       providerName: model.providerName,
       default: model.default,
     }))).toEqual([
-      { id: "fast", name: "fast", providerName: "config/llm.yaml", default: true },
-      { id: "powerful", name: "powerful", providerName: "config/llm.yaml", default: false },
+      { id: "fast", name: "fast", providerName: "config/model.yaml", default: true },
+      { id: "powerful", name: "powerful", providerName: "config/model.yaml", default: false },
     ])
     expect(JSON.stringify(models)).not.toContain("secret-fast")
     expect(JSON.stringify(models)).not.toContain("secret-powerful")
   }, 20_000)
 
-  test("production Studio sends each turn through the selected llm.yaml profile", async () => {
+  test("production Studio sends each turn through the selected model.yaml profile", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-shared-profile-"))
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
     const fast = new ProfileCaptureServer()
@@ -615,7 +615,7 @@ describe("bundled OpenCode Runtime", () => {
     cleanups.push(() => fast.close())
     cleanups.push(() => powerful.close())
     await mkdir(join(projectRoot, "config"), { recursive: true })
-    await writeFile(join(projectRoot, "config/llm.yaml"), [
+    await writeFile(join(projectRoot, "config/model.yaml"), [
       "model:",
       "  default_model_type: fast",
       "  fast:",
@@ -666,13 +666,13 @@ describe("bundled OpenCode Runtime", () => {
     expect(powerfulRequest?.profile).toBe("powerful")
   }, 30_000)
 
-  test("production Studio never exposes llm.yaml credentials to tool subprocesses or model context", async () => {
+  test("production Studio never exposes model.yaml credentials to tool subprocesses or model context", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "agentloom-opencode-secret-boundary-"))
     cleanups.push(() => rm(projectRoot, { recursive: true, force: true }))
     const llm = new SecretBoundaryServer()
     cleanups.push(() => llm.close())
     await mkdir(join(projectRoot, "config"), { recursive: true })
-    await writeFile(join(projectRoot, "config/llm.yaml"), [
+    await writeFile(join(projectRoot, "config/model.yaml"), [
       "model:",
       "  default_model_type: secure",
       "  secure:",

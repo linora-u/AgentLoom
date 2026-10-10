@@ -34,7 +34,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
              first_reported_usage: dict | None = None, compaction_answer: str | None = None,
              tool_turns: list[dict | None] | None = None, response_error: str | None = None):
     app = project(tmp_path, "http://127.0.0.1:1/v1")
-    configuration = tmp_path / "config/llm.yaml"
+    configuration = tmp_path / "config/model.yaml"
     data = yaml.safe_load(configuration.read_text())
     data["model"]["codex"] = {
         "adapter": "openai_chatgpt_responses" if provider == "openai" else "openai_codex_responses",
@@ -218,7 +218,7 @@ ModelRuntime.prototype.getModel = function(provider, id) {
 
 def test_pi_native_settings_and_request_options_are_forwarded(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off", completed=False, citations=False)
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"].update(reasoning_effort="low", context_window=500000,
                                     max_output_tokens=65536)
@@ -430,7 +430,7 @@ def test_pi_login_uses_sdk_device_code_when_browser_callback_unavailable(tmp_pat
 
 def test_unlisted_codex_model_fails_without_provider_request(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off")
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"]["model"] = "gpt-6-unlisted-fixture"
     path.write_text(yaml.safe_dump(config))
@@ -513,7 +513,7 @@ def test_codex_wrapped_processing_error_preserves_safe_bounded_retry(
 
 def test_codex_max_reasoning_is_an_explicit_profile_setting(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off")
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"]["reasoning_effort"] = "max"
     path.write_text(yaml.safe_dump(config))
@@ -526,7 +526,7 @@ def test_codex_max_reasoning_is_an_explicit_profile_setting(tmp_path, monkeypatc
 @pytest.mark.parametrize("search", ["off", "required"])
 def test_codex_service_tier_reaches_the_wire(tmp_path, monkeypatch, tier, wire_tier, search):
     app, wire = _fixture(tmp_path, monkeypatch, search=search, completed=search == "required")
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"]["service_tier"] = tier
     path.write_text(yaml.safe_dump(config))
@@ -541,7 +541,7 @@ def test_codex_service_tier_reaches_the_wire(tmp_path, monkeypatch, tier, wire_t
 
 def test_codex_response_tier_does_not_claim_effective_fast_tier(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off", response_tier="default")
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"]["service_tier"] = "fast"
     path.write_text(yaml.safe_dump(config))
@@ -561,7 +561,7 @@ def test_codex_response_tier_does_not_claim_effective_fast_tier(tmp_path, monkey
 def test_chatgpt_public_api_records_actual_service_tier(tmp_path, monkeypatch, effective):
     app, wire = _fixture(tmp_path, monkeypatch, search="off", provider="openai",
                          response_tier=effective)
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"]["service_tier"] = "fast"
     path.write_text(yaml.safe_dump(config))
@@ -606,7 +606,7 @@ def test_required_search_is_enforced_on_each_model_turn(tmp_path, monkeypatch):
 
 def test_required_search_stays_on_for_retry_attempt(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="required", first_status=500)
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"].update(num_retries=1, retry_delay=0.01, max_retry_delay=0.01)
     path.write_text(yaml.safe_dump(config))
@@ -659,7 +659,7 @@ def test_required_search_stays_on_for_output_correction(tmp_path, monkeypatch):
         "required": ["answer"], "additionalProperties": False,
     }
     app.write_text(yaml.safe_dump(definition))
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"]["supports_structured_output"] = True
     path.write_text(yaml.safe_dump(config))
@@ -680,7 +680,7 @@ def test_codex_structured_result_remains_json_with_search_evidence(tmp_path, mon
         "required": ["answer"], "additionalProperties": False,
     }
     app.write_text(yaml.safe_dump(definition))
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"]["supports_structured_output"] = True
     path.write_text(yaml.safe_dump(config))
@@ -729,7 +729,7 @@ def test_sdk_window_and_usage_preserve_successful_tool_calls(tmp_path, monkeypat
              "input_tokens_details": {"cached_tokens": 0}}
     app, wire = _fixture(tmp_path, monkeypatch, search="off", reported_usage=usage,
                          propose_write=str(marker))
-    config_path = tmp_path / "config/llm.yaml"
+    config_path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(config_path.read_text())
     config["model"]["codex"]["context_window"] = context_window
     config["model"]["codex"]["max_output_tokens"] = 65536
@@ -767,7 +767,7 @@ def test_native_compaction_preserves_completed_response_above_configured_window(
     app, wire = _fixture(tmp_path, monkeypatch, search="off", completed=False, citations=False,
                          answer=completed_review, first_reported_usage=usage,
                          compaction_answer="NATIVE_COMPACTION_SUMMARY: the news review is complete.")
-    path = tmp_path / "config/llm.yaml"
+    path = tmp_path / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["codex"].update(context_window=500000, max_output_tokens=65536)
     path.write_text(yaml.safe_dump(config))

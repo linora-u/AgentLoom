@@ -17,7 +17,7 @@ uv run --locked loom runtime install pi
 uv run --locked python -m pytest tests/application_test/test_mixed_runtime_application.py tests/application_test/test_mixed_runtime_memory.py -q
 ```
 
-真实 provider 验证读取本地 `config/llm.yaml` 的 profile，在新的私有目录内创建 Application、独立 runtime 与记忆库：
+真实 provider 验证读取本地 `config/model.yaml` 的 profile，在新的私有目录内创建 Application、独立 runtime 与记忆库：
 
 ```sh
 uv run --locked python tests/acceptance/mixed_runtime_validation.py \

@@ -1,7 +1,7 @@
 """Run one deterministic ToolCalling Application through every model protocol.
 
 This is a manual real-provider acceptance runner, not an ordinary pytest test.
-It reads the ignored ``config/llm.yaml`` but never modifies or copies it.
+It reads the ignored ``config/model.yaml`` but never modifies or copies it.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from typing import Literal
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-LLM_CONFIG_PATH = ROOT / "config" / "llm.yaml"
+LLM_CONFIG_PATH = ROOT / "config" / "model.yaml"
 ADAPTERS = (
     "openai_chat",
     "openai_responses",
@@ -155,7 +155,7 @@ def select_cases(
                     profile=None,
                     model=None,
                     runnable=False,
-                    reason=f"no explicit config/llm.yaml profile declares adapter={adapter}",
+                    reason=f"no explicit config/model.yaml profile declares adapter={adapter}",
                 )
             )
             continue
@@ -186,7 +186,7 @@ def _load_config() -> object:
     from agentloom.config.llm_config import LLMConfig
 
     if not LLM_CONFIG_PATH.is_file():
-        raise FileNotFoundError("ignored config/llm.yaml is absent")
+        raise FileNotFoundError("ignored config/model.yaml is absent")
     return LLMConfig.load_from_yaml(LLM_CONFIG_PATH)
 
 

@@ -20,7 +20,7 @@ def _dispatcher(project_root: Path) -> StudioDispatcher:
 
 
 def _write_agent(project_root: Path, relative_path: str, *, name: str = "scheduled_agent") -> Path:
-    model_config = project_root / "config/llm.yaml"
+    model_config = project_root / "config/model.yaml"
     if not model_config.exists():
         model_config.parent.mkdir(parents=True, exist_ok=True)
         model_config.write_text(

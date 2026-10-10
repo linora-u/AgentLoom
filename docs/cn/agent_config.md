@@ -6,7 +6,7 @@
 > **文档定位**：本文档详细说明 Agent YAML 的**每一个**配置参数。
 > 关于配置文件之间的覆盖关系，请参阅 [配置体系总览](config-overview.md)。
 > 关于 `config/system.yaml`，请参阅 [系统配置文档](system_config.md)。
-> 关于 `config/llm.yaml`，请参阅 [LLM 配置文档](llm_config.md)。
+> 关于 `config/model.yaml`，请参阅 [LLM 配置文档](llm_config.md)。
 
 Agent YAML 定义单个 Agent 的可选长期指令、必填用户任务、工具、模型和 Skill。Agent 分为 **Supervisor**（多 Agent 编排者）和 **Worker**（具体任务执行者）两种角色。
 Agent 运行时通过必填的 `agent_runtime` 选择；当前注册值为
@@ -14,7 +14,7 @@ Agent 运行时通过必填的 `agent_runtime` 选择；当前注册值为
 
 两种角色只使用 `.yaml` 或 `.yml` 定义。Markdown 可作为 `system_prompt.path` 指向的提示词正文，不能直接作为 Agent 定义。Application Studio、CLI、Schedule 和 Python 入口读取同一份 YAML 任务。
 
-> ⚠️ **LLM 配置隔离**：Agent YAML 中的 `model`/`llm`/`langfuse` 会被自动过滤并输出 warning。LLM 参数只能在 `config/llm.yaml` 中定义，Agent 通过 `model_type` 字段选择使用哪个预定义模型类型。
+> ⚠️ **LLM 配置隔离**：Agent YAML 中的 `model`/`llm`/`langfuse` 会被自动过滤并输出 warning。LLM 参数只能在 `config/model.yaml` 中定义，Agent 通过 `model_type` 字段选择使用哪个预定义模型类型。
 
 ---
 
@@ -395,7 +395,7 @@ task: |
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | 工具列表。详见 [第 4 节](#4-工具配置详解) |
-| `model_type` | `str` | 已配置的全局 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
+| `model_type` | `str` | 应用覆盖后的 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
 | `runtime_options.prompt_template_path` | `str` | 不设置 | smol 模板路径，仅字符串 |
 | `runtime_options.planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-runtime_optionsplanning_interval--规划间隔) |
 | `runtime_options.todo_mode` | `str` | "auto" | smol 当前任务跟踪；"on" / "off" 必须加引号 |
@@ -449,7 +449,7 @@ AgentLoom 按 schema 校验参数并执行已注册 Tool。框架不会从自然
 
 ### 3.7 `model_type` — 模型选择
 
-Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择**使用 `config/llm.yaml` 中定义的哪个模型类型。
+Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择**使用 `config/model.yaml` 中定义的哪个模型类型。
 
 | 预定义类型 | 适用场景 | 说明 |
 |-----------|----------|------|
@@ -457,11 +457,11 @@ Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择
 | `"fast"` | 简单分类、路由、轻量 Worker | 快速响应，成本低 |
 | `"summary"` | 文本摘要、信息提取 | 中等能力 |
 
-也支持 `llm.yaml` 中自定义的任意类型名（如 `"code_review"`）。
+也支持 `model.yaml` 中自定义的任意类型名（如 `"code_review"`）。
 
 **解析逻辑**：
 1. Agent YAML 指定了 `model_type` → 使用该值，如果该类型不存在，**直接报错 (`ValueError`)，不会静默回退**。
-2. 未指定 → 使用全局 `config/llm.yaml` 的 `model.default_model_type`。如果 `default_model_type` 未配置，或最终解析出的类型不存在，**同样直接报错**。
+2. 未指定 → 使用应用覆盖后的 `model.default_model_type`（应用未声明时继承项目配置）。如果 `default_model_type` 未配置，或最终解析出的类型不存在，**同样直接报错**。
 
 ---
 
@@ -557,7 +557,7 @@ checkpoint 时仅保存在当前 run 的内存中。文件损坏时会告警并�
 | `N`（正整数） | 固定并发度，同时最多运行 N 个实例 |
 | 不设置 / `null` | 等同 `auto` |
 
-> `auto` 模式从 `config/llm.yaml` 中对应 `model_type` 的 `requests_per_minute` 读取 RPM。线程数 = `min(RPM, 10)`，rate limiter 以 `60/RPM` 秒为间隔控制实际请求速率。
+> `auto` 模式从 `config/model.yaml` 中对应 `model_type` 的 `requests_per_minute` 读取 RPM。线程数 = `min(RPM, 10)`，rate limiter 以 `60/RPM` 秒为间隔控制实际请求速率。
 
 **线程安全说明**：框架为每次并发调用创建**独立的 Agent 实例**（共享 Model 和 Config，但 Agent 的 `memory`、`state` 等有状态属性完全隔离）。这借鉴了 Cline `new SubagentRunner()` 和 LangGraph `Send()` 的设计模式。
 
@@ -1354,13 +1354,13 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 
 | 被过滤的 Key | 唯一合法位置 |
 |-------------|-------------|
-| `model` | `config/llm.yaml` |
-| `llm` | `config/llm.yaml` |
-| `langfuse` | `config/llm.yaml` |
+| `model` | `config/model.yaml` |
+| `llm` | `config/model.yaml` |
+| `langfuse` | `config/model.yaml` |
 
 ```
 WARNING: Ignoring top-level key 'model' in agent config;
-         LLM settings must come from config/llm.yaml only.
+         LLM settings must come from config/model.yaml only.
 ```
 
 ### 9.5 Deep Merge 规则
@@ -1596,7 +1596,7 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `system_prompt` | ❌ | ✅ | ✅ | `str` / `{path: str}` | Runtime 默认指令 |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
-| `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
+| `model_type` | ❌ | ✅ | ✅ | `str` | `config/model.yaml` 中的 `model.default_model_type`；无隐式默认值 |
 | `runtime_options.prompt_template_path` | ❌ | ✅ | ✅ | `str` | 不设置 |
 | `runtime_options.planning_interval` | ❌ | ✅ | ✅ | `int` | 不设置 |
 | `runtime_options.todo_mode` | ❌ | ✅ | ✅ | `str` | `"auto"` |

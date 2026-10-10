@@ -311,8 +311,8 @@ export function buildPaletteItems(snapshot: BootstrapResultDto): PaletteItem[] {
     {
       key: "command:models",
       category: "Commands",
-      title: "从 llm.yaml 选择 Studio 模型",
-      description: "模型类型、Provider 与认证统一读取项目 config/llm.yaml",
+      title: "从 model.yaml 选择 Studio 模型",
+      description: "模型类型、Provider 与认证统一读取项目 config/model.yaml",
       action: "models",
     },
     {

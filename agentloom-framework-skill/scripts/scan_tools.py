@@ -177,24 +177,20 @@ def _validate_root_precondition_for_relative_path(path_str: str) -> str | None:
     if configured.is_absolute():
         return None
 
-    llm_yaml = Path.cwd() / "config" / "llm.yaml"
-    if llm_yaml.is_file():
+    root = Path.cwd()
+    if (root / "config/model.yaml").is_file() or (root / "config/system.yaml").is_file() or (root / "applications").is_dir():
         return None
 
     return (
         "❌ 根目录前置条件不满足\n\n"
         "要求：先进入 AgentLoom 根目录再执行检测/更新。\n"
-        "根目录判定条件：存在 `config/llm.yaml`。\n"
+        "根目录判定条件：存在 config/system.yaml、config/model.yaml 或 applications/。\n"
         f"当前工作目录: {Path.cwd()}\n"
-        f"检查结果: 未找到 {llm_yaml}\n\n"
-        "若当前目录是新建 worktree 或干净 checkout，`config/llm.yaml` 可能因 `.gitignore` "
-        "不会自动带过来。请从同机可信 AgentLoom 工作区复制，或让用户提供本地配置；"
-        "不要提交该文件，也不要凭空生成模型配置。\n\n"
+        "应用可以只使用自身的 config/model.yaml，项目模型文件不作为扫描前置条件。\n\n"
         "💡 请先执行：\n"
         "   cd /path/to/AgentLoom\n"
         "   pwd\n"
-        "   ls config/llm.yaml\n"
-        "   git check-ignore -v config/llm.yaml || true"
+        "   ls applications"
     )
 
 

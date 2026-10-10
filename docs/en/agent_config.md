@@ -6,7 +6,7 @@
 > **Document scope**: This document details **every** configuration parameter in Agent YAML.
 > For override relationships between configuration files, see [Configuration System Overview](config-overview.md).
 > For `config/system.yaml`, see [System Configuration Reference](system_config.md).
-> For `config/llm.yaml`, see [LLM Configuration Reference](llm_config.md).
+> For `config/model.yaml`, see [LLM Configuration Reference](llm_config.md).
 
 Agent YAML defines one Agent's optional long-lived instructions, required user task, tools, model, and Skills. Agents have two roles: **Supervisor** (multi-Agent orchestrator) and **Worker** (specific task executor).
 The required `agent_runtime` field selects the Agent runtime; registered values
@@ -15,7 +15,7 @@ tool calls.
 
 Both roles use `.yaml` or `.yml` definitions. A Markdown file may supply the content of `system_prompt.path`, but is not an Agent definition. Studio, CLI, Schedule, and Python read the same YAML task.
 
-> ⚠️ **LLM Configuration Isolation**: `model`/`llm`/`langfuse` in Agent YAML are automatically filtered with a warning. LLM parameters can only be defined in `config/llm.yaml`; Agents select which predefined model type to use via the `model_type` field.
+> ⚠️ **LLM Configuration Isolation**: `model`/`llm`/`langfuse` in Agent YAML are automatically filtered with a warning. LLM parameters can only be defined in `config/model.yaml`; Agents select which predefined model type to use via the `model_type` field.
 
 ---
 
@@ -395,7 +395,7 @@ task: |
 | Field | Type | Default | Description |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | Tool list. See [Section 4](#4-tool-configuration-details) |
-| `model_type` | `str` | Configured global `default_model_type` | Model selection. See [3.7](#37-model_type--model-selection) |
+| `model_type` | `str` | Effective `default_model_type` after Application overrides | Model selection. See [3.7](#37-model_type--model-selection) |
 | `runtime_options.prompt_template_path` | `str` | Not set | Smol template path, string only |
 | `runtime_options.planning_interval` | `int` | Not set | Force re-planning every N steps. See [3.10](#310-runtime_optionsplanning_interval--planning-interval) |
 | `runtime_options.todo_mode` | `str` | "auto" | Smol task tracking; quote "on" / "off" |
@@ -451,7 +451,7 @@ text. A provider or model without structured-tool support fails directly.
 
 ### 3.7 `model_type` — Model Selection
 
-Agent YAML cannot directly modify LLM parameters, but can **select** which model type defined in `config/llm.yaml` to use via `model_type`.
+Agent YAML cannot directly modify LLM parameters, but can **select** which model type defined in `config/model.yaml` to use via `model_type`.
 
 | Predefined Type | Use Case | Description |
 |-----------|----------|------|
@@ -459,11 +459,11 @@ Agent YAML cannot directly modify LLM parameters, but can **select** which model
 | `"fast"` | Simple classification, routing, lightweight Worker | Fast response, lower cost |
 | `"summary"` | Text summarization, information extraction | Medium capability |
 
-Custom type names from `llm.yaml` are also supported (e.g., `"code_review"`).
+Custom type names from `model.yaml` are also supported (e.g., `"code_review"`).
 
 **Resolution logic**:
 1. Agent YAML specifies `model_type` → Uses that value; if the type doesn't exist, **raises an error (`ValueError`) directly, no silent fallback**.
-2. Not specified → Uses the global `config/llm.yaml` `model.default_model_type`. If `default_model_type` is omitted or the resolved type does not exist, **also raises an error directly**.
+2. Not specified → Uses the effective `model.default_model_type` after Application overrides (or the project default when the Application does not specify one). If `default_model_type` is omitted or the resolved type does not exist, **also raises an error directly**.
 
 ---
 
@@ -564,7 +564,7 @@ Controls the maximum concurrency when this Agent is batch-invoked. Typically use
 | `N` (positive int) | Fixed concurrency, at most N instances simultaneously |
 | Not set / `null` | Equivalent to `auto` |
 
-> In `auto` mode, RPM is read from the corresponding `model_type`'s `requests_per_minute` in `config/llm.yaml`. Thread count = `min(RPM, 10)`, the rate limiter paces actual requests at `60/RPM` second intervals.
+> In `auto` mode, RPM is read from the corresponding `model_type`'s `requests_per_minute` in `config/model.yaml`. Thread count = `min(RPM, 10)`, the rate limiter paces actual requests at `60/RPM` second intervals.
 
 **Thread safety**: The framework creates an **independent Agent instance** for each concurrent call (sharing Model and Config, but Agent's `memory`, `state`, and other stateful properties are fully isolated). This follows the design patterns of Cline's `new SubagentRunner()` and LangGraph's `Send()`.
 
@@ -1333,13 +1333,13 @@ The following keys in Agent YAML are **automatically filtered** (`_LLM_ONLY_TOP_
 
 | Filtered Key | Only Valid Location |
 |-------------|-------------|
-| `model` | `config/llm.yaml` |
-| `llm` | `config/llm.yaml` |
-| `langfuse` | `config/llm.yaml` |
+| `model` | `config/model.yaml` |
+| `llm` | `config/model.yaml` |
+| `langfuse` | `config/model.yaml` |
 
 ```
 WARNING: Ignoring top-level key 'model' in agent config;
-         LLM settings must come from config/llm.yaml only.
+         LLM settings must come from config/model.yaml only.
 ```
 
 ### 9.5 Deep Merge Rules
@@ -1572,7 +1572,7 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `system_prompt` | ❌ | ✅ | ✅ | `str` / `{path: str}` | Runtime default instructions |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
-| `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/llm.yaml`; no implicit default |
+| `model_type` | ❌ | ✅ | ✅ | `str` | `model.default_model_type` from `config/model.yaml`; no implicit default |
 | `runtime_options.prompt_template_path` | ❌ | ✅ | ✅ | `str` | Not set |
 | `runtime_options.planning_interval` | ❌ | ✅ | ✅ | `int` | Not set |
 | `runtime_options.todo_mode` | ❌ | ✅ | ✅ | `str` | `"auto"` |

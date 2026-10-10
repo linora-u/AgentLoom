@@ -32,7 +32,7 @@ success marker and can be retried with the same command. Install before starting
 Applications; Node/npm and network access are needed for the initial download.
 The equivalent Python entry point is `python -m agentloom.runtimes.pi.install`.
 
-Use the existing `config/llm.yaml`, then select Pi in an Application YAML definition:
+Use the existing `config/model.yaml`, then select Pi in an Application YAML definition:
 
 ```yaml
 name: direct_answer
@@ -106,6 +106,7 @@ or protected Shell query mapping are rejected before execution.
 | `context_cache` | Pi's native short/none cache hint; actual cache support is provider-dependent |
 | `extra_body`, sampling parameters | Passed through native `samplingParams`; support depends on the provider |
 | `top_p`, `seed`, `reasoning_effort` | Explicit provider parameters; Responses maps reasoning effort into `reasoning.effort` |
+| `reasoning_summary: false` | For Responses profiles with an explicit `reasoning_effort`, omit the SDK's default `reasoning.summary` and send the configured effort. Leave unset to retain SDK defaults. `extra_body` still takes precedence. |
 | `tool_choice`, `parallel_tool_calls` | Native sampling parameters for compatible providers |
 
 `runtime_options` passes directly to `SettingsManager.inMemory`, except
@@ -143,7 +144,7 @@ with ChatGPT** authorizes the public Responses API; **OpenAI Codex** authorizes
 the native Codex backend. AgentLoom passes Pi's `auth.json` path into its
 isolated process; Pi reads it and refreshes the selected credential. The
 default path is `~/.pi/agent/auth.json`, or `PI_CODING_AGENT_DIR/auth.json` when
-set in the parent environment. Do not put a token in `llm.yaml`. For
+set in the parent environment. Do not put a token in `model.yaml`. For
 `openai_codex_responses`, a missing login or failed token refresh starts Pi's
 subscription OAuth flow, opens the system browser, waits up to 15 minutes for
 the callback, and then continues the same Run. A headless session uses Pi's
@@ -235,6 +236,6 @@ the remote model service is replaced by deterministic SSE fixtures. Process
 failure tests corrupt/terminate actual child processes at the OS boundary.
 
 `tests/pi_test/run_live_applications.py` is an opt-in live campaign. It copies a
-private `llm.yaml` into isolated projects with mode 0600, runs 32 Applications
+private `model.yaml` into isolated projects with mode 0600, runs 32 Applications
 across eight named profiles, and records receipts/answers separately from secrets.
 Never commit campaign private configurations or execution logs.

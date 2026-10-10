@@ -21,7 +21,7 @@ def write(path: Path, text: str) -> Path:
 @pytest.fixture
 def native_project(tmp_path, monkeypatch):
     write(tmp_path / "config/system.yaml", "checkpoint: {enabled: false}\nself_learning: {enabled: false}\nsmart_summary: false\ntodo: {mode: auto}\ndefault_toolsets: []\n")
-    write(tmp_path / "config/llm.yaml", "model:\n  default_model_type: test\n  test: {model: fixture/model, adapter: openai_chat, api_key: fixture-secret}\n  summary: {model: fixture/model, adapter: openai_chat}\n")
+    write(tmp_path / "config/model.yaml", "model:\n  default_model_type: test\n  test: {model: fixture/model, adapter: openai_chat, api_key: fixture-secret}\n  summary: {model: fixture/model, adapter: openai_chat}\n")
     path = write(tmp_path / "applications/native/workflows/root.yaml", "name: native\nagent_runtime: native-fixture\ndescription: Return the requested answer.\ntask: Answer directly.\ntools: []\ntoolsets: []\nruntime_options: {thinking: low}\n")
     definitions = []
     class Observations(list):
@@ -219,7 +219,7 @@ def test_native_model_projection_uses_only_model_headers(native_project):
     path.write_text(path.read_text() + (
         "model_request_headers:\n  headers: {X-Agent: agent, X-Level: agent}\n"
     ))
-    model = root / "config/llm.yaml"
+    model = root / "config/model.yaml"
     model.write_text(model.read_text().replace(
         "api_key: fixture-secret", "api_key: fixture-secret, extra_headers: {x-level: model, Authorization: fixture-header-secret}",
     ))

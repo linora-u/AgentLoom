@@ -115,7 +115,7 @@ def probe(workspace: Path) -> dict:
           enabled: false
         default_toolsets: []
     """))
-    (config / "llm.yaml").write_text(
+    (config / "model.yaml").write_text(
         "model:\n"
         "  default_model_type: probe\n"
         "  probe:\n"

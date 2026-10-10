@@ -51,7 +51,7 @@ class _ChatTool(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ChatModelProfile:
-    """One safe, bounded Studio projection of an ``llm.yaml`` model entry."""
+    """One safe, bounded Studio projection of a ``model.yaml`` model entry."""
 
     model_type: str
     model_id: str
@@ -101,12 +101,12 @@ EventSink = Callable[[dict[str, object]], None]
 
 def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatModelProfile:
     try:
-        catalog = LLMConfig.load_from_yaml(project_root / "config" / "llm.yaml")
+        catalog = LLMConfig.load_from_yaml(project_root / "config" / "model.yaml")
         settings = catalog.for_type(requested_model_type)
     except Exception as error:
         raise ChatAgentError(
             "assistant_config",
-            "无法读取所选模型配置；请检查项目 config/llm.yaml。",
+            "无法读取所选模型配置；请检查项目 config/model.yaml。",
         ) from error
 
     model_type = (requested_model_type or catalog.default_model_type).strip().lower()
@@ -114,7 +114,7 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
     if not raw_model_id:
         raise ChatAgentError(
             "assistant_config",
-            f"模型类型 {model_type!r} 没有配置 model；请检查 config/llm.yaml。",
+            f"模型类型 {model_type!r} 没有配置 model；请检查 config/model.yaml。",
         )
     # ``openai/`` is a LiteLLM routing prefix, not part of the provider's
     # actual model/deployment id.
@@ -140,7 +140,7 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
         if invalid_base_url:
             raise ChatAgentError(
                 "assistant_config",
-                f"模型类型 {model_type!r} 的 base_url 无效；请检查 config/llm.yaml。",
+                f"模型类型 {model_type!r} 的 base_url 无效；请检查 config/model.yaml。",
             )
     elif not raw_model_id.startswith("openai/"):
         raise ChatAgentError(
@@ -155,7 +155,7 @@ def _load_profile(project_root: Path, requested_model_type: str | None) -> ChatM
     if not api_key:
         raise ChatAgentError(
             "assistant_config",
-            f"模型类型 {model_type!r} 没有可用凭据；请检查 config/llm.yaml。",
+            f"模型类型 {model_type!r} 没有可用凭据；请检查 config/model.yaml。",
         )
 
     raw_max_tokens = getattr(settings, "max_output_tokens", settings.max_tokens)
@@ -221,7 +221,7 @@ def _classify_provider_error(error: BaseException) -> ChatAgentError:
     if isinstance(error, (AuthenticationError, PermissionDeniedError)):
         return ChatAgentError(
             "assistant_auth",
-            "模型认证失败；请检查 config/llm.yaml 中所选模型的凭据。",
+            "模型认证失败；请检查 config/model.yaml 中所选模型的凭据。",
         )
     if isinstance(error, BadRequestError):
         return ChatAgentError(

@@ -128,7 +128,7 @@ def project(root: Path, url: str, *, supervisor: str, worker: str) -> Path:
              'context_window': 32768, 'max_output_tokens': 1000, 'num_retries': 0,
              'timeout': 15, 'requests_per_minute': 2000000,
              'supports_structured_output': True}
-    write_yaml(root / 'config/llm.yaml', {'model': {'default_model_type': 'supervisor',
+    write_yaml(root / 'config/model.yaml', {'model': {'default_model_type': 'supervisor',
         **{role: {**model, 'model': f'openai/{role}'} for role in ['supervisor', 'worker', 'summary']}}})
     workflow = root / 'applications/mixed/workflows/root.yaml'
     write_yaml(workflow, {'name': 'mixed', 'agent_runtime': supervisor, 'model_type': 'supervisor',

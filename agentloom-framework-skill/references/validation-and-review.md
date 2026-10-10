@@ -6,11 +6,11 @@
 
 ```bash
 pwd
-test -f config/llm.yaml
-git check-ignore -v config/llm.yaml || true
+test -f config/model.yaml
+git check-ignore -v config/model.yaml || true
 ```
 
-`config/llm.yaml` 通常是本机私有配置，缺失时先从同机可信工作区复制或让用户提供；不要凭空生成，也不要提交。
+`config/model.yaml` 通常是本机私有配置，缺失时先从同机可信工作区复制或让用户提供；不要凭空生成，也不要提交。
 
 ```bash
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
@@ -19,7 +19,7 @@ git check-ignore -v config/llm.yaml || true
 
 通过标准：`summary.valid == true` 且 `error_count == 0`。
 
-此脚本是 `agentloom.app.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML Agent 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
+此脚本是 `agentloom.app.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML Agent 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。应用模型配置由框架自动合并，项目模型文件可省略；实际所需模型缺失会失败，不能跳过模型校验后报告通过。
 
 输出保留 `summary` 与 `errors` envelope；共享诊断使用 `field: definition`、`rule: shared_definition`，`message` 保留 canonical 原因。目录缺失、没有定义等 authoring 结构错误使用独立规则，不保证旧脚本的字段级 rule 名称。
 

@@ -54,7 +54,7 @@ describe("detail presentation", () => {
         description: "Coordinates the Application",
         role: "supervisor",
         task: longWorkflow,
-        model: { type: "powerful", source: "global" },
+        model: { type: "powerful", source: "config" },
         tools: [{ name: "read_file", source: "agent" }],
         skills: [{
           name: "demo-skill",

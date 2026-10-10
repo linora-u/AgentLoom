@@ -30,7 +30,7 @@ def test_application_native_read_runs_production_hooks_and_durable_host(tmp_path
             }
         )
     )
-    (config / "llm.yaml").write_text(
+    (config / "model.yaml").write_text(
         "model:\n  default_model_type: test\n  test: {model: fixture, adapter: openai_chat}\n  summary: {model: fixture, adapter: openai_chat}\n"
     )
     workflow, marker = write_application(tmp_path, "native_case", "test", scenario)

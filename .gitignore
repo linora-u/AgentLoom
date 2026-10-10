@@ -193,11 +193,11 @@ outputs/
 /applications/news_agent/data/*
 
 # Local/runtime-only content (must not be tracked)
-config/llm.yaml
+config/model.yaml
 .agent/
 
 # Keep generic legacy ignore for compatibility
-llm.yaml
+model.yaml
 applications/web_search/config/.mcp.anysearch.json
 
 # Isolated real-Application acceptance definitions and artifacts.

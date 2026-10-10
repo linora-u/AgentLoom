@@ -6,7 +6,7 @@
 - 输出：Agent 的文本回答。
 - 分工：只有一个 Supervisor；使用 Pi 原生 `read` 读取相关文档，不调用 Worker，
   也不会修改文件。
-- 模型：使用项目根目录 `config/llm.yaml` 中的 `codex_luna` 配置，调用 Pi 的
+- 模型：使用项目根目录 `config/model.yaml` 中的 `codex_luna` 配置，调用 Pi 的
   `gpt-6-luna`，默认 `xhigh` 推理和 `auto` 原生搜索。先通过 Pi 登录一次。
 
 另有 `workflows/my_pi_search_agent.yaml`，选择 `codex_luna_search`，要求每次
