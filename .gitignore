@@ -201,6 +201,7 @@ model.yaml
 llm.yaml
 applications/web_search/config/.mcp.anysearch.json
 applications/test_demo/config/.mcp.anysearch.json
+model.local.yaml
 
 # Isolated real-Application acceptance definitions and artifacts.
 **/.architecture_acceptance/
