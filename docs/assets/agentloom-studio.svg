@@ -24,7 +24,7 @@
 <text x="925.2" y="86.0" fill="#444444" font-weight="400">│</text>
 <rect x="933.6" y="72.0" width="344.4" height="18" fill="#121212"/>
 <text x="34.8" y="104.0" fill="#eeeeee" font-weight="700">agentloom-readme-demo.SIHeVj</text>
-<text x="648.0" y="104.0" fill="#7f7f7f" font-weight="400">Studio: config/llm.yaml default</text>
+<text x="648.0" y="104.0" fill="#7f7f7f" font-weight="400">Studio: config/model.yaml default</text>
 <rect x="925.2" y="90.0" width="8.4" height="18" fill="#121212"/>
 <text x="925.2" y="104.0" fill="#444444" font-weight="400">│</text>
 <rect x="933.6" y="90.0" width="16.8" height="18" fill="#121212"/>
@@ -54,7 +54,7 @@
 <rect x="967.2" y="144.0" width="142.8" height="18" fill="#121212"/>
 <text x="967.2" y="158.0" fill="#ffaf87" font-weight="700">+ New Application</text>
 <rect x="1110.0" y="144.0" width="168.0" height="18" fill="#121212"/>
-<text x="34.8" y="176.0" fill="#7f7f7f" font-weight="400">创 建  · 修 改  · 验 证  · 运 行   ·  Studio: config/llm.yaml default</text>
+<text x="34.8" y="176.0" fill="#7f7f7f" font-weight="400">创 建  · 修 改  · 验 证  · 运 行   ·  Studio: config/model.yaml default</text>
 <rect x="925.2" y="162.0" width="8.4" height="18" fill="#121212"/>
 <text x="925.2" y="176.0" fill="#444444" font-weight="400">│</text>
 <rect x="933.6" y="162.0" width="344.4" height="18" fill="#121212"/>

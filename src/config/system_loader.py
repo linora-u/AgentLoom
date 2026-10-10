@@ -51,7 +51,7 @@ def filter_llm_only_top_level_keys(
     for key, value in config_map.items():
         if key in _LLM_ONLY_TOP_LEVEL_KEYS:
             logger.warning(
-                "Ignoring top-level key '%s' in %s; LLM settings must come from config/llm.yaml only.",
+                "Ignoring top-level key '%s' in %s; LLM settings must come from config/model.yaml only.",
                 key,
                 source_name,
             )

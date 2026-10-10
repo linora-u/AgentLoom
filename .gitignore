@@ -193,10 +193,12 @@ outputs/
 /applications/news_agent/data/*
 
 # Local/runtime-only content (must not be tracked)
+config/model.yaml
 config/llm.yaml
 .agent/
 
-# Keep generic legacy ignore for compatibility
+# Model configuration files may contain local credentials
+model.yaml
 llm.yaml
 applications/web_search/config/.mcp.anysearch.json
 

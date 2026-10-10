@@ -502,7 +502,7 @@ describe("OpenCode Studio client", () => {
     expect(api.prompts.at(-1)?.model).toEqual({ providerID: "openai", modelID: "gpt-5.4" })
   })
 
-  test("pins the llm.yaml default on every resumed Studio Session prompt", async () => {
+  test("pins the model.yaml default on every resumed Studio Session prompt", async () => {
     const api = new MemoryStudioApi()
     const studio = new OpenCodeStudioClient(api)
     const opened = await studio.openApplication("reports")

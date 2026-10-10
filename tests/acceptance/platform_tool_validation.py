@@ -2,7 +2,7 @@
 
 Each invocation creates a new private workspace; existing evidence is never
 overwritten. Assertions inspect actual tool records and effects, not just the
-model's final answer. The private llm.yaml is copied but never included in a
+model's final answer. The private model.yaml is copied but never included in a
 report. Run this script with the worktree's own interpreter.
 """
 
@@ -183,8 +183,8 @@ def run_case(case: str, workspace: Path, *, model_type: str | None = None) -> di
     })
     config = workspace / "config"
     config.mkdir(mode=0o700)
-    shutil.copyfile(ROOT / "config" / "llm.yaml", config / "llm.yaml")
-    os.chmod(config / "llm.yaml", 0o600)
+    shutil.copyfile(ROOT / "config" / "model.yaml", config / "model.yaml")
+    os.chmod(config / "model.yaml", 0o600)
     system = {
         "runtime": {"root_dir": str(workspace / "runtime")},
         "checkpoint": {"enabled": True, "cleanup_on_success": False},
@@ -241,7 +241,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", choices=CASES, required=True)
     parser.add_argument("--workspace", type=Path, required=True)
-    parser.add_argument("--model-type", help="Use an existing llm.yaml profile for cross-provider validation")
+    parser.add_argument("--model-type", help="Use an existing model.yaml profile for cross-provider validation")
     args = parser.parse_args()
     workspace = args.workspace.resolve()
     if workspace.exists():

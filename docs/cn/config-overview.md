@@ -2,6 +2,9 @@
 
 本文档介绍 AgentLoom 框架的配置体系架构，包括配置文件的分类、加载层级、覆盖机制以及 LLM 配置的独立性。
 
+
+框架自动加载项目 `config/model.yaml` 与 Agent 所属应用的 `config/model.yaml`。同名模型整条替换，其他项目模型保留；应用可声明自己的 `model.default_model_type`，未声明则继承项目默认值。跨应用 Worker 按自己的定义目录加载，应用之间不会互相覆盖。项目模型文件可省略，只需有效模型目录包含实际所需类型。新执行或任务重试读取最新配置，一次运行内固定模型；SDK 请求重试及断点恢复兼容规则沿用现有行为。旧 `llm.yaml` 必须迁移。
+
 ## 1. 配置文件分类
 
 AgentLoom 的配置主要分为三大类，分别存放在不同的配置文件中：
@@ -9,9 +12,10 @@ AgentLoom 的配置主要分为三大类，分别存放在不同的配置文件�
 | 配置文件 | 默认路径 | 作用与定位 |
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **全局系统配置**。控制工具、工作区、权限和运行时存储等系统级行为。 |
-| `llm.yaml` | `config/llm.yaml` | **全局模型配置**。每个模型类型显式选择 wire adapter，并独立管理模型名、凭据、网关和请求参数。 |
+| `model.yaml` | `config/model.yaml` | **全局模型配置**。每个模型类型显式选择 wire adapter，并独立管理模型名、凭据、网关和请求参数。 |
 | `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent 配置**。定义角色、runtime、必填 task、可选 system_prompt、工具和模型类型；顶层 Supervisor 还可配置 [Goal Mode](goal_mode.md)，Worker 不允许配置 Goal。 |
 | *应用级系统配置* | `applications/<app>/config/system.yaml` | **可选的应用级覆盖**。用于覆盖特定应用的默认系统行为（例如修改工作区或替换默认工具）。 |
+| *应用级模型配置* | `applications/<app>/config/model.yaml` | **可选的模型覆盖**。按模型名整条替换项目模型，其他项目模型保留。 |
 
 > 详情参考：
 > - [Agent YAML 配置参考](agent_config.md)
@@ -75,7 +79,7 @@ logging:
 
 ## 3. LLM 配置的完全隔离
 
-在 AgentLoom 中，**LLM 配置（`llm.yaml`）与系统配置（`system.yaml`）是物理隔离的**。
+在 AgentLoom 中，**LLM 配置（`model.yaml`）与系统配置（`system.yaml`）是物理隔离的**。
 
 ### 为什么隔离？
 - **防止泄漏**：确保敏感的 `api_key` 不会被意外写入业务 Agent 的配置中。
@@ -130,7 +134,7 @@ Goal Mode 只能配置在顶层 Supervisor Agent YAML，不属于全局或 Appli
 
 Python 包统一为 `agentloom`，使用 `python -m agentloom` 或 `loom` 命令。
 原有 `src` 包和模块命令已移除。安装 wheel 后从项目外启动时，将
-`AGENTLOOM_PROJECT_ROOT` 设置为包含 `config/system.yaml` 和 `config/llm.yaml`
+`AGENTLOOM_PROJECT_ROOT` 设置为包含 `config/system.yaml`
 的项目目录；没有显式配置时，继续沿父目录发现项目。生成的脚本记录相对输出
 文件的项目位置，也接受该环境变量覆盖。项目工具仍使用 `applications.*`，
 运行时从选定项目加载，不将整个项目加入框架的模块搜索路径。

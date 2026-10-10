@@ -188,7 +188,7 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
         turns=[[('worker-left', 'probe', {'query': 'left'}), ('worker-right', 'probe', {'query': 'right'})]]
     ) as (url, requests):
         app = project(tmp_path, url)
-        model_path = tmp_path / 'config/llm.yaml'
+        model_path = tmp_path / 'config/model.yaml'
         config = yaml.safe_load(model_path.read_text())
         config['model']['worker'] = {**config['model']['test'], 'base_url': worker_url}
         model_path.write_text(yaml.safe_dump(config))

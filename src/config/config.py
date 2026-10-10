@@ -3,8 +3,9 @@ Unified configuration management.
 
 Configuration precedence (low -> high):
 1. config/system.yaml
-2. config/llm.yaml
+2. config/model.yaml
 3. applications/<app>/config/system.yaml  (optional, resolved via Agent YAML path)
+4. applications/<app>/config/model.yaml   (whole named model profiles replace project profiles)
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,7 @@ from .system_loader import load_project_system_config
 from .yaml_loader import load_unique_yaml
 
 SYSTEM_CONFIG_NAME = "system.yaml"
-LLM_CONFIG_NAME = "llm.yaml"
+MODEL_CONFIG_NAME = "model.yaml"
 _CAMPAIGN_LLM_CONFIG_FD_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD"
 _MAX_CAMPAIGN_LLM_CONFIG_BYTES = 1024 * 1024
 APP_CONFIG_RELATIVE_PATH = Path("config") / SYSTEM_CONFIG_NAME
@@ -73,6 +74,8 @@ def _validate_review_model_references(
     """Require enabled review scopes to reference configured model types."""
 
     self_learning = config_map.get("self_learning")
+    if isinstance(self_learning, dict) and self_learning.get("enabled") is False:
+        return
     review = self_learning.get("review") if isinstance(self_learning, dict) else None
     if not isinstance(review, dict) or review.get("enabled") is not True:
         return
@@ -85,7 +88,7 @@ def _validate_review_model_references(
         if model_type and model_type not in configured:
             raise ValueError(
                 f"self_learning.review.{scope}.review_model '{model_type}' in "
-                f"{source_name} is not configured in config/llm.yaml."
+                f"{source_name} is not configured in config/model.yaml."
             )
 
 
@@ -105,6 +108,7 @@ class EffectiveAgentConfigSnapshot:
 
     values: dict[str, Any]
     layers: tuple[ConfigLayerSnapshot, ...]
+    llm: LLMConfig | None = field(default=None, repr=False)
 
 
 def _load_llm_config(path: Path) -> LLMConfig:
@@ -306,11 +310,6 @@ class UnifiedConfig:
 
         self._raw = normalized
         self._settings = RootSettings.model_validate(self._raw)
-        _validate_review_model_references(
-            self._raw,
-            llm_config,
-            source_name="project root config/system.yaml",
-        )
         self._agent_root = agent_root
         self._llm_config = llm_config
         self._loaded_raw: dict[str, Any] | None = None
@@ -397,10 +396,11 @@ class UnifiedConfig:
 
 _ACTIVE_CONFIG: UnifiedConfig | None = None
 _INVOCATION_CONFIG: ContextVar[UnifiedConfig | None] = ContextVar("agentloom_config", default=None)
+_AGENT_MODEL_CONFIG: ContextVar[LLMConfig | None] = ContextVar("agentloom_model_config", default=None)
 
 
 def _load_merged_config(config_dir: Path | str | None = None) -> UnifiedConfig:
-    """Load global base configuration: ``config/system.yaml`` + ``config/llm.yaml``.
+    """Load global base configuration: ``config/system.yaml`` + ``config/model.yaml``.
 
     Application-level overlays (``applications/<app>/config/system.yaml``) are
     **not** handled here — they are resolved later in
@@ -416,7 +416,7 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
     agent_root = Path(project_root).expanduser().resolve()
     config_root = agent_root / "config"
     merged = load_project_system_config(agent_root, require_exists=False)
-    llm_config = _load_llm_config(config_root / LLM_CONFIG_NAME)
+    llm_config = _load_llm_config(config_root / MODEL_CONFIG_NAME)
     config = UnifiedConfig(merged, agent_root=agent_root, llm_config=llm_config)
     # Programmatic configs and the credential-pipe campaign are explicit
     # overrides. Only unchanged disk-loaded bases may be refreshed for a Run.
@@ -455,6 +455,16 @@ def bind_config(config: UnifiedConfig):
         _INVOCATION_CONFIG.reset(token)
 
 
+@contextmanager
+def bind_model_config(catalog: LLMConfig | None):
+    """Bind one Agent's models without changing the project base for its Workers."""
+    token = _AGENT_MODEL_CONFIG.set(catalog)
+    try:
+        yield catalog
+    finally:
+        _AGENT_MODEL_CONFIG.reset(token)
+
+
 class ConfigProxy:
     def __getitem__(self, key: str) -> Any:
         return get_config().raw[key]
@@ -466,11 +476,14 @@ class ConfigProxy:
         return get_config().get_nested(*keys, default=default)
 
     def get_model_config(self, model_type: str, key: str, default: Any = None) -> Any:
-        return get_config().get_model_config(model_type, key, default=default)
+        settings = self.llm.models.get(model_type)
+        value = getattr(settings, key, None)
+        return value if value is not None and value != "" else default
 
     @property
     def llm(self) -> LLMConfig:
-        return get_config().llm
+        bound = _AGENT_MODEL_CONFIG.get()
+        return bound if bound is not None else get_config().llm
 
     @property
     def raw(self) -> dict[str, Any]:
@@ -490,19 +503,28 @@ class ConfigProxy:
 
     @property
     def default_model_type(self) -> str:
-        return get_config().default_model_type
+        return self.llm.default_model_type
 
     @property
     def requests_per_minute(self) -> int:
-        return get_config().requests_per_minute
+        try:
+            return self.llm.for_type(None).requests_per_minute
+        except ValueError:
+            return DEFAULT_MODEL_REQUESTS_PER_MINUTE
 
     @property
     def llm_base_url(self) -> str:
-        return get_config().llm_base_url
+        try:
+            return self.llm.for_type(None).base_url
+        except ValueError:
+            return ""
 
     @property
     def llm_api_key(self) -> str:
-        return get_config().llm_api_key
+        try:
+            return self.llm.for_type(None).api_key or "not_provided"
+        except ValueError:
+            return "not_provided"
 
     @property
     def langfuse_host(self) -> str:
@@ -559,7 +581,7 @@ def build_effective_agent_config_snapshot(
     """Build merged Agent values while retaining every unmerged source.
 
     Merge order (low → high):
-    1. Global base (``config/system.yaml`` + ``config/llm.yaml``)
+    1. Global base (``config/system.yaml`` + ``config/model.yaml``)
     2. Application overlay (``<app_root>/config/system.yaml``, optional)
     3. Agent YAML overlay
 
@@ -571,6 +593,18 @@ def build_effective_agent_config_snapshot(
     if isinstance(pinned, EffectiveAgentConfigSnapshot):
         return deepcopy(pinned)
     base = base_config if base_config is not None else get_config()
+    if base_config is None and _INVOCATION_CONFIG.get() is None:
+        base = fresh_invocation_config(base)
+    llm_config = base.llm.model_copy(deep=True)
+    model_source = (agent_config or {}).get("_model_source_path") or (agent_config or {}).get("_yaml_file_path")
+    if model_source:
+        try:
+            model_root = _resolve_app_root_from_yaml(base.agent_root, Path(str(model_source)))
+        except ValueError:
+            pass  # Programmatic Agents without an Application use project models.
+        else:
+            if model_root != base.agent_root:
+                llm_config = base.llm.overlay_from_yaml(model_root / "config" / MODEL_CONFIG_NAME)
     layers: list[ConfigLayerSnapshot] = []
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
@@ -677,7 +711,7 @@ def build_effective_agent_config_snapshot(
     validate_system_snapshot(merged, source_name)
     _validate_review_model_references(
         merged,
-        base.llm,
+        llm_config,
         source_name=source_name,
     )
     if isinstance(agent_config, dict) and agent_config.get("_yaml_file_path"):
@@ -688,7 +722,7 @@ def build_effective_agent_config_snapshot(
     for layer in layers:
         if "default_toolsets" in layer.data:
             merged["_default_toolsets_source"] = layer.name
-    return EffectiveAgentConfigSnapshot(values=merged, layers=tuple(layers))
+    return EffectiveAgentConfigSnapshot(values=merged, layers=tuple(layers), llm=llm_config)
 
 
 def build_effective_agent_config(
@@ -705,7 +739,7 @@ def build_effective_agent_config(
 
 
 def get_model_config(model_type: str, key: str, default: Any = None) -> Any:
-    return get_config().get_model_config(model_type, key, default=default)
+    return C.get_model_config(model_type, key, default=default)
 
 
 def get_default_toolsets(config_map: dict[str, Any] | None = None) -> list[str]:

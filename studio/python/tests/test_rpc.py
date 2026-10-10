@@ -24,7 +24,7 @@ def _write_project_file(project_root: Path, relative_path: str, content: str) ->
 def project_root(tmp_path: Path) -> Path:
     _write_project_file(
         tmp_path,
-        "config/llm.yaml",
+        "config/model.yaml",
         """
 model:
   default_model_type: powerful

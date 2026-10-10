@@ -1,20 +1,23 @@
-# AgentLoom LLM Model Configuration (`llm.yaml`) Complete Reference
+# AgentLoom LLM Model Configuration (`model.yaml`) Complete Reference
 
-> **Document scope**: This document details **every** configuration parameter in `config/llm.yaml`.
+> **Document scope**: This document details **every** configuration parameter in `config/model.yaml`.
 > For override relationships between configuration files, see [Configuration System Overview](config-overview.md).
 > For global system configuration, see [System Configuration Reference](system_config.md).
 > For Agent YAML parameters, see [Agent Configuration Reference](agent_config.md).
 
-`config/llm.yaml` is AgentLoom's **model protocol, routing, and parameter configuration file**, controlling LLM model types (powerful/fast/summary or custom types), wire adapters, API credentials, inference parameters, and retry policies.
+`config/model.yaml` is AgentLoom's **model protocol, routing, and parameter configuration file**, controlling LLM model types (powerful/fast/summary or custom types), wire adapters, API credentials, inference parameters, and retry policies.
 
 > ⚠️ **Important**: LLM configuration is **loaded independently** and does not participate in the `system.yaml` deep merge override chain. If `model`/`llm` appears in `config/system.yaml` or `applications/<app>/config/system.yaml`, it will be automatically filtered and a warning will be printed.
+
+
+The framework loads project `config/model.yaml` and the model file belonging to each Agent’s Application. Same-name Application profiles replace entire project profiles; other project models remain available. An Application may override `model.default_model_type`; otherwise it inherits the project default. Cross-Application Workers use their own definition directory. The project model file is optional when the Application supplies all required models. New executions and task attempts read current configuration; each running session keeps its selected model. Existing SDK retries and checkpoint compatibility rules remain unchanged. Existing `llm.yaml` files must migrate.
 
 ---
 
 ## Table of Contents
 
 - [Quick Reference: Complete YAML Structure](#quick-reference-complete-yaml-structure)
-- [1. model.default_model_type — Global Default Model Type](#1-modeldefault_model_type--global-default-model-type)
+- [1. model.default_model_type — Default Model Type](#1-modeldefault_model_type--default-model-type)
 - [2. Model Type Naming Rules](#2-model-type-naming-rules)
 - [3. model.\<type\> — Model Type Configuration](#3-modeltype--model-type-configuration)
 - [4. Parameter Defaults](#4-parameter-defaults)
@@ -29,7 +32,7 @@
 
 ## Quick Reference: Complete YAML Structure
 
-The following shows the **complete structure** of `config/llm.yaml`, with all fields and their default values:
+The following shows the **complete structure** of `config/model.yaml`, with all fields and their default values:
 
 ```yaml
 # ============================================
@@ -84,13 +87,13 @@ model:
 
 ---
 
-## 1. model.default_model_type — Global Default Model Type
+## 1. model.default_model_type — Default Model Type
 
-Controls which model type the entire Agent system uses when an Agent YAML does not specify `model_type`.
+Selects the default when an Agent YAML does not specify `model_type`. An Application default overrides the project default.
 
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
-| `model.default_model_type` | `str` | `""` | ❌ No | Global default model type. Must be a type key defined under the `model` block (e.g., `powerful`, `fast`, `summary`, or a custom type name). If omitted, Agents that do not specify `model_type` raise `ValueError` directly |
+| `model.default_model_type` | `str` | `""` | ❌ No | Default model type after Application overrides. Must exist in the effective model catalogue (e.g., `powerful`, `fast`, `summary`, or a custom type name). If omitted, Agents that do not specify `model_type` raise `ValueError` directly |
 
 ### 1.1 Resolution Rules
 
@@ -99,12 +102,12 @@ When an Agent needs to obtain model configuration, resolution follows this prior
 ```
 model_type in Agent YAML (e.g., model_type: "fast")
        ↓ (when not specified)
-default_model_type in config/llm.yaml (e.g., default_model_type: "powerful")
+Application default_model_type, otherwise project default_model_type
        ↓ (when default_model_type is not configured)
 ValueError
 ```
 
-> ⚠️ **Note**: The resolved model type must exist in `llm.yaml`. If an Agent YAML explicitly specifies a missing `model_type`, the global default points to a missing type, or neither Agent nor global config provides a model type, the framework will **raise an error** (`ValueError`) directly.
+> ⚠️ **Note**: The resolved model type must exist in `model.yaml`. If an Agent YAML explicitly specifies a missing `model_type`, the effective default points to a missing type, or neither the Agent nor the effective configuration provides a model type, the framework will **raise an error** (`ValueError`) directly.
 
 **Example**:
 
@@ -133,7 +136,7 @@ model_type: "powerful"    # Uses the powerful type; if omitted, uses configured 
 
 Under the `model` block, every dict-valued key except `default_model_type` is a model type name. The framework does not assign special semantics to type names; `powerful`, `fast`, and `summary` are examples.
 
-- `summary` is required by context compression (`smart_summary`).
+- Only smolagents with `runtime_options.smart_summary` enabled requires `summary`, using a Python-supported adapter. Pi compacts with its selected model and needs no separate `summary` profile.
 - `default_model_type` is a reserved key, not a model type.
 
 **Example:**
@@ -169,7 +172,7 @@ model:
 
 | Key | Required | Description |
 |-----|---------|------|
-| `summary` | ❗ **Required** | Context compression (`smart_summary`) feature has a hard dependency on this type |
+| `summary` | Conditional | Required only for smolagents with `smart_summary` enabled |
 | `default_model_type` | ❌ Optional | Reserved key. No implicit default; omit only when every Agent specifies `model_type` |
 | Any other key | ❌ Optional | Freely define, delete, or rename, e.g., `powerful`, `fast`, `code_review`, etc. |
 
@@ -316,7 +319,7 @@ Agent YAML references your defined type names through the `model_type` field.
 **Example 1: Fully custom naming**
 
 ```yaml
-# config/llm.yaml — Not using powerful/fast/summary, fully custom
+# config/model.yaml — Not using powerful/fast/summary, fully custom
 model:
   default_model_type: "main"
 
@@ -355,13 +358,13 @@ model:
 ```yaml
 # Agent YAML — Reference custom type
 name: "code_review_agent"
-model_type: "code_review"        # References code_review defined in llm.yaml
+model_type: "code_review"        # References code_review defined in model.yaml
 ```
 
 **Example 2: Minimal configuration (all Agents share one model)**
 
 ```yaml
-# config/llm.yaml — All Agents share a single model
+# config/model.yaml — All Agents share a single model
 model:
   default_model_type: "default"
 
@@ -450,9 +453,9 @@ Code default values (defaults.py)
 
 ## 5. langfuse — Observability Configuration (Future Support)
 
-> ⚠️ **The current version has not yet integrated Langfuse automatic tracing.** The code includes a pre-allocated `LangfuseSettings` configuration model, but it has not been connected to LiteLLM's callback pipeline. There is **no need** to configure the langfuse section in `config/llm.yaml`.
+> ⚠️ **The current version has not yet integrated Langfuse automatic tracing.** The code includes a pre-allocated `LangfuseSettings` configuration model, but it has not been connected to LiteLLM's callback pipeline. There is **no need** to configure the langfuse section in `config/model.yaml`.
 
-Future versions plan to integrate Langfuse. At that time, simply add the following configuration to `config/llm.yaml`:
+Future versions plan to integrate Langfuse. At that time, simply add the following configuration to `config/model.yaml`:
 
 ```yaml
 # Configuration for enabling Langfuse in future versions (currently inactive)

@@ -22,7 +22,8 @@
 | 配置面 | 写在哪里 | 用途 | 关键规则 |
 |---|---|---|---|
 | 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、skills、checkpoint 等系统行为 | `runtime`/`logging` 只在此处生效；其他字段参与 deep merge；列表整段替换 |
-| 本地模型配置 | `config/llm.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立加载，不被 app/Agent YAML 覆盖；通常被 `.gitignore` 忽略 |
+| 项目模型配置 | `config/model.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立于系统配置；应用可按模型名整条覆盖；通常被 `.gitignore` 忽略 |
+| 应用模型覆盖 | `applications/<app>/config/model.yaml` | 当前应用的模型及默认类型 | 同名模型整条替换，其他项目模型保留；Agent YAML 只选择模型类型 |
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
 | Agent YAML | `applications/<app>/workflows/*.yaml` | 单个 Agent 的可选长期指令、必填任务、工具、模型类型、运行模式 | 只有白名单字段会 overlay 到系统配置，其余是 Agent 自身属性 |
 | Worker YAML | `applications/<app>/workflows/worker_agents/*.yaml` | 被 Supervisor 调用的 Agent 工具 | 仅被 `worker_agents` 显式引用时注册；Tool 复用 Worker 的 `name` 和 `description` |
@@ -60,7 +61,7 @@ task: |
 | `system_prompt` | `str` / `{path: str}` | 可选长期指令；路径相对当前 YAML |
 | `task` | `str` / `list[str]` | 必填；列表项在同一 Agent 会话中依次发送 |
 | `tools` | `list[dict]` | Agent 额外工具列表；预定义工具只写 `name`，动态工具写 `name/module/function` |
-| `model_type` | `str` | 选择 `config/llm.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
+| `model_type` | `str` | 选择 `config/model.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
 | `runtime_options.smart_summary` | `bool` | smol 智能摘要；默认 `true` |
 | `runtime_options.max_consecutive_model_errors` | 正整数 | smol 连续模型错误上限；默认 `5` |
 | `runtime_options.max_steps` | 正整数 | smolagents 最大步数；默认 80 |
@@ -274,7 +275,7 @@ todo_write
 实际完整列表以 `src/tools/catalog.py` 的 `ToolSpec` catalog 为准。读取 metadata
 不得导入具体工具；Runtime implementation 只通过 `src/tools/loader.py` 按需加载。
 
-## llm.yaml 配置面
+## model.yaml 配置面
 
 基本结构：
 
@@ -296,10 +297,10 @@ model:
 
 规则：
 
-- `summary` 是必需模型类型；`smart_summary` 依赖它。只要 `model` 下存在模型类型，缺少 `summary` 会报错。
+- 仅 smolagents 开启 `smart_summary` 时要求 `summary`；Pi 不要求独立摘要模型。
 - `default_model_type` 和 `common` 是保留 key，不作为模型类型。
 - 模型类型名可自定义；`powerful`、`fast` 只是约定名。
-- Agent YAML 只能写 `model_type`，不能写 LLM 参数。
+- Agent YAML 只能写 `model_type`，不能写 LLM 参数。框架自动加载项目及 Agent 所属应用的 `config/model.yaml`，同名模型整条替换，其他全局模型保留。
 - 每个模型类型必须有 `model` 和 `adapter`。`model` 是传给 LiteLLM 的不透明名字，不从前缀推断协议。
 
 模型类型字段：
@@ -477,7 +478,7 @@ dict 形式也支持 `paths: [...]`；`mcp_servers: null` 是有效的空配置�
 
 - 只有当前应用需要的配置，优先放 `applications/<app>/config/system.yaml` 或 Agent YAML；不要改全局 `config/system.yaml`。
 - 配置越少越好。新增配置前先确认它改变用户可观察行为；能用代码默认表达的边界不要暴露成开关。
-- 只有模型路由和 API 参数进 `config/llm.yaml`；不要把 endpoint、key、temperature 写进 Agent YAML。
+- 只有模型路由和 API 参数进 `config/model.yaml`；不要把 endpoint、key、temperature 写进 Agent YAML。
 - Worker 需要权限就写在 Worker YAML 或 app-level system；不要指望 Supervisor 传下去。
 - 普通列表覆盖是替换，不是追加；`toolsets` 要写完整意图。Skill 发现保留各层来源，分别解析每层 `skills.paths`，再按作用域处理同名覆盖。
 - 确定性逻辑放 `agent_tools/*.py`，推理协议放 workflow，长期领域协议才放 Skill。

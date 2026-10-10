@@ -2,7 +2,7 @@
 
 These manual runners call the configured real models. They do not run under
 ordinary pytest. Start them from the checkout under validation with its configured
-Python environment and ignored `config/llm.yaml`. A new `--workspace` is required
+Python environment and ignored `config/model.yaml`. A new `--workspace` is required
 for each attempt; existing directories are never cleared.
 
 ```bash
@@ -18,7 +18,7 @@ path adaptations are copied to ignored `applications/architecture_acceptance_*`
 Applications to preserve stable project discovery. Runtime, fixture and result
 directories are private to the selected evidence directory.
 
-The protocol matrix reads the ignored `config/llm.yaml` without modifying it.
+The protocol matrix reads the ignored `config/model.yaml` without modifying it.
 For each of `openai_chat`, `openai_responses`, and `anthropic_messages`, it
 selects one explicitly configured profile and runs the same minimal
 smolagents/Tool Gateway/final-answer Application through public `execute_app`.

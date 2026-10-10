@@ -135,9 +135,10 @@ class BaseAgent(ABC):
         else:
             from agentloom.config.http_headers import normalize_http_headers
 
-            settings = C.llm.for_type(self.default_model_type)
+            catalog = self._effective_agent_config_snapshot.llm or C.llm
+            settings = catalog.for_type(self.default_model_type)
             self._model_selection = RuntimeModelSelection(
-                model_type=(self.default_model_type or C.llm.default_model_type).strip().lower(),
+                model_type=(self.default_model_type or catalog.default_model_type).strip().lower(),
                 model_id=settings.model,
                 protocol=settings.adapter,
                 settings=settings.model_dump(mode="json"),
@@ -173,6 +174,7 @@ class BaseAgent(ABC):
 
         return resolve_litellm_model_turn_binding(
             self.default_model_type,
+            llm_config=self._effective_agent_config_snapshot.llm,
             model_cache=model_cache,
         )
 

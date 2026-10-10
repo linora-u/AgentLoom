@@ -3,8 +3,8 @@ import { join } from "node:path"
 import { formatBridgeFailure, HELP } from "../../src/cli/main"
 
 describe("AgentLoom CLI diagnostics", () => {
-  test("help points Ctrl+X Studio model selection at config/llm.yaml", () => {
-    expect(HELP).toContain("/models             Select a Studio model from config/llm.yaml")
+  test("help points Ctrl+X Studio model selection at config/model.yaml", () => {
+    expect(HELP).toContain("/models             Select a Studio model from config/model.yaml")
     expect(HELP).toContain("/compact            Compact the current Session context")
     expect(HELP).toContain("Ctrl-X              Commands, permissions, Applications, main Agents, Runs and Skills")
     expect(HELP).not.toContain("Ctrl-P")

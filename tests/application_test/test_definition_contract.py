@@ -95,7 +95,7 @@ def project_config(root):
         'runtime_options: {todo_mode: "auto", smart_summary: true}\ncontext_engine: {min_chars: 123, preview_max_chars: 456}\ntoolsets: [core_file]\n',
     )
     write(
-        root / "config/llm.yaml",
+        root / "config/model.yaml",
         "model:\n  default_model_type: test\n  test: {model: openai/test, adapter: openai_chat, api_key: hidden-key}\n  summary: {model: openai/test, adapter: openai_chat}\n",
     )
     return load_project_config(root)
@@ -246,12 +246,11 @@ def test_summary_profile_requirement_matches_runtime_catalog(tmp_path):
     from agentloom.config.config import load_project_config
 
     write(
-        tmp_path / "config/llm.yaml",
+        tmp_path / "config/model.yaml",
         "model:\n  default_model_type: test\n  test: {model: openai/test, adapter: openai_chat}\n",
     )
     path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE)
-    with pytest.raises(ValueError, match="summary.*required"):
-        load_project_config(tmp_path)
+    assert "test" in load_project_config(tmp_path).llm.models
     errors = validate_agent_definition(tmp_path, str(path), load_agent_definition(path))
     assert any("summary" in error and "required" in error for error in errors)
 
@@ -694,7 +693,7 @@ def test_model_cache_tracks_profile_content_across_invocations(tmp_path):
         manager = ModelManager()
         first = manager.get_litellm_config(ModelType("test"))
         write(
-            tmp_path / "config/llm.yaml",
+            tmp_path / "config/model.yaml",
             "model:\n  default_model_type: test\n  test: {model: openai/changed, adapter: openai_chat, api_key: updated-key}\n  summary: {model: openai/test, adapter: openai_chat}\n",
         )
         still_running = manager.get_litellm_config(ModelType("test"))

@@ -22,7 +22,7 @@ task: |
   Expected: caching is implemented at the provider protocol adapter boundary.
 
   ## Step 3: Check LLM config
-  Use shell_tool to run: cat config/llm.yaml | grep -A2 "context_cache"
+  Use shell_tool to run: cat config/model.yaml | grep -A2 "context_cache"
   Expected: see context_cache: true under one or more model types.
   Verify: output shows "context_cache: true".
 

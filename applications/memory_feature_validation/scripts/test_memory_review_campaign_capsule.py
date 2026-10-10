@@ -378,7 +378,7 @@ def test_cleanup_removes_private_config_when_git_cleanup_fails(
 ) -> None:
     temporary = tmp_path / "private"
     capsule = temporary / "checkout"
-    config = capsule / "config" / "llm.yaml"
+    config = capsule / "config" / "model.yaml"
     config.parent.mkdir(parents=True)
     config.write_text("api_key: secret\n", encoding="utf-8")
 
@@ -433,7 +433,7 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
-    model_config = repo / "config" / "llm.yaml"
+    model_config = repo / "config" / "model.yaml"
     model_config.parent.mkdir(parents=True)
     model_config.write_text("summary: {}\n", encoding="utf-8")
     uv = tmp_path / "trusted" / "uv"

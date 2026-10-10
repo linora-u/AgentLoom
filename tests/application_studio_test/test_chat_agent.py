@@ -16,7 +16,7 @@ from openai import OpenAI
 def _write_catalog(project_root: Path) -> None:
     config = project_root / "config"
     config.mkdir(exist_ok=True)
-    (config / "llm.yaml").write_text(
+    (config / "model.yaml").write_text(
         """\
 model:
   default_model_type: powerful
@@ -131,7 +131,7 @@ def test_plain_chat_uses_one_openai_compatible_stream_without_litellm_agent(
 
 def test_configured_tool_choice_none_disables_tool_schemas(tmp_path: Path) -> None:
     _write_catalog(tmp_path)
-    config_path = tmp_path / "config" / "llm.yaml"
+    config_path = tmp_path / "config" / "model.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace("tool_choice: auto", "tool_choice: none"),
         encoding="utf-8",
@@ -156,7 +156,7 @@ def test_configured_tool_choice_none_disables_tool_schemas(tmp_path: Path) -> No
 
 def test_tool_choice_none_rejects_forged_provider_tool_calls_locally(tmp_path: Path) -> None:
     _write_catalog(tmp_path)
-    config_path = tmp_path / "config" / "llm.yaml"
+    config_path = tmp_path / "config" / "model.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace("tool_choice: auto", "tool_choice: none"),
         encoding="utf-8",
@@ -208,7 +208,7 @@ def test_tool_choice_none_rejects_forged_provider_tool_calls_locally(tmp_path: P
 
 def test_invalid_tool_choice_fails_before_client_construction(tmp_path: Path) -> None:
     _write_catalog(tmp_path)
-    config_path = tmp_path / "config" / "llm.yaml"
+    config_path = tmp_path / "config" / "model.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
             "tool_choice: auto",
@@ -239,7 +239,7 @@ def test_invalid_tool_choice_fails_before_client_construction(tmp_path: Path) ->
 
 def test_required_tool_choice_becomes_auto_after_the_first_tool_result(tmp_path: Path) -> None:
     _write_catalog(tmp_path)
-    config_path = tmp_path / "config" / "llm.yaml"
+    config_path = tmp_path / "config" / "model.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
             "tool_choice: auto",
@@ -528,7 +528,7 @@ def test_auth_error_is_not_retried_and_is_safe_for_the_rpc(tmp_path: Path) -> No
 
     assert calls == 1
     assert error.value.code == "assistant_auth"
-    assert "config/llm.yaml" in str(error.value)
+    assert "config/model.yaml" in str(error.value)
     assert "secret credential detail" not in str(error.value)
 
 
@@ -538,7 +538,7 @@ def test_invalid_openai_compatible_base_url_is_a_local_config_error(
     invalid_base_url: str,
 ) -> None:
     _write_catalog(tmp_path)
-    config_path = tmp_path / "config" / "llm.yaml"
+    config_path = tmp_path / "config" / "model.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
             "https://models.example.test/api/v3",
@@ -572,7 +572,7 @@ def test_custom_endpoint_never_receives_an_ambient_openai_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _write_catalog(tmp_path)
-    config_path = tmp_path / "config" / "llm.yaml"
+    config_path = tmp_path / "config" / "model.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8").replace(
             "api_key: test-key",
@@ -605,7 +605,7 @@ def test_custom_endpoint_never_receives_an_ambient_openai_api_key(
 
 def test_default_openai_endpoint_rejects_non_openai_litellm_model_prefix(tmp_path: Path) -> None:
     _write_catalog(tmp_path)
-    config_path = tmp_path / "config" / "llm.yaml"
+    config_path = tmp_path / "config" / "model.yaml"
     config_path.write_text(
         config_path.read_text(encoding="utf-8")
         .replace("    base_url: https://models.example.test/api/v3\n", "")

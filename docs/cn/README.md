@@ -83,7 +83,7 @@ agentloom --snapshot
 创建本地模型配置：
 
 ```bash
-cp config/llm.example.yaml config/llm.yaml
+cp config/model.example.yaml config/model.yaml
 ```
 
 ```yaml
@@ -101,7 +101,7 @@ model:
     tool_choice: "auto"
 ```
 
-`config/llm.yaml` 已被 Git 忽略，是 Studio 和 Application Agent 共用的唯一模型
+`config/model.yaml` 已被 Git 忽略，是 Studio 和 Application Agent 共用的唯一模型
 目录。在任意 AgentLoom 项目中启动 Studio：
 
 ```bash
@@ -116,7 +116,7 @@ agentloom --project /path/to/project
 ```text
 创建一个名为 release_review 的 Application。
 使用一个 Supervisor，以及负责 API 审查和测试审查的两个 Worker。
-模型类型只能从 config/llm.yaml 选择。
+模型类型只能从 config/model.yaml 选择。
 完成校验后，在第一次真实 Run 前向我确认。
 ```
 
