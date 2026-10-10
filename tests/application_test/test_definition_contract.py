@@ -560,6 +560,26 @@ def test_configuration_paths_keep_declaring_root_across_partial_overrides(tmp_pa
         prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
 
 
+def test_sandbox_configuration_paths_keep_declaring_root(tmp_path, monkeypatch):
+    from agentloom.config.config import build_effective_agent_config_snapshot
+
+    base = project_config(tmp_path)
+    base.raw["shell_settings"] = {"sandbox": {"allow_write": ["shared"], "deny_write": ["secrets"]}}
+    app = tmp_path / "applications/demo"
+    write(app / "config/system.yaml", "shell_settings: {sandbox: {network_isolation: true}}\n")
+    path = write(app / "workflows/root.yaml", BASE)
+    monkeypatch.chdir(app / "config")
+    inherited = build_effective_agent_config_snapshot(load_agent_definition(path), base_config=base)
+    sandbox = inherited.values["shell_settings"]["sandbox"]
+    assert sandbox["allow_write"] == [str(tmp_path / "shared")]
+    assert sandbox["deny_write"] == [str(tmp_path / "secrets")]
+    write(path, BASE + "shell_settings: {sandbox: {allow_write: [data, ../shared], deny_write: [data/private]}}\n")
+    overridden = build_effective_agent_config_snapshot(load_agent_definition(path), base_config=base)
+    sandbox = overridden.values["shell_settings"]["sandbox"]
+    assert sandbox["allow_write"] == [str(app / "data"), str(tmp_path / "applications/shared")]
+    assert sandbox["deny_write"] == [str(app / "data/private")]
+
+
 def test_hook_projection_uses_complete_id_replacement_and_disabling(tmp_path):
     from agentloom.app.presentation import configuration_projection
     from agentloom.config.config import build_effective_agent_config_snapshot

@@ -48,7 +48,9 @@ def normalize_runtime_options(
                 if snapshot is not None:
                     root = next((layer.root for layer in snapshot.layers
                                  if str(layer.source_path) == layer_source), root)
-                value = str(resolve_execution_prompt_template_path(value, layer_source, agent_root=root))
+                value = str(resolve_execution_prompt_template_path(
+                    value, f"{layer_source}:runtime_options.{key}", agent_root=root,
+                ))
             options[key] = value
             sources[key] = f"{layer_source}:runtime_options.{key}"
     unknown = sorted(set(options) - set(SMOL_DEFAULTS))

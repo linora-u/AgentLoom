@@ -12,6 +12,7 @@
 | `hooks.bundles.<name>.path` | `hooks/audit` |
 | `tool_access_control.path_validation` 的 include/exclude | `data/*` |
 | `shell_settings.dangerous_paths` | `data/private` |
+| `shell_settings.sandbox.allow_write` / `deny_write` | `data` / `data/private` |
 
 继承全局路径时，保留 AgentLoom 根。应用只覆盖 MCP 的 timeout，不会移动继承的 MCP 文件；显式覆盖 path 才使用应用根。通配符和 `*` 哨兵保留。路径解析不扩大各能力已有的访问范围，命令字符串、CLI 入参、模型工具参数和执行工作目录继续遵守原规则。`runtime.root_dir` 是全局配置，始终相对 AgentLoom 根。
 

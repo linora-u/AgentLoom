@@ -65,7 +65,7 @@ def test_system_prompt_path_is_loaded_into_agent_instructions(tmp_path):
         agent.pop("workflow", None)
         agent["worker_agents"] = []
         agent["task"] = "Check the configured system prompt."
-        agent["system_prompt"] = {"path": "../config/prompts/instructions.md"}
+        agent["system_prompt"] = {"path": "config/prompts/instructions.md"}
         write_yaml(definition, agent)
         prompt = definition.parent.parent / "config/prompts/instructions.md"
         prompt.parent.mkdir(parents=True)
