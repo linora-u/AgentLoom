@@ -7,6 +7,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { configureModel, type SearchEvidence } from "./model.js";
+import { providerError } from "./errors.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
 import { restoreSession, SessionPersistence } from "./checkpoint.js";
@@ -425,7 +426,7 @@ async function run(frame: Frame, abort: AbortController) {
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? {category: "provider", message: "Pi model request failed", retryable: false} :
+      error: state === "failed" ? providerError(last?.role === "assistant" ? last.errorMessage : undefined) :
         outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch (error) {
     const interrupted = abort.signal.aborted;

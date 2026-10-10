@@ -32,7 +32,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
              response_tier: str = "default", search_actions: list[dict] | None = None,
              reported_usage: dict | None = None, propose_write: str | None = None,
              first_reported_usage: dict | None = None, compaction_answer: str | None = None,
-             tool_turns: list[dict | None] | None = None):
+             tool_turns: list[dict | None] | None = None, response_error: str | None = None):
     app = project(tmp_path, "http://127.0.0.1:1/v1")
     configuration = tmp_path / "config/llm.yaml"
     data = yaml.safe_load(configuration.read_text())
@@ -75,7 +75,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
                                     "response_tier": response_tier, "search_actions": search_actions,
                                     "reported_usage": reported_usage, "propose_write": propose_write,
                                     "first_reported_usage": first_reported_usage, "compaction_answer": compaction_answer,
-                                    "tool_turns": tool_turns}))
+                                    "tool_turns": tool_turns, "response_error": response_error}))
     bootstrap = tmp_path / "codex-bootstrap.mjs"
     bootstrap.write_text("""
 import {appendFileSync, readFileSync} from 'node:fs';
@@ -149,7 +149,10 @@ globalThis.fetch = async (input, init) => {
     ({type: 'web_search_call', id: `search_${index + 1}`, status: 'completed', ...(action ? {action} : {})})) : [];
   const output = [...calls, message];
   const messageIndex = calls.length;
-  const events = [
+  const events = scenario.response_error ? [
+    {type: 'response.failed', response: {id: 'resp_1', status: 'failed',
+      error: {code: 'server_error', message: scenario.response_error}}},
+  ] : [
     {type: 'response.created', response: {id: 'resp_1', model: payload.model, status: 'in_progress', output: []}},
     ...calls.map((item, output_index) => ({type: 'response.output_item.done', output_index, item})),
     ...(writing || toolTurn ? [
@@ -449,6 +452,22 @@ def test_codex_provider_failures_do_not_fallback(tmp_path, monkeypatch, status, 
     with inspect_run(failure.value.run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
         assert json.loads(trace.read_text(responses[-1]["response_ref"]))["errorMessage"]
+    assert len(wire.read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("transient", [True, False])
+def test_stream_failure_preserves_safe_retry_classification(tmp_path, monkeypatch, transient):
+    request_id = "ec410bec-6f13-46f6-a8f8-65c30bb18a8a"
+    detail = ("An error occurred while processing your request. Please include the request ID "
+              + request_id + " in your message. PRIVATE-PROVIDER-ECHO") if transient else "PRIVATE-PROVIDER-ECHO"
+    app, wire = _fixture(tmp_path, monkeypatch, search="auto", response_error=detail)
+    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
+        execute_app(app, file_logging=False)
+    error = failure.value.original_error
+    assert error.category == "provider"
+    assert error.retryable is transient
+    assert "PRIVATE-PROVIDER-ECHO" not in str(error)
+    assert (request_id in str(error)) is transient
     assert len(wire.read_text().splitlines()) == 1
 
 
