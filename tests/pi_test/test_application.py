@@ -205,6 +205,7 @@ def test_application_local_model_profiles_override_tracked_profiles_and_refresh(
     assert [headers["authorization"] for _, _, headers in requests] == [
         "Bearer private-before", "Bearer private-after",
     ]
+    assert all("input_token_limit" not in payload for _, payload, _ in requests)
 
 
 def test_textual_tool_call_without_tools_gets_feedback_and_continues(tmp_path):

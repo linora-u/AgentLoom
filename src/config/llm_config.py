@@ -310,7 +310,9 @@ class LLMConfig(BaseModel):
             if current is None:
                 merged = dict(patch)
             else:
-                merged = current.model_dump(exclude={"extra_completion_params"})
+                merged = current.model_dump(
+                    exclude={"extra_completion_params", "input_token_limit"}
+                )
                 merged.update(current.extra_completion_params or {})
                 merged.update(patch)
             models[name] = self.from_dict({"model": {name: merged}}).models[name]
