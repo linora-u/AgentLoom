@@ -471,6 +471,24 @@ def test_stream_failure_preserves_safe_retry_classification(tmp_path, monkeypatc
     assert len(wire.read_text().splitlines()) == 1
 
 
+@pytest.mark.parametrize("detail, transient", [
+    ("terminated", True),
+    ("terminated PRIVATE-PROVIDER-ECHO", False),
+    ("AbortError", False),
+])
+def test_exhausted_transport_failure_preserves_bounded_host_retry_classification(
+        tmp_path, monkeypatch, detail, transient):
+    app, wire = _fixture(tmp_path, monkeypatch, search="auto", response_error=detail)
+    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
+        execute_app(app, file_logging=False)
+    error = failure.value.original_error
+    assert error.category == "provider"
+    assert error.retryable is transient
+    assert "PRIVATE-PROVIDER-ECHO" not in str(error)
+    assert ("transient provider transport error" in str(error)) is transient
+    assert len(wire.read_text().splitlines()) == 1
+
+
 def test_codex_max_reasoning_is_an_explicit_profile_setting(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off")
     path = tmp_path / "config/llm.yaml"
