@@ -9,10 +9,26 @@ import subprocess
 import sys
 from threading import Event
 import time
+from uuid import uuid4
 
 import pytest
 
 from tests.pi_test.test_application import model_service, project
+
+
+class CapturedCli(subprocess.Popen):
+    """Capture before fault injection without waiting on an undrained pipe."""
+    def __init__(self, command, root, env):
+        prefix = root / f"cli-{uuid4().hex}"
+        self.output_path = prefix.with_suffix(".stdout")
+        self.error_path = prefix.with_suffix(".stderr")
+        with self.output_path.open("w") as stdout, self.error_path.open("w") as stderr:
+            super().__init__(command, stdout=stdout, stderr=stderr, text=True, env=env, start_new_session=True)
+
+    def communicate(self, input=None, timeout=None):
+        assert input is None
+        super().communicate(timeout=timeout)
+        return self.output_path.read_text(), self.error_path.read_text()
 
 
 def start_cli(root: Path, app: Path, env=None, *, resume=None):
@@ -22,8 +38,8 @@ def start_cli(root: Path, app: Path, env=None, *, resume=None):
         "import sys\nwith bind_config(load_project_config(Path(sys.argv[1]))):\n"
         " main(['run',sys.argv[2],'--no-file-log','--output-format','jsonl',*sys.argv[3:]])\n"
     )
-    return subprocess.Popen([sys.executable, "-c", code, str(root), str(app), *(['--resume', resume] if resume else [])], stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+    return CapturedCli([sys.executable, "-c", code, str(root), str(app),
+                        *(['--resume', resume] if resume else [])], root, env)
 
 
 def node_launcher(root: Path):
@@ -72,11 +88,14 @@ def test_real_cli_stdout_contains_only_application_events(tmp_path):
 
 
 @pytest.mark.parametrize("proxy_value,ca_value", [
-    (None, None), ("0", ""), ("1", "/etc/ssl/certs/ca-certificates.crt"),
+    (None, None), ("0", ""), ("1", "system"),
 ])
 def test_real_bridge_preserves_configured_or_default_proxy_ca(tmp_path, monkeypatch, proxy_value, ca_value):
     with model_service() as (url, requests):
         app = project(tmp_path, url)
+        if ca_value == "system":
+            import certifi
+            ca_value = certifi.where()
         if ca_value:
             assert Path(ca_value).is_file()
         monkeypatch.setenv("HTTPS_PROXY", os.environ.get("HTTPS_PROXY", "http://127.0.0.1:9"))
