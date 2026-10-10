@@ -116,9 +116,9 @@ def prepare(case: str, workspace: Path, runtime: str, profile: str, models: Path
         proof["required_tools"] = {"path_worker"}
     elif case.startswith("skill_"):
         owner = workspace if case == "skill_global" else shared if case == "skill_cross_app" else app
-        skill = owner / "skills/path-checker"
+        skill = owner / "extra-skills/path-checker"
         write(skill / "SKILL.md", f"---\nname: path-checker\ndescription: Read the private verification instruction.\n---\nReply with exactly {token} after loading this Skill.\n")
-        skill_reference = "../shared/skills/path-checker" if owner == shared else "skills/path-checker"
+        skill_reference = "../shared/extra-skills/path-checker" if owner == shared else "extra-skills/path-checker"
         layer = system if owner == workspace else definition
         layer["skills"] = {"paths": [skill_reference]}
         definition["tools"] = [{"name": "read" if runtime == "pi" else "skill"}]
@@ -160,9 +160,24 @@ def prepare(case: str, workspace: Path, runtime: str, profile: str, models: Path
         definition["task"] = read_task(source, runtime)
         proof["required_tools"] = {native}
         if case.startswith("access_"):
+            # Workspace contents are allowed by default. Read outside it so
+            # success actually depends on the configured include path.
+            included = workspace.parent / f"allowed-{workspace.name}"
+            source = included / "note.txt"
+            write(source, token)
+            definition["task"] = read_task(source, runtime)
             layer = system if owner == workspace else app_system
             layer["tool_access_control"] = {"path_validation": [
-                {"tools": [native], "include_paths": ["data"], "exclude_paths": ["data/private"]}]}
+                {"tools": [native], "include_paths": [os.path.relpath(included, owner)],
+                 "exclude_paths": ["data/private"]}]}
+            excluded = owner / "data/private/note.txt"
+            hidden_token = token + "-EXCLUDED-CONTENT"
+            write(excluded, hidden_token)
+            definition["task"] += (f" Then call {native} with "
+                f"{'path' if runtime == 'pi' else 'file_path'}={str(excluded)!r} once. "
+                "Report whether that actual read was blocked. Do not infer its contents.")
+            proof["excluded_path"] = excluded
+            proof["excluded_token"] = hidden_token
         else:
             bundle = owner / "hooks/path-audit"
             hook_token = token + "-HOOK"
@@ -225,6 +240,15 @@ def run_case(case: str, workspace: Path, runtime: str, profile: str, models: Pat
     records = [event for event in events if event["kind"] == "tool"]
     completed = {record["tool_name"] for record in records if record["status"] == "completed"}
     assert proof["required_tools"] <= completed, f"Required tools did not complete: {proof['required_tools'] - completed}"
+    if proof.get("excluded_path"):
+        with inspect_run(result.run) as trace:
+            excluded_reads = [record for record in records if record.get("input_ref")
+                and record["tool_name"] in proof["required_tools"]
+                and json.loads(trace.read_text(record["input_ref"])).get(
+                    "path" if runtime == "pi" else "file_path") == str(proof["excluded_path"])]
+            assert excluded_reads and all(record["status"] == "blocked" for record in excluded_reads), \
+                "Excluded file was not actually denied by the declared policy"
+        assert proof["excluded_token"] not in str(result.output), "Excluded content leaked"
     if proof.get("mcp"):
         import psutil
         calls = [json.loads(line) for line in (workspace / "mcp-events.jsonl").read_text().splitlines()]
@@ -235,6 +259,7 @@ def run_case(case: str, workspace: Path, runtime: str, profile: str, models: Pat
     value = {"case": case, "runtime": runtime, "profile": profile, "provider": "real",
              "passed": True, "model_request_events": requests, "logical_model_requests": len(turns),
              "completed_tools": sorted(completed),
+             "blocked_tools": sorted({record["tool_name"] for record in records if record["status"] == "blocked"}),
              "output": result.output, "run_id": result.run.run_id, "run_dir": str(result.run.run_dir),
              "manifest": str(result.run.manifest_path)}
     report(workspace / "report.json", value)

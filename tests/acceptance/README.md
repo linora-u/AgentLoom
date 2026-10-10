@@ -108,3 +108,6 @@ The default is 42 cases with concurrency 3. `--runtimes`, `--cases`, `--concurre
 and `--deadline` can narrow a campaign. Existing capability admission rules still
 apply: for example, absolute `system_prompt.path` is checked for rejection before
 the corresponding relative-path Application makes its real model request.
+Explicit Skills live outside automatically discovered directories. Access-policy
+cases must read an included directory outside the workspace, then attempt a real
+read of an excluded file and verify its `blocked` tool record.
