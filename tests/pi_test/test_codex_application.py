@@ -489,6 +489,28 @@ def test_exhausted_transport_failure_preserves_bounded_host_retry_classification
     assert len(wire.read_text().splitlines()) == 1
 
 
+@pytest.mark.parametrize("detail, transient", [
+    ("Codex error: An error occurred while processing your request. "
+     "You can retry your request, or contact us through our help center at "
+     "help.openai.com if the error persists. PRIVATE-PROVIDER-ECHO", True),
+    ("Codex error: PRIVATE-PROVIDER-ECHO", False),
+    ("Codex error: Pi Codex subscription quota exhausted", False),
+    ("Codex error: terminated", False),
+    ("Private prefix: An error occurred while processing your request.", False),
+])
+def test_codex_wrapped_processing_error_preserves_safe_bounded_retry(
+        tmp_path, monkeypatch, detail, transient):
+    app, wire = _fixture(tmp_path, monkeypatch, search="auto", response_error=detail)
+    with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError) as failure:
+        execute_app(app, file_logging=False)
+    error = failure.value.original_error
+    assert error.category == "provider"
+    assert error.retryable is transient
+    assert "PRIVATE-PROVIDER-ECHO" not in str(error)
+    assert ("transient provider processing error" in str(error)) is transient
+    assert len(wire.read_text().splitlines()) == 1
+
+
 def test_codex_max_reasoning_is_an_explicit_profile_setting(tmp_path, monkeypatch):
     app, wire = _fixture(tmp_path, monkeypatch, search="off")
     path = tmp_path / "config/llm.yaml"
