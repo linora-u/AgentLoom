@@ -191,7 +191,7 @@ def prepare(case: str, workspace: Path, runtime: str, profile: str, models: Path
             layer = system if owner == workspace else app_system
             layer["hooks"] = {"bundles": {"path-audit": {"path": "hooks/path-audit"}}}
             definition["task"] += " Include the verification token subsequently supplied by the Hook."
-            proof["expected"].append(hook_token)
+            proof["hook_token"] = hook_token
             proof["hook_marker"] = bundle / "executed.txt"
     elif case.startswith("template_"):
         from agentloom.runtimes.smolagents.prompts.prompt_builder import load_base_prompt_templates
@@ -255,7 +255,11 @@ def run_case(case: str, workspace: Path, runtime: str, profile: str, models: Pat
         assert any(item["event"] == "lookup" and item["query"] == proof["expected"][0] for item in calls)
         assert not any(psutil.pid_exists(item["pid"]) for item in calls), "MCP server was not released"
     if proof.get("hook_marker"):
-        assert proof["hook_marker"].read_text() == proof["expected"][-1]
+        assert proof["hook_marker"].read_text() == proof["hook_token"]
+        with inspect_run(result.run) as trace:
+            assert any(proof["hook_token"] in trace.read_text(event["request_ref"])
+                       for event in events if event["kind"] == "model_request" and event.get("request_ref")), \
+                "Executed Hook context did not reach a real model request"
     value = {"case": case, "runtime": runtime, "profile": profile, "provider": "real",
              "passed": True, "model_request_events": requests, "logical_model_requests": len(turns),
              "completed_tools": sorted(completed),
