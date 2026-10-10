@@ -33,7 +33,7 @@ model_type: "powerful"
 runtime_options:
   max_steps: 80
 worker_agents:
-  - path: "applications/<app_name>/workflows/worker_agents/<worker>.yaml"
+  - path: "workflows/worker_agents/<worker>.yaml"
 task: |
   # <本次任务>
   ...
@@ -42,7 +42,7 @@ task: |
 规则：
 
 - `worker_agents` 只支持 `path`，不要写 `name`。
-- `path` 支持绝对路径、AgentLoom 根目录相对路径、`worker_agents/` 下文件名、或不带后缀的 Worker 名；生成时推荐写完整项目相对路径。
+- `path` 相对 Application 根目录，也支持绝对路径；必须带 `.yaml` 或 `.yml` 后缀。生成时写 `workflows/worker_agents/<worker>.yaml`，跨应用写 `../other_app/...`，不按文件名自动查找目录。
 - `agent_runtime` 必填；当前注册值为 `smolagents` 和 `pi`，需安装所选基座。缺失或未知值在预检阶段失败，不会回退。
 - Agent 只通过 provider 原生结构化工具调用执行 Tool。
 
@@ -126,7 +126,7 @@ runtime_options:
   planning_interval: 3
   smart_summary: false
   todo_mode: "off"
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
   max_consecutive_model_errors: 5
 ```
 
@@ -238,3 +238,5 @@ metadata:
 - 包内资源和脚本通过 Agent 已有的常规文件/Shell 工具使用。
 - Skill 与 Hook 是独立模块；`SKILL.md` 中出现 `hooks` 会明确报迁移错误。
 - Hook 通过 Agent YAML 顶层 `hooks:` 直接声明，或显式引用带 `HOOK.yaml` 的独立 Bundle。
+
+配置文件路径按声明根解析：全局相对 AgentLoom，Application/Agent YAML 相对应用根；继承字段保持来源根。Worker 使用 `workflows/worker_agents/name.yaml`，不支持目录简写回退；跨应用用 `../other_app/...`。CLI/API 入参和工具工作目录不变。

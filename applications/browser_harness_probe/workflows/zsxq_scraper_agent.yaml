@@ -28,7 +28,7 @@ tools:
 worker_agents: []
 
 system_prompt:
-  path: ../config/prompts/zsxq_scraper.md
+  path: config/prompts/zsxq_scraper.md
 
 task: |
   Scrape the configured zsxq group's owner posts into the configured CSV file, then report the actual outcome.

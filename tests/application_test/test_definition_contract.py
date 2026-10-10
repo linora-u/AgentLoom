@@ -53,7 +53,7 @@ task: Inspect the YAML merge result.
     assert parsed["task"] == "Inspect the YAML merge result."
 
 
-def test_worker_dot_paths_are_relative_to_definition_source(tmp_path):
+def test_worker_dot_paths_are_relative_to_application_root(tmp_path):
     worker_folder = tmp_path / "applications/group/demo/workflows/worker_agents"
     assert (
         AgentConfigNormalizer.resolve_worker_agent_config_path(
@@ -61,11 +61,11 @@ def test_worker_dot_paths_are_relative_to_definition_source(tmp_path):
             worker_folder,
             agent_root=tmp_path,
         )
-        == worker_folder.parent / "other/worker.md"
+        == worker_folder.parent.parent / "other/worker.md"
     )
     assert (
         AgentConfigNormalizer.resolve_worker_agent_config_path(
-            "applications/shared/workflows/worker.md",
+            "../../shared/workflows/worker.md",
             worker_folder,
             agent_root=tmp_path,
         )
@@ -75,7 +75,7 @@ def test_worker_dot_paths_are_relative_to_definition_source(tmp_path):
 
 def test_recursive_worker_topology_is_rejected(tmp_path):
     root = write(
-        tmp_path / "applications/group/demo/workflows/root.yaml", BASE + "worker_agents:\n  - path: worker.yaml\n"
+        tmp_path / "applications/group/demo/workflows/root.yaml", BASE + "worker_agents:\n  - path: workflows/worker_agents/worker.yaml\n"
     )
     write(root.parent / "worker_agents/worker.yaml", BASE + SCHEMA + f"worker_agents:\n  - path: {root}\n")
     errors = validate_agent_definition(
@@ -257,7 +257,7 @@ def test_running_graph_and_config_remain_pinned_while_next_call_observes_edits(t
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/nested/demo"
-    path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
+    path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: workflows/worker_agents/child.yaml}]\n")
     worker = write(path.parent / "worker_agents/child.yaml", BASE.replace("Run the task.", "Original task.") + SCHEMA)
     app_config = write(app / "config/system.yaml", 'runtime_options: {todo_mode: "on"}\n')
     first = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
@@ -278,7 +278,7 @@ def test_invalid_worker_is_rejected_before_any_run_allocation(tmp_path, monkeypa
     import agentloom.app.runner as runner
 
     base = project_config(tmp_path)
-    path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
+    path = write(tmp_path / "applications/demo/workflows/root.yaml", BASE + "worker_agents: [{path: workflows/worker_agents/child.yaml}]\n")
     write(
         path.parent / "worker_agents/child.yaml",
         BASE + "input_schema: {type: array, items: {type: string}}\n",
@@ -325,7 +325,7 @@ def test_invalid_discovered_skill_is_rejected_before_any_run_allocation(
     skill_config = "skills: {paths: [agent-skills, other-skills]}\n"
     path = write(
         app / "workflows/root.yaml",
-        BASE + "worker_agents: [{path: child.yaml}]\n" + (skill_config if target == "supervisor" else ""),
+        BASE + "worker_agents: [{path: workflows/worker_agents/child.yaml}]\n" + (skill_config if target == "supervisor" else ""),
     )
     write(path.parent / "worker_agents/child.yaml", BASE + SCHEMA + (skill_config if target == "worker" else ""))
     for directory, content in manifests.items():
@@ -367,7 +367,7 @@ def test_skill_instructions_are_pinned_for_each_runtime_definition_and_refresh_o
 
     base = project_config(tmp_path)
     app = tmp_path / "applications/demo"
-    path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: child.yaml}]\n")
+    path = write(app / "workflows/root.yaml", BASE + "worker_agents: [{path: workflows/worker_agents/child.yaml}]\n")
     worker = write(path.parent / "worker_agents/child.yaml", BASE + SCHEMA + "skills: {paths: [agent-skills]}\n")
     skill(tmp_path / "skills/shared-review/SKILL.md", "Project instructions.")
     app_skill = skill(app / "skills/shared-review/SKILL.md", "Original application instructions.")
@@ -412,7 +412,7 @@ def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
     )
     path = write(
         tmp_path / "applications/demo/workflows/worker_agents/worker.yaml",
-        BASE + "system_prompt:\n  path: ../../config/prompts/instructions.md\n",
+        BASE + "system_prompt:\n  path: config/prompts/instructions.md\n",
     )
     with bind_config(project_config(tmp_path)):
         first = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
@@ -420,7 +420,7 @@ def test_fresh_file_tool_definition_preserves_existing_callable(tmp_path):
         write(
             path,
             BASE.replace("Run the task.", "Use new definition.")
-            + "system_prompt:\n  path: ../../config/prompts/instructions.md\n",
+            + "system_prompt:\n  path: config/prompts/instructions.md\n",
         )
         second = YamlAgentFactory.create_agent_as_tool(path, agent_class=DefinitionTool)
     assert first() == ("Run the task.", "Original instructions.")
@@ -443,15 +443,16 @@ def test_worker_resolution_rejects_symlink_escape_and_allows_absolute_file(tmp_p
     link = source.parent / "worker_agents"
     link.symlink_to(external.parent, target_is_directory=True)
     with pytest.raises(ValueError, match="symlink"):
-        resolve_worker_path(tmp_path / "project", source, "worker.yaml")
+        resolve_worker_path(tmp_path / "project", source, "workflows/worker_agents/worker.yaml")
     assert resolve_worker_path(tmp_path / "project", source, str(external)) == external
 
 
-def test_worker_agents_prefix_is_relative_to_supervisor_source(tmp_path):
+def test_worker_paths_have_no_shorthand_fallback(tmp_path):
     from agentloom.app.definition import resolve_worker_path
 
     source = tmp_path / "applications/nested/demo/workflows/root.yaml"
-    assert resolve_worker_path(tmp_path, source, "worker_agents/worker.md") == source.parent / "worker_agents/worker.md"
+    assert resolve_worker_path(tmp_path, source, "worker_agents/worker.md") == source.parent.parent / "worker_agents/worker.md"
+    assert resolve_worker_path(tmp_path, source, "worker.md") == source.parent.parent / "worker.md"
 
 
 def test_readonly_inspection_with_hooks_mcp_and_tools_has_no_runtime_side_effects(tmp_path):
@@ -471,7 +472,7 @@ hooks:
 mcp_servers: config/test.mcp.json
 """,
     )
-    write(tmp_path / "config/test.mcp.json", '{"mcpServers":{"test":{"type":"http","url":"http://127.0.0.1:9/mcp"}}}')
+    write(tmp_path / "applications/demo/config/test.mcp.json", '{"mcpServers":{"test":{"type":"http","url":"http://127.0.0.1:9/mcp"}}}')
     write(
         tmp_path / "applications/demo/skills/review/SKILL.md",
         "---\nname: review\ndescription: Review.\n---\nPrivate review instructions.\n",
@@ -515,13 +516,48 @@ def test_mcp_snapshot_preserves_credentials_and_normalizes_options(tmp_path):
         BASE + 'mcp_servers: {path: config/mcp.json, timeout: "12", tool_name_prefix: "false"}\n',
     )
     write(
-        tmp_path / "config/mcp.json",
+        tmp_path / "applications/demo/config/mcp.json",
         '{"mcpServers":{"test":{"type":"http","url":"https://localhost/mcp","headers":{"Authorization":"token"}}}}',
     )
     prepared = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
     settings = prepared["_effective_agent_config_snapshot"].values["_mcp_settings_snapshot"]
     assert settings.timeout == 12 and settings.tool_name_prefix is False
     assert settings.configs[0].headers == {"Authorization": "token"}
+
+
+def test_configuration_paths_keep_declaring_root_across_partial_overrides(tmp_path, monkeypatch):
+    from agentloom.app.definition import prepare_application_definition
+
+    base = project_config(tmp_path)
+    base.raw["mcp_servers"] = {"path": "config/mcp.json", "timeout": 30}
+    base.raw["runtime_options"]["prompt_template_path"] = "config/template.yaml"
+    base.raw["tool_access_control"] = {"path_validation": [{"tools": ["read_file"],
+        "include_paths": ["shared/*", "*"], "exclude_paths": ["secrets"]}]}
+    app = tmp_path / "applications/demo"
+    write(tmp_path / "config/mcp.json", '{"mcpServers":{"global":{"type":"http","url":"http://localhost/global"}}}')
+    write(app / "config/mcp.json", '{"mcpServers":{"local":{"type":"http","url":"http://localhost/local"}}}')
+    write(tmp_path / "config/template.yaml", "system_prompt: Test.\n")
+    write(app / "config/system.yaml", "mcp_servers: {timeout: 12}\nruntime_options: {max_steps: 10}\n")
+    path = write(app / "workflows/worker_agents/nested/worker.yaml", BASE + SCHEMA)
+    monkeypatch.chdir(app / "config")
+    inherited = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
+    values = inherited["_effective_agent_config_snapshot"].values
+    assert values["_mcp_settings_snapshot"].configs[0].url == "http://localhost/global"
+    assert values["_mcp_settings_snapshot"].timeout == 12
+    assert values["runtime_options"]["prompt_template_path"] == str(tmp_path / "config/template.yaml")
+    rule = values["tool_access_control"]["path_validation"][0]
+    assert rule["include_paths"] == [str(tmp_path / "shared/*"), "*"]
+    assert rule["exclude_paths"] == [str(tmp_path / "secrets")]
+    write(app / "config/template.yaml", "system_prompt: Local.\n")
+    write(app / "config/system.yaml", "mcp_servers: {path: config/mcp.json}\nruntime_options: {prompt_template_path: config/template.yaml}\n")
+    overridden = prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
+    values = overridden["_effective_agent_config_snapshot"].values
+    assert values["_mcp_settings_snapshot"].configs[0].url == "http://localhost/local"
+    assert values["runtime_options"]["prompt_template_path"] == str(app / "config/template.yaml")
+    # Matching project files never rescue a missing application declaration.
+    (app / "config/mcp.json").unlink()
+    with pytest.raises(ValueError, match="MCP config file not found"):
+        prepare_application_definition(tmp_path, path, load_agent_definition(path), base_config=base)
 
 
 def test_hook_projection_uses_complete_id_replacement_and_disabling(tmp_path):
@@ -689,7 +725,7 @@ def test_removed_fields_reject_consistently_before_run_allocation(tmp_path, monk
     path = tmp_path / "applications/demo/workflows/root.yaml"
     worker = path.parent / "worker_agents/child.yaml"
     removed = "tools_mapping: {Claude: {Read: read_file}}\n"
-    supervisor_text = BASE + "worker_agents: [{path: child.yaml}]\n"
+    supervisor_text = BASE + "worker_agents: [{path: workflows/worker_agents/child.yaml}]\n"
     worker_text = BASE + SCHEMA
     for role, source, body in (("supervisor", path, supervisor_text), ("worker", worker, worker_text)):
         if role == target:

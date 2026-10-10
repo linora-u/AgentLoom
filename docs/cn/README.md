@@ -132,11 +132,11 @@ agent_runtime: "smolagents"
 description: "Review an API release and its test evidence."
 model_type: "powerful"
 system_prompt:
-  path: ../config/prompts/reviewer.md
+  path: config/prompts/reviewer.md
 
 worker_agents:
-  - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
-  - path: "applications/release_review/workflows/worker_agents/test_reviewer.yaml"
+  - path: "workflows/worker_agents/api_reviewer.yaml"
+  - path: "workflows/worker_agents/test_reviewer.yaml"
 
 task: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.

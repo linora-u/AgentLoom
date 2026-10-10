@@ -10,4 +10,4 @@ tool_access_control:
         - "list_directory"
         - "glob_search"
         - "grep_search"
-      exclude_paths: ["Tools", "Test", ".git"]
+      exclude_paths: ["../../Tools", "../../Test", "../../.git"]

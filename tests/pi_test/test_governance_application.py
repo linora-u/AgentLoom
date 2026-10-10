@@ -255,7 +255,7 @@ def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_p
             'input_schema': {'type': 'object', 'properties': {
                 'query': {'type': 'string', 'description': 'Request.'}},
                 'required': ['query'], 'additionalProperties': False}}))
-        select(app, goal=True, worker_agents=[{'path': 'probe.yaml'}])
+        select(app, goal=True, worker_agents=[{'path': 'workflows/worker_agents/probe.yaml'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert result.goal['status'] == 'complete'

@@ -97,11 +97,11 @@ model_type: "powerful"                   # Options: "powerful", "fast", "summary
 
 # ---- Supervisor-Specific ----
 worker_agents:
-  - path: "applications/my_app/workflows/worker_agents/project_scan.yaml"
-  - path: "applications/my_app/workflows/worker_agents/data_analysis.yaml"
+  - path: "workflows/worker_agents/project_scan.yaml"
+  - path: "workflows/worker_agents/data_analysis.yaml"
 
 runtime_options:
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
 
 skills:
   paths:
@@ -186,12 +186,12 @@ Supervisor and Worker share 4 required fields:
 | Field | Responsibility | What to Write | What NOT to Write |
 |------|------|--------|----------|
 | `description` | **Role positioning** (one or two sentences) | "As XX agent, your core responsibility is YY" | Don't write detailed processes or specific steps |
-| `system_prompt` | **Optional long-lived instructions** | Role, rules, and working style; inline or `{path: ../config/prompts/role.md}` | The current request |
+| `system_prompt` | **Optional long-lived instructions** | Role, rules, and working style; inline or `{path: config/prompts/role.md}` | The current request |
 | `task` | **Required user task** | One request or an ordered list of requests | Tool call arguments |
 
 `system_prompt` enters the Runtime system / instructions channel. When omitted, the runtime uses its default behavior. `task` enters the user channel. Each list item waits for the previous one to finish and shares the same Agent conversation. CLI and Python entry points do not accept extra task text.
 
-`system_prompt.path` is relative to the defining Agent YAML. A YAML under `workflows/` can use `../config/prompts/role.md`; a Worker YAML under `workflows/worker_agents/` uses `../../config/prompts/role.md`. The `my_pi_agent` and code review Applications include examples under their own `config/prompts/` directories.
+`system_prompt.path` is relative to the Application root. Supervisors and nested Workers both use `config/prompts/role.md`; YAML directory depth does not change the base.
 
 #### Goal Mode (Supervisor only)
 
@@ -492,10 +492,10 @@ Configure a non-empty string path for the smol System Prompt template. A `{path:
 
 ```yaml
 runtime_options:
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
 ```
 
-Relative paths resolve from the project root; absolute paths are used directly. The file must contain a YAML mapping. An explicit path takes precedence. Otherwise the smol adapter selects an activated model-family template, a local template under `src/runtimes/smolagents/prompts/`, then the built-in smolagents template. `.example.yaml` files are reference assets.
+Relative paths use the declaring configuration root: the AgentLoom project for global configuration, and the Application for Application/Agent configuration. Absolute paths are used directly. The file must contain a YAML mapping. An explicit path takes precedence. Otherwise the smol adapter selects an activated model-family template, a local template under `src/runtimes/smolagents/prompts/`, then the built-in smolagents template. `.example.yaml` files are reference assets.
 
 ---
 
@@ -1086,40 +1086,36 @@ applications/{app_name}/
 
 - **Supervisor YAML** must be located under `applications/{app_name}/workflows/`
 - **Worker YAML** must be located under `applications/{app_name}/workflows/worker_agents/`
-- **Subdirectories are allowed** under `worker_agents/` with no naming restrictions, but Workers in subdirectories **cannot use shorthand filenames** — they must be referenced using full relative paths
+- **Subdirectories are allowed** under `worker_agents/` with no naming restrictions, all Workers use paths relative to the Application root
 - The framework automatically infers `{app_name}` (category) from the Supervisor YAML path, then locates the corresponding `worker_agents/` directory
 - If `workflows/` or `worker_agents/` directory does not exist, loading will fail with an error
 
-### 6.2 Three Path Forms
+### 6.2 Configuration Path Roots
 
-| Form | Detection Condition | Resolution | Example |
-|------|----------|----------|------|
-| **Absolute path** | Starts with `/` | Used directly | `/home/user/project/worker.yaml` |
-| **Relative path** | Contains `/` or `\` | Concatenated with `AGENT_ROOT` | `applications/my_app/workflows/worker_agents/step0.yaml` |
-| **Shorthand filename** | No directory separators, **must include extension** | Searched under `worker_agents/` | `project_scan.yaml` |
+Global configuration uses the AgentLoom project root. Application and Agent YAML configuration use the Application root, the parent of the nearest `workflows/` directory, regardless of YAML nesting.
 
-**Supported file extensions**: `.yaml`, `.yml`, `.md`
+Use `workflows/worker_agents/project_scan.yaml` for a local Worker and `../other_app/workflows/worker_agents/shared_worker.yaml` across Applications. A bare filename names a file at the Application root; there is no implicit `worker_agents/` search. Worker definitions support `.yaml` and `.yml` only.
 
-> **Note**: Shorthand filenames **must include a file extension** (e.g. `.yaml`). Names without extensions (e.g. `project_scan`) will raise an error.
+Inherited fields keep their declaring root; overriding a timeout does not relocate the inherited file. Parent traversal, home expansion and absolute paths retain each capability's existing access checks. CLI arguments, Python API inputs and model tool paths retain their working-directory rules.
 
 ### 6.3 Recommended Usage
 
 ```yaml
-# ✅ Recommended: shorthand filename (when Worker is under the same app's worker_agents/, most concise)
+# Local Worker, relative to the Application root
 worker_agents:
-  - path: "project_scan.yaml"
+  - path: "workflows/worker_agents/project_scan.yaml"
 
 # ✅ Full relative path (use when referencing Workers from another app)
 worker_agents:
-  - path: "applications/other_app/workflows/worker_agents/shared_worker.yaml"
+  - path: "../other_app/workflows/worker_agents/shared_worker.yaml"
 
 # ✅ Full relative path (use when referencing Workers in a subdirectory of worker_agents/)
 worker_agents:
-  - path: "applications/my_app/workflows/worker_agents/analysis/deep_scan.yaml"
+  - path: "workflows/worker_agents/analysis/deep_scan.yaml"
 
 # ❌ Prohibited: missing file extension
 worker_agents:
-  - path: "project_scan"               # Error! Must end with .yaml/.yml/.md
+  - path: "project_scan"               # Error! Must end with .yaml/.yml
 
 # ❌ Prohibited: using name field
 worker_agents:
@@ -1205,7 +1201,7 @@ tools:
   - name: "list_directory"
 
 worker_agents:
-  - path: "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
+  - path: "workflows/worker_agents/dir_architecture_analysis.yaml"
 ```
 
 **Worker Example**: `dir_architecture_analysis.yaml`
@@ -1267,7 +1263,7 @@ system_prompt:
 task: "Scan the supplied directory and report findings."
 ```
 
-`prompts/project_scan.md` is resolved relative to this YAML file. A Markdown file cannot itself define an Agent.
+`prompts/project_scan.md` is resolved relative to the Application root. A Markdown file cannot itself define an Agent.
 
 ---
 

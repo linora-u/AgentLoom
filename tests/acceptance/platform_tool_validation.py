@@ -110,7 +110,7 @@ def configure_case(case: str, workspace: Path, workflow: Path, system: dict, def
             },
         }))
         definition.pop("mcp_servers")
-        definition["worker_agents"] = [{"path": "fact_worker.yaml"}]
+        definition["worker_agents"] = [{"path": 'workflows/worker_agents/fact_worker.yaml'}]
         task = "Call fact_worker(query='worker-one') and report its actual result."
         expected = {"fact_worker", "mcp__facts__lookup"}
         if case == "parallel_workers":

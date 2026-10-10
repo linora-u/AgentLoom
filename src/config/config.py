@@ -30,6 +30,7 @@ from .config_validation import (
 )
 from .defaults import DEFAULT_MODEL_REQUESTS_PER_MINUTE
 from .layered_builder import LayeredConfigBuilder
+from .paths import normalize_config_paths
 from .llm_config import LLMConfig
 from .system_loader import (
     filter_llm_only_top_level_keys as _filter_llm_only_top_level_keys,
@@ -610,7 +611,7 @@ def build_effective_agent_config_snapshot(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
     )
     base_data = deepcopy(base.raw)
-    layered_builder.apply_mapping("base_config", base_data)
+    layered_builder.apply_mapping("base_config", normalize_config_paths(base_data, base.agent_root))
     layers.append(
         ConfigLayerSnapshot(
             name="global_system",
@@ -669,7 +670,7 @@ def build_effective_agent_config_snapshot(
                         source_name=str(app_config_path),
                     )
                     layered_builder.apply_mapping(
-                        str(app_config_path), app_system_yaml
+                        str(app_config_path), normalize_config_paths(app_system_yaml, agent_layer_root)
                     )
                     layers.append(
                         ConfigLayerSnapshot(
@@ -691,7 +692,7 @@ def build_effective_agent_config_snapshot(
         )
         layered_builder.apply_mapping(
             source_name,
-            agent_overlay,
+            normalize_config_paths(agent_overlay, agent_layer_root),
         )
         if agent_overlay:
             if not agent_source_path.is_absolute():

@@ -57,7 +57,7 @@ def test_cross_application_workers_use_own_catalogues(tmp_path):
         "type": "object", "properties": {"query": {"type": "string", "description": "Query"}},
         "required": ["query"], "additionalProperties": False,
     })
-    parent = agent(tmp_path, "a", worker_agents=[{"path": str(child.relative_to(tmp_path))}])
+    parent = agent(tmp_path, "a", worker_agents=[{"path": "../b/workflows/root.yaml"}])
     inspection = inspect_application_definition(tmp_path, str(parent), load_agent_definition(parent))
     assert not inspection.errors
     assert inspection.snapshots[parent].llm.for_type(None).model == "a"

@@ -15,6 +15,10 @@ System configuration loads `config/system.yaml` → `applications/<app>/config/s
 
 ---
 
+Configuration filesystem paths use their declaring root: AgentLoom for global configuration, and the Application for Application/Agent YAML. Inherited paths retain their original base when non-path fields are overridden. This covers MCP files, prompt templates, Skills, Hook Bundles and path permission lists; wildcard and access-check behavior is retained. CLI and model tool paths are unaffected.
+
+See [configuration path migration](config_paths.md) when upgrading existing configuration.
+
 ## Table of Contents
 
 - [redaction — Content Redaction](#redaction--content-redaction)

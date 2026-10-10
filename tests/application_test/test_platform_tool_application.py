@@ -129,7 +129,7 @@ def test_parallel_worker_applications_own_mcp_connections_and_run_context(platfo
         return "both workers completed"
 
     programs.update(platform=supervisor_program, probe=worker_program)
-    assert run(worker_agents=[{"path": "probe.yaml"}]).output == "both workers completed"
+    assert run(worker_agents=[{"path": 'workflows/worker_agents/probe.yaml'}]).output == "both workers completed"
     assert len(observed) == 2
     assert len({item[0] for item in observed}) == 2
     assert len({item[1] for item in observed}) == 1
@@ -235,8 +235,8 @@ def test_resume_rejects_changed_agent_definition_content(platform_project, chang
     prompt.parent.mkdir()
     prompt.write_text("Original instructions.", encoding="utf-8")
     updates = {
-        "worker_agents": [{"path": "helper.yaml"}],
-        "system_prompt": {"path": "prompts/instructions.md"},
+        "worker_agents": [{"path": 'workflows/worker_agents/helper.yaml'}],
+        "system_prompt": {"path": "workflows/prompts/instructions.md"},
     }
 
     def interrupt(_definition, _request):
@@ -392,7 +392,7 @@ json.dump({"decision": "allow"}, sys.stdout)
             {"name": "skill"},
             {"name": "memory"},
         ],
-        "worker_agents": [{"path": "storage_worker.yaml"}],
+        "worker_agents": [{"path": 'workflows/worker_agents/storage_worker.yaml'}],
     }
     files_before_run = {path for path in root.rglob("*") if path.is_file()}
     with pytest.raises(ApplicationRunInterrupted) as interrupted:

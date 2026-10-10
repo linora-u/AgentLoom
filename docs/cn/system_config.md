@@ -15,6 +15,10 @@
 
 ---
 
+配置文件路径统一按声明来源解析：全局配置相对 AgentLoom 根，Application/Agent YAML 相对 Application 根。继承或只覆盖非路径字段时，文件位置保持原声明基准。涵盖 MCP 文件、提示词模板、Skills、Hook Bundle 和路径权限列表；通配符及原有访问检查保留。命令行与模型工具路径不受此规则影响。
+
+升级已有配置请参见 [配置路径迁移](config_paths.md)。
+
 ## 目录
 
 - [redaction — 内容脱敏](#redaction--内容脱敏)

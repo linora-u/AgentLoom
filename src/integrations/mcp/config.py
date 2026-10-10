@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from agentloom.execution.logging import get_logger
+from agentloom.config.paths import resolve_config_path
 
 logger = get_logger(__name__)
 
@@ -61,10 +62,7 @@ def resolve_mcp_json_path(raw_path: str, agent_root: Path) -> Path:
     * Absolute path -> used as-is
     * ``~`` expansion supported
     """
-    expanded = Path(raw_path).expanduser()
-    if expanded.is_absolute():
-        return expanded
-    return (agent_root / expanded).resolve()
+    return resolve_config_path(raw_path, agent_root)
 
 
 # ---------------------------------------------------------------------------

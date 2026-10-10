@@ -98,11 +98,11 @@ model_type: "powerful"                   # 可选: "powerful", "fast", "summary"
 
 # ---- Supervisor 专属 ----
 worker_agents:
-  - path: "applications/my_app/workflows/worker_agents/project_scan.yaml"
-  - path: "applications/my_app/workflows/worker_agents/data_analysis.yaml"
+  - path: "workflows/worker_agents/project_scan.yaml"
+  - path: "workflows/worker_agents/data_analysis.yaml"
 
 runtime_options:
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
 
 skills:
   paths:
@@ -187,12 +187,12 @@ Supervisor 和 Worker 共有 4 个必填字段：
 | 字段 | 职责 | 写什么 | 不写什么 |
 |------|------|--------|----------|
 | `description` | **角色定位**（一两句话） | "作为 XX 智能体，你的核心职责是 YY" | 不写详细流程、不写具体步骤 |
-| `system_prompt` | **可选长期指令** | 角色、规则、工作方式；直写或 `{path: ../config/prompts/role.md}` | 本次任务 |
+| `system_prompt` | **可选长期指令** | 角色、规则、工作方式；直写或 `{path: config/prompts/role.md}` | 本次任务 |
 | `task` | **必填用户任务** | 一条任务或按顺序执行的任务列表 | 工具输入参数 |
 
 `system_prompt` 进入 Runtime 的 system / instructions 通道；不配置时使用 runtime 默认行为。`task` 进入 user 通道；列表中的后一项在前一项完成后才发送，沿用同一 Agent 会话。CLI 和 Python 入口不接受额外任务文字。
 
-`system_prompt.path` 相对于定义该 Agent 的 YAML 文件。若 YAML 位于 `workflows/`，可写 `../config/prompts/role.md`；若 Worker YAML 位于 `workflows/worker_agents/`，则写 `../../config/prompts/role.md`。例如 `my_pi_agent` 和代码审查 Application 已将部分长期指令放在各自的 `config/prompts/` 中。
+`system_prompt.path` 相对于 Application 根目录。Supervisor 和任意层级 Worker 都写 `config/prompts/role.md`；YAML 的目录深度不改变路径基准。
 
 #### Goal Mode（仅 Supervisor）
 
@@ -489,10 +489,10 @@ smol 的自定义 System Prompt 模板使用非空字符串路径，不接受 `{
 
 ```yaml
 runtime_options:
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
 ```
 
-相对路径基于项目根目录解析，绝对路径直接使用。模板内容必须是合法 YAML mapping。
+相对路径基于声明配置的根目录解析：全局配置用 AgentLoom 项目根目录，Application/Agent 配置用 Application 根目录。绝对路径直接使用。模板内容必须是合法 YAML mapping。
 显式路径优先；未配置时，smol adapter 依次选择 `src/runtimes/smolagents/prompts/` 下已激活的模型家族模板、本地模板，再使用 smolagents 内置模板。`.example.yaml` 只是参考资源。
 
 ---
@@ -631,7 +631,7 @@ mcp_servers:
   tool_name_prefix: true
 ```
 
-**路径解析**：相对路径从 `agent_root`（项目根目录）解析，与 `prompt.path` 规则一致。
+**路径解析**：全局配置中的路径相对 AgentLoom 项目根目录，Application/Agent 配置中的路径相对 Application 根目录。
 
 **与全局配置的合并**：Agent YAML 中的 `mcp_servers` 会与 `config/system.yaml` 中的全局 `mcp_servers` 合并。同名 Server 以 Agent 级别为准。
 
@@ -1097,40 +1097,36 @@ applications/{app_name}/
 
 - **Supervisor YAML** 必须位于 `applications/{app_name}/workflows/` 目录下
 - **Worker YAML** 必须位于 `applications/{app_name}/workflows/worker_agents/` 目录下
-- `worker_agents/` 下**允许创建子目录**，子目录名称无限制，但子目录中的 Worker **不能用简写文件名**，必须使用完整相对路径引用
+- `worker_agents/` 下**允许创建子目录**，子目录名称无限制，所有 Worker 都使用相对 Application 根目录的路径引用
 - 框架通过 Supervisor YAML 的路径自动推断 `{app_name}`（category），然后定位对应的 `worker_agents/` 目录
 - 如果 `workflows/` 或 `worker_agents/` 目录不存在，加载时会直接报错
 
-### 6.2 三种路径形式
+### 6.2 配置路径基准
 
-| 形式 | 判断条件 | 解析方式 | 示例 |
-|------|----------|----------|------|
-| **绝对路径** | 以 `/` 开头 | 直接使用 | `/home/user/project/worker.yaml` |
-| **相对路径** | 包含 `/` 或 `\` | 基于 `AGENT_ROOT` 拼接 | `applications/my_app/workflows/worker_agents/step0.yaml` |
-| **简写文件名** | 不含目录分隔符，**必须带后缀** | 在 `worker_agents/` 目录下查找 | `project_scan.yaml` |
+全局配置相对 AgentLoom 项目根目录；Application 和 Agent YAML 配置相对 Application 根目录。应用根是最近的 `workflows/` 的父目录，与 YAML 位于哪个子目录无关。
 
-**支持的文件后缀**：`.yaml`、`.yml`、`.md`
+Worker 使用 `workflows/worker_agents/project_scan.yaml`；跨应用使用 `../other_app/workflows/worker_agents/shared_worker.yaml`。裸文件名只表示应用根下的文件，不再自动查找 `worker_agents/`。Worker 定义仅支持 `.yaml` 和 `.yml`。
 
-> **注意**：简写文件名**必须包含文件后缀**（如 `.yaml`）。不带后缀的写法（如 `project_scan`）会直接报错。
+继承字段保留声明来源的基准；覆盖超时等非路径字段不会移动继承的文件。`../`、`~` 和绝对路径按已有能力规则解析，原有访问检查继续适用。命令行、Python API 入参和模型工具的路径仍使用各自的工作目录。
 
 ### 6.3 推荐写法
 
 ```yaml
-# ✅ 推荐：简写文件名（Worker 在同 app 的 worker_agents/ 下时，最简洁）
+# 应用内 Worker，相对 Application 根目录
 worker_agents:
-  - path: "project_scan.yaml"
+  - path: "workflows/worker_agents/project_scan.yaml"
 
 # ✅ 完整相对路径（跨 app 引用其他 app 的 Worker 时使用）
 worker_agents:
-  - path: "applications/other_app/workflows/worker_agents/shared_worker.yaml"
+  - path: "../other_app/workflows/worker_agents/shared_worker.yaml"
 
 # ✅ 完整相对路径（引用 worker_agents/ 子目录下的 Worker 时使用）
 worker_agents:
-  - path: "applications/my_app/workflows/worker_agents/analysis/deep_scan.yaml"
+  - path: "workflows/worker_agents/analysis/deep_scan.yaml"
 
 # ❌ 禁止：不带文件后缀
 worker_agents:
-  - path: "project_scan"               # 报错！必须带 .yaml/.yml/.md 后缀
+  - path: "project_scan"               # 报错！必须带 .yaml/.yml 后缀
 
 # ❌ 禁止：使用 name 字段
 worker_agents:
@@ -1226,7 +1222,7 @@ tools:
   - name: "list_directory"
 
 worker_agents:
-  - path: "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
+  - path: "workflows/worker_agents/dir_architecture_analysis.yaml"
 ```
 
 **Worker 示例**: `dir_architecture_analysis.yaml`
@@ -1288,7 +1284,7 @@ system_prompt:
 task: "扫描传入的目录并报告发现。"
 ```
 
-`prompts/project_scan.md` 相对该 YAML 所在目录解析。Markdown 文件本身不能作为 Agent 定义。
+`prompts/project_scan.md` 相对 Application 根目录解析。Markdown 文件本身不能作为 Agent 定义。
 
 ---
 

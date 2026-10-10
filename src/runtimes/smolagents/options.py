@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentloom.config.config import EffectiveAgentConfigSnapshot
+from agentloom.config.paths import configuration_root, resolve_config_path
 
 if TYPE_CHECKING:
     from agentloom.execution.agent_runtime import RuntimeDefinition
@@ -23,8 +24,7 @@ SMOL_DEFAULTS = {
 def resolve_execution_prompt_template_path(raw_path: str, source: str, *, agent_root: Path | str) -> Path:
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise ValueError(f"{source} must be a non-empty string path")
-    path = Path(raw_path.strip()).expanduser()
-    return (path if path.is_absolute() else Path(agent_root).expanduser() / path).resolve()
+    return resolve_config_path(raw_path.strip(), agent_root)
 
 
 def normalize_runtime_options(
@@ -43,6 +43,12 @@ def normalize_runtime_options(
         for key, value in raw.items():
             if not isinstance(key, str):
                 raise ValueError(f"{layer_source}:runtime_options keys must be strings")
+            if key == "prompt_template_path" and value is not None:
+                root = configuration_root(layer_source, agent_root)
+                if snapshot is not None:
+                    root = next((layer.root for layer in snapshot.layers
+                                 if str(layer.source_path) == layer_source), root)
+                value = str(resolve_execution_prompt_template_path(value, layer_source, agent_root=root))
             options[key] = value
             sources[key] = f"{layer_source}:runtime_options.{key}"
     unknown = sorted(set(options) - set(SMOL_DEFAULTS))

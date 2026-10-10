@@ -8,4 +8,4 @@ tools: []
 checkpoint:
   enabled: false
 worker_agents:
-- path: smol_reader.yaml
+- path: workflows/worker_agents/smol_reader.yaml
