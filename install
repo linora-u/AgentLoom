@@ -20,7 +20,10 @@ Options:
   -h, --help        Show this help
 
 Environment:
-  AGENTLOOM_INSTALL_DIR  Installation root (default: ~/.agentloom)
+  AGENTLOOM_INSTALL_DIR  Custom installation root (environment: ROOT/venv)
+
+Defaults: Python environment in the checkout's .venv; launchers and installation
+records in the checkout's .agentloom.
 EOF
 }
 
@@ -50,9 +53,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-INSTALL_ROOT=${AGENTLOOM_INSTALL_DIR:-"$HOME/.agentloom"}
+INSTALL_ROOT=${AGENTLOOM_INSTALL_DIR:-"$REPO_ROOT/.agentloom"}
+if [[ -n "${AGENTLOOM_INSTALL_DIR:-}" ]]; then
+  VENV_DIR="$INSTALL_ROOT/venv"
+else
+  VENV_DIR="$REPO_ROOT/.venv"
+fi
+# Updates pass the original environment explicitly, including the checkout layout.
+VENV_DIR=${UV_PROJECT_ENVIRONMENT:-"$VENV_DIR"}
 mkdir -p "$INSTALL_ROOT"
 INSTALL_ROOT=$(cd -- "$INSTALL_ROOT" && pwd -P)
+mkdir -p "$VENV_DIR"
+VENV_DIR=$(cd -- "$VENV_DIR" && pwd -P)
 if [[ -z "$RUNTIME_PROFILE" ]] && [[ -f "$INSTALL_ROOT/runtime-profile" ]]; then
   RUNTIME_PROFILE=$(cat "$INSTALL_ROOT/runtime-profile")
 fi
@@ -61,7 +73,6 @@ case "$RUNTIME_PROFILE" in
   pi|smol) ;;
   *) printf '%s\n' 'Error: invalid saved runtime profile; select --runtime pi or smol.' >&2; exit 2 ;;
 esac
-VENV_DIR="$INSTALL_ROOT/venv"
 BIN_DIR="$INSTALL_ROOT/bin"
 mkdir -p "$BIN_DIR"
 
@@ -103,8 +114,13 @@ if [[ "$RUNTIME_PROFILE" == smol ]]; then
   # Preserve the original source installer's complete code-tool environment.
   RUNTIME_EXTRAS+=(--extra code)
 fi
+SYNC_OPTIONS=(--locked)
+if [[ "$VENV_DIR" == "$REPO_ROOT/.venv" ]]; then
+  # This environment is shared with workspace applications and development tools.
+  SYNC_OPTIONS+=(--inexact)
+fi
 UV_PROJECT_ENVIRONMENT="$VENV_DIR" "$UV_BIN" sync \
-  --locked \
+  "${SYNC_OPTIONS[@]}" \
   "${RUNTIME_EXTRAS[@]}" \
   --no-editable \
   --no-dev \
@@ -118,12 +134,15 @@ fi
 
 printf '%s\n' "$REPO_ROOT" > "$INSTALL_ROOT/.source-root.$$.tmp"
 mv -f "$INSTALL_ROOT/.source-root.$$.tmp" "$INSTALL_ROOT/source-root"
+printf '%s\n' "$VENV_DIR" > "$INSTALL_ROOT/.python-environment.$$.tmp"
+mv -f "$INSTALL_ROOT/.python-environment.$$.tmp" "$INSTALL_ROOT/python-environment"
 
 WRAPPER_TMP="$BIN_DIR/.agentloom.$$.tmp"
 cat > "$WRAPPER_TMP" <<'EOF'
 #!/bin/sh
 set -eu
 install_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+venv_dir=$(sed -n '1p' "$install_root/python-environment")
 if [ "${1:-}" = "update" ]; then
   shift
   source_root=$(sed -n '1p' "$install_root/source-root")
@@ -131,9 +150,9 @@ if [ "${1:-}" = "update" ]; then
     printf '%s\n' 'agentloom: the trusted source directory is unavailable; update from a checkout with ./install' >&2
     exit 1
   fi
-  AGENTLOOM_INSTALL_DIR="$install_root" exec "$source_root/install" --no-modify-path "$@"
+  AGENTLOOM_INSTALL_DIR="$install_root" UV_PROJECT_ENVIRONMENT="$venv_dir" exec "$source_root/install" --no-modify-path "$@"
 fi
-exec "$install_root/venv/bin/python" -I -m agentloom "$@"
+exec "$venv_dir/bin/python" -I -m agentloom "$@"
 EOF
 chmod 755 "$WRAPPER_TMP"
 mv -f "$WRAPPER_TMP" "$BIN_DIR/agentloom"
@@ -198,6 +217,7 @@ if [[ "$NO_MODIFY_PATH" != true ]] && [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 fi
 
 printf '\n%s installed successfully.\n' "$APP"
+printf 'Python environment: %s\n' "$VENV_DIR"
 printf 'Run now: %s/agentloom --help\n' "$BIN_DIR"
 printf 'Run schedules: %s/agentloom schedules --project /path/to/project serve\n' "$BIN_DIR"
 printf 'After opening a new shell: agentloom --help\n'
