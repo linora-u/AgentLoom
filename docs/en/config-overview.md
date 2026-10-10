@@ -15,6 +15,7 @@ The configuration of AgentLoom is primarily divided into three major categories,
 | `model.yaml` | `config/model.yaml` | **Global model configuration**. Every model type explicitly selects a wire adapter and independently configures its model name, credentials, endpoint, and request parameters. |
 | `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, runtime, required task, optional system prompt, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
 | *Application-level system configuration* | `applications/<app>/config/system.yaml` | **Optional application-level override**. Used to override default system behaviors for specific applications (e.g., modifying tool access control or replacing default tools). |
+| *Application-level model configuration* | `applications/<app>/config/model.yaml` | **Optional model override**. Replaces whole profiles by model name while retaining other project models. |
 
 > For more information, refer to:
 > - [Agent YAML Configuration Reference](agent_config.md)
@@ -146,7 +147,7 @@ for configuration, continuation, and schedule behavior.
 The Python package is `agentloom`; use `python -m agentloom` or the `loom`
 console command. The former `src` package and module commands have been removed.
 For an installed wheel launched outside a project, set `AGENTLOOM_PROJECT_ROOT`
-to the directory containing `config/system.yaml` and `config/model.yaml`. Without
+to the directory containing `config/system.yaml`. Without
 an explicit root, the existing project-ancestor discovery still applies.
 Generated scripts record their project location relative to their output file
 and accept the same environment override. Project tools remain in

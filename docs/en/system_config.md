@@ -11,7 +11,7 @@
 
 > ⚠️ **Isolation between system.yaml and model.yaml**: All LLM-related configuration (`model`, `llm`, `langfuse`) **must and can only** be placed in `config/model.yaml`. If these keys are written in `system.yaml`, the framework will automatically filter them during loading and output a warning log. See [LLM Configuration Reference](llm_config.md) for details.
 
-The configuration loading order is `config/system.yaml` → `config/model.yaml` → `applications/<app>/config/system.yaml` (optional). Application-level `system.yaml` discovery is based on the Agent YAML configuration file path: the framework searches upward from the file's directory for a `workflows/` directory, whose parent directory is the application root (app_root). If `app_root/config/system.yaml` exists, it is automatically overlaid; if not, it is skipped. Nested applications (e.g., `my_app/sub_module`) will hit the nearest `workflows/` directory, providing natural isolation.
+System configuration loads `config/system.yaml` → `applications/<app>/config/system.yaml` (optional) → Agent whitelisted overrides. Model configuration independently loads project and Application `config/model.yaml`; Application profiles replace whole project profiles by name. Application-level `system.yaml` discovery is based on the Agent YAML configuration file path: the framework searches upward from the file's directory for a `workflows/` directory, whose parent directory is the application root (app_root). If `app_root/config/system.yaml` exists, it is automatically overlaid; if not, it is skipped. Nested applications (e.g., `my_app/sub_module`) will hit the nearest `workflows/` directory, providing natural isolation.
 
 ---
 

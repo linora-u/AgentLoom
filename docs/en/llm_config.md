@@ -89,11 +89,11 @@ model:
 
 ## 1. model.default_model_type — Default Model Type
 
-Controls which model type the entire Agent system uses when an Agent YAML does not specify `model_type`.
+Selects the default when an Agent YAML does not specify `model_type`. An Application default overrides the project default.
 
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
-| `model.default_model_type` | `str` | `""` | ❌ No | Global default model type. Must be a type key defined under the `model` block (e.g., `powerful`, `fast`, `summary`, or a custom type name). If omitted, Agents that do not specify `model_type` raise `ValueError` directly |
+| `model.default_model_type` | `str` | `""` | ❌ No | Default model type after Application overrides. Must exist in the effective model catalogue (e.g., `powerful`, `fast`, `summary`, or a custom type name). If omitted, Agents that do not specify `model_type` raise `ValueError` directly |
 
 ### 1.1 Resolution Rules
 
@@ -102,7 +102,7 @@ When an Agent needs to obtain model configuration, resolution follows this prior
 ```
 model_type in Agent YAML (e.g., model_type: "fast")
        ↓ (when not specified)
-default_model_type in config/model.yaml (e.g., default_model_type: "powerful")
+Application default_model_type, otherwise project default_model_type
        ↓ (when default_model_type is not configured)
 ValueError
 ```
