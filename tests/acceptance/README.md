@@ -79,3 +79,32 @@ and token totals, and exactly-once side effects. The barrier captures actual
 Worker output; it does not generate Agent responses. Its own duplicate output
 writes fail explicitly. A prepared `completed` state remains useful for
 same-version prepare/resume validation.
+
+## Live configuration-path validation
+
+This opt-in campaign runs actual YAML Applications against configured providers.
+It covers declaration roots for prompts, nested and cross-Application Workers,
+Skills, MCP, Hooks, access policies and smol prompt templates. MCP checks include
+actual stdio tool calls and process teardown; no model responses are fabricated.
+
+From the repository root, with the framework, news CLI, selected runtimes and
+provider authentication installed:
+
+```sh
+.venv/bin/python tests/acceptance/config_path_validation.py \
+  --model-config applications/news_agent/config/model.yaml \
+  --pi-profile codex_luna_news_initial --smol-profile deepseek_v4_1 \
+  --output .agentloom/validation/config-paths-001
+```
+
+Use a new output directory for each campaign. Credentials are copied into
+private per-case directories; keep the output under the ignored `.agentloom/`
+directory. Reports include pass/fail results, trace locations, the tested Git
+revision and whether the worktree had uncommitted changes. Failed attempts retain
+their evidence. `logical_model_requests` counts distinct model turns; request
+events may include several boundaries for one turn and are reported separately.
+
+The default is 42 cases with concurrency 3. `--runtimes`, `--cases`, `--concurrency`
+and `--deadline` can narrow a campaign. Existing capability admission rules still
+apply: for example, absolute `system_prompt.path` is checked for rejection before
+the corresponding relative-path Application makes its real model request.
