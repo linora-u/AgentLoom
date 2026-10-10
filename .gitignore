@@ -203,6 +203,7 @@ applications/web_search/config/.mcp.anysearch.json
 applications/test_demo/config/.mcp.anysearch.json
 model.local.yaml
 applications/news_agent/config/.mcp.anysearch.json
+*.sqlite3
 
 # Isolated real-Application acceptance definitions and artifacts.
 **/.architecture_acceptance/
