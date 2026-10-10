@@ -65,6 +65,13 @@ _SAMPLE_YAML_NO_WORKFLOW = textwrap.dedent("""\
 """)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_model_profiles(tmp_path, monkeypatch):
+    import agentloom.config.config as config_module
+    from tests.config_test_support import unit_config
+    monkeypatch.setattr(config_module, "_ACTIVE_CONFIG", unit_config(tmp_path))
+
+
 def _fake_c(tmp_path: Path):
     """Return a lightweight stand-in for the ``C`` config proxy."""
     return SimpleNamespace(

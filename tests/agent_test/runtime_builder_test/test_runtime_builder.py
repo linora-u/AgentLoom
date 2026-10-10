@@ -39,6 +39,7 @@ from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.self_learning.persistence.review_engine import ReviewEngine
+from tests.config_test_support import unit_config
 
 
 @pytest.fixture(autouse=True)
@@ -49,6 +50,8 @@ def _isolate_self_learning_state(tmp_path, monkeypatch):
         str(tmp_path / ".agentloom"),
     )
     set_current_hook_run(HookRun(HookPlan(), local_run_id="test-local", root_run_id="test-root"))
+    import agentloom.config.config as config_module
+    monkeypatch.setattr(config_module, "_ACTIVE_CONFIG", unit_config(Path(__file__).resolve().parents[3]))
     yield
     clear_current_hook_run()
 
