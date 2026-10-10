@@ -290,6 +290,32 @@ class LLMConfig(BaseModel):
             changes["default_model_type"] = overlay.default_model_type
         return self.model_copy(deep=True, update=deepcopy(changes))
 
+    def patch_from_yaml(self, path: Path) -> LLMConfig:
+        """Patch fields of named profiles without copying public model settings."""
+        if not path.exists():
+            return self.model_copy(deep=True)
+        raw = load_unique_yaml(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict) or set(raw) != {"model"}:
+            raise ValueError(f"{path.name} must contain only a model mapping")
+        patches = raw["model"]
+        if not isinstance(patches, dict):
+            raise ValueError(f"{path.name} model must be a mapping")
+        models = dict(self.models)
+        for name, patch in patches.items():
+            if name in _RESERVED_MODEL_KEYS:
+                raise ValueError(f"{path.name} cannot patch reserved model key {name!r}")
+            if not isinstance(patch, dict):
+                raise ValueError(f"{path.name} model profile {name!r} must be a mapping")
+            current = models.get(name)
+            if current is None:
+                merged = dict(patch)
+            else:
+                merged = current.model_dump(exclude={"extra_completion_params"})
+                merged.update(current.extra_completion_params or {})
+                merged.update(patch)
+            models[name] = self.from_dict({"model": {name: merged}}).models[name]
+        return self.model_copy(deep=True, update={"models": deepcopy(models)})
+
     def validate_runtime(self, runtime_id: str, options: dict[str, Any]) -> None:
         """Only smol smart compression requires a separate summary profile."""
         if runtime_id != "smolagents" or not options.get("smart_summary", True):
