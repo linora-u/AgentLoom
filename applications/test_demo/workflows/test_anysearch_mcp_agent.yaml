@@ -5,7 +5,7 @@ description: "Agent that connects to AnySearch MCP server and uses its search to
 model_type: "powerful"
 
 mcp_servers:
-  path: "config/.mcp.anysearch.json"
+  path: "config/anysearch.mcp.json"
   timeout: 30
   tool_timeout: 60
   tool_name_prefix: true
@@ -21,7 +21,7 @@ task: |
   You have access to the following MCP tools (prefixed with `mcp__AnySearch__`):
 
   - `mcp__AnySearch__search` — General web search or vertical domain search
-  - `mcp__AnySearch__list_domains` — Query vertical domain directory (must call before vertical search)
+  - `mcp__AnySearch__get_sub_domains` — Query vertical domain directory (must call before vertical search)
   - `mcp__AnySearch__batch_search` — Execute 2-5 independent search queries in parallel
   - `mcp__AnySearch__extract` — Fetch full page content from a URL as Markdown
 
@@ -35,14 +35,14 @@ task: |
   - freshness: "month"
 
   ## Step 3: List vertical domains
-  Use `mcp__AnySearch__list_domains` to discover available vertical search domains.
+  Use `mcp__AnySearch__get_sub_domains` to discover available vertical search domains.
   Query the "code" and "finance" domains to understand their sub_domains and query_format.
 
   ## Step 4: Vertical domain search (code)
   Use `mcp__AnySearch__search` to do a vertical search in the "code" domain:
   - Query: "python mcp server example"
   - domain: "code"
-  - sub_domain: use the value discovered from list_domains
+  - sub_domain: use the value discovered from get_sub_domains
   - max_results: 5
 
   ## Step 5: Batch search
