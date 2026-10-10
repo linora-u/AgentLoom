@@ -278,7 +278,7 @@ def test_runtime_preflight_uses_registry_capabilities(
                 agent_runtime="minimal",
                 concurrency=2,
                 checkpoint={"enabled": True},
-                worker_agents=[{"path": "worker.yaml"}],
+                worker_agents=[{"path": 'workflows/worker_agents/worker.yaml'}],
             ),
             tmp_path / "agent.yaml",
             agent_root=tmp_path,

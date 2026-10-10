@@ -306,7 +306,7 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
         **agent._config,
         "concurrency": 2,
         "checkpoint": {"enabled": True},
-        "worker_agents": [{"path": "worker.yaml"}],
+        "worker_agents": [{"path": 'workflows/worker_agents/worker.yaml'}],
     }
     runtime = RecordingAgentRuntime("runtime-result")
     monkeypatch.setattr(agent, "build_runtime", lambda: runtime)

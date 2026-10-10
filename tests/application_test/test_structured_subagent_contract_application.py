@@ -119,9 +119,9 @@ def test_native_subagent_contract_has_the_same_public_result_and_lifecycle(
         root = yaml.safe_load(workflow.read_text())
         root["task"] = "Delegate each contract exactly once, then return their values."
         root["worker_agents"] = [
-            {"path": "simple.yaml"},
-            {"path": "object.yaml"},
-            {"path": "array.yaml"},
+            {"path": 'workflows/worker_agents/simple.yaml'},
+            {"path": 'workflows/worker_agents/object.yaml'},
+            {"path": 'workflows/worker_agents/array.yaml'},
         ]
         root["output_schema"] = {
             "type": "object",
@@ -266,7 +266,7 @@ def test_invalid_subagent_output_becomes_an_output_validation_tool_record(
         )
         root = yaml.safe_load(workflow.read_text())
         root["task"] = "Call the Worker once and handle its contract failure."
-        root["worker_agents"] = [{"path": "invalid.yaml"}]
+        root["worker_agents"] = [{"path": 'workflows/worker_agents/invalid.yaml'}]
         write_yaml(workflow, root)
 
         worker = _worker_definition(

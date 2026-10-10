@@ -200,7 +200,7 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
             'input_schema': {'type': 'object', 'properties': {
                 'query': {'type': 'string', 'description': 'Requested fact.'}},
                 'required': ['query'], 'additionalProperties': False}}))
-        select(app, concurrency=2, worker_agents=[{'path': 'probe.yaml'}])
+        select(app, concurrency=2, worker_agents=[{'path': 'workflows/worker_agents/probe.yaml'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert result.output == 'Pi answer'

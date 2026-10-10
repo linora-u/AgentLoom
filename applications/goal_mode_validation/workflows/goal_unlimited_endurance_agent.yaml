@@ -54,4 +54,4 @@ tools:
     function: "verify_goal_validation_report"
 
 worker_agents:
-  - path: "applications/goal_mode_validation/workflows/worker_agents/evidence_synthesizer.yaml"
+  - path: "workflows/worker_agents/evidence_synthesizer.yaml"

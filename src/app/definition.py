@@ -28,6 +28,7 @@ from agentloom.config.config import (
     load_project_config,
 )
 from agentloom.config.llm_config import LLMConfig
+from agentloom.config.paths import configuration_root, resolve_config_path
 from agentloom.config.yaml_loader import load_unique_yaml
 from pydantic import ValidationError
 
@@ -362,7 +363,7 @@ def _resolve_system_prompt(
     source = raw["path"]
     if not isinstance(source, str) or not source.strip() or Path(source).is_absolute():
         raise ValueError("system_prompt.path must be a non-empty relative path")
-    target = Path(os.path.normpath(path.parent / source))
+    target = resolve_config_path(source, configuration_root(path, project_root))
     try:
         relative = target.relative_to(project_root)
     except ValueError as exc:
@@ -1057,6 +1058,5 @@ def skill_sources(snapshot: EffectiveAgentConfigSnapshot):
             continue
         AgentConfigNormalizer.validate_skills_config(layer.data)
         for raw_path in configured["paths"]:
-            path = Path(raw_path).expanduser()
-            sources.append(SkillSource(path=path if path.is_absolute() else layer.root / path, scope=scope))
+            sources.append(SkillSource(path=resolve_config_path(raw_path, layer.root), scope=scope))
     return tuple(sources)

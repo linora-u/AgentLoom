@@ -5,7 +5,7 @@ description: "Agent that connects to AnySearch MCP server and uses its search to
 model_type: "powerful"
 
 mcp_servers:
-  path: "applications/test_demo/config/.mcp.anysearch.json"
+  path: "config/.mcp.anysearch.json"
   timeout: 30
   tool_timeout: 60
   tool_name_prefix: true

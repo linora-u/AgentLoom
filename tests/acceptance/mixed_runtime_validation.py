@@ -125,7 +125,7 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
     workflow = workspace / f'applications/{APP}/workflows/{direction}.yaml'
     definition = yaml.safe_load(workflow.read_text())
     definition.update(model_type=profile, concurrency=3)
-    worker_path = workflow.parent / 'worker_agents' / definition['worker_agents'][0]['path']
+    worker_path = workflow.parent.parent / definition['worker_agents'][0]['path']
     worker = yaml.safe_load(worker_path.read_text())
     worker['model_type'] = profile
     native = 'read' if worker['agent_runtime'] == 'pi' else 'read_file'

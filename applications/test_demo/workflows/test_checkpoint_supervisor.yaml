@@ -53,7 +53,7 @@ tools:
   - name: "edit_file"
 
 worker_agents:
-  - path: "applications/test_demo/workflows/worker_agents/test_checkpoint_worker.yaml"
+  - path: "workflows/worker_agents/test_checkpoint_worker.yaml"
 
 runtime_options:
   max_steps: 20

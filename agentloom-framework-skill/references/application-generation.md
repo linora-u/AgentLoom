@@ -112,7 +112,7 @@ if __name__ == "__main__":
 hooks:
   bundles:
     my-hook:
-      path: applications/<app_name>/hooks/my-hook
+      path: hooks/my-hook
 toolsets: []   # 纯规划 Agent 可显式关闭内置工具
 tool_access_control:
   path_validation:
@@ -126,7 +126,7 @@ shell_settings:
     log_policy_snapshot: true
     log_success: false
 mcp_servers:
-  path: "applications/<app_name>/config/.mcp.json"
+  path: "config/.mcp.json"
 ```
 
 列表是整体替换，不是追加；写 Agent 级 `toolsets`、`skills` 这类列表时要表达完整意图。完整配置面见 `configuration-surface.md`。

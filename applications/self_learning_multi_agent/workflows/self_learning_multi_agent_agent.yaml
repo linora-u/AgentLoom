@@ -17,10 +17,10 @@ tools:
   - name: "grep_search"
 
 worker_agents:
-  - path: "applications/self_learning_multi_agent/workflows/worker_agents/history_researcher.yaml"
-  - path: "applications/self_learning_multi_agent/workflows/worker_agents/memory_reviewer.yaml"
-  - path: "applications/self_learning_multi_agent/workflows/worker_agents/skill_packager.yaml"
-  - path: "applications/self_learning_multi_agent/workflows/worker_agents/artifact_auditor.yaml"
+  - path: "workflows/worker_agents/history_researcher.yaml"
+  - path: "workflows/worker_agents/memory_reviewer.yaml"
+  - path: "workflows/worker_agents/skill_packager.yaml"
+  - path: "workflows/worker_agents/artifact_auditor.yaml"
 
 task: |
   # Self-Learning Multi-Agent Functional Validation

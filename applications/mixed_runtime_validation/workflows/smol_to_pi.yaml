@@ -10,4 +10,4 @@ tools: []
 checkpoint:
   enabled: false
 worker_agents:
-- path: pi_reader.yaml
+- path: workflows/worker_agents/pi_reader.yaml

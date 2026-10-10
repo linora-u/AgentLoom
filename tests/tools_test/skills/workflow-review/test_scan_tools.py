@@ -29,7 +29,7 @@ def application(tmp_path: Path) -> tuple[Path, Path]:
         "description: Coordinate the worker.\n"
         "system_prompt: Keep the evidence.\n"
         "task:\n  - Inspect the note.\n  - Summarize the findings.\n"
-        "worker_agents:\n  - path: worker_agents/worker.yaml\n",
+        "worker_agents:\n  - path: workflows/worker_agents/worker.yaml\n",
         encoding="utf-8",
     )
     worker = workers / "worker.yaml"

@@ -83,10 +83,10 @@ Supervisor 专属：
 
 ```yaml
 worker_agents:
-  - path: "applications/<app>/workflows/worker_agents/<worker>.yaml"
+  - path: "workflows/worker_agents/<worker>.yaml"
 ```
 
-规则：`worker_agents` item 只支持 `path`，不支持 `name`。路径可以是绝对路径、项目根相对路径、`worker_agents/` 下的文件名，或不带后缀的 worker 名。
+规则：`worker_agents` item 只支持 `path`，不支持 `name`。路径相对 Application 根目录或使用绝对路径，必须带 `.yaml`/`.yml` 后缀，例如 `workflows/worker_agents/worker.yaml`；没有目录简写回退。
 
 Supervisor 还可配置 `goal: true/false`，或显式 mapping。Goal mapping 不做类型宽松
 转换；旧 `token_budget` 静默忽略。`task` 列表的每项分别进入 Goal 模式，

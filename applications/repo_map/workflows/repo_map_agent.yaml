@@ -14,7 +14,7 @@ description: |
 model_type: "powerful"
 
 system_prompt:
-  path: ../config/prompts/repo_map_agent.md
+  path: config/prompts/repo_map_agent.md
 task: 按上述流程处理 output_dir=.repo_map 中由扫描阶段生成的索引，完成 Repo Map 架构分析与 Skill 文档生成。
 
 tools:

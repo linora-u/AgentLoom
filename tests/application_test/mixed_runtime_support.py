@@ -133,7 +133,7 @@ def project(root: Path, url: str, *, supervisor: str, worker: str) -> Path:
     workflow = root / 'applications/mixed/workflows/root.yaml'
     write_yaml(workflow, {'name': 'mixed', 'agent_runtime': supervisor, 'model_type': 'supervisor',
         'description': 'Verify repository facts with a Worker.', 'task': 'Ask inspect_note to read note.txt and return its token.',
-        'tools': [], 'toolsets': [], 'worker_agents': [{'path': 'inspect.yaml'}], 'concurrency': 3})
+        'tools': [], 'toolsets': [], 'worker_agents': [{'path': 'workflows/worker_agents/inspect.yaml'}], 'concurrency': 3})
     write_yaml(workflow.parent / 'worker_agents/inspect.yaml', {
         'name': 'inspect_note', 'agent_runtime': worker, 'model_type': 'worker',
         'description': 'Read one requested file.', 'task': 'Read the file named in query and return its exact token.',

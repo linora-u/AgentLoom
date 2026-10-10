@@ -36,7 +36,7 @@ tools:
 worker_agents: []
 
 system_prompt:
-  path: ../config/prompts/browser_harness_probe.md
+  path: config/prompts/browser_harness_probe.md
 
 task: |
   Run browser-harness doctor, then verify both isolated Chrome and real Chrome
