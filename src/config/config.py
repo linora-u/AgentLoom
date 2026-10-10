@@ -30,8 +30,8 @@ from .config_validation import (
 )
 from .defaults import DEFAULT_MODEL_REQUESTS_PER_MINUTE
 from .layered_builder import LayeredConfigBuilder
-from .paths import normalize_config_paths
 from .llm_config import LLMConfig
+from .paths import normalize_config_paths
 from .system_loader import (
     filter_llm_only_top_level_keys as _filter_llm_only_top_level_keys,
 )
