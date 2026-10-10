@@ -277,10 +277,6 @@ def _clean_python_env(root: Path, *, token: str, uv: Path) -> dict[str, str]:
 
 _SUPPORTED_MAPPED_PACKAGE_DIRS = (
     {"agentloom": "src"},
-    {
-        "agentloom": "src",
-        "agentloom_studio_adapter": "studio/python/agentloom_studio_adapter",
-    },
 )
 
 

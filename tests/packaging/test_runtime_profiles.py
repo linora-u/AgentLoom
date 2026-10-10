@@ -37,8 +37,6 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
         source = tmp_path / "future-package"
         shutil.copytree(root / "src", source / "src", ignore=shutil.ignore_patterns(
             "node_modules", "dist", "__pycache__", "*.pyc", ".agentloom-install.*"))
-        shutil.copytree(root / "studio/python", source / "studio/python", ignore=shutil.ignore_patterns(
-            "__pycache__", "*.pyc"))
         for name in ("pyproject.toml", "README.md"):
             shutil.copyfile(root / name, source / name)
         schema = next((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
@@ -60,7 +58,6 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
         schemas = list((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
         assert schemas
         assert all("agentloom/runtimes/pi/" + path.name in names_in_wheel for path in schemas)
-        assert "agentloom_studio_adapter/__main__.py" in names_in_wheel
         metadata = BytesParser().parsebytes(wheel.read(next(
             name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")
         )))

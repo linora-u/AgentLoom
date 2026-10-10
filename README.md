@@ -5,7 +5,7 @@ English | <a href="docs/cn/README.md">简体中文</a>
 <h1 align="center">AgentLoom</h1>
 
 <p align="center">
-  <strong>Build multi-agent applications from YAML. Operate them from an evidence-aware terminal Studio.</strong>
+  <strong>Build and run multi-agent applications from YAML.</strong>
 </p>
 
 <p align="center">
@@ -18,17 +18,10 @@ English | <a href="docs/cn/README.md">简体中文</a>
   <img alt="version 1.0.1" src="https://img.shields.io/badge/version-1.0.1-007EC6">
 </p>
 
-<p align="center">
-  <img alt="AgentLoom Application Studio running in a real terminal" src="docs/assets/agentloom-studio.svg">
-</p>
-
-<p align="center"><sub>Real reduced-motion terminal session using the current Chinese UI. The Studio indexes Applications, Skills, validation state, Runs, and commands from the project.</sub></p>
-
 AgentLoom treats a multi-agent system as an **Application with an execution
 contract**. YAML defines the Supervisor, typed Workers, models, tools, Skills,
-Hooks, permissions, and runtime policy. Application Studio can change that
-contract, show the Diff, request permission for side effects, run it, read
-structured evidence, and continue repairing failures.
+Hooks, permissions, and runtime policy. Run Applications through the CLI or
+Python API and inspect structured execution evidence.
 
 ## Why AgentLoom
 
@@ -44,7 +37,7 @@ executable contracts rather than prompt conventions.
 
 Every allocated Run receives an immutable `run_id`, manifest, and versioned
 lifecycle events, with bounded file logs when enabled plus audit records and
-artifacts. A logical `task_id` survives resume. The Studio, CLI JSON/JSONL, and
+artifacts. A logical `task_id` survives resume. The CLI JSON/JSONL and
 Python API read the same canonical state. Preflight rejection occurs before a
 Run or its storage is allocated.
 
@@ -71,8 +64,8 @@ access remains governed by Agent configuration and permissions.
 
 ## Quick start
 
-The source installer builds the Studio and prepares a locked Python environment for
-the current checkout:
+The source installer uses uv to create an isolated Python environment with locked
+dependencies and installs the `agentloom` and `loom` commands for this checkout:
 
 ```bash
 git clone https://github.com/linora-u/AgentLoom.git
@@ -81,12 +74,13 @@ cd AgentLoom
 ```
 
 It currently supports macOS and Linux shells and requires Git and Bash. It
-installs missing `uv` and Bun through their official installers, then places the
-compatible unit under `~/.agentloom`. Open a new terminal and verify it:
+installs missing `uv` through its official installer, then places the environment
+and commands under `~/.agentloom`. No environment activation is needed.
+Open a new terminal and verify it:
 
 ```bash
-agentloom --version
-agentloom --snapshot
+agentloom --help
+loom --help
 ```
 
 The source installer defaults to `smol` plus professional `code` tools. For Pi
@@ -116,69 +110,9 @@ model:
     tool_choice: "auto"
 ```
 
-`config/model.yaml` is ignored by Git and is the only model catalog used by both
-Studio and Application Agents. Start the Studio from any AgentLoom project:
-
-```bash
-agentloom
-
-# Or inspect another checkout
-agentloom --project /path/to/project
-```
-
-Try a request with explicit roles and acceptance criteria:
-
-```text
-Create an Application named release_review.
-Use one Supervisor and two Workers for API review and test review.
-Choose model types from config/model.yaml.
-Validate it and ask before the first real Run.
-```
-
-Studio edits the selected Application directly and shows each Diff. Its loop is:
-
-```text
-inspect → edit → validate → request Run permission → execute → inspect evidence → repair
-```
-
-If execution is not approved, Studio reports “configuration validated, not
-run.” It does not turn static validation into a success claim.
-
-## Application Studio
-
-The Studio is an Applications-first control plane, not a thin log viewer.
-
-- **Application workspace:** browse Effective Config, Supervisor/Worker
-  topology, source attribution, models, Tools, Skills, Hooks, MCP, permissions,
-  and validation.
-- **Agent Loop:** inspect the project, modify the selected Application, display
-  Tool and Diff cards, ask business questions, run smoke checks, and diagnose
-  failed Runs.
-- **Permission boundary:** `Application Only` permits project reads and writes
-  inside the selected Application. Shell, global files, other Applications, and
-  unknown new paths require a visible decision. `Full Access` is an explicit
-  Session toggle and resets on exit.
-- **Session continuity:** switching Applications keeps Studio conversation
-  memory; `/new` starts fresh and `/compact` compresses the active context while
-  preserving completed file changes and durable history.
-- **Revision safety:** each Run pins its Application content hash. Later edits
-  change the Working Revision but never hot-switch an active Running Revision.
-- **Run diagnostics:** summaries expose terminal state, Goal progress, token
-  usage, completion evidence, and recovery actions without dumping raw events.
-
-| Action | Key / command |
-|---|---|
-| Send a Studio message | `Enter` |
-| Search Applications, Agents, Skills, Runs, models, permissions, and commands | `Ctrl+X` |
-| Start a fresh conversation | `/new` |
-| Compact the current conversation | `/compact` |
-| Select a Studio model | `/models` |
-| Refresh the project index | `/refresh` |
-| Diagnose the selected failed Run | `a` |
-| Close detail, reject a decision, or interrupt the Agent Loop | `Esc` |
-
-See [Application Studio](studio/README.md) for screen behavior,
-architecture, updates, schedules, and contributor commands.
+`config/model.yaml` is ignored by Git and provides the project's model catalog.
+Applications can also define their own catalog in `config/model.yaml` under the
+Application directory. Select models in the Agent YAML with `model_type`.
 
 ## Define an Application
 
@@ -337,7 +271,7 @@ to the Python package name `agentloom`: the import above loads
 `src/app/runner.py`. There is no extra `agentloom` source directory.
 Use `uv sync --python 3.12 --locked --all-groups --extra smol --extra code` to install the checkout before
 calling Python APIs. The old `src.*` imports and module commands are removed;
-supported commands are `loom` and `python -m agentloom`. See the
+supported commands are `agentloom`, `loom`, and `python -m agentloom`. See the
 [architecture and migration map](docs/specs/architecture-migration-inventory.md)
 for module ownership and migration details.
 
@@ -346,8 +280,7 @@ Post-allocation failures carry the same receipt; preflight rejection emits
 [Structured Run API](docs/en/run_observability.md).
 
 Durable schedules use the same Application contract and Run lifecycle. Their
-automatic firing is a separate foreground service, so closing the Studio does not
-leave a hidden daemon:
+automatic firing is handled by an explicit foreground service:
 
 ```bash
 agentloom schedules --project /path/to/project serve
@@ -358,7 +291,6 @@ agentloom schedules --project /path/to/project serve
 | Application | Demonstrates |
 |---|---|
 | `ai_quality_analysis` | Twelve specialized Workers coordinated into staged code review |
-| `unit_test_studio` | Strict pytest generation with a deterministic Python entrypoint |
 | `repo_map` | Deterministic preprocessing, bottom-up Agent analysis, batching, and progress persistence |
 | `goal_mode_validation` | Explicit Goal completion, continuation, and checkpoint resume |
 | `self_learning_smoke` | Session history, memory proposals, evidence, and review boundaries |
@@ -382,16 +314,10 @@ agentloom schedules --project /path/to/project serve
 ```bash
 # Framework
 uv run --locked --extra smol --extra code pytest tests -q
-
-# Studio
-cd studio
-bun test
-bun run typecheck
 ```
 
 - Issues: [github.com/linora-u/AgentLoom/issues](https://github.com/linora-u/AgentLoom/issues)
 - Contact: [raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
-- Studio provenance and notices: [studio/upstream/README.md](studio/upstream/README.md)
 
 If AgentLoom helps your project, consider starring the repository or
 contributing a focused Application, fix, or validation case.

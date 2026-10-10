@@ -54,7 +54,7 @@ native skill reading tools are available. Without `read`/`bash` or platform `ski
 the catalogue is not shown. There is no eager mode. Skills grant no additional
 file, shell, script or network permissions; existing tool policies still apply.
 
-Studio and execution share the same static inspection. Invalid frontmatter,
+Execution preflight uses static inspection. Invalid frontmatter,
 names and same-scope duplicates fail before Run allocation. Inspection reads
 Skill data without constructing models, loading tool implementations, connecting
 MCP or executing Hooks. Platform activation retains the prepared body; new

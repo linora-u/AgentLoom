@@ -13,7 +13,7 @@ The required `agent_runtime` field selects the Agent runtime; registered values
 are `smolagents` and `pi`. All Tools are invoked through native structured
 tool calls.
 
-Both roles use `.yaml` or `.yml` definitions. A Markdown file may supply the content of `system_prompt.path`, but is not an Agent definition. Studio, CLI, Schedule, and Python read the same YAML task.
+Both roles use `.yaml` or `.yml` definitions. A Markdown file may supply the content of `system_prompt.path`, but is not an Agent definition. CLI, Schedule, and Python read the same YAML task.
 
 > ⚠️ **LLM Configuration Isolation**: `model`/`llm`/`langfuse` in Agent YAML are automatically filtered with a warning. LLM parameters can only be defined in `config/model.yaml`; Agents select which predefined model type to use via the `model_type` field.
 
@@ -207,7 +207,7 @@ any `goal` key.
 When enabled, each `task` list item enters Goal Mode in the same Agent session. Normal final answers and `max_steps` end only one
 continuation segment; the root Supervisor must call `update_goal(complete,
 evidence)`. Ordinary model usage remains in runtime audit records. See [Goal Mode](goal_mode.md)
-for lifecycle, resume, persistence, CLI, Studio, and schedule behavior.
+for lifecycle, resume, persistence, CLI and schedule behavior.
 
 #### Prompt and Task Writing Guidelines
 

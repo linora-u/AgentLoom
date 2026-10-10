@@ -380,9 +380,9 @@ skills:
 prompt 只展示 catalogue，模型调用 `skill(name)` 后才获得选中正文。Skill
 发现和加载不触碰 Hook，也不授予文件、Shell、脚本或网络权限。
 
-Studio 与执行共用完整拓扑静态预检：Supervisor 和所有 Worker 的 Skill frontmatter、
+执行前进行完整拓扑静态预检：Supervisor 和所有 Worker 的 Skill frontmatter、
 名称与同层重名错误在 Run 分配前拒绝。每个定义的有效配置快照保留已解析的 Skill
-目录与正文，Studio 只展示摘要，运行使用相同快照。新检查或新调用重新读取磁盘；
+目录与正文，运行使用该快照。新检查或新调用重新读取磁盘；
 已有调用保持原正文。资源文件列表仍在激活时采样，不是整个 Skill 目录的文件快照。
 
 ## Hooks 配置

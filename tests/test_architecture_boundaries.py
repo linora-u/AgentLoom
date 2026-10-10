@@ -84,26 +84,18 @@ def test_legacy_package_and_alias_loader_are_absent() -> None:
     for removed in ("application", "configuration"):
         assert not (ROOT / "src" / removed).exists()
     assert not (ROOT / "src" / "runtime").exists()
-    for removed in ("adapters", "encoding", "ui", "utils", "tui_bridge"):
+    for removed in ("adapters", "encoding", "ui", "utils"):
         assert not (ROOT / "src" / removed).exists()
     assert not (ROOT / "src" / "scaffold.py").exists()
     assert not (ROOT / "src" / "execution" / "agent.py").exists()
     assert not (ROOT / "src" / "execution" / "factory.py").exists()
     assert not (ROOT / "src" / "execution" / "invocation.py").exists()
-    assert not (ROOT / "src" / "app" / "studio" / "bridge.py").exists()
-    assert not (ROOT / "src" / "app" / "studio" / "domain_cli.py").exists()
-    assert not (ROOT / "agentloom-tui").exists()
-    assert (ROOT / "studio").is_dir()
     run_fresh("""
         import importlib.util
         assert importlib.util.find_spec("agentloom.scaffold") is None
         assert importlib.util.find_spec("agentloom.execution.agent") is None
         assert importlib.util.find_spec("agentloom.execution.factory") is None
         assert importlib.util.find_spec("agentloom.execution.invocation") is None
-        assert importlib.util.find_spec("agentloom.app.studio.bridge") is None
-        assert importlib.util.find_spec("agentloom.app.studio.domain_cli") is None
-        assert importlib.util.find_spec("agentloom_tui_bridge") is None
-        assert importlib.util.find_spec("agentloom_studio_adapter") is not None
     """)
 
 
@@ -264,31 +256,6 @@ def test_schedules_do_not_depend_on_application_implementations() -> None:
                 if name == "agentloom.app" or name.startswith("agentloom.app."):
                     offenders.append(f"{source_path.relative_to(ROOT)}:{node.lineno}:{name}")
     assert offenders == []
-
-
-def test_studio_adapter_does_not_assemble_schedule_business_dependencies() -> None:
-    source_path = ROOT / "studio/python/agentloom_studio_adapter/dispatcher.py"
-    source = source_path.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    forbidden_imports: list[str] = []
-    forbidden_calls: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imports = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module is not None:
-            imports = [node.module]
-        else:
-            imports = []
-        forbidden_imports.extend(
-            name
-            for name in imports
-            if name == "agentloom.app.definition" or name == "agentloom.schedules.mutations"
-        )
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "ScheduleMutationService":
-            forbidden_calls.append(f"{source_path.relative_to(ROOT)}:{node.lineno}")
-
-    assert forbidden_imports == []
-    assert forbidden_calls == []
 
 
 def test_tool_terminal_records_and_hook_outcomes_do_not_load_the_engine() -> None:

@@ -636,8 +636,7 @@ def test_runtime_layout_accepts_current_distribution_package_mappings(
     (tmp_path / "pyproject.toml").write_text(
         '[project.scripts]\nloom = "agentloom.__main__:main"\n'
         '[tool.setuptools.package-dir]\n'
-        'agentloom = "src"\n'
-        'agentloom_studio_adapter = "studio/python/agentloom_studio_adapter"\n',
+        'agentloom = "src"\n',
         encoding="utf-8",
     )
 
@@ -752,8 +751,6 @@ def test_mapped_canonical_capsule_launcher_executes_only_approved_source(
 @pytest.mark.parametrize("mapping", [
     'agentloom = "../src"', 'agentloom = "/mutable/src"', 'agentloom = "src/app"',
     'agentloom = "src"\nother = "src"', 'src = "src"', '"" = "src"',
-    'agentloom = "src"\nagentloom_studio_adapter = "../studio"',
-    'agentloom = "src"\nagentloom_studio_adapter = "studio/python/agentloom_studio_adapter"\nother = "src"',
 ])
 def test_trusted_launcher_rejects_unsupported_source_mappings(tmp_path: Path, mapping: str) -> None:
     root = tmp_path / "capsule"

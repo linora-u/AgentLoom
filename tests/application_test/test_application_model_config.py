@@ -47,7 +47,7 @@ def test_application_replaces_whole_profile_and_preserves_global_models(tmp_path
     assert "local" not in base.llm.models
 
 
-def test_cross_application_workers_and_studio_use_own_catalogues(tmp_path):
+def test_cross_application_workers_use_own_catalogues(tmp_path):
     write_yaml(tmp_path / "config/model.yaml", {"model": {"default_model_type": "fast", "fast": profile("global")}})
     for app in ("a", "b"):
         write_yaml(tmp_path / f"applications/{app}/config/model.yaml", {"model": {
@@ -63,11 +63,6 @@ def test_cross_application_workers_and_studio_use_own_catalogues(tmp_path):
     assert inspection.snapshots[parent].llm.for_type(None).model == "a"
     assert inspection.snapshots[child].llm.for_type(None).model == "b"
     assert "a" not in inspection.snapshots[child].llm.models
-    from agentloom.app.studio.application_studio import application_detail
-
-    detail = application_detail(tmp_path, "a", systems=[{"path": str(parent.relative_to(tmp_path)), "application_id": "a"}])
-    assert detail["agents"][0]["model"]["type"] == "a"
-    assert detail["agents"][0]["workers"][0]["model"]["type"] == "b"
 
 
 @pytest.mark.parametrize("runtime,smart_summary,needs_summary", [

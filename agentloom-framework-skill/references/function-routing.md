@@ -37,10 +37,10 @@
 | MCP/LSP 外部协议连接 | `src/integrations/mcp/`、`src/integrations/lsp/` |
 | 全局和模型配置读取、规范化 | `src/config/` |
 | 工具目录与具体工具实现 | `src/tools/` |
-| Studio 展示、私有适配器、命令与调度入口 | `studio/`、`src/app/studio/`、`src/__main__.py`、`src/schedules/` |
+| 命令与调度入口 | `src/__main__.py`、`src/schedules/` |
 
 这些目录通过安装配置统一属于 `agentloom` 包，例如 `agentloom.app`
-对应 `src/app/`。定义规则由 Application 模块提供，Studio、运行入口和
+对应 `src/app/`。定义规则由 Application 模块提供，运行入口和
 Skill 脚本应复用它；不要各自解析 YAML、维护字段白名单或推导 Worker 路径。
 
 ## 单 Agent / 多 Agent 判断

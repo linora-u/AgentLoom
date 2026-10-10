@@ -1,6 +1,6 @@
 name: "goal_observability_auditor"
 agent_runtime: smolagents
-description: "Audit agreement across Python API, CLI, JSONL, schedule, adapter, and Studio."
+description: "Audit agreement across Python API, CLI, JSONL, and schedules."
 model_type: "summary"
 runtime_options:
   max_steps: 2
@@ -10,8 +10,7 @@ concurrency: 1
 task: |
   Use only the EVIDENCE_BUNDLE embedded in the query. Audit one Goal observability
   surface end to end. Compare canonical state fields,
-  statuses, errors, artifacts, and resume identity across the supplied Python and
-  TypeScript paths. Return exact headings: SURFACE, PRODUCER, TRANSPORT, CONSUMER,
+  statuses, errors, artifacts, and resume identity across the supplied Python paths. Return exact headings: SURFACE, PRODUCER, TRANSPORT, CONSUMER,
   TEST_EVIDENCE, DRIFT, VERDICT. Cite concrete paths/symbols. Do not modify files.
   Keep the response under 1800 words. Do not call any other tool or request more
   evidence. Do not call tools. Your first model response must be the final verdict.
