@@ -58,6 +58,12 @@ def normalize_config_paths(data: dict, root: Path | str) -> dict:
                 if isinstance(rule.get(key), list):
                     rule[key] = [value if value == "*" else path(value) for value in rule[key]]
     shell = result.get("shell_settings")
-    if isinstance(shell, dict) and isinstance(shell.get("dangerous_paths"), list):
-        shell["dangerous_paths"] = [value if value == "*" else path(value) for value in shell["dangerous_paths"]]
+    if isinstance(shell, dict):
+        if isinstance(shell.get("dangerous_paths"), list):
+            shell["dangerous_paths"] = [value if value == "*" else path(value) for value in shell["dangerous_paths"]]
+        sandbox = shell.get("sandbox")
+        if isinstance(sandbox, dict):
+            for key in ("allow_write", "deny_write"):
+                if isinstance(sandbox.get(key), list):
+                    sandbox[key] = [path(value) for value in sandbox[key]]
     return result

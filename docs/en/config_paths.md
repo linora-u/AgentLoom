@@ -2,7 +2,7 @@
 
 Global configuration paths use the AgentLoom project root. Application configuration and Agent YAML paths use the Application root: the parent of the nearest `workflows/` directory. Nested Workers use that same root.
 
-This applies to file-backed system prompts, Worker references, MCP files, smol prompt templates, Skill roots, Hook Bundles, path include/exclude lists and dangerous Shell paths. `runtime.root_dir` remains global and project-relative. CLI arguments, Python API inputs, tool arguments and execution working directories retain their existing rules.
+This applies to file-backed system prompts, Worker references, MCP files, smol prompt templates, Skill roots, Hook Bundles, path include/exclude lists, dangerous Shell paths and sandbox allow/deny write paths. `runtime.root_dir` remains global and project-relative. CLI arguments, Python API inputs, tool arguments and execution working directories retain their existing rules.
 
 Inherited paths keep their declaring root. An Application that overrides an MCP timeout still uses the inherited global MCP file. Overriding its path selects a file relative to the Application instead. Wildcards and existing capability access checks are retained.
 
