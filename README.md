@@ -75,7 +75,9 @@ cd AgentLoom
 
 It currently supports macOS and Linux shells and requires Git and Bash. It
 installs missing `uv` through its official installer, then places the environment
-and commands under `~/.agentloom`. No environment activation is needed.
+in this checkout's `.venv` and the launchers/install records in `.agentloom`.
+No environment activation is needed. Set `AGENTLOOM_INSTALL_DIR=/path/to/install`
+for a custom installation with its environment in `/path/to/install/venv`.
 Open a new terminal and verify it:
 
 ```bash

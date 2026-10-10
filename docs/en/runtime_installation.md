@@ -31,7 +31,14 @@ runs its installer; the installer uses `npm ci` and the committed npm lock to
 download Pi. No upstream SDK source needs to be copied into this repository.
 For the complete source installation, `./install --runtime pi` performs both
 steps automatically. `agentloom update` preserves this runtime choice. The
-download lives under `runtimes/pi/bridge/node_modules/` inside the installed
+source installer uses the checkout's `.venv` by default, with stable launchers
+and installation records in `.agentloom`. Framework updates preserve other
+packages installed in that shared project environment. `AGENTLOOM_INSTALL_DIR` selects a
+custom root with its Python environment in `<root>/venv`. Workspace applications
+are installed separately with `uv sync --all-packages`; after changing from the
+installer's non-editable framework to an editable checkout, install Pi again
+with `.venv/bin/loom runtime install pi`. The download lives under
+`runtimes/pi/bridge/node_modules/` inside the installed
 package; editable development uses `src/runtimes/pi/bridge/node_modules/`.
 
 When selecting professional code tools in YAML, add `--extra code` to **both**

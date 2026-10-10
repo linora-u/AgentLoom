@@ -67,7 +67,9 @@ cd AgentLoom
 ```
 
 目前支持 macOS 和 Linux Shell，需要 Git 与 Bash。安装器会通过官方安装器补齐
-`uv`，再把虚拟环境和命令安装到 `~/.agentloom`，无需手动激活环境。打开新终端后验证：
+`uv`，再把虚拟环境安装到当前仓库的 `.venv`，命令包装和安装记录放在仓库的
+`.agentloom`，无需手动激活环境。设置 `AGENTLOOM_INSTALL_DIR=/path/to/install`
+可自定义安装根目录，虚拟环境位于该目录的 `venv`。打开新终端后验证：
 
 ```bash
 agentloom --help
