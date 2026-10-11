@@ -91,6 +91,7 @@ class ApplicationRunLifecycle:
         self._resumable = False
         self._runtime_events: list[RuntimeEvent] = []
         self._runtime_events_lock = RLock()
+        self._batch_records_lock = RLock()
 
     @property
     def phase(self) -> RunPhase:
@@ -148,6 +149,33 @@ class ApplicationRunLifecycle:
 
         with self._runtime_events_lock:
             return tuple(self._runtime_events)
+
+    def register_batch_record(self, runtime_context: Any, batch_id: str) -> None:
+        """Aggregate persisted batch references under the Application owner.
+
+        Invocation threads persist their own records. Only this lifecycle
+        performs the shared reference read/modify/write operation.
+        """
+        with self._batch_records_lock:
+            runtime_context.read_batch_record(batch_id)
+            manifest = json.loads(runtime_context.read_run_file(runtime_context.manifest_path))
+            if not isinstance(manifest, dict):
+                raise ValueError("Run manifest must contain a JSON object")
+            references = manifest.get("worker_batches", [])
+            if not isinstance(references, list):
+                raise ValueError("Run worker_batches must be a list")
+            reference = {
+                "batch_id": batch_id,
+                "record": runtime_context.batch_record_path(batch_id).relative_to(runtime_context.run_dir).as_posix(),
+            }
+            for existing in references:
+                if not isinstance(existing, dict):
+                    raise ValueError("Run worker_batches entries must be objects")
+                if existing.get("batch_id") == batch_id:
+                    if existing != reference:
+                        raise ValueError("Batch reference conflicts with its canonical identity")
+                    return
+            runtime_context.update_manifest(worker_batches=[*references, reference])
 
     def report_agent_invocation(
         self,

@@ -26,8 +26,8 @@ from agentloom.execution.native_tool_host import NativeToolHost
 from agentloom.execution.native_tools import NativeCallIdentity
 from agentloom.execution.tool_gateway import PreparedToolGateway
 from agentloom.execution.trace import capture_explicit_execution_context
-from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 from agentloom.runtimes.pi.auth import CodexLoginGate, open_login_browser, show_device_code
+from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
 from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
 from agentloom.runtimes.pi.protocol import (
     PI_BRIDGE_PROTOCOL_VERSION,
@@ -309,7 +309,16 @@ class PiRuntime:
             protocol.close()
 
     def close(self):
+        errors = []
         try:
             self.transport.close()
-        finally:
+        except BaseException as error:
+            errors.append(error)
+        try:
             self.definition.tool_gateway.close()
+        except BaseException as error:
+            errors.append(error)
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("Pi Runtime cleanup failed", errors)

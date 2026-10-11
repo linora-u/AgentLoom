@@ -1547,20 +1547,24 @@ class AgentLoomToolGateway:
         )
 
     def close(self) -> None:
-        """Release run-owned Tool resources once, even after close failures."""
+        """Reject new calls, close resources, and retain only failed closers."""
 
         with self._close_lock:
-            if self._closed:
+            if self._closed and not self._resource_closers:
                 return
             self._closed = True
             self._prepared.clear()
-        first_error: Exception | None = None
-        for closer in reversed(self._resource_closers):
-            try:
-                closer()
-            except Exception as exc:
-                logger.warning("Tool resource close failed: %s", exc)
-                if first_error is None:
-                    first_error = exc
-        if first_error is not None:
-            raise first_error
+            errors: list[BaseException] = []
+            failed: list[ToolResourceCloser] = []
+            for closer in reversed(self._resource_closers):
+                try:
+                    closer()
+                except BaseException as exc:
+                    logger.warning("Tool resource close failed: %s", exc)
+                    errors.append(exc)
+                    failed.append(closer)
+            self._resource_closers = tuple(reversed(failed))
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise BaseExceptionGroup("Tool resource cleanup failed", errors)

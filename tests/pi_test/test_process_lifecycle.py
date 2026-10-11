@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
-from threading import Event
 import time
+from pathlib import Path
+from threading import Event
 from uuid import uuid4
 
 import pytest
@@ -242,3 +242,33 @@ def test_older_bundled_node_does_not_hide_compatible_node(tmp_path):
         stdout, stderr = child.communicate(timeout=20)
     assert child.returncode == 0, stderr
     assert json.loads(stdout.splitlines()[-1])["event"] == "run.completed"
+
+
+def test_application_finalization_retries_failed_pi_directory_cleanup(tmp_path, monkeypatch):
+    from tempfile import TemporaryDirectory
+
+    from agentloom.app.run import ApplicationRunError
+    from agentloom.app.runner import execute_app
+    from agentloom.config.config import bind_config, load_project_config
+
+    original_cleanup = TemporaryDirectory.cleanup
+    directories = []
+    attempts = {}
+
+    def flaky_cleanup(directory):
+        path = Path(directory.name)
+        if path.name.startswith("agentloom-pi-"):
+            attempts[path] = attempts.get(path, 0) + 1
+            if path not in directories:
+                directories.append(path)
+                raise OSError("temporary Pi directory cleanup failure")
+        return original_cleanup(directory)
+
+    monkeypatch.setattr(TemporaryDirectory, "cleanup", flaky_cleanup)
+    with model_service() as (url, requests):
+        app = project(tmp_path, url)
+        with bind_config(load_project_config(tmp_path)):
+            with pytest.raises(ApplicationRunError, match="temporary Pi directory cleanup failure"):
+                execute_app(app, file_logging=False)
+    assert len(requests) == 1
+    assert directories and all(attempts[path] >= 2 and not path.exists() for path in directories)

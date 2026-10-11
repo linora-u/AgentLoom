@@ -6,7 +6,7 @@ import json
 from contextlib import nullcontext
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from agentloom.config import C
@@ -17,6 +17,8 @@ from agentloom.execution.agent_runtime import (
     JSONValue,
     RuntimeEvent,
     RuntimeEventSink,
+    RuntimeUsage,
+    copy_json_value,
     require_runtime_state,
 )
 from agentloom.execution.goal import goal_continuation_prompt as _goal_continuation_prompt
@@ -67,6 +69,63 @@ def _merge_runtime_events(
     return replace(result, events=tuple(observed))
 
 
+@dataclass(frozen=True, slots=True)
+class InvocationCleanupError:
+    """Original cleanup failure and the phase that failed."""
+
+    phase: str
+    error: BaseException
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationReport:
+    """Evidence from the existing invocation path, after cleanup was attempted."""
+
+    agent_id: str
+    local_run_id: str | None
+    root_run_id: str | None
+    task_id: str | None
+    answer_present: bool
+    primary_error: BaseException | None
+    error_phase: str | None
+    cleanup_errors: tuple[InvocationCleanupError, ...]
+    _output: JSONValue = field(repr=False)
+    _runtime_results: tuple[AgentRuntimeResult, ...] = field(repr=False)
+    runtime_events: tuple[RuntimeEvent, ...] = field(repr=False)
+    _failed_runtime_usage: tuple[RuntimeUsage, ...] = field(repr=False)
+
+    @property
+    def output(self) -> JSONValue:
+        return copy_json_value(self._output)
+
+    @property
+    def runtime_results(self) -> tuple[AgentRuntimeResult, ...]:
+        return tuple(replace(result) for result in self._runtime_results)
+
+    @property
+    def usage(self) -> RuntimeUsage:
+        usages = [result.usage for result in self._runtime_results]
+        usages.extend(self._failed_runtime_usage)
+        return RuntimeUsage(**{
+            name: sum(getattr(usage, name) for usage in usages)
+            for name in (
+                "input_tokens", "output_tokens", "total_tokens",
+                "cached_input_tokens", "reasoning_tokens",
+            )
+        })
+
+    @property
+    def cleanup_complete(self) -> bool:
+        return not self.cleanup_errors
+
+
+@dataclass(slots=True)
+class InvocationEvidence:
+    """Per-call report holder; the normal Agent JSON/exception API is unchanged."""
+
+    report: InvocationReport | None = None
+
+
 @dataclass(slots=True)
 class AgentInvocation:
     """Execute exactly one Agent invocation and release everything it owns."""
@@ -80,19 +139,60 @@ class AgentInvocation:
     additional_args: dict[str, Any] | None = None
     owns_root_run: bool = False
     answer_present: bool = False
+    invocation_evidence: InvocationEvidence | None = None
+    _runtime_results: list[AgentRuntimeResult] = field(default_factory=list, init=False)
+    _runtime_events: list[RuntimeEvent] = field(default_factory=list, init=False)
+    _failed_runtime_usage: list[RuntimeUsage] = field(default_factory=list, init=False)
+    _cleanup_errors: list[InvocationCleanupError] = field(default_factory=list, init=False)
+    _output: JSONValue = field(default=None, init=False)
+    _phase: str = field(default="preparation", init=False)
+    _primary_error: BaseException | None = field(default=None, init=False)
+    _error_phase: str | None = field(default=None, init=False)
+
+    def _record_cleanup_error(self, phase: str, error: BaseException) -> None:
+        if isinstance(error, BaseExceptionGroup):
+            for child in error.exceptions:
+                self._record_cleanup_error(phase, child)
+        else:
+            self._cleanup_errors.append(InvocationCleanupError(phase, error))
 
     def run(self) -> JSONValue:
         from agentloom.config.config import bind_model_config
         from agentloom.config.redaction import bind_redaction_policy
 
-        effective = self.owner._effective_agent_config or self.owner._config
-        snapshot = getattr(self.owner, "_effective_agent_config_snapshot", None)
-        with bind_model_config(snapshot.llm if snapshot is not None else None), bind_redaction_policy(effective, inherit=True) as enabled:
-            context = get_current_run_context()
-            # The Application lifecycle owns manifest initialization.
-            if context is not None and self.owns_root_run and context.manifest_path.is_file():
-                context.update_manifest(redaction={"enabled": enabled})
-            return self._run_bound()
+        identity = capture_explicit_execution_context()
+        try:
+            effective = self.owner._effective_agent_config or self.owner._config
+            snapshot = getattr(self.owner, "_effective_agent_config_snapshot", None)
+            with bind_model_config(snapshot.llm if snapshot is not None else None), bind_redaction_policy(effective, inherit=True) as enabled:
+                context = get_current_run_context()
+                # The Application lifecycle owns manifest initialization.
+                if context is not None and self.owns_root_run and context.manifest_path.is_file():
+                    context.update_manifest(redaction={"enabled": enabled})
+                result = self._run_bound()
+                self._output = copy_json_value(result)
+                return result
+        except BaseException as exc:
+            if self._primary_error is None and not self._cleanup_errors:
+                self._primary_error = exc
+                self._error_phase = self._phase
+            raise
+        finally:
+            if self.invocation_evidence is not None:
+                self.invocation_evidence.report = InvocationReport(
+                    agent_id=self.owner.get_agent_id(),
+                    local_run_id=identity.local_run_id,
+                    root_run_id=identity.root_run_id,
+                    task_id=getattr(self.owner, "_task_id", None) or self.task_id or identity.task_id,
+                    answer_present=self.answer_present,
+                    primary_error=self._primary_error,
+                    error_phase=self._error_phase,
+                    cleanup_errors=tuple(self._cleanup_errors),
+                    _output=copy_json_value(self._output),
+                    _runtime_results=tuple(self._runtime_results),
+                    runtime_events=tuple(self._runtime_events),
+                    _failed_runtime_usage=tuple(self._failed_runtime_usage),
+                )
 
     def _run_bound(self) -> JSONValue:
         from agentloom.execution.checkpoint.coordinator import CheckpointCoordinator
@@ -273,7 +373,9 @@ class AgentInvocation:
         goal_binding.__enter__()
 
         try:
+            self._phase = "runtime_creation"
             runtime_agent = owner.build_runtime()
+            self._phase = "invocation"
             owner._bind_hook_message_sink(runtime_agent)
             ensure_workspace_mounted_once()
             if self.owns_root_run:
@@ -293,6 +395,8 @@ class AgentInvocation:
                 checkpoint_sink=checkpoint_sink,
                 coordinator=coordinator,
             )
+            self._output = copy_json_value(result)
+            self._phase = "task_completion"
             owner._emit_task_lifecycle_event(
                 HookEvent.TASK_COMPLETED,
                 lifecycle_task,
@@ -302,6 +406,9 @@ class AgentInvocation:
             return result
         except BaseException as exc:
             session_error = exc
+            self._primary_error = exc
+            self._error_phase = self._phase
+            self._cleanup_errors.extend(getattr(exc, "_invocation_cleanup_errors", ()))
             if isinstance(exc, Exception):
                 owner._emit_task_lifecycle_event(
                     HookEvent.STOP_FAILURE,
@@ -311,6 +418,7 @@ class AgentInvocation:
             raise
         finally:
             lifecycle_error: BaseException | None = None
+            runtime_close_failed = False
             try:
                 lifecycle_error = self._finalize(
                     lifecycle_task=lifecycle_task,
@@ -324,13 +432,18 @@ class AgentInvocation:
                     session_error=session_error,
                     goal_provider=goal_provider,
                 )
+                if lifecycle_error is not None:
+                    self._record_cleanup_error("finalization", lifecycle_error)
             except BaseException as exc:
                 lifecycle_error = exc
+                self._record_cleanup_error("finalization", exc)
             finally:
                 try:
                     if runtime_agent is not None:
                         runtime_agent.close()
                 except BaseException as exc:
+                    runtime_close_failed = True
+                    self._record_cleanup_error("runtime_close", exc)
                     if lifecycle_error is None:
                         lifecycle_error = exc
                     elif lifecycle_error is not exc:
@@ -344,10 +457,19 @@ class AgentInvocation:
 
                         close_instance_resources(agent_id)
                     except BaseException as exc:
+                        self._record_cleanup_error("owned_resources", exc)
                         if lifecycle_error is None:
                             lifecycle_error = exc
                         else:
                             lifecycle_error.add_note(f"Resource close also failed: {exc}")
+                    if runtime_close_failed:
+                        from agentloom.execution.resources import retain_failed_resource
+
+                        retain_failed_resource(
+                            f"invocation-runtime:{id(runtime_agent)}",
+                            runtime_agent.close,
+                            instance_id=agent_id,
+                        )
                     try:
                         goal_binding.__exit__(None, None, None)
                     finally:
@@ -436,6 +558,7 @@ class AgentInvocation:
 
         def observe_runtime_event(event: RuntimeEvent) -> None:
             runtime_events.append(event)
+            self._runtime_events.append(event)
             if lifecycle is not None:
                 lifecycle.observe_runtime_event(event)
             elif parent_event_sink is not None:
@@ -498,9 +621,13 @@ class AgentInvocation:
                 try:
                     result = runtime_agent.run(request)
                 except BaseException as exc:
+                    usage_events = [event for event in runtime_events[start:] if event.kind == "usage"]
+                    if usage_events:
+                        self._failed_runtime_usage.append(RuntimeUsage.from_value(usage_events[-1].details))
                     if recorder is not None:
                         recorder.record_agent_end(state="failed", error=exc)
                     raise
+                self._runtime_results.append(result)
                 if recorder is not None:
                     recorder.record_agent_end(state=result.state)
                 for event in result.events:

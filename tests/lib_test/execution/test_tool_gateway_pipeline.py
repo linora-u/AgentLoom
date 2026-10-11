@@ -365,3 +365,24 @@ def test_plain_callable_binding_keeps_callable_identity() -> None:
 
     assert first.forward is echo
     assert second.forward is echo
+
+
+def test_gateway_retries_failed_closers_without_reclosing_successful_resources():
+    attempts = []
+
+    def unstable_close():
+        attempts.append("unstable")
+        if attempts.count("unstable") == 1:
+            raise OSError("temporary resource failure")
+
+    gateway = AgentLoomToolGateway(
+        [_binding("echo", lambda text: text)],
+        resource_closers=[unstable_close, lambda: attempts.append("stable")],
+    )
+    with pytest.raises(OSError, match="temporary resource failure"):
+        gateway.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        gateway.invoke(call_id="late-call", tool_name="echo", arguments={"text": "late"})
+    gateway.close()
+    gateway.close()
+    assert attempts == ["stable", "unstable", "unstable"]
