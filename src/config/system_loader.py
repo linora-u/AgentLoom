@@ -73,6 +73,11 @@ def load_project_system_config(
         load_config_mapping(system_path, require_exists=require_exists),
         source_name="config/system.yaml",
     )
+    # Validate project scope before an Application can override these values.
+    from agentloom.execution.concurrency.policy import validate_worker_execution
+
+    if "worker_execution" in system_yaml:
+        validate_worker_execution(system_yaml["worker_execution"], scope="project")
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(
             snapshot,

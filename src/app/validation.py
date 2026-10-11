@@ -121,7 +121,6 @@ class AgentConfigNormalizer:
         selected_tools = resolve_runtime_toolsets(config, effective_config)
         tools_selected = bool(effective.get("tools") or selected_tools)
         checkpoint = effective.get("checkpoint", {})
-        concurrency = effective.get("concurrency", config.get("concurrency"))
         goal = normalize_goal_config(config, source=str(config.get("name", "agent"))).enabled
         subagents = bool(effective.get("worker_agents", config.get("worker_agents")))
         mcp = effective.get("mcp_servers")
@@ -129,9 +128,8 @@ class AgentConfigNormalizer:
         structured_tools = bool(tools_selected or mcp or subagents or goal or config.get("agent_runtime") == "smolagents")
         return RuntimeRequirements(
             structured_tools=structured_tools,
-            parallel_tools=structured_tools and (concurrency == "auto" or (
-                isinstance(concurrency, int) and not isinstance(concurrency, bool) and concurrency > 1
-            )),
+            # A whole-Worker map capacity says nothing about Tool dispatch.
+            parallel_tools=False,
             checkpoint_resume=isinstance(checkpoint, dict) and checkpoint.get("enabled") is True,
             subagents=subagents,
             goal=goal,
@@ -274,6 +272,12 @@ class AgentConfigNormalizer:
     @staticmethod
     def validate_removed_fields(config: dict) -> None:
         """Keep removed-field rejection identical in preflight and construction."""
+        if "concurrency" in config or "worker_execution" in config:
+            raise ValueError(
+                "Agent-local concurrency/worker_execution was retired; Supervisor batch "
+                "execution configuration is not supported in v1. Configure worker_execution "
+                "in the project or Application config/system.yaml, or pass map(concurrency=N)"
+            )
         if "workflow" in config or "tasks" in config:
             raise ValueError("Configuration error: workflow and tasks were removed; use task")
         if "tools_mapping" in config:
@@ -348,6 +352,14 @@ class AgentConfigNormalizer:
 
             if "name" in agent_conf:
                 errors.append(f"worker_agents[{idx}] uses unsupported field 'name'; use 'path' only")
+
+            unsupported = set(agent_conf) - {"path", "name"}
+            if unsupported:
+                errors.append(
+                    f"worker_agents[{idx}] Supervisor execution binding is not supported in v1; "
+                    f"use path only and configure worker_execution in Application config/system.yaml "
+                    f"(unsupported: {', '.join(sorted(unsupported))})"
+                )
 
             path_value = agent_conf.get("path")
             if not isinstance(path_value, str) or not path_value.strip():

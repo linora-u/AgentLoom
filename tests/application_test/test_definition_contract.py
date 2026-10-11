@@ -825,3 +825,30 @@ def test_scheduled_supervisor_target_is_revalidated_before_run_allocation(
 
     assert not (tmp_path / ".agentloom").exists()
     assert len(events) == 1 and events[0].event == "run.rejected"
+
+
+@pytest.mark.parametrize("root_is_worker", [True, False])
+@pytest.mark.parametrize("setting", ["concurrency: 2\n", "worker_execution: {defaults: {concurrency: 2}}\n"])
+def test_agent_local_batch_policy_is_rejected_in_preflight(tmp_path, root_is_worker, setting):
+    path = write(tmp_path / "applications/demo/workflows/worker_agents/a.yaml", BASE + setting)
+    errors = validate_agent_definition(
+        tmp_path, str(path), load_agent_definition(path), root_is_worker=root_is_worker,
+        base_config=project_config(tmp_path),
+    )
+    assert any("worker_execution" in error and "config/system.yaml" in error for error in errors)
+
+
+def test_worker_capacity_does_not_require_runtime_parallel_tool_capability():
+    config = {"agent_runtime": "smolagents", "tools": [], "concurrency": 32}
+    requirements = AgentConfigNormalizer.runtime_requirements(config)
+    assert requirements.structured_tools is True
+    assert requirements.parallel_tools is False
+
+
+def test_supervisor_worker_binding_execution_policy_is_rejected(tmp_path):
+    config = load_agent_definition(write(
+        tmp_path / "applications/demo/workflows/root.yaml",
+        BASE + "worker_agents:\n  - path: workflows/worker_agents/a.yaml\n    execution: {concurrency: 2}\n",
+    ))
+    with pytest.raises(ValueError, match="Supervisor.*not supported"):
+        AgentConfigNormalizer.validate_worker_agents_config(config["worker_agents"])
