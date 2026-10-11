@@ -121,7 +121,7 @@ def test_parallel_platform_batch_keeps_run_and_hook_context_without_deadlock(tmp
     with model_service(turns=[[('left-1', 'parallel_probe', {'label': 'left'}),
                                ('right-1', 'parallel_probe', {'label': 'right'})]]) as (url, requests):
         app = project(tmp_path, url)
-        select(app, concurrency=2, tools=[{'name': 'parallel_probe', 'module': __name__, 'function': 'parallel_probe'}])
+        select(app, tools=[{'name': 'parallel_probe', 'module': __name__, 'function': 'parallel_probe'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     outputs = {m['tool_call_id']: json.loads(m['content']) for m in requests[1][1]['messages'] if m['role'] == 'tool'}
@@ -200,7 +200,7 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
             'input_schema': {'type': 'object', 'properties': {
                 'query': {'type': 'string', 'description': 'Requested fact.'}},
                 'required': ['query'], 'additionalProperties': False}}))
-        select(app, concurrency=2, worker_agents=[{'path': 'workflows/worker_agents/probe.yaml'}])
+        select(app, worker_agents=[{'path': 'workflows/worker_agents/probe.yaml'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert result.output == 'Pi answer'

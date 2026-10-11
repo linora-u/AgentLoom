@@ -41,6 +41,19 @@ LLM 配置不参与这个链条。`model`、`llm`、`langfuse` 写进 `system.ya
 
 需要隔离子进程时只允许使用 `AGENTLOOM_RUNTIME_ROOT` 覆盖整套 canonical runtime home；禁止恢复 self-learning 专用 root 或让日志/checkpoint/session 分根。
 
+## Worker 有限批处理策略
+
+`worker_execution` 只写在项目/Application `config/system.yaml`。项目提供
+`defaults.concurrency`；Application 还可用 `workers.<Application-relative YAML path>.concurrency`
+覆盖逐 Worker 默认。优先级是框架 1 < 项目默认 < Application 默认 < 逐 Worker <
+`BoundWorker.map(concurrency=N)`。所有值为严格正整数，`auto`、布尔值与数字字符串拒绝。
+Agent-local `concurrency`/`worker_execution` 及 Supervisor batch policy 均拒绝。
+
+已有 Run 使用 `current_run_app().worker(path).map(WorkItems)`；无 Supervisor 的 Python
+编排使用 `with Application.open(application_dir, project_root=...) as app`。每个 map 有独立
+容量，返回输入顺序的 `BatchOutcome.outcomes`，作用域退出停止新任务并 drain 已启动任务。
+旧 `.batch()`/parallel launcher 仅是 deprecated TaskResult 适配器，无 RPM 推断或默认熔断。
+
 ## Agent YAML 可配置字段
 
 每个 Agent 必填：
@@ -67,7 +80,6 @@ task: |
 | `runtime_options.max_steps` | 正整数 | smolagents 最大步数；默认 80 |
 | `runtime_options.planning_interval` | 正整数或 `null` | 仅控制周期性 planning，与 Todo 解耦 |
 | `runtime_options.todo_mode` | `"auto"` / `"on"` / `"off"` | 当前任务进度跟踪；默认 `auto`，`on` 强提示多步骤任务先建 Todo，`off` 完全隐藏 |
-| `concurrency` | 正整数或 `"auto"` | 仅影响同一 Worker 通过 `.batch()` 被多输入批量调用 |
 | `runtime_options.prompt_template_path` | 非空字符串 | smol 系统 prompt 模板路径；不接受 mapping |
 | `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
 | `goal` | `bool` 或 `{enabled: bool}` | 仅顶层 Supervisor；开启 continuation 和显式完成 |

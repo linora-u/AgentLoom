@@ -26,7 +26,7 @@ _EVIDENCE_FILES = {
         "src/app/factory.py",
         "tests/goal_test/test_goal_config.py",
         "tests/goal_test/test_goal_state.py",
-        "tests/agent_test/llm_cfg_test/test_supervisor_task_spec_format.py",
+        "tests/application_test/test_definition_contract.py",
         "tests/agent_test/runtime_builder_test/test_runtime_builder.py",
     ),
     "lifecycle": (
@@ -114,7 +114,7 @@ def run_goal_audit_batch(
     tasks_json: str,
     concurrency: int = 1,
 ) -> str:
-    """Run a validated real-LLM audit batch through AgentLoom's parallel API.
+    """Run a validated real-LLM audit plan through the current Application Worker.
 
     Args:
         worker_name: One of contract, lifecycle, observability, or documentation.
@@ -163,24 +163,21 @@ def run_goal_audit_batch(
             }
         )
 
-    from agentloom.app.factory import YamlAgentFactory
+    from agentloom.app import current_run_app
+    from agentloom.execution.concurrency import WorkItem
 
-    worker_path = _APP_ROOT / "workflows" / "worker_agents" / filename
-    results = YamlAgentFactory.run_agents_parallel(
-        worker_path,
-        normalized,
-        max_workers=concurrency,
-    )
+    worker = current_run_app().worker(f"workflows/worker_agents/{filename}")
+    result = worker.map([WorkItem(task["task_id"], task) for task in normalized], concurrency=concurrency)
     return json.dumps(
         [
             {
-                "task_id": result.task_id,
-                "status": result.status,
-                "duration_seconds": round(result.duration_seconds, 3),
-                "result": result.result,
-                "error": result.error,
+                "task_id": outcome.item_id,
+                "status": {"success": "completed", "failed": "failed", "canceled": "skipped"}[outcome.status],
+                "duration_seconds": round(outcome.duration_seconds, 3),
+                "result": outcome.to_dict()["output"],
+                "error": outcome.error.message if outcome.error else outcome.cancellation_reason,
             }
-            for result in results
+            for outcome in result.outcomes
         ],
         ensure_ascii=False,
     )

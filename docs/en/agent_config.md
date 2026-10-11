@@ -35,7 +35,7 @@ Both roles use `.yaml` or `.yml` definitions. A Markdown file may supply the con
   - [3.9 runtime_options.prompt_template_path — Custom Prompt](#39-runtime_optionsprompt_template_path--custom-prompt)
   - [3.10 runtime_options.planning_interval — Planning Interval](#310-runtime_optionsplanning_interval--planning-interval)
   - [3.11 runtime_options.todo_mode — Task Tracking](#311-runtime_optionstodo_mode--task-tracking)
-  - [3.11 concurrency — Concurrency Configuration](#311-concurrency--concurrency-configuration)
+  - [3.12 worker_execution — Finite Worker Batches](#312-worker_execution--finite-worker-batches)
 - [4. Tool Configuration Details](#4-tool-configuration-details)
   - [4.4 Advanced Pattern: Wrapping Agent as a Python Tool Function](#44-advanced-pattern-wrapping-agent-as-a-python-tool-function)
 - [5. Worker Export as Callable Tool](#5-worker-export-as-callable-tool)
@@ -399,7 +399,6 @@ task: |
 | `runtime_options.prompt_template_path` | `str` | Not set | Smol template path, string only |
 | `runtime_options.planning_interval` | `int` | Not set | Force re-planning every N steps. See [3.10](#310-runtime_optionsplanning_interval--planning-interval) |
 | `runtime_options.todo_mode` | `str` | "auto" | Smol task tracking; quote "on" / "off" |
-| `concurrency` | `int`/`str` | Not set | Concurrency level when this Agent is batch-invoked. See [3.11](#311-concurrency--concurrency-configuration) |
 | `skills` | `list`/`dict`/`str` | Not set | Private skill package configuration. See [3.8](#38-skills--skill-package-configuration) |
 | `hooks` | `dict` | Not set | Independent direct Hooks and explicit Hook Bundles. See [Hooks](hooks.md) |
 | `runtime_options.max_steps` | `int` | `80` | Maximum execution steps. Agent is forcefully terminated when exceeded |
@@ -548,75 +547,95 @@ model call and does not block the final answer.
 
 ---
 
-### 3.12 `concurrency` — Concurrency Configuration
+### 3.12 `worker_execution` — Finite Worker Batches
 
-Controls the maximum concurrency when this Agent is batch-invoked. Typically used for Worker Agents — when the application layer needs to batch-invoke the same Worker on multiple inputs (e.g., multiple directories, multiple files), this field determines how many Agent instances run simultaneously.
-
-**Type**: `int` (positive integer) or `str` (`"auto"`)
-**Default**: Not set (equivalent to `"auto"`)
-
-**Possible values**:
-
-| Value | Meaning |
-|------|------|
-| `auto` | Auto-calculated: `min(RPM, 10)`, actual request pacing controlled by rate limiter (`interval = 60/RPM`) |
-| `1` | Explicit sequential execution, one at a time |
-| `N` (positive int) | Fixed concurrency, at most N instances simultaneously |
-| Not set / `null` | Equivalent to `auto` |
-
-> In `auto` mode, RPM is read from the corresponding `model_type`'s `requests_per_minute` in `config/model.yaml`. Thread count = `min(RPM, 10)`, the rate limiter paces actual requests at `60/RPM` second intervals.
-
-**Thread safety**: The framework creates an **independent Agent instance** for each concurrent call (sharing Model and Config, but Agent's `memory`, `state`, and other stateful properties are fully isolated). This follows the design patterns of Cline's `new SubagentRunner()` and LangGraph's `Send()`.
-
-**Examples**:
+Plan inputs in Application code and execute them through a Worker bound to the
+current Run. Each `map()` has its own capacity; two calls at four may run eight
+Workers together. Agent-as-Tool and Runtime Tool dispatch have independent behavior.
 
 ```yaml
-# Worker Agent: directory analysis (supports concurrent batch invocation)
-name: "dir_architecture_analysis"
-agent_runtime: "smolagents"
-model_type: "powerful"
-concurrency: auto          # Auto-calculate concurrency
-
-task: |
-  ...
+# Project config/system.yaml: common default only
+worker_execution:
+  defaults:
+    concurrency: 1
 ```
 
 ```yaml
-# Worker Agent: fixed concurrency of 6
-name: "file_processor"
-agent_runtime: "smolagents"
-model_type: "fast"
-concurrency: 6
+# applications/my_app/config/system.yaml
+worker_execution:
+  defaults:
+    concurrency: 2
+  workers:
+    workflows/worker_agents/file_processor.yaml:
+      concurrency: 20
 ```
 
-**Application-layer usage — `tool.batch()`**:
+Policy keys identify real Application-relative Worker YAML files. Project config
+cannot contain a Worker table. Agent YAML and Supervisor `worker_agents` entries
+cannot declare execution policy; unsupported Supervisor defaults are rejected.
 
-After a Worker Agent with `concurrency` configured is loaded via `create_agent_as_tool()`, the returned tool function has a `.batch()` method for one-line parallel execution:
+Concurrency resolves as framework **1** < project default < Application default <
+per-Worker value < call override. Every supplied value, including overridden
+values, must be a positive integer; booleans, numeric strings and `auto` are errors.
+Omitted/`None` call concurrency uses the binding default. A call override never
+changes later calls or config files. There is no hidden twenty-item limit, Provider
+RPM inference or default circuit breaker.
 
 ```python
-# Load Worker Agent as tool (returns single Callable, with built-in cache)
-tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
+from agentloom.app import Application, current_run_app
+from agentloom.execution.concurrency import WorkItem
 
-# Build task list
-tasks = [
-    {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/app/imports", "index_content": "..."},
-    {"dir_path": "src/core", "index_content": "..."},
-]
+# Inside an existing execute_app Run or its Python Tool:
+worker = current_run_app().worker("workflows/worker_agents/file_processor.yaml")
+batch = worker.map([
+    WorkItem("a", {"query": "first"}),
+    WorkItem("b", {"query": "second"}),
+], concurrency=4)
+for outcome in batch.outcomes:  # input order
+    print(outcome.item_id, outcome.status, outcome.to_dict()["output"])
 
-# One-line parallel execution — auto-reads concurrency from YAML
-results = tool.batch(tasks)
-
-# Override YAML config
-results = tool.batch(tasks, concurrency=3)
-
-# With progress callback
-results = tool.batch(tasks, on_progress=lambda done, total, r: print(f"{done}/{total}"))
+# Python orchestration without a Supervisor:
+with Application.open("applications/my_app", project_root=project_root) as app:
+    batch = app.worker("workflows/worker_agents/file_processor.yaml").map(items)
+    record = app.runtime_context.read_batch_record(batch.batch_id)
 ```
 
-**Priority chain**: `tool.batch(concurrency=N)` param > YAML `concurrency` field > `auto`
+Supply a finite sequence or `WorkPlan`, with unique nonempty item IDs and JSON
+inputs. All IDs and schemas are validated before startup. Inputs are copied and
+frozen; each invocation receives an independent mutable copy and a fresh
+Agent/Runtime. An empty plan completes; successful `None` is a success.
 
-> ⚠️ **Applicable scenarios**: `concurrency` is for batch scenarios where "the same Worker is called multiple times with different inputs" (e.g., analyzing 100 directories, processing 50 files). It does not affect the Supervisor's own execution.
+`failure_mode="collect"` retains failures and continues independent work;
+`"fail_fast"` stops admission after an observed failure. A `threading.Event`
+`stop_token` stops new work and drains started work and owned cleanup. Started
+items keep their actual success/failure; unstarted items are `canceled` without
+an invocation ID. Scope exit drains registered batches; closed bindings reject
+new work. Cleanup/infrastructure failures raise `WorkerBatchError` with partial
+evidence. Full Workers are never automatically replayed.
+
+An `event_sink` receives serialized completion events as items finish, even when
+an earlier input is slow. Ordinary observer errors become diagnostics. Batch
+records preserve identities, configuration/definition revisions, input fingerprint,
+effective capacity and its source chain, using the standard storage/redaction
+rules. Scope settings and the first Worker binding are pinned until a new scope.
+
+This is a synchronous API. Async callers explicitly offload it (for example with
+`asyncio.to_thread`); canceling the await does not stop the thread. Signal a stop
+token and retain the offload task to observe its drain. A native async map is deferred.
+
+**Legacy migration (deprecated in Worker batch v1):** `tool.batch(tasks)` and
+`YamlAgentFactory.run_agents_parallel(path, tasks, max_workers=N)` remain adapters,
+returning input-ordered `list[TaskResult]`: `completed`, `failed`, or `skipped`
+(unstarted cancellation, reason in `error`). Duplicate legacy task IDs are allowed;
+internal item IDs use per-batch ordinals and do not alter task dictionaries.
+`on_progress(done,total,result)` follows observed completion order. Migrate new
+Application code to typed `map()` and move Worker-local `concurrency` into the
+system policy shown above. Legacy `auto`, `max_pending` and circuit-breaker
+settings are rejected with migration guidance. The direct `ParallelAgentExecutor`
+compatibility adapter also uses the same owner/scheduler. Outside an active Run,
+a sourced definition opens one compatibility Run for its Application; pathless
+inline/callable inputs use a dedicated `legacy/<identity>` Run, never one per item.
+The adapters remain available for this version; removal requires a separate notice.
 
 ---
 
@@ -1572,7 +1591,6 @@ These tolerance mechanisms significantly reduce wasted retries caused by LLM out
 | `runtime_options.prompt_template_path` | ❌ | ✅ | ✅ | `str` | Not set |
 | `runtime_options.planning_interval` | ❌ | ✅ | ✅ | `int` | Not set |
 | `runtime_options.todo_mode` | ❌ | ✅ | ✅ | `str` | `"auto"` |
-| `concurrency` | ❌ | ✅ | ✅ | `int`/`str` | Not set (`auto`) |
 | `skills` | ❌ | ✅ | ✅ | `list`/`dict`/`str` | Auto-loaded |
 | `worker_agents` | ❌ | ✅ | ❌ | `list[dict]` | `[]` |
 | `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |

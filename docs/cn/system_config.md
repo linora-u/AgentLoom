@@ -21,6 +21,7 @@
 
 ## 目录
 
+- [worker_execution — Worker 有限执行容量](#worker_execution--worker-有限执行容量)
 - [redaction — 内容脱敏](#redaction--内容脱敏)
 - [快速参考：代表性 YAML 结构](#快速参考代表性-yaml-结构)
 - [1. system — 系统元数据](#1-system--系统元数据)
@@ -41,6 +42,15 @@
 - [附录 B：应用级覆盖与目录结构](#附录-b应用级覆盖与目录结构)
 
 ---
+
+## worker_execution — Worker 有限执行容量
+
+项目 `worker_execution.defaults.concurrency` 使用严格正整数，默认 **1**。
+Application 的 `config/system.yaml` 可覆盖默认值，并用 `workers` 表为真实的
+Application 相对 Worker YAML 路径指定并发。项目 Worker 表、Agent-local 配置、
+首版不支持的 Supervisor 默认值以及 `auto` 均拒绝。每次 `BoundWorker.map()`
+独立解析代码覆盖，并发数不关联 Provider RPM 或 Runtime Tool dispatch。
+完整策略、批处理与迁移合同见 [Worker 有限批处理](agent_config.md#312-worker_execution--worker-有限批处理)。
 
 ## redaction — 内容脱敏
 

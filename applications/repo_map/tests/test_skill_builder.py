@@ -10,20 +10,18 @@ import importlib.util
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
-
-# Ensure repo root on path. parents[3] = AgentLoom/ (tests → repo_map → applications → AgentLoom)
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT))
+import yaml
+from agentloom.execution.skills.parser import parse_skill_file
 
 from applications.repo_map.agent_tools import pipeline_agent_tools as pat
 from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map
 from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
-from agentloom.execution.skills.parser import parse_skill_file
+from tests.application_test.test_worker_batch_application import batch_project as _batch_project
 
+batch_project = _batch_project
 
 FIXTURE_PROJECT = Path(__file__).parent / "fixtures" / "sample_project"
 
@@ -239,21 +237,20 @@ description: Use when invalid.
         pat.validate_repo_map_skill(str(output_dir))
 
 
-def test_analysis_loop_prepare_validate_integration(tmp_path, monkeypatch):
-    project = _copy_fixture_project(tmp_path)
+def test_analysis_loop_prepare_validate_integration(batch_project):
+    from agentloom.app import Application
+
+    root, application, _worker, probe, write = batch_project
+    project = _copy_fixture_project(root)
     output_dir = _prepare_repo_map_outputs(project)
 
-    # Mock create_agent_as_tool to return a simple callable (no LLM needed)
-    # Do NOT set .batch — hasattr() check in run_analysis_loop will use the serial fallback
-    def _mock_tool(**kwargs):
-        return f"# 架构分析: {kwargs['dir_path']}\n\nmock"
-    _mock_tool.__name__ = "mock_dir_analysis"
-    monkeypatch.setattr(
-        "agentloom.app.factory.YamlAgentFactory.create_agent_as_tool",
-        lambda *args, **kwargs: _mock_tool,
-    )
-
-    loop_summary = pat.run_analysis_loop(str(output_dir))
+    config = yaml.safe_load((Path(__file__).parents[1] / "workflows/worker_agents/dir_architecture_analysis.yaml").read_text())
+    config.pop("system_prompt", None)
+    config.update(agent_runtime="batch-fixture", model_type="test")
+    write(application / "workflows/worker_agents/dir_architecture_analysis.yaml", config)
+    probe.behavior = lambda payload: f"# 架构分析: {payload['dir_path']}\n\ncontrolled Runtime"
+    with Application.open(application, project_root=root, file_logging=False):
+        loop_summary = pat.run_analysis_loop(str(output_dir))
     prep_summary = pat.prepare_repo_map_skill_workspace(str(output_dir))
     write_summary = pat.write_repo_map_skill_files(str(output_dir))
     validate_summary = pat.validate_repo_map_skill(str(output_dir))

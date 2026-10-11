@@ -131,12 +131,11 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         Dynamically generate an agent tool from YAML configuration.
 
         **Factory mode (thread-safe)**: Each call to the returned tool function
-        creates a *new* Agent instance (sharing Model, Config, Logger, Tools)
-        so that concurrent calls don't corrupt shared ``memory.steps`` / ``state``.
+        creates a *new* Agent instance from an independent configuration copy
+        and the captured Model/Logger, isolating mutable Agent and Runtime state.
 
-        The returned tool also has a ``.batch()`` method for parallel execution:
-        ``tool.batch(tasks)`` automatically reads the YAML ``concurrency`` field
-        and uses ``ParallelAgentExecutor`` under the hood.
+        The deprecated ``.batch()`` adapter uses the Application-owned finite
+        map scheduler and returns input-ordered TaskResult receipts.
         """
         normalized = self._ensure_normalized()
         function_name = self.name
@@ -171,15 +170,19 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         # so we create a NEW agent per call. These components are safe to share:
         _shared_model_binding = getattr(self, "_model_binding", None)
         _shared_logger = getattr(self, "logger", None) or getattr(self, "_logger", None)
-        _frozen_config = self._config  # read-only dict
+        _frozen_config = copy.deepcopy(self._config)
         _AgentClass = self.__class__
-        _yaml_concurrency = self._config.get("concurrency")  # "auto" / int / None
-        _model_type = self._config.get("model_type", "powerful")
+        from agentloom.config.config import get_config
+        _project_config = copy.deepcopy(get_config())
+        from agentloom.app.application import _revision
+        from agentloom.app.revision import agent_definition_revision
+        _definition_revision = agent_definition_revision(_frozen_config)
+        _config_revision = _revision(getattr(self, "_effective_agent_config", _frozen_config))
 
         def _create_fresh_agent():
             """Every Worker call constructs a new owner, including native providers."""
             return _AgentClass(
-                config=_frozen_config,
+                config=copy.deepcopy(_frozen_config),
                 model_binding=_shared_model_binding,
                 logger=_shared_logger,
             )
@@ -215,40 +218,24 @@ class YamlConfiguredAgent(RoleDrivenAgent):
             agent = _create_fresh_agent()
             return agent.run(additional_args=input_payload)
 
-        # ── Attach .batch() method for parallel execution ──
-        def batch(tasks, concurrency=None, on_progress=None):
+        def batch(tasks, concurrency=None, on_progress=None, *, failure_mode="collect", stop_token=None):
+            """Deprecated finite dictionary batch; use Application.worker(...).map().
+
+            None uses system/Worker defaults (framework default one). Auto is
+            rejected. Results follow input order and inputs remain unchanged.
             """
-            Execute multiple tasks in parallel using this agent tool.
+            from agentloom.execution.concurrency.legacy import execute_legacy_batch
 
-            Concurrency priority: ``concurrency`` param > YAML ``concurrency`` field > auto.
-
-            Args:
-                tasks: List of dicts, each passed as ``**kwargs`` to this tool.
-                concurrency: Override concurrency (int or ``"auto"``). If None,
-                             reads from YAML config; if YAML also unset, uses auto.
-                on_progress: Optional callback ``(completed, total, TaskResult)``.
-
-            Returns:
-                List[TaskResult]: One result per task.
-            """
-            from agentloom.execution.concurrency import ParallelAgentExecutor
-
-            # Priority chain: param > YAML > None (auto)
-            effective = concurrency if concurrency is not None else _yaml_concurrency
-            # Normalize "auto" string to None (executor treats None as auto)
-            if effective == "auto":
-                effective = None
-
-            executor = ParallelAgentExecutor(
-                max_workers=effective,
-                model_type=_model_type,
-            )
-            return executor.execute_batch(tasks, dynamic_agent_tool, on_progress)
+            return execute_legacy_batch(tasks, concurrency=concurrency,
+                source_path=_frozen_config.get("_yaml_file_path"), project_config=_project_config,
+                name=function_name, input_validator=normalized.input_validator,
+                definition_revision=_definition_revision, config_revision=_config_revision,
+                invoke=lambda app, item, index: app._invoke_definition(
+                    _frozen_config, item, index, agent_factory=_create_fresh_agent),
+                on_progress=on_progress, failure_mode=failure_mode, stop_token=stop_token)
 
         dynamic_agent_tool.batch = batch
-        # Store metadata for introspection
-        dynamic_agent_tool._agent_loom_concurrency = _yaml_concurrency
-        dynamic_agent_tool._agent_loom_model_type = _model_type
+        dynamic_agent_tool._agentloom_batch_adapter = batch
 
         description_lines = [self.description.strip(), "", "Args:"]
         for name in ordered_input_names:
@@ -807,49 +794,25 @@ class YamlAgentFactory:
         max_workers: int | None = None,
         logger: Any = None,
         on_progress=None,
+        *,
+        failure_mode: str = "collect",
+        stop_token=None,
     ) -> list:
+        """Deprecated dictionary batch adapter, returning input-ordered TaskResult.
+
+        max_workers is a strict positive call override; None uses the Application
+        Worker policy, defaulting to one. Use Application.worker(path).map() in
+        new Application code.
         """
-        Create an Agent-as-Tool and execute a batch of tasks in parallel.
-
-        This is a convenience method that combines ``create_agent_as_tool()``
-        with ``ParallelAgentExecutor.execute_batch()``, encapsulating the
-        common pattern of creating a worker agent and calling it concurrently
-        on multiple inputs (e.g. analysing many directories in parallel).
-
-        Args:
-            config_path: YAML config file path or config dict.
-            tasks: List of dicts, each passed as ``**kwargs`` to the agent tool.
-            max_workers: Max parallel threads (default: auto from RPM).
-            logger: Optional logger instance.
-            on_progress: Optional callback ``(completed, total, TaskResult)``.
-
-        Returns:
-            List[TaskResult]: One result per task.
-        """
-        from agentloom.execution.concurrency import ParallelAgentExecutor
-
-        agent_tool = YamlAgentFactory.create_agent_as_tool(config_path, logger=logger)
-        if agent_tool is None:
-            raise RuntimeError(
-                f"Failed to create agent tool from "
-                f"{config_path if not isinstance(config_path, dict) else 'dict'}"
-            )
-
-        # Determine model_type for the executor
-        if isinstance(config_path, dict):
-            model_type = config_path.get("model_type", "powerful")
-        else:
-            try:
-                config = YamlAgentFactory._load_config_from_file(config_path)
-                model_type = config.get("model_type", "powerful")
-            except Exception:
-                model_type = "powerful"
-
-        executor = ParallelAgentExecutor(
-            max_workers=max_workers,
-            model_type=model_type,
-        )
-        return executor.execute_batch(tasks, agent_tool, on_progress)
+        from agentloom.execution.concurrency.legacy import legacy_owner
+        config = (YamlAgentFactory._prepare_agent_config(config_path) if isinstance(config_path, dict)
+                  else YamlAgentFactory._load_config_from_file(config_path))
+        with legacy_owner(source_path=config.get("_yaml_file_path"), name=config.get("name", "worker")) as app:
+            agent_tool = YamlAgentFactory.create_agent_as_tool(config, logger=logger or app.logger)
+            if agent_tool is None:
+                raise RuntimeError(f"Failed to create agent tool from {config_path}")
+            return agent_tool.batch(tasks, concurrency=max_workers, on_progress=on_progress,
+                failure_mode=failure_mode, stop_token=stop_token)
 
     @staticmethod
     def create_agents_as_tools_from_folder(folder_path: str | Path,

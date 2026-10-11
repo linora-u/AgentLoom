@@ -308,7 +308,6 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
     agent = _make_agent(logger=DummyLoggerBackend())
     agent._effective_agent_config = {
         **agent._config,
-        "concurrency": 2,
         "checkpoint": {"enabled": True},
         "worker_agents": [{"path": 'workflows/worker_agents/worker.yaml'}],
     }
@@ -339,7 +338,6 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
     assert request.run_id == "canonical-run"
     assert request.requirements == RuntimeRequirements(
         structured_tools=True,
-        parallel_tools=True,
         checkpoint_resume=True,
         subagents=True,
     )
