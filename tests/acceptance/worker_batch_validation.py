@@ -72,6 +72,7 @@ def child(root: Path, runtime: str, profile: str, *, url=None, route=False, item
         capture_bridges,
         configure,
         prepare,
+        resource_exit,
         scan_secrets,
         verify_run,
     )
@@ -103,8 +104,17 @@ def child(root: Path, runtime: str, profile: str, *, url=None, route=False, item
     stdout = output.getvalue()
     (root / 'cli.stdout').write_text(stdout)
     events = [json.loads(line) for line in stdout.splitlines()]
-    assert [e['event'] for e in events] == ['run.started', 'run.completed']
     terminal = events[-1]
+    if terminal['event'] != 'run.completed':
+        cleanup = resource_exit(root, state.resources, state.baseline_threads)
+        if not url and runtime == 'pi':
+            secrets.extend(pi_secrets())
+        failure = {**attempt, 'status': 'failed', 'route': route_evidence,
+            'terminal': terminal, 'batches': state.receipts, 'resource_exit': cleanup,
+            'secret_scan': scan_secrets(root, secrets)}
+        (root / 'failure-report.json').write_text(json.dumps(failure, indent=2))
+        raise RuntimeError('Application CLI failed; preserved actual batch and physical cleanup evidence')
+    assert [e['event'] for e in events] == ['run.started', 'run.completed']
     run = terminal['run']
     context = RuntimeHome(root / 'runtime').context(application_id=run['application_id'],
         task_id=run['task_id'], run_id=run['run_id'])

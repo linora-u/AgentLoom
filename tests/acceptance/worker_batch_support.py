@@ -252,7 +252,8 @@ os.execv({binary!r},[{binary!r},*sys.argv[1:]])
 
 
 def resource_exit(root, resources, baseline_threads=()):
-    mcp = [json.loads(line) for line in (root / 'mcp-events.jsonl').read_text().splitlines()]
+    mcp_path = root / 'mcp-events.jsonl'
+    mcp = [json.loads(line) for line in mcp_path.read_text().splitlines()] if mcp_path.exists() else []
     marker = root / 'bridge-processes.jsonl'
     bridges = [json.loads(line) for line in marker.read_text().splitlines()] if marker.exists() else []
     pids = sorted({entry['pid'] for entry in mcp + bridges})
@@ -308,7 +309,22 @@ def verify_run(result, state, *, expected_success=True):
     with inspect_run(result.run) as trace:
         events = trace.events()
         assert any(e['kind'] == 'model_request' for e in events)
-        assert any(e['kind'] == 'tool' for e in events)
+        for receipt in receipts:
+            for outcome in receipt['outcomes']:
+                if outcome['status'] != 'success':
+                    continue
+                tools = [e for e in events if e['kind'] == 'tool' and e['status'] == 'completed'
+                         and e['agent_id'] == outcome['local_run_id']]
+                read = next(e for e in tools if e['tool_name'] in {'read', 'read_file'})
+                mcp = next(e for e in tools if e['tool_name'] == 'mcp__facts__lookup')
+                value = json.loads(outcome['output'])
+                assert value['fact'] in trace.read_text(read['output_ref'])
+                read_input = json.loads(trace.read_text(read['input_ref']))
+                assert Path(read_input.get('path', read_input.get('file_path'))) == state.root / f"{outcome['item_id']}.txt"
+                assert json.loads(trace.read_text(mcp['input_ref']))['query'] == outcome['item_id']
+                assert '42' in trace.read_text(mcp['output_ref'])
+                actual = next(r for r in state.resources if r['instance_id'] == outcome['invocation_id'])
+                assert value == actual, 'model output differs from actual invocation-owned Tool evidence'
     checkpoints = json.loads(context.task_tree_path.read_text())
     assert len(checkpoints['workers']['batch_worker']) == len(started_ids)
     if expected_success:
