@@ -57,7 +57,8 @@ def live_settings(profile, model_source):
         base_config=load_project_config(model_source))
     settings = snapshot.llm.for_type(profile)
     values = {**settings.model_dump(exclude={'extra_completion_params', 'input_token_limit'}),
-        **settings.extra_completion_params, 'timeout': 45, 'num_retries': 0, 'max_output_tokens': 2048}
+        **settings.extra_completion_params, 'timeout': 45,
+        'num_retries': min(settings.num_retries, 1), 'max_output_tokens': 2048}
     return values, [settings.api_key] if settings.api_key else []
 
 
@@ -92,6 +93,8 @@ def child(root: Path, runtime: str, profile: str, *, url=None, route=False, item
         routing = nullcontext(None)
     command = ['run', str(workflow), '--no-file-log', '--output-format', 'jsonl']
     attempt = {'runtime': runtime, 'profile': profile, 'provider': 'fixture' if url else 'real',
+        'provider_request_policy': {key: settings[key] for key in ('timeout', 'num_retries', 'max_output_tokens')}
+            if settings else {'timeout': 30, 'num_retries': 0, 'max_output_tokens': 2000},
         'entry': 'agentloom.__main__.main', 'cli_arguments': command,
         'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
