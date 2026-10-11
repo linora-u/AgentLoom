@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
 from typing import Any, Literal
@@ -69,6 +69,7 @@ class ApplicationRunResources:
     log: Any
     task_lease: Any | None
     checkpoint_manager: CheckpointManager | None
+    coordinator: Any | None = None
 
 
 class ApplicationRunLifecycle:
@@ -106,21 +107,32 @@ class ApplicationRunLifecycle:
             raise
         return lease
 
+    def start_task(self, checkpoint_manager: Any, task_id: str, **metadata: Any) -> None:
+        """Create one root Task and its first attempt without requiring an Agent."""
+        checkpoint_manager.record_task_created(task_id, created_at=datetime.now().astimezone().isoformat(), **metadata)
+        checkpoint_manager.record_run_started(task_id)
+
     @contextmanager
     def bind_services(self, runtime_context: Any, effective_config: dict, *,
                       file_logging: bool | None = None, trace_exporter: Any = None):
         """Own the shared Run context, trace, logger and redaction bindings."""
         from types import SimpleNamespace
+
         from agentloom.config.redaction import bind_redaction_policy
         from agentloom.execution import bind_run_context
-        from agentloom.execution.observability import bind_trace_recorder, RunTrace
-        from agentloom.execution.presentation import StepPresenter
         from agentloom.execution.logging import (
-            LoggingConfigBuilder, initialize_run_logger, bind_logger_backend, get_logger,
+            LoggingConfigBuilder,
+            bind_logger_backend,
+            get_logger,
+            initialize_run_logger,
         )
+        from agentloom.execution.observability import RunTrace, bind_trace_recorder
+        from agentloom.execution.presentation import StepPresenter
         builder = LoggingConfigBuilder().apply_mapping(effective_config.get('logging', {}), source='effective logging config')
         from agentloom.app.invocation import bind_runtime_event_sink
-        with bind_redaction_policy(effective_config), bind_run_context(runtime_context), bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder, bind_runtime_event_sink(self.observe_runtime_event):
+        from agentloom.config.config import get_config
+        from agentloom.execution.workspace import bind_workspace_project
+        with bind_workspace_project(get_config().agent_root), bind_redaction_policy(effective_config), bind_run_context(runtime_context), bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder, bind_runtime_event_sink(self.observe_runtime_event):
             backend = initialize_run_logger(runtime_context, logging_builder=builder, file_logging=file_logging)
             recorder.attach_presenter(StepPresenter(backend, RunTrace(recorder.storage, runtime_context.run_id)))
             with bind_logger_backend(backend, context=runtime_context):
@@ -498,38 +510,37 @@ class ApplicationRunLifecycle:
         heartbeat: Any | None,
         file_history: Any | None,
         log: Any,
+        coordinator: Any | None = None,
     ) -> None:
-        """Close all resources scoped to active Agent execution."""
+        """Close all resources scoped to active Agent execution; preserve failures."""
 
-        try:
-            from agentloom.execution.resources import close_run_resources
-
-            close_run_resources()
-        except Exception as exc:
-            log.debug("Execution resource teardown failed: %s", exc)
+        errors: list[BaseException] = []
+        def close(callback):
+            try:
+                callback()
+            except BaseException as exc:
+                errors.append(exc)
+        from agentloom.execution.resources import close_run_resources
+        close(close_run_resources)
         if heartbeat is not None:
-            try:
-                heartbeat.stop()
-            except Exception:
-                pass
-            try:
-                heartbeat.close()
-            except Exception:
-                pass
-        try:
-            mcp_manager = getattr(supervisor, "_mcp_manager", None)
-            if mcp_manager is not None:
-                mcp_manager.disconnect_all()
-        except Exception:
-            pass
+            close(heartbeat.stop)
+            close(heartbeat.close)
+        mcp_manager = getattr(supervisor, '_mcp_manager', None)
+        if mcp_manager is not None:
+            close(mcp_manager.disconnect_all)
         if file_history is not None:
-            try:
-                file_history.close()
-            except Exception:
-                pass
-        invocation = self._invocation
-        if invocation is not None and invocation.coordinator is not None:
-            self.close_agent_coordinator(invocation.coordinator)
+            close(file_history.close)
+        target = coordinator
+        if target is None and self._invocation is not None:
+            target = self._invocation.coordinator
+        if target is not None:
+            close(lambda: self.close_agent_coordinator(target))
+        if errors:
+            primary = errors[0]
+            for extra in errors[1:]:
+                primary.add_note(f'Additional execution cleanup failure: {type(extra).__name__}: {extra}')
+            self.fail_cleanup(primary)
+            raise primary
 
     def close_agent_coordinator(self, coordinator: Any | None = None) -> None:
         """Deactivate the reported coordinator through one teardown path."""
@@ -557,6 +568,7 @@ class ApplicationRunLifecycle:
                 heartbeat=resources.heartbeat,
                 file_history=resources.file_history,
                 log=resources.log,
+                coordinator=resources.coordinator,
             )
         except BaseException as exc:
             execution_cleanup_error = exc

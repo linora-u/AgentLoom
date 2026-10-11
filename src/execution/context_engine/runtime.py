@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from contextvars import ContextVar
-from contextlib import contextmanager
 from collections.abc import Iterator
-from typing import Optional
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from .engine import ContextEngine
 
-
-_current_context_engine: ContextVar[Optional[ContextEngine]] = ContextVar(
+_current_context_engine: ContextVar[ContextEngine | None] = ContextVar(
     "_current_context_engine", default=None
 )
 
@@ -40,6 +38,16 @@ def clear_current_context_engine(engine: ContextEngine | None = None) -> None:
 
 
 @contextmanager
+def bind_task_context_engine(engine: ContextEngine | None) -> Iterator[None]:
+    """Bind a root's service, restoring any enclosing Application service."""
+    token = _current_context_engine.set(engine)
+    try:
+        yield
+    finally:
+        _current_context_engine.reset(token)
+
+
+@contextmanager
 def ensure_task_context_engine(effective_config: dict) -> Iterator[ContextEngine | None]:
     """Own a task store when no checkpoint coordinator has already bound one.
 
@@ -48,6 +56,7 @@ def ensure_task_context_engine(effective_config: dict) -> Iterator[ContextEngine
     activating this service does not create an Agent checkpoint or allow resume.
     """
     from agentloom.execution import SecureDirectory, get_current_run_context
+
     from .config import ContextEngineConfig
 
     current = _current_context_engine.get()

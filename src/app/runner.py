@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any
 
 from agentloom.app.application import Application, _system_settings
-from agentloom.config.paths import configuration_root
 from agentloom.app.definition import (
     inspect_supervisor_definition,
     prepare_application_definition,
@@ -57,8 +56,8 @@ from agentloom.app.run import (
 )
 from agentloom.config import C, build_effective_agent_config, get_config
 from agentloom.config.config import bind_config, fresh_invocation_config
+from agentloom.config.paths import configuration_root
 from agentloom.execution import (
-    bind_run_context,
     generate_runtime_id,
     resolve_application_id,
     resolve_runtime_home,
@@ -71,9 +70,7 @@ from agentloom.execution.heartbeat import SupervisorHeartbeat
 from agentloom.execution.logging import (
     AgentLoomLogLevel,
     LoggingConfigBuilder,
-    bind_logger_backend,
     get_logger,
-    initialize_run_logger,
 )
 from agentloom.execution.trace_export import TraceExporter
 
@@ -231,7 +228,12 @@ def execute_app(
     except BaseException as exc:
         _emit_preflight_rejection(event_sink, exc)
         raise
-    with bind_config(invocation_config):
+    from agentloom.execution.checkpoint.coordinator import isolated_checkpoint_context
+    from agentloom.execution.context_engine.runtime import bind_task_context_engine
+    from agentloom.execution.goal import bind_goal_state_provider
+    from agentloom.execution.trace import ExplicitExecutionContext, bind_explicit_execution_context
+    root_context = ExplicitExecutionContext(None, None, None, None, None, None, None, None, None, None)
+    with bind_config(invocation_config), isolated_checkpoint_context(), bind_task_context_engine(None), bind_goal_state_provider(None), bind_explicit_execution_context(root_context):
         return _execute_app(
             yaml_path,
             resume_task_id,
@@ -296,7 +298,7 @@ def _execute_app(
         application_config, _ = _system_settings(get_config(), application_root, captured_application)
 
         checkpoint_config = effective_config.get("checkpoint", {})
-        from agentloom.config.redaction import bind_redaction_policy, redaction_enabled
+        from agentloom.config.redaction import redaction_enabled
 
         effective_redaction = redaction_enabled(effective_config)
         if not isinstance(checkpoint_config, dict):
@@ -305,7 +307,7 @@ def _execute_app(
         heartbeat_interval = checkpoint_config.get("heartbeat_interval", 5.0)
         cleanup_on_success = checkpoint_config.get("cleanup_on_success", True)
         max_resume_age = checkpoint_config.get("max_resume_age", 604800)
-        logging_builder = LoggingConfigBuilder().apply_mapping(
+        LoggingConfigBuilder().apply_mapping(
             effective_config.get("logging", {}),
             source="effective logging config",
         )
@@ -515,15 +517,8 @@ def _execute_app(
                             tree_status,
                         )
                     elif checkpoint_mgr is not None:
-                        checkpoint_mgr.record_task_created(
-                            task_id,
-                            yaml_path=str(resolved_path),
-                            agent_name=agent_name,
-                            task_text=task_text,
-                            definition_revision=task_definition_revision,
-                            created_at=datetime.now().astimezone().isoformat(),
-                        )
-                        checkpoint_mgr.record_run_started(task_id)
+                        lifecycle.start_task(checkpoint_mgr, task_id, yaml_path=str(resolved_path),
+                            agent_name=agent_name, task_text=task_text, definition_revision=task_definition_revision)
 
                     if checkpoint_mgr is not None:
                         file_history = FileHistoryManager(
@@ -600,32 +595,43 @@ def _execute_app(
                         log.error("Execution failed: %s", exc)
                     raise
                 finally:
-                    app.close()
                     try:
-                        lifecycle.finalize_run(
-                            ApplicationRunFinalization(
-                                runtime_context=runtime_context,
-                                checkpoint_manager=checkpoint_mgr,
-                                task_id=task_id,
-                                event_start_offset=event_start_offset,
-                                manifest_updates=durable_manifest_updates,
-                                cleanup_on_success=cleanup_on_success,
-                                log=log,
-                                task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
-                                record_final_answer=recorder.record_final_answer,
-                            )
-                        )
+                        app.close()
+                    except BaseException as exc:
+                        if lifecycle.phase == 'finalization':
+                            lifecycle.fail_finalization(exc)
+                        else:
+                            lifecycle.fail_execution(exc)
+                        raise
                     finally:
-                        lifecycle.close_resources(
-                            ApplicationRunResources(
-                                supervisor=supervisor,
-                                heartbeat=heartbeat,
-                                file_history=file_history,
-                                log=log,
-                                task_lease=task_lease,
-                                checkpoint_manager=checkpoint_mgr,
-                            )
-                        )
+                        try:
+                            try:
+                                lifecycle.finalize_run(
+                                    ApplicationRunFinalization(
+                                        runtime_context=runtime_context,
+                                        checkpoint_manager=checkpoint_mgr,
+                                        task_id=task_id,
+                                        event_start_offset=event_start_offset,
+                                        manifest_updates=durable_manifest_updates,
+                                        cleanup_on_success=cleanup_on_success,
+                                        log=log,
+                                        task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
+                                        record_final_answer=recorder.record_final_answer,
+                                    )
+                                )
+                            finally:
+                                lifecycle.close_resources(
+                                    ApplicationRunResources(
+                                        supervisor=supervisor,
+                                        heartbeat=heartbeat,
+                                        file_history=file_history,
+                                        log=log,
+                                        task_lease=task_lease,
+                                        checkpoint_manager=checkpoint_mgr,
+                                    )
+                                )
+                        finally:
+                            app._close_root_engine()
         if run_attempt_lease is not None:
             lifecycle.release_run_lease(run_attempt_lease)
             run_attempt_lease = None
