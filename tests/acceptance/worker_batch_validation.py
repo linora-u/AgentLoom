@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import io
 import json
@@ -23,7 +24,13 @@ sys.path.insert(0, str(ROOT))
 def versions():
     import agentloom
     from agentloom.runtimes.pi.metadata import SDK_VERSION
+    assert Path(agentloom.__file__).resolve() == ROOT / 'src/__init__.py', 'acceptance imported another checkout'
+    source_tree = subprocess.check_output(
+        ['git', 'ls-tree', '-r', 'HEAD', '--', 'src', 'applications', 'tests', 'config', 'pyproject.toml', 'uv.lock'],
+        cwd=ROOT,
+    )
     return {'python': sys.version, 'platform': platform.platform(), 'source': agentloom.__file__,
+        'source_fingerprint': hashlib.sha256(source_tree).hexdigest(),
         'dependencies': {name: importlib.metadata.version(name)
             for name in ('smolagents', 'litellm', 'httpx', 'openai', 'mcp', 'pytest')},
         'node': subprocess.check_output(['node', '--version'], text=True).strip(),

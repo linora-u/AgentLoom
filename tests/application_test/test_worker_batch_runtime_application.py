@@ -227,3 +227,36 @@ def test_cli_campaign_retains_failed_batch_even_when_root_completes(tmp_path, ru
     evidence = json.loads((child_root / 'fixture-evidence.json').read_text())
     resource_exit(child_root, evidence['resources'])
     assert not (child_root / 'report.json').exists(), 'failed batch was reported as campaign success'
+
+
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_cli_campaign_rejects_duplicate_root_plan_execution(tmp_path, runtime):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from tests.acceptance.worker_batch_support import model_program
+    from tests.application_test.mixed_runtime_support import tool_messages
+
+    ordinary = model_program(runtime)
+    def duplicate_plan(request):
+        if request['model'] == 'supervisor' and len(tool_messages(request)) == 1:
+            return [('duplicate-plan', 'run_fixed_plan', {})]
+        return ordinary(request)
+
+    child_root = tmp_path / 'child'
+    with model_service(duplicate_plan) as (url, _requests):
+        campaign = Path(__file__).parents[1] / 'acceptance/worker_batch_validation.py'
+        result = subprocess.run([sys.executable, str(campaign), '--child', '--runtimes', runtime,
+            '--profile', 'worker', '--items', '2', '--concurrency', '2', '--fixture-url', url,
+            '--output', str(child_root)], capture_output=True, text=True, timeout=90)
+    (tmp_path / 'cli.stdout').write_text(result.stdout)
+    (tmp_path / 'cli.stderr').write_text(result.stderr)
+    assert result.returncode != 0, 'campaign silently accepted two executions of one fixed plan'
+    failure = json.loads((child_root / 'failure-report.json').read_text())
+    assert failure['failure_phase'] == 'batch_verification'
+    assert failure['terminal']['event'] == 'run.completed'
+    assert len(failure['batches']) == 2
+    assert all(b['status'] == 'completed' for b in failure['batches'])
+    assert failure['resource_exit']['live_pids'] == []
+    assert not (child_root / 'report.json').exists()
