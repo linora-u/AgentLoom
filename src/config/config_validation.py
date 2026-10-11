@@ -354,6 +354,31 @@ class SkillsSettings(BaseModel):
     paths: list[str] = Field(default_factory=list)
 
 
+class WorkerConcurrencySettings(BaseModel):
+    """One explicit finite-map capacity; omitted values do not override defaults."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    concurrency: int = Field(default=1, gt=0, strict=True)
+
+
+class WorkerExecutionSettings(BaseModel):
+    """System-level finite Worker execution policy, never an Agent YAML setting."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    defaults: WorkerConcurrencySettings = Field(default_factory=WorkerConcurrencySettings)
+    workers: dict[str, WorkerConcurrencySettings] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_supervisor_policy(cls, value: Any) -> Any:
+        if isinstance(value, dict) and any(key in value for key in ("supervisor", "supervisors")):
+            raise ValueError(
+                "Supervisor worker_execution configuration is not supported in v1; "
+                "use Application defaults/workers or the map concurrency argument"
+            )
+        return value
+
+
 class RootSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
     system: SystemSettings = Field(default_factory=SystemSettings)
@@ -372,6 +397,7 @@ class RootSettings(BaseModel):
     self_learning: SelfLearningSettings = Field(default_factory=SelfLearningSettings)
     hooks: dict[str, Any] = Field(default_factory=dict)
     skills: SkillsSettings = Field(default_factory=SkillsSettings)
+    worker_execution: WorkerExecutionSettings = Field(default_factory=WorkerExecutionSettings)
 
 
 def raise_project_key_error(source: str) -> ValueError:
