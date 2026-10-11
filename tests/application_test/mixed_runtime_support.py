@@ -17,6 +17,12 @@ class ModelReply(NamedTuple):
     finish_reason: str
 
 
+class ProviderFailure(NamedTuple):
+    """A controlled external HTTP error selected by the actual request."""
+    status: int
+    message: str
+
+
 @contextmanager
 def model_service(
     program: Callable[
@@ -44,6 +50,13 @@ def model_service(
                 return
             try:
                 answer = program(request)
+                if isinstance(answer, ProviderFailure):
+                    self.send_response(answer.status)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': {'message': answer.message,
+                        'type': 'invalid_request_error'}}).encode())
+                    return
                 finish_override = None
                 if isinstance(answer, ModelReply):
                     answer, finish_override = answer
