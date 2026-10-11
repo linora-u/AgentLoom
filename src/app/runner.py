@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agentloom.app.application import Application, _system_settings
+from agentloom.config.paths import configuration_root
 from agentloom.app.definition import (
     inspect_supervisor_definition,
     prepare_application_definition,
@@ -288,6 +290,11 @@ def _execute_app(
             source_name=str(config.get("_yaml_file_path") or resolved_path),
         )
 
+        application_root = configuration_root(resolved_path, C.agent_root)
+        snapshot = config.get('_effective_agent_config_snapshot')
+        captured_application = next((layer.data for layer in snapshot.layers if layer.name == 'application_system'), {}) if snapshot else {}
+        application_config, _ = _system_settings(get_config(), application_root, captured_application)
+
         checkpoint_config = effective_config.get("checkpoint", {})
         from agentloom.config.redaction import bind_redaction_policy, redaction_enabled
 
@@ -364,48 +371,20 @@ def _execute_app(
     final_answer_presented = False
 
     try:
-        runtime_context.prepare_run()
-        run_attempt_lease = runtime_context.run_lease()
-        run_attempt_lease.acquire()
         try:
-            manifest_metadata = {}
-            manifest_metadata["application_revision"] = running_revision
-            manifest_metadata["redaction"] = {"enabled": effective_redaction}
+            manifest_metadata = {"application_revision": running_revision, "redaction": {"enabled": effective_redaction}}
             if definition_snapshot_revision is not None:
                 manifest_metadata["definition_snapshot_revision"] = definition_snapshot_revision
-            runtime_context.write_manifest(
-                yaml_path=str(resolved_path),
-                agent_name=agent_name,
-                mode="resume" if is_resume else "new",
-                task_tree_observation={
-                    "enabled": bool(ckpt_enabled),
-                    "worker_agents_configured": bool(config.get("worker_agents")),
-                },
-                **manifest_metadata,
-            )
-        except BaseException:
-            # write_manifest persists the manifest before removing its starting
-            # marker. Preserve terminal evidence if that post-commit cleanup fails.
+            run_attempt_lease = lifecycle.initialize_run(runtime_context,
+                yaml_path=str(resolved_path), agent_name=agent_name, mode="resume" if is_resume else "new",
+                task_tree_observation={"enabled": bool(ckpt_enabled), "worker_agents_configured": bool(config.get("worker_agents"))},
+                **manifest_metadata)
+        finally:
             manifest_initialized = runtime_context.manifest_path.is_file()
-            raise
-        else:
-            manifest_initialized = True
 
-        from agentloom.execution.observability import bind_trace_recorder
-
-        with (bind_redaction_policy(effective_config), bind_run_context(runtime_context),
-              bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder):
-            logger_backend = initialize_run_logger(
-                runtime_context,
-                logging_builder=logging_builder,
-                file_logging=file_logging,
-            )
+        with lifecycle.bind_services(runtime_context, effective_config, file_logging=file_logging, trace_exporter=trace_exporter) as services:
+            recorder, logger_backend = services.recorder, services.logger_backend
             from agentloom.execution.observability import RunTrace
-            from agentloom.execution.presentation import StepPresenter
-
-            recorder.attach_presenter(
-                StepPresenter(logger_backend, RunTrace(recorder.storage, runtime_context.run_id))
-            )
             console = getattr(logger_backend, "console", None)
             final_answer_presented = console is not None and bool(
                 getattr(console, "console_enabled", True)
@@ -418,7 +397,9 @@ def _execute_app(
             )
             emit_started()
 
-            with bind_logger_backend(logger_backend, context=runtime_context):
+            app = Application(project_config=get_config(), application_root=application_root, application_config=application_config,
+                runtime_context=runtime_context, lifecycle=lifecycle, logger=logger_backend)
+            with app.bind():
                 log = get_logger(logger_backend, __name__)
                 try:
                     lifecycle.enter_execution()
@@ -619,6 +600,7 @@ def _execute_app(
                         log.error("Execution failed: %s", exc)
                     raise
                 finally:
+                    app.close()
                     try:
                         lifecycle.finalize_run(
                             ApplicationRunFinalization(

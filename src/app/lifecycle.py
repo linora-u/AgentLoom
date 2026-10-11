@@ -12,6 +12,7 @@ import json
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import datetime
 from threading import RLock
 from typing import Any, Literal
@@ -92,6 +93,38 @@ class ApplicationRunLifecycle:
         self._runtime_events: list[RuntimeEvent] = []
         self._runtime_events_lock = RLock()
         self._batch_records_lock = RLock()
+
+    def initialize_run(self, runtime_context: Any, **manifest: Any) -> Any:
+        """Allocate the canonical Run and lease for either public entrypoint."""
+        runtime_context.prepare_run()
+        lease = runtime_context.run_lease()
+        lease.acquire()
+        try:
+            runtime_context.write_manifest(**manifest)
+        except BaseException:
+            self.release_run_lease(lease)
+            raise
+        return lease
+
+    @contextmanager
+    def bind_services(self, runtime_context: Any, effective_config: dict, *,
+                      file_logging: bool | None = None, trace_exporter: Any = None):
+        """Own the shared Run context, trace, logger and redaction bindings."""
+        from types import SimpleNamespace
+        from agentloom.config.redaction import bind_redaction_policy
+        from agentloom.execution import bind_run_context
+        from agentloom.execution.observability import bind_trace_recorder, RunTrace
+        from agentloom.execution.presentation import StepPresenter
+        from agentloom.execution.logging import (
+            LoggingConfigBuilder, initialize_run_logger, bind_logger_backend, get_logger,
+        )
+        builder = LoggingConfigBuilder().apply_mapping(effective_config.get('logging', {}), source='effective logging config')
+        from agentloom.app.invocation import bind_runtime_event_sink
+        with bind_redaction_policy(effective_config), bind_run_context(runtime_context), bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder, bind_runtime_event_sink(self.observe_runtime_event):
+            backend = initialize_run_logger(runtime_context, logging_builder=builder, file_logging=file_logging)
+            recorder.attach_presenter(StepPresenter(backend, RunTrace(recorder.storage, runtime_context.run_id)))
+            with bind_logger_backend(backend, context=runtime_context):
+                yield SimpleNamespace(recorder=recorder, logger_backend=backend, log=get_logger(backend, __name__))
 
     @property
     def phase(self) -> RunPhase:

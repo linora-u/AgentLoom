@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
+from contextlib import nullcontext, contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -40,6 +40,16 @@ _RUNTIME_EVENT_SINK: ContextVar[RuntimeEventSink | None] = ContextVar(
     "agentloom_runtime_event_sink",
     default=None,
 )
+
+
+@contextmanager
+def bind_runtime_event_sink(sink: RuntimeEventSink):
+    """Bind root event observation without manufacturing a root Agent invocation."""
+    token = _RUNTIME_EVENT_SINK.set(sink)
+    try:
+        yield
+    finally:
+        _RUNTIME_EVENT_SINK.reset(token)
 
 
 def task_with_call_data(task: str, call_data: dict[str, Any] | None) -> str:
