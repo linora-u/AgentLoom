@@ -9,7 +9,6 @@ description: |
   不做文件读写，只做分析。
 
 model_type: "powerful"
-concurrency: auto
 
 system_prompt:
   path: config/prompts/dir_architecture_analysis.md

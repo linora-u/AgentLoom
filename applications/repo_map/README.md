@@ -86,7 +86,7 @@ root     -> 生成全局架构地图
 
 ### 5. 自动并发与进度持久化
 
-同一深度的目录彼此独立，可以通过 `tool.batch(tasks)` 并行调用 Worker Agent。Worker 的 `concurrency: auto` 交给 AgentLoom 自动计算并发度，应用层不需要手写线程池。
+同一深度的目录彼此独立，应用通过当前 Run 的 `BoundWorker.map()` 执行本层有限计划。并发策略位于 `config/system.yaml` 的 `worker_execution.workers`，当前默认 1；修改为明确的正整数即可调整单层批次容量。任务规划、层间依赖与结果持久化仍由应用负责，不从模型 RPM 推断并发。
 
 每个目录分析完成后都会立即写入 `analysis_progress.json`，记录状态、错误信息和 hash。进程中断后再次运行，可以从已有进度恢复，不需要重跑所有目录。
 

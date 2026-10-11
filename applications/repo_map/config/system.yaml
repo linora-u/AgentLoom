@@ -1,0 +1,4 @@
+worker_execution:
+  workers:
+    workflows/worker_agents/dir_architecture_analysis.yaml:
+      concurrency: 1

@@ -13,7 +13,7 @@ Pipeline Agent Tools for repo_map.
 - generate_markdown_map()：纯 Python，在 repo_map_app.py 直接调Analysis Loop用
 
 设计原则：
-- 子 Agent 通过 YamlAgentFactory.create_agent_as_tool() 懒加载，避免重复初始化
+- Worker 通过当前 Application Run 绑定，定义快照与生命周期由框架管理
 - for 循环在确定性工具层实现，避免模型编排循环，错误处理更精确
 - 每次迭代立即写回 progress.json，防止进程崩溃丢失进度
 - 失败目录记录 error_msg + error_trace，主 Agent 读摘要后决策
@@ -24,17 +24,15 @@ from __future__ import annotations
 import hashlib
 import json
 import textwrap
-import traceback
 from pathlib import Path
 
 import yaml
-
 from agentloom.execution.logging import resolve_logger
 
 from .paths import repo_map_docs_root, repo_map_skill_name, repo_map_skill_root
 
 # yaml 路径（相对于 AGENT_ROOT）
-_DIR_ANALYSIS_YAML = "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
+_DIR_ANALYSIS_YAML = "workflows/worker_agents/dir_architecture_analysis.yaml"
 _SKILL_CONTEXT_FILENAME = "skill_build_context.json"
 
 
@@ -565,14 +563,14 @@ def _process_batch_results(
     total: int,
 ) -> None:
     """
-    统一处理 tool.batch() 返回的 TaskResult 列表。
+    统一处理 typed Worker map 返回的 WorkerOutcome 列表。
 
     对每个 result：写 analysis.md（completed 时）、更新 progress 状态、更新统计、记日志。
     """
     task_lookup = {t["dir_path"]: t for t in tasks}
 
     for r in results:
-        dir_path = r.task_id
+        dir_path = r.item_id
         task = task_lookup.get(dir_path)
         if task is None:
             continue
@@ -580,10 +578,10 @@ def _process_batch_results(
         entry = progress[dir_path]
         analysis_file = Path(task["_analysis_file"])
 
-        if r.status == "completed":
+        if r.status == "success":
             analysis_file.parent.mkdir(parents=True, exist_ok=True)
             analysis_file.write_text(
-                str(r.result) if r.result else "",
+                str(r.output) if r.output is not None else "",
                 encoding="utf-8",
             )
             entry["status"] = "completed"
@@ -598,11 +596,12 @@ def _process_batch_results(
             )
         else:
             entry["status"] = "failed"
-            entry["error_msg"] = r.error or "unknown error"
-            if r.error_trace:
-                entry["error_trace"] = r.error_trace
+            error_message = r.error.message if r.error else r.cancellation_reason or "unknown error"
+            entry["error_msg"] = error_message
+            if r.error and r.error.traceback:
+                entry["error_trace"] = r.error.traceback
             stats["failed"] += 1
-            logger.error(f"[Analysis Loop] 失败: {dir_path} — {r.error}")
+            logger.error(f"[Analysis Loop] 失败: {dir_path} — {error_message}")
 
     _save_progress(progress_file, progress)
 
@@ -618,8 +617,8 @@ def run_analysis_loop(
     """
     对每个目录调用 dir_architecture_analysis 子 Agent 进行架构分析。
 
-    并发度由 Worker YAML 中的 ``concurrency`` 字段决定（默认 auto），
-    框架通过 ``tool.batch()`` 自动并行执行，应用层无需手动管理线程。
+    并发度由 Application config/system.yaml 的 worker_execution 决定，
+    框架通过当前 Run 的 BoundWorker.map() 执行有限输入，应用层负责规划与汇总。
 
     特性：
     - Bottom-Up 层级分析：深层目录先分析，父目录复用子目录的 analysis.md
@@ -653,12 +652,9 @@ def run_analysis_loop(
 
     logger = resolve_logger(None, "repo_map_agent")
 
-    # create_agent_as_tool 内置缓存，同一 YAML 文件只创建一次
-    # logger=None 让框架使用全局 AgentLogger（由 runner 初始化）
-    from agentloom.app.factory import YamlAgentFactory
-    tool = YamlAgentFactory.create_agent_as_tool(_DIR_ANALYSIS_YAML)
-    if tool is None:
-        raise RuntimeError(f"Failed to create agent tool from {_DIR_ANALYSIS_YAML}")
+    from agentloom.app import current_run_app
+    from agentloom.execution.concurrency import WorkItem
+    worker = current_run_app().worker(_DIR_ANALYSIS_YAML)
 
     # ── 统计初始状态 ──
     total = len(progress)
@@ -780,7 +776,7 @@ def run_analysis_loop(
         if not batch_tasks:
             continue
 
-        # ── Phase B: 执行分析 — tool.batch() 自动处理并发 ──
+        # ── Phase B: 框架执行本层已规划的有限输入 ──
         logger.info(
             f"[Analysis Loop] 执行: {len(batch_tasks)} 个目录 (depth={depth})"
         )
@@ -790,31 +786,12 @@ def run_analysis_loop(
             progress[t["dir_path"]]["status"] = "in_progress"
         _save_progress(progress_file, progress)
 
-        if hasattr(tool, 'batch'):
-            results = tool.batch(batch_tasks)
-        else:
-            # Fallback: 逐个调用（测试中 tool 可能无 batch 方法）
-            from agentloom.execution.concurrency.models import TaskResult
-            import time as _time
-            results = []
-            for t in batch_tasks:
-                _start = _time.monotonic()
-                try:
-                    res = tool(
-                        dir_path=t["dir_path"],
-                        index_content=t["index_content"],
-                        children_analyses=t["children_analyses"],
-                    )
-                    results.append(TaskResult(
-                        task_id=t["dir_path"], status="completed",
-                        result=res, duration_seconds=_time.monotonic() - _start,
-                    ))
-                except Exception as e:
-                    results.append(TaskResult(
-                        task_id=t["dir_path"], status="failed",
-                        error=str(e), error_trace=traceback.format_exc(),
-                        duration_seconds=_time.monotonic() - _start,
-                    ))
+        outcome = worker.map([
+            WorkItem(task["dir_path"], {key: task[key] for key in
+                ("dir_path", "index_content", "children_analyses")})
+            for task in batch_tasks
+        ])
+        results = outcome.outcomes
 
         # ── Phase C: 统一后处理 ──
         _process_batch_results(

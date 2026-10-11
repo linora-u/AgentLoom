@@ -34,7 +34,7 @@ Agent 运行时通过必填的 `agent_runtime` 选择；当前注册值为
   - [3.9 runtime_options.prompt_template_path — 自定义 Prompt](#39-runtime_optionsprompt_template_path--自定义-prompt)
   - [3.10 runtime_options.planning_interval — 规划间隔](#310-runtime_optionsplanning_interval--规划间隔)
   - [3.11 runtime_options.todo_mode — 任务跟踪](#311-runtime_optionstodo_mode--任务跟踪)
-  - [3.11 concurrency — 并发度配置](#311-concurrency--并发度配置)
+  - [3.12 worker_execution — Worker 有限批处理](#312-worker_execution--worker-有限批处理)
   - [3.12 mcp_servers — MCP 外部工具集成](#312-mcp_servers--mcp-外部工具集成)
 - [4. 工具配置详解](#4-工具配置详解)
   - [4.4 高级模式：Agent 封装为 Python 工具函数](#44-高级模式agent-封装为-python-工具函数)
@@ -399,7 +399,6 @@ task: |
 | `runtime_options.prompt_template_path` | `str` | 不设置 | smol 模板路径，仅字符串 |
 | `runtime_options.planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-runtime_optionsplanning_interval--规划间隔) |
 | `runtime_options.todo_mode` | `str` | "auto" | smol 当前任务跟踪；"on" / "off" 必须加引号 |
-| `concurrency` | `int`/`str` | 不设置 | 并发度：此 Agent 被批量调用时的最大并发数。详见 [3.11](#311-concurrency--并发度配置) |
 | `skills` | `list`/`dict`/`str` | 不设置 | 私有技能包配置。详见 [3.8](#38-skills--技能包配置) |
 | `hooks` | `dict` | 不设置 | 独立直接 Hook 与显式 Hook Bundle。详见 [Hooks](hooks.md) |
 | `runtime_options.max_steps` | `int` | `80` | 最大执行步数。超过后 Agent 强制终止 |
@@ -541,75 +540,83 @@ checkpoint 时仅保存在当前 run 的内存中。文件损坏时会告警并�
 
 ---
 
-### 3.12 `concurrency` — 并发度配置
+### 3.12 `worker_execution` — Worker 有限批处理
 
-控制此 Agent 被批量调用时的最大并发数。通常用于 Worker Agent —— 当应用层需要对多个输入（如多个目录、多个文件）批量调用同一个 Worker 时，该字段决定同时运行几个 Agent 实例。
-
-**类型**：`int`（正整数）或 `str`（`"auto"`）
-**默认值**：不设置（等同 `"auto"`）
-
-**可选值**：
-
-| 值 | 含义 |
-|------|------|
-| `auto` | 自动计算：`min(RPM, 10)`，实际请求节奏由 rate limiter（`interval = 60/RPM`）控制 |
-| `1` | 显式串行，一次只运行一个 |
-| `N`（正整数） | 固定并发度，同时最多运行 N 个实例 |
-| 不设置 / `null` | 等同 `auto` |
-
-> `auto` 模式从 `config/model.yaml` 中对应 `model_type` 的 `requests_per_minute` 读取 RPM。线程数 = `min(RPM, 10)`，rate limiter 以 `60/RPM` 秒为间隔控制实际请求速率。
-
-**线程安全说明**：框架为每次并发调用创建**独立的 Agent 实例**（共享 Model 和 Config，但 Agent 的 `memory`、`state` 等有状态属性完全隔离）。这借鉴了 Cline `new SubagentRunner()` 和 LangGraph `Send()` 的设计模式。
-
-**示例**：
+Application 代码负责任务规划和结果汇总，通过当前 Run 绑定的 Worker 执行有限输入。
+并发数只限制单次 `map()`：两个容量为 4 的批次可以合计执行 8 个 Worker。
+Agent-as-Tool 与 Runtime Tool calls 保留各自的执行规则。
 
 ```yaml
-# Worker Agent: 目录架构分析（支持并发批量调用）
-name: "dir_architecture_analysis"
-agent_runtime: "smolagents"
-model_type: "powerful"
-concurrency: auto          # 自动计算并发度
-
-task: |
-  ...
+# 项目 config/system.yaml：只提供公共默认值
+worker_execution:
+  defaults:
+    concurrency: 1
 ```
 
 ```yaml
-# Worker Agent: 固定 6 并发
-name: "file_processor"
-agent_runtime: "smolagents"
-model_type: "fast"
-concurrency: 6
+# applications/my_app/config/system.yaml
+worker_execution:
+  defaults:
+    concurrency: 2
+  workers:
+    workflows/worker_agents/file_processor.yaml:
+      concurrency: 20
 ```
 
-**应用层使用方式 — `tool.batch()`**：
+Worker policy key 必须指向真实的 Application 相对 YAML 路径。项目配置不能包含
+Worker 表；Agent YAML 和 Supervisor 的 `worker_agents` item 不能声明执行策略。
+首版不支持 Supervisor batch 默认值，错误位置的配置会明确拒绝。
 
-配置了 `concurrency` 的 Worker Agent 被 `create_agent_as_tool()` 加载后，返回的 tool 函数自带 `.batch()` 方法，应用层一行代码即可并行执行：
+优先级：框架默认 **1** < 项目默认 < Application 默认 < 逐 Worker 值 < 调用覆盖。
+每一层提供的值都必须是正整数，即使会被高层覆盖也校验；布尔值、数字字符串和 `auto`
+均拒绝。不传或传 `None` 使用绑定默认值；临时覆盖不修改配置和后续调用。
+框架没有隐藏的 20 项上限、RPM 推断并发或默认熔断。
 
 ```python
-# 加载 Worker Agent 为 tool（返回单个 Callable，内置缓存）
-tool = YamlAgentFactory.create_agent_as_tool("worker.yaml")
+from agentloom.app import Application, current_run_app
+from agentloom.execution.concurrency import WorkItem
 
-# 构造任务列表
-tasks = [
-    {"dir_path": "src/api", "index_content": "..."},
-    {"dir_path": "src/app/imports", "index_content": "..."},
-    {"dir_path": "src/core", "index_content": "..."},
-]
+# 已有 execute_app Run 或其 Python Tool 中：
+worker = current_run_app().worker("workflows/worker_agents/file_processor.yaml")
+batch = worker.map([
+    WorkItem("a", {"query": "first"}),
+    WorkItem("b", {"query": "second"}),
+], concurrency=4)
+for outcome in batch.outcomes:  # 按输入顺序
+    print(outcome.item_id, outcome.status, outcome.to_dict()["output"])
 
-# 一行并行执行 — 自动读取 YAML 中的 concurrency
-results = tool.batch(tasks)
-
-# 也可覆盖 YAML 配置
-results = tool.batch(tasks, concurrency=3)
-
-# 带进度回调
-results = tool.batch(tasks, on_progress=lambda done, total, r: print(f"{done}/{total}"))
+# 不需要 Supervisor 的 Python 编排：
+with Application.open("applications/my_app", project_root=project_root) as app:
+    batch = app.worker("workflows/worker_agents/file_processor.yaml").map(items)
+    record = app.runtime_context.read_batch_record(batch.batch_id)
 ```
 
-**优先级链**：`tool.batch(concurrency=N)` 参数 > YAML `concurrency` 字段 > `auto`
+输入必须是有限 Sequence 或 `WorkPlan`，每项使用本批次唯一的非空 ID 与 JSON payload。
+框架在启动前校验全部 ID 和 schema，深拷贝并冻结输入，每个 invocation 得到独立的
+可变副本与 fresh Agent/Runtime。空计划正常完成，成功的 `None` 仍是 success。
 
-> ⚠️ **适用场景**：`concurrency` 适用于「同一个 Worker 被多次调用处理不同输入」的批量场景（如分析 100 个目录、处理 50 个文件）。对于 Supervisor 自身的执行不产生影响。
+`failure_mode="collect"` 保留失败并继续独立任务；`"fail_fast"` 在观察到失败后停止
+接纳新任务。`stop_token`（例如 `threading.Event`）停止新 admission，等待已启动任务
+及其资源清理；已启动任务保留实际成功/失败，未启动项为 `canceled` 且没有 invocation ID。
+Application 退出时等待已登记批次，关闭后的 binding 拒绝新调用。清理或基础设施失败
+抛出含部分结果的 `WorkerBatchError`。框架不会自动重放完整 Worker。
+
+`event_sink` 在各项完成时串行收到事件，不等待更早的慢输入；普通 observer 异常记入诊断。
+每个批次通过标准存储与脱敏路径记录 Run/Worker identity、定义与配置 revision、输入
+fingerprint、实际并发及来源链。系统配置与首次 Worker binding 的快照保留到本作用域结束。
+
+此接口是同步的。异步代码应显式 offload（例如 `asyncio.to_thread`）；取消 await 不会
+停止线程。调用方应设置 stop token 并保留 offload task，以等待 drain。原生 async map 留待后续。
+
+**旧接口迁移（Worker batch v1 起 deprecated）**：`tool.batch(tasks)` 与
+`YamlAgentFactory.run_agents_parallel(path, tasks, max_workers=N)` 保留适配，返回按输入
+顺序的 `list[TaskResult]`，状态为 `completed`、`failed` 或 `skipped`（未启动取消，
+`error` 保留原因）。允许重复 legacy task_id；内部 ID 使用本批次 ordinal，不改 task 字典。
+`on_progress(done,total,result)` 按观察到的完成顺序触发。新 Application 代码改用 typed
+`map()`，Worker-local `concurrency` 移至上述系统 policy。旧 `auto`、`max_pending` 与
+熔断设置明确拒绝。直接使用 `ParallelAgentExecutor` 的兼容路径也转发到同一 owner/scheduler。
+没有当前 Run 时，带来源的定义为所属 Application 开一个兼容 Run；pathless inline/callable
+使用独立 `legacy/<identity>` Run，不按 item 新建 Run。此版本继续提供适配器，移除会另行公告。
 
 ### 3.13 `mcp_servers` — MCP 外部工具集成
 
@@ -1596,7 +1603,6 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `runtime_options.prompt_template_path` | ❌ | ✅ | ✅ | `str` | 不设置 |
 | `runtime_options.planning_interval` | ❌ | ✅ | ✅ | `int` | 不设置 |
 | `runtime_options.todo_mode` | ❌ | ✅ | ✅ | `str` | `"auto"` |
-| `concurrency` | ❌ | ✅ | ✅ | `int`/`str` | 不设置 (`auto`) |
 | `skills` | ❌ | ✅ | ✅ | `list`/`dict`/`str` | 自动加载 |
 | `worker_agents` | ❌ | ✅ | ❌ | `list[dict]` | `[]` |
 | `runtime_options.smart_summary` | ❌ | ✅ | ✅ | `bool` | `true` |

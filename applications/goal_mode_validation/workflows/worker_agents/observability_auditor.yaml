@@ -5,7 +5,6 @@ model_type: "summary"
 runtime_options:
   max_steps: 2
   smart_summary: false
-concurrency: 1
 
 task: |
   Use only the EVIDENCE_BUNDLE embedded in the query. Audit one Goal observability

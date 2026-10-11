@@ -3,7 +3,7 @@ Worker-level aggregated heartbeat writer.
 
 Each **worker type** (e.g. ``scan_code``) gets **one** heartbeat file that
 tracks all concurrent calls.  This avoids file-per-call proliferation when
-``tool.batch()`` launches many parallel workers.
+``BoundWorker.map()`` launches many parallel workers.
 
 File layout::
 
@@ -23,7 +23,7 @@ JSON payload::
     }
 
 Thread-safety: all mutations go through ``threading.Lock`` because
-``ParallelAgentExecutor`` invokes workers from different threads.
+the finite batch scheduler invokes workers from different threads.
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ import threading
 import time
 from pathlib import Path
 
-from agentloom.execution.heartbeat._base import BaseHeartbeatWriter
 from agentloom.execution import SecureDirectory
+from agentloom.execution.heartbeat._base import BaseHeartbeatWriter
 
 
 class WorkerHeartbeat(BaseHeartbeatWriter):
