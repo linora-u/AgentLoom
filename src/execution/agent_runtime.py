@@ -251,6 +251,7 @@ class AgentRuntimeError(RuntimeError):
         self.category = category
         self.cause = cause
         self.retryable = retryable
+        self.runtime_cleanup_errors: tuple[tuple[str, BaseException], ...] = ()
         if category == "output_validation":
             self.kind = "output_validation"
             self.stage = "output_validation"
@@ -969,7 +970,16 @@ class RuntimeRegistry:
             return runtime
         try:
             runtime.close()
-        except Exception as close_exc:
+        except BaseException as close_exc:
+            from agentloom.execution.resources import retain_failed_resource
+            from agentloom.execution.trace import get_current_agent_id
+
+            contract_error.runtime_cleanup_errors = (("runtime_contract_close", close_exc),)
+            retain_failed_resource(
+                f"rejected-runtime:{id(runtime)}",
+                runtime.close,
+                instance_id=definition.instance_id or get_current_agent_id() or "",
+            )
             contract_error.add_note(
                 f"Runtime close after contract rejection also failed: {close_exc!r}"
             )

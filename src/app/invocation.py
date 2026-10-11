@@ -419,6 +419,8 @@ class AgentInvocation:
             self._primary_error = exc
             self._error_phase = self._phase
             self._cleanup_errors.extend(getattr(exc, "_invocation_cleanup_errors", ()))
+            for phase, cleanup_error in getattr(exc, "runtime_cleanup_errors", ()):
+                self._record_cleanup_error(phase, cleanup_error)
             if isinstance(exc, Exception):
                 owner._emit_task_lifecycle_event(
                     HookEvent.STOP_FAILURE,
