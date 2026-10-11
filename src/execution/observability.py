@@ -138,7 +138,8 @@ class TraceRecorder:
         """Reserve model input space while keeping durable retrieval bounded."""
 
         execution = capture_explicit_execution_context()
-        input_limit = self._model_input_limits.get(execution.local_run_id or "")
+        with self._lock:
+            input_limit = self._model_input_limits.get(execution.local_run_id or "")
         if input_limit is None:
             return MAX_DURABLE_CONTEXT_PAGE_BYTES
         # One byte can cost one token; leave at least half the input budget and
@@ -157,7 +158,8 @@ class TraceRecorder:
         threshold = min(engine.config.min_chars if engine is not None else 32768, 131072)
         preview_limit = min(engine.config.preview_max_chars if engine is not None else 2048, 16384)
         execution = capture_explicit_execution_context()
-        input_limit = self._model_input_limits.get(execution.local_run_id or "")
+        with self._lock:
+            input_limit = self._model_input_limits.get(execution.local_run_id or "")
         if input_limit is not None:
             # Reserve most of the input window for instructions and prior turns.
             threshold = min(threshold, max(1, input_limit // 4))
@@ -241,7 +243,8 @@ class TraceRecorder:
             with self._lock:
                 self._agent_segments[agent_id] = self._agent_segments.get(agent_id, 0) + 1
         if isinstance(input_token_limit, int) and not isinstance(input_token_limit, bool) and input_token_limit > 0:
-            self._model_input_limits[agent_id or ""] = input_token_limit
+            with self._lock:
+                self._model_input_limits[agent_id or ""] = input_token_limit
         try:
             task_ref = self._payload(task or "", content_type="text/plain")
             self._append({

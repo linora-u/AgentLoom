@@ -25,6 +25,7 @@ Worker (inside ``SubTaskTrackedAgent.run()``):
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
@@ -58,6 +59,18 @@ _current_coordinator: ContextVar[CheckpointCoordinator | None] = ContextVar(
 _pending_supervisor_heartbeat: ContextVar[Any] = ContextVar("_pending_supervisor_heartbeat", default=None)
 # Stores a file history manager set by runner.py before supervisor.run(); consumed by activate().
 _pending_file_history: ContextVar[Any] = ContextVar("_pending_file_history", default=None)
+
+
+@contextmanager
+def isolated_checkpoint_context():
+    """Start an independent Application root without borrowing outer owners."""
+    variables = (_current_coordinator, _pending_supervisor_heartbeat, _pending_file_history)
+    tokens = [(variable, variable.set(None)) for variable in variables]
+    try:
+        yield
+    finally:
+        for variable, token in reversed(tokens):
+            variable.reset(token)
 
 
 class CheckpointCoordinator:

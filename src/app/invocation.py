@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext, contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -301,7 +301,17 @@ class AgentInvocation:
 
         def execute() -> JSONValue:
             from agentloom.execution.context_engine.runtime import ensure_task_context_engine
-            with ensure_task_context_engine(owner._effective_agent_config or owner._config):
+            engine_scope = ensure_task_context_engine(owner._effective_agent_config or owner._config)
+            if self.application_lifecycle is not None:
+                from agentloom.app.application import current_run_app
+                try:
+                    app = current_run_app()
+                except RuntimeError:
+                    app = None
+                if app is not None and app.lifecycle is self.application_lifecycle:
+                    app._ensure_root_engine(owner._effective_agent_config or owner._config)
+                    engine_scope = nullcontext()
+            with engine_scope:
                 return self._execute_bound(
                     transformed_tasks=transformed_tasks,
                     lifecycle_tasks=lifecycle_tasks,

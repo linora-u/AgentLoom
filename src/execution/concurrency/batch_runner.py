@@ -1,4 +1,5 @@
 """Bounded, per-call synchronous admission; Application owns Run lifetime."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -9,13 +10,21 @@ from threading import Event
 from typing import Any
 
 from agentloom.execution.concurrency.batch_models import (
-    BatchEvent, BatchOutcome, ObserverDiagnostic, WorkerBatchError, WorkerError, WorkerOutcome, WorkItem, WorkPlan,
+    BatchEvent,
+    BatchOutcome,
+    ObserverDiagnostic,
+    WorkerBatchError,
+    WorkerError,
+    WorkerOutcome,
+    WorkItem,
+    WorkPlan,
 )
 from agentloom.execution.concurrency.policy import ResolvedWorkerExecution
 
 
 class InvocationControlError(BaseException):
     """Carry actual started disposition while draining a process-control signal."""
+
     def __init__(self, error: BaseException, outcome: WorkerOutcome):
         self.error, self.outcome = error, outcome
 
@@ -23,14 +32,25 @@ class InvocationControlError(BaseException):
 @dataclass(eq=False)
 class BatchControl:
     stop: Event
-    reason: str = 'stop requested'
+    reason: str = "stop requested"
 
 
-def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: str,
-              execution: ResolvedWorkerExecution, control: BatchControl,
-              invoke: Callable[[WorkItem, int], WorkerOutcome], persist: Callable[[dict], None],
-              failure_mode: str, stop_token: Any = None, event_sink: Callable[[BatchEvent], None] | None = None,
-              definition_revision: str | None = None, config_revision: str | None = None) -> BatchOutcome:
+def run_batch(
+    *,
+    plan: WorkPlan,
+    batch_id: str,
+    run_id: str,
+    worker_identity: str,
+    execution: ResolvedWorkerExecution,
+    control: BatchControl,
+    invoke: Callable[[WorkItem, int], WorkerOutcome],
+    persist: Callable[[dict], None],
+    failure_mode: str,
+    stop_token: Any = None,
+    event_sink: Callable[[BatchEvent], None] | None = None,
+    definition_revision: str | None = None,
+    config_revision: str | None = None,
+) -> BatchOutcome:
     """Execute only admitted work; cleanup is part of the callback's completion."""
     outcomes: list[WorkerOutcome | None] = [None] * len(plan.items)
     events: list[BatchEvent] = []
@@ -51,45 +71,67 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
         return stopped
 
     def canceled(index: int) -> WorkerOutcome:
-        return WorkerOutcome(plan.items[index].id, index, 'canceled', cancellation_reason=control.reason)
+        return WorkerOutcome(plan.items[index].id, index, "canceled", cancellation_reason=control.reason)
 
     def receipt() -> BatchOutcome:
         known = tuple(outcome for outcome in outcomes if outcome is not None)
-        status = 'failed' if infrastructure is not None or any(outcome.status == 'failed' for outcome in known) else 'stopped' if stopped else 'completed'
-        return BatchOutcome(batch_id, run_id, worker_identity, status, execution, known, plan.input_fingerprint,
-            failure_mode, definition_revision, config_revision, tuple(observers), tuple(events))
+        status = (
+            "failed"
+            if infrastructure is not None or any(outcome.status == "failed" for outcome in known)
+            else "stopped"
+            if stopped
+            else "completed"
+        )
+        return BatchOutcome(
+            batch_id,
+            run_id,
+            worker_identity,
+            status,
+            execution,
+            known,
+            plan.input_fingerprint,
+            failure_mode,
+            definition_revision,
+            config_revision,
+            tuple(observers),
+            tuple(events),
+        )
 
     def fail(error: BaseException, phase: str) -> None:
         nonlocal infrastructure
         if infrastructure is None:
-            infrastructure = error if isinstance(error, WorkerBatchError) else WorkerBatchError(
-                str(error), phase=phase, original_error=error)
-        control.reason = f'batch {phase} failure'
+            infrastructure = (
+                error
+                if isinstance(error, WorkerBatchError)
+                else WorkerBatchError(str(error), phase=phase, original_error=error)
+            )
+        control.reason = f"batch {phase} failure"
         control.stop.set()
 
     def persist_observed(*, initial: bool = False) -> None:
         try:
-            persist({**receipt().to_dict(), **({'status': 'running'} if initial else {})})
+            persist({**receipt().to_dict(), **({"status": "running"} if initial else {})})
         except Exception as exc:
-            fail(exc, 'persistence')
+            fail(exc, "persistence")
         except BaseException as exc:
             nonlocal interruption
             interruption = interruption or exc
-            control.reason = 'batch interrupted'
+            control.reason = "batch interrupted"
             control.stop.set()
 
     def observe(outcome: WorkerOutcome) -> None:
         nonlocal completed_count, event_sink, interruption
         if outcomes[outcome.index] is not None:
-            fail(RuntimeError('duplicate item terminal disposition'), 'consistency')
+            fail(RuntimeError("duplicate item terminal disposition"), "consistency")
             return
         outcomes[outcome.index] = outcome
         completed_count += 1
-        event = BatchEvent(batch_id, len(events) + 1, outcome=outcome,
-            completed_count=completed_count, total_count=len(plan.items))
+        event = BatchEvent(
+            batch_id, len(events) + 1, outcome=outcome, completed_count=completed_count, total_count=len(plan.items)
+        )
         events.append(event)
-        if failure_mode == 'fail_fast' and outcome.status == 'failed':
-            control.reason = 'fail-fast failure'
+        if failure_mode == "fail_fast" and outcome.status == "failed":
+            control.reason = "fail-fast failure"
             control.stop.set()
         if event_sink is not None:
             try:
@@ -99,7 +141,7 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
                 event_sink = None
             except BaseException as exc:
                 interruption = interruption or exc
-                control.reason = 'observer interrupted'
+                control.reason = "observer interrupted"
                 control.stop.set()
                 event_sink = None
 
@@ -109,7 +151,11 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
             return canceled(index)
         outcome = invoke(plan.items[index], index)
         if not isinstance(outcome, WorkerOutcome) or outcome.index != index or outcome.item_id != plan.items[index].id:
-            raise WorkerBatchError('invocation callback returned inconsistent identity', phase='consistency', original_error=RuntimeError('outcome identity mismatch'))
+            raise WorkerBatchError(
+                "invocation callback returned inconsistent identity",
+                phase="consistency",
+                original_error=RuntimeError("outcome identity mismatch"),
+            )
         return outcome
 
     persist_observed(initial=True)
@@ -117,10 +163,10 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
     try:
         if plan.items and infrastructure is None and interruption is None:
             try:
-                executor = ThreadPoolExecutor(max_workers=execution.concurrency, thread_name_prefix='agentloom-batch')
+                executor = ThreadPoolExecutor(max_workers=execution.concurrency, thread_name_prefix="agentloom-batch")
             except BaseException as exc:
                 if isinstance(exc, Exception):
-                    fail(exc, 'executor')
+                    fail(exc, "executor")
                 else:
                     interruption = exc
                     control.stop.set()
@@ -139,20 +185,27 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
                             except InvocationControlError as exc:
                                 outcome = exc.outcome
                                 interruption = interruption or exc.error
-                                control.reason = 'invocation interrupted'
+                                control.reason = "invocation interrupted"
                                 control.stop.set()
                             except WorkerBatchError as exc:
                                 fail(exc, exc.phase)
                                 outcome = next((o for o in exc.outcomes if o.index == index), None)
                                 if outcome is None:
-                                    outcome = WorkerOutcome(plan.items[index].id, index, 'failed', error=WorkerError.from_exception(exc.original_error, category='infrastructure'))
+                                    outcome = WorkerOutcome(
+                                        plan.items[index].id,
+                                        index,
+                                        "failed",
+                                        error=WorkerError.from_exception(exc.original_error, category="infrastructure"),
+                                    )
                             except BaseException as exc:
                                 if isinstance(exc, Exception):
-                                    fail(exc, 'invocation_callback')
+                                    fail(exc, "invocation_callback")
                                 else:
                                     interruption = interruption or exc
                                     control.stop.set()
-                                outcome = WorkerOutcome(plan.items[index].id, index, 'failed', error=WorkerError.from_exception(exc))
+                                outcome = WorkerOutcome(
+                                    plan.items[index].id, index, "failed", error=WorkerError.from_exception(exc)
+                                )
                         observe(outcome)
                     if done:
                         persist_observed()
@@ -172,7 +225,7 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
                             try:
                                 future = executor.submit(context.run, start, index)
                             except Exception as exc:
-                                fail(exc, 'executor')
+                                fail(exc, "executor")
                                 break
                             pending[future] = index
                             next_index += 1
@@ -180,10 +233,10 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
                         wait(tuple(pending), timeout=0.05, return_when=FIRST_COMPLETED)
                 except BaseException as exc:
                     if isinstance(exc, Exception):
-                        fail(exc, 'controller')
+                        fail(exc, "controller")
                     else:
                         interruption = interruption or exc
-                        control.reason = 'batch interrupted'
+                        control.reason = "batch interrupted"
                         control.stop.set()
                     # Re-enter to drain actual starts before propagation.
     finally:
@@ -192,7 +245,7 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
                 executor.shutdown(wait=True, cancel_futures=True)
             except BaseException as exc:
                 if isinstance(exc, Exception):
-                    fail(exc, 'executor_cleanup')
+                    fail(exc, "executor_cleanup")
                 else:
                     interruption = interruption or exc
         if infrastructure is not None or interruption is not None:
@@ -203,8 +256,13 @@ def run_batch(*, plan: WorkPlan, batch_id: str, run_id: str, worker_identity: st
         persist_observed()
     result = receipt()
     if infrastructure is not None:
-        raise WorkerBatchError(str(infrastructure), phase=infrastructure.phase, original_error=infrastructure.original_error,
-            outcome=result, cleanup_errors=infrastructure.cleanup_errors) from infrastructure.original_error
+        raise WorkerBatchError(
+            str(infrastructure),
+            phase=infrastructure.phase,
+            original_error=infrastructure.original_error,
+            outcome=result,
+            cleanup_errors=infrastructure.cleanup_errors,
+        ) from infrastructure.original_error
     if interruption is not None:
         # Receipt is already persisted; attach it for callers inspecting interruption.
         try:
