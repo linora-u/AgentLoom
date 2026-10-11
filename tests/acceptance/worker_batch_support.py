@@ -6,6 +6,7 @@ import os
 import socket
 import sys
 import threading
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -275,6 +276,8 @@ def verify_run(result, state, *, expected_success=True):
     from agentloom.execution import RuntimeHome
     from agentloom.execution.observability import inspect_run
     receipts = state.receipts
+    assert len(receipts) == len(state.capacities), 'fixed business plan executed more than once'
+    assert [r['execution']['concurrency'] for r in receipts] == list(state.capacities)
     manifest = json.loads(result.run.manifest_path.read_text())
     assert manifest['status'] == 'completed'
     assert {r['batch_id'] for r in manifest['worker_batches']} == {r['batch_id'] for r in receipts}
@@ -303,6 +306,10 @@ def verify_run(result, state, *, expected_success=True):
             assert outcome['usage']['total_tokens'] > 0
             all_ids.append(outcome['invocation_id'])
     assert len(set(started_ids)) == len(started_ids), 'reused invocation identity'
+    physical_calls = Counter(r['instance_id'] for r in state.resources)
+    assert set(physical_calls).issubset(started_ids), 'physical Tool marker lacks a known invocation'
+    assert all(count == 1 for count in physical_calls.values()), 'physical Tool executed more than once in an invocation'
+    assert all(physical_calls[identity] == 1 for identity in all_ids), 'successful invocation lacks its physical Tool marker'
     assert len({r['input_fingerprint'] for r in receipts}) == 1
     assert len({r['definition_revision'] for r in receipts}) == 1
     assert len({r['config_revision'] for r in receipts}) == 1
