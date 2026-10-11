@@ -105,14 +105,19 @@ def child(root: Path, runtime: str, profile: str, *, url=None, route=False, item
     (root / 'cli.stdout').write_text(stdout)
     events = [json.loads(line) for line in stdout.splitlines()]
     terminal = events[-1]
-    if terminal['event'] != 'run.completed':
+
+    def preserve_failure(phase, error_type=None):
         cleanup = resource_exit(root, state.resources, state.baseline_threads)
         if not url and runtime == 'pi':
             secrets.extend(pi_secrets())
         failure = {**attempt, 'status': 'failed', 'route': route_evidence,
+            'failure_phase': phase, 'error_type': error_type,
             'terminal': terminal, 'batches': state.receipts, 'resource_exit': cleanup,
             'secret_scan': scan_secrets(root, secrets)}
         (root / 'failure-report.json').write_text(json.dumps(failure, indent=2))
+
+    if terminal['event'] != 'run.completed':
+        preserve_failure('cli_terminal')
         raise RuntimeError('Application CLI failed; preserved actual batch and physical cleanup evidence')
     assert [e['event'] for e in events] == ['run.started', 'run.completed']
     run = terminal['run']
@@ -121,11 +126,15 @@ def child(root: Path, runtime: str, profile: str, *, url=None, route=False, item
     info = RunInfo(application_id=run['application_id'], task_id=run['task_id'], run_id=run['run_id'],
         run_dir=Path(run['run_dir']), manifest_path=Path(run['manifest_path']),
         log_path=Path(run['log_path']) if run['log_path'] else None, trace_dir=context.trace_dir)
-    proof = verify_run(SimpleNamespace(run=info, output=terminal['output']), state)
-    answer = json.loads(terminal['output'])
-    assert answer['batch_ids'] == [b['batch_id'] for b in proof['batches']]
-    assert answer['run_id'] == run['run_id']
-    assert answer['reduction'] == proof['reduction']
+    try:
+        proof = verify_run(SimpleNamespace(run=info, output=terminal['output']), state)
+        answer = json.loads(terminal['output'])
+        assert answer['batch_ids'] == [b['batch_id'] for b in proof['batches']]
+        assert answer['run_id'] == run['run_id']
+        assert answer['reduction'] == proof['reduction']
+    except BaseException as error:
+        preserve_failure('batch_verification', type(error).__name__)
+        raise
     if not url and runtime == 'pi':
         secrets.extend(pi_secrets())
     secret_proof = scan_secrets(root, secrets)
@@ -163,10 +172,14 @@ def campaign(args):
         passed = process.returncode == 0 and (root / 'report.json').is_file()
         record = {'runtime': runtime, 'command': command, 'exit_code': process.returncode,
             'timed_out': timed_out, 'passed': passed, 'elapsed_seconds': time.monotonic() - started}
-        if passed:
+        evidence_path = root / ('report.json' if passed else 'failure-report.json')
+        if evidence_path.is_file():
             import psutil
-            proof = json.loads((root / 'report.json').read_text())['proof']['resource_exit']
-            assert not any(psutil.pid_exists(pid) for pid in proof['pids']), 'child left owned process alive'
+            evidence = json.loads(evidence_path.read_text())
+            proof = evidence['proof']['resource_exit'] if passed else evidence['resource_exit']
+            remaining = [pid for pid in proof['pids'] if psutil.pid_exists(pid)]
+            record['parent_process_exit'] = {'observed_pids': proof['pids'], 'live_pids': remaining}
+            assert not remaining, 'child left owned process alive'
         reports.append(record)
     (args.output / 'campaign.json').write_text(json.dumps(reports, indent=2))
     from tests.acceptance.worker_batch_support import scan_secrets

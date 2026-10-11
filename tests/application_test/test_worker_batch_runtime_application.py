@@ -10,6 +10,46 @@ from agentloom.config.config import bind_config, load_project_config
 from tests.application_test.mixed_runtime_support import model_service
 
 
+@pytest.mark.parametrize('project,application,worker,override,expected,source', [
+    (None, None, None, None, 1, 'framework_default'),
+    (2, None, None, None, 2, 'project_system'),
+    (2, 3, None, None, 3, 'application_system'),
+    (2, 3, 4, None, 4, 'application_worker'),
+    (2, 3, 4, 5, 5, 'call_override'),
+])
+def test_application_receipt_reports_each_winning_configuration_source(
+    tmp_path, project, application, worker, override, expected, source,
+):
+    import yaml
+    from agentloom.app import Application
+
+    from tests.acceptance.worker_batch_support import prepare
+    from tests.application_test.mixed_runtime_support import write_yaml
+
+    prepare(tmp_path, 'smolagents', url='http://127.0.0.1:9/v1')
+    system = tmp_path / 'config/system.yaml'
+    settings = yaml.safe_load(system.read_text())
+    if project is not None:
+        settings['worker_execution'] = {'defaults': {'concurrency': project}}
+    write_yaml(system, settings)
+    policy = {}
+    if application is not None:
+        policy['defaults'] = {'concurrency': application}
+    if worker is not None:
+        policy['workers'] = {'workflows/worker.yaml': {'concurrency': worker}}
+    application_root = tmp_path / 'applications/batch_acceptance'
+    write_yaml(application_root / 'config/system.yaml', {'worker_execution': policy})
+    with bind_config(load_project_config(tmp_path)):
+        with Application.open(application_root, project_root=tmp_path, file_logging=False) as app:
+            receipt = app.worker('workflows/worker.yaml').map([], concurrency=override)
+            assert (receipt.execution.concurrency, receipt.execution.source) == (expected, source)
+            assert receipt.status == 'completed' and receipt.outcomes == ()
+            record = app.runtime_context.read_batch_record(receipt.batch_id)
+            assert record['execution']['source'] == source
+            assert record['execution']['concurrency'] == expected
+    assert not (tmp_path / 'mcp-events.jsonl').exists(), 'empty batch constructed invocation resources'
+
+
 @pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
 def test_fixed_business_plan_survives_capacity_changes_with_real_runtime_ownership(tmp_path, runtime):
     from tests.acceptance.worker_batch_support import (
@@ -157,3 +197,33 @@ def test_real_cli_terminal_receipt_agrees_with_map_and_physical_exit(tmp_path, r
     resource_exit(child_root, evidence['resources'])
     assert report['proof']['reduction'] == ['BATCH-ALPHA-8149', 'BATCH-BETA-3952']
     assert 'fixture-key' not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('runtime', ['pi', 'smolagents'])
+def test_cli_campaign_retains_failed_batch_even_when_root_completes(tmp_path, runtime):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from tests.acceptance.worker_batch_support import model_program, resource_exit
+
+    child_root = tmp_path / 'child'
+    with model_service(model_program(runtime, fail_item='item-1')) as (url, _requests):
+        campaign = Path(__file__).parents[1] / 'acceptance/worker_batch_validation.py'
+        result = subprocess.run([sys.executable, str(campaign), '--child', '--runtimes', runtime,
+            '--profile', 'worker', '--items', '2', '--concurrency', '2', '--fixture-url', url,
+            '--output', str(child_root)], capture_output=True, text=True, timeout=90)
+    (tmp_path / 'cli.stdout').write_text(result.stdout)
+    (tmp_path / 'cli.stderr').write_text(result.stderr)
+    assert result.returncode != 0
+    failure = json.loads((child_root / 'failure-report.json').read_text())
+    assert failure['failure_phase'] == 'batch_verification'
+    assert failure['terminal']['event'] == 'run.completed'
+    assert failure['batches'][0]['status'] == 'failed'
+    assert [o['status'] for o in failure['batches'][0]['outcomes']] == ['success', 'failed']
+    assert failure['resource_exit']['live_pids'] == []
+    assert failure['resource_exit']['remaining_owned_threads'] == []
+    assert failure['secret_scan']['credential_matches'] == 0
+    evidence = json.loads((child_root / 'fixture-evidence.json').read_text())
+    resource_exit(child_root, evidence['resources'])
+    assert not (child_root / 'report.json').exists(), 'failed batch was reported as campaign success'
