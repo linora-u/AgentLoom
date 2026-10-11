@@ -228,12 +228,9 @@ def execute_app(
     except BaseException as exc:
         _emit_preflight_rejection(event_sink, exc)
         raise
-    from agentloom.execution.checkpoint.coordinator import isolated_checkpoint_context
-    from agentloom.execution.context_engine.runtime import bind_task_context_engine
-    from agentloom.execution.goal import bind_goal_state_provider
-    from agentloom.execution.trace import ExplicitExecutionContext, bind_explicit_execution_context
+    from agentloom.execution.trace import ExplicitExecutionContext
     root_context = ExplicitExecutionContext(None, None, None, None, None, None, None, None, None, None)
-    with bind_config(invocation_config), isolated_checkpoint_context(), bind_task_context_engine(None), bind_goal_state_provider(None), bind_explicit_execution_context(root_context):
+    with bind_config(invocation_config), ApplicationRunLifecycle.isolate_root_services(root_context):
         return _execute_app(
             yaml_path,
             resume_task_id,
@@ -595,43 +592,29 @@ def _execute_app(
                         log.error("Execution failed: %s", exc)
                     raise
                 finally:
-                    try:
-                        app.close()
-                    except BaseException as exc:
-                        if lifecycle.phase == 'finalization':
-                            lifecycle.fail_finalization(exc)
-                        else:
-                            lifecycle.fail_execution(exc)
-                        raise
-                    finally:
-                        try:
-                            try:
-                                lifecycle.finalize_run(
-                                    ApplicationRunFinalization(
-                                        runtime_context=runtime_context,
-                                        checkpoint_manager=checkpoint_mgr,
-                                        task_id=task_id,
-                                        event_start_offset=event_start_offset,
-                                        manifest_updates=durable_manifest_updates,
-                                        cleanup_on_success=cleanup_on_success,
-                                        log=log,
-                                        task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
-                                        record_final_answer=recorder.record_final_answer,
-                                    )
-                                )
-                            finally:
-                                lifecycle.close_resources(
-                                    ApplicationRunResources(
-                                        supervisor=supervisor,
-                                        heartbeat=heartbeat,
-                                        file_history=file_history,
-                                        log=log,
-                                        task_lease=task_lease,
-                                        checkpoint_manager=checkpoint_mgr,
-                                    )
-                                )
-                        finally:
-                            app._close_root_engine()
+                    lifecycle.finish_root_run(
+                        ApplicationRunFinalization(
+                            runtime_context=runtime_context,
+                            checkpoint_manager=checkpoint_mgr,
+                            task_id=task_id,
+                            event_start_offset=event_start_offset,
+                            manifest_updates=durable_manifest_updates,
+                            cleanup_on_success=cleanup_on_success,
+                            log=log,
+                            task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
+                            record_final_answer=recorder.record_final_answer,
+                        ),
+                        ApplicationRunResources(
+                            supervisor=supervisor,
+                            heartbeat=heartbeat,
+                            file_history=file_history,
+                            log=log,
+                            task_lease=task_lease,
+                            checkpoint_manager=checkpoint_mgr,
+                        ),
+                        drain=app.close,
+                        close_engine=app._close_root_engine,
+                    )
         if run_attempt_lease is not None:
             lifecycle.release_run_lease(run_attempt_lease)
             run_attempt_lease = None
@@ -639,7 +622,7 @@ def _execute_app(
         terminal_error = caught
         if run_attempt_lease is not None:
             try:
-                lifecycle.release_run_lease(run_attempt_lease)
+                lifecycle.release_run_lease(run_attempt_lease, original_error=terminal_error)
             except BaseException as cleanup_exc:
                 terminal_error = cleanup_exc
             run_attempt_lease = None
@@ -664,9 +647,7 @@ def _execute_app(
                         task_id,
                     )
                 else:
-                    log.warning(
-                        "Interrupted by user; no resumable checkpoint is available"
-                    )
+                    log.warning("Interrupted by user; no resumable checkpoint is available")
             interrupted = ApplicationRunInterrupted(
                 "Application run interrupted",
                 run=public_run,

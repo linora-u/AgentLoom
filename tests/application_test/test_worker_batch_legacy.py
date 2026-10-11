@@ -11,7 +11,7 @@ from agentloom.app import Application
 from agentloom.app.definition import load_agent_definition
 from agentloom.app.factory import YamlConfiguredAgent
 
-from tests.application_test.test_worker_batch_application import batch_project as _batch_project
+from test_support.worker_batch import batch_project as _batch_project
 
 batch_project = _batch_project
 

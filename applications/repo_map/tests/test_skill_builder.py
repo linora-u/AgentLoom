@@ -19,7 +19,7 @@ from agentloom.execution.skills.parser import parse_skill_file
 from applications.repo_map.agent_tools import pipeline_agent_tools as pat
 from applications.repo_map.agent_tools.markdown_tool import generate_markdown_map
 from applications.repo_map.agent_tools.scan_rank_tool import scan_and_rank
-from tests.application_test.test_worker_batch_application import batch_project as _batch_project
+from test_support.worker_batch import batch_project as _batch_project
 
 batch_project = _batch_project
 

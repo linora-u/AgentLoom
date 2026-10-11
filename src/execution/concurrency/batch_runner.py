@@ -6,7 +6,7 @@ from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextvars import copy_context
 from dataclasses import dataclass
-from threading import Event
+from threading import Event, Lock
 from typing import Any
 
 from agentloom.execution.concurrency.batch_models import (
@@ -25,8 +25,11 @@ from agentloom.execution.concurrency.policy import ResolvedWorkerExecution
 class InvocationControlError(BaseException):
     """Carry actual started disposition while draining a process-control signal."""
 
-    def __init__(self, error: BaseException, outcome: WorkerOutcome):
+    def __init__(
+        self, error: BaseException, outcome: WorkerOutcome, infrastructure_error: WorkerBatchError | None = None
+    ):
         self.error, self.outcome = error, outcome
+        self.infrastructure_error = infrastructure_error
 
 
 @dataclass(eq=False)
@@ -59,16 +62,27 @@ def run_batch(
     next_index = 0
     stopped = False
     infrastructure: WorkerBatchError | None = None
+    infrastructure_errors: list[WorkerBatchError] = []
     interruption: BaseException | None = None
     completed_count = 0
+    stop_observation_lock = Lock()
 
     def check_stop() -> bool:
-        nonlocal stopped
-        if stop_token is not None and stop_token.is_set():
-            control.stop.set()
-        if control.stop.is_set():
-            stopped = True
-        return stopped
+        nonlocal stopped, interruption
+        with stop_observation_lock:
+            if not control.stop.is_set() and stop_token is not None:
+                try:
+                    if stop_token.is_set():
+                        control.stop.set()
+                except Exception as exc:
+                    fail(exc, "stop_observation")
+                except BaseException as exc:
+                    interruption = interruption or exc
+                    control.reason = "stop observation interrupted"
+                    control.stop.set()
+            if control.stop.is_set():
+                stopped = True
+            return stopped
 
     def canceled(index: int) -> WorkerOutcome:
         return WorkerOutcome(plan.items[index].id, index, "canceled", cancellation_reason=control.reason)
@@ -95,16 +109,21 @@ def run_batch(
             config_revision,
             tuple(observers),
             tuple(events),
+            tuple(
+                WorkerError.from_exception(error.original_error, category=error.phase)
+                for error in infrastructure_errors
+            ),
         )
 
     def fail(error: BaseException, phase: str) -> None:
         nonlocal infrastructure
-        if infrastructure is None:
-            infrastructure = (
-                error
-                if isinstance(error, WorkerBatchError)
-                else WorkerBatchError(str(error), phase=phase, original_error=error)
-            )
+        failure = (
+            error
+            if isinstance(error, WorkerBatchError)
+            else WorkerBatchError(str(error), phase=phase, original_error=error)
+        )
+        infrastructure_errors.append(failure)
+        infrastructure = infrastructure or failure
         control.reason = f"batch {phase} failure"
         control.stop.set()
 
@@ -147,7 +166,7 @@ def run_batch(
 
     def start(index: int) -> WorkerOutcome:
         # Submitted does not mean started: this final seam owns the decision.
-        if control.stop.is_set() or (stop_token is not None and stop_token.is_set()):
+        if check_stop():
             return canceled(index)
         outcome = invoke(plan.items[index], index)
         if not isinstance(outcome, WorkerOutcome) or outcome.index != index or outcome.item_id != plan.items[index].id:
@@ -185,6 +204,8 @@ def run_batch(
                             except InvocationControlError as exc:
                                 outcome = exc.outcome
                                 interruption = interruption or exc.error
+                                if exc.infrastructure_error is not None:
+                                    fail(exc.infrastructure_error, exc.infrastructure_error.phase)
                                 control.reason = "invocation interrupted"
                                 control.stop.set()
                             except WorkerBatchError as exc:
@@ -255,19 +276,26 @@ def run_batch(
                     observe(canceled(index))
         persist_observed()
     result = receipt()
-    if infrastructure is not None:
-        raise WorkerBatchError(
-            str(infrastructure),
-            phase=infrastructure.phase,
-            original_error=infrastructure.original_error,
+    failures = tuple(
+        WorkerBatchError(
+            str(error),
+            phase=error.phase,
+            original_error=error.original_error,
             outcome=result,
-            cleanup_errors=infrastructure.cleanup_errors,
-        ) from infrastructure.original_error
+            cleanup_errors=error.cleanup_errors,
+        )
+        for error in infrastructure_errors
+    )
     if interruption is not None:
         # Receipt is already persisted; attach it for callers inspecting interruption.
         try:
             interruption.batch_outcome = result
+            interruption.batch_errors = failures
+            if failures:
+                interruption.batch_error = failures[0]
         except Exception:
             pass
         raise interruption
+    if failures:
+        raise failures[0] from failures[0].original_error
     return result

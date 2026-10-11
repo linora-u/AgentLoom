@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
-from agentloom.config.config_validation import WorkerExecutionSettings
+from agentloom.config.config_validation import WorkerExecutionSettings, validate_worker_execution
 
 WorkerExecutionSourceName = Literal[
     "framework_default", "project_system", "application_system", "application_worker", "call_override"
@@ -60,19 +60,6 @@ class ResolvedWorkerExecution:
             "source": self.source,
             "source_chain": [entry.to_dict() for entry in self.source_chain],
         }
-
-
-def validate_worker_execution(
-    section: Mapping[str, Any] | WorkerExecutionSettings | None, *, scope: Literal["project", "application"]
-) -> WorkerExecutionSettings:
-    """Validate a complete unmerged source, including values later overridden."""
-    settings = WorkerExecutionSettings.model_validate({} if section is None else section)
-    if scope == "project" and "workers" in settings.model_fields_set:
-        raise ValueError(
-            "Project worker_execution must not contain Application-private workers; "
-            "move workers to the Application config/system.yaml"
-        )
-    return settings
 
 
 def resolve_worker_execution(

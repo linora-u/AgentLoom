@@ -306,6 +306,7 @@ class BatchOutcome:
     config_revision: str | None = None
     observer_errors: tuple[ObserverDiagnostic, ...] = ()
     events: tuple[BatchEvent, ...] = ()
+    infrastructure_errors: tuple[WorkerError, ...] = ()
 
     def __post_init__(self) -> None:
         for name in ("batch_id", "run_id", "worker_identity"):
@@ -322,6 +323,8 @@ class BatchOutcome:
             raise ValueError("BatchOutcome.observer_errors must contain ObserverDiagnostics")
         if any(not isinstance(entry, BatchEvent) for entry in self.events):
             raise ValueError("BatchOutcome.events must contain BatchEvents")
+        if any(not isinstance(entry, WorkerError) for entry in self.infrastructure_errors):
+            raise ValueError("BatchOutcome.infrastructure_errors must contain WorkerErrors")
         for name in ("input_fingerprint", "definition_revision", "config_revision"):
             value = getattr(self, name)
             if value is not None and not isinstance(value, str):
@@ -329,6 +332,7 @@ class BatchOutcome:
         object.__setattr__(self, "outcomes", tuple(self.outcomes))
         object.__setattr__(self, "observer_errors", tuple(self.observer_errors))
         object.__setattr__(self, "events", tuple(self.events))
+        object.__setattr__(self, "infrastructure_errors", tuple(self.infrastructure_errors))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -344,6 +348,7 @@ class BatchOutcome:
             "config_revision": self.config_revision,
             "observer_errors": [entry.to_dict() for entry in self.observer_errors],
             "events": [event.to_dict() for event in self.events],
+            "infrastructure_errors": [error.to_dict() for error in self.infrastructure_errors],
         }
 
 

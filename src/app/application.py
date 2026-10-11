@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar, copy_context
@@ -51,7 +52,6 @@ from agentloom.execution.concurrency import (
 from agentloom.execution.concurrency.batch_runner import BatchControl, InvocationControlError, run_batch
 from agentloom.execution.trace import (
     ExplicitExecutionContext,
-    bind_explicit_execution_context,
     capture_explicit_execution_context,
 )
 
@@ -322,30 +322,21 @@ class Application:
         coordinator = None
         app = None
         try:
-            from agentloom.execution.checkpoint.coordinator import isolated_checkpoint_context
-            from agentloom.execution.context_engine.runtime import bind_task_context_engine
-            from agentloom.execution.goal import bind_goal_state_provider
-
             with bind_config(base), lifecycle.bind_services(context, effective, file_logging=file_logging) as services:
-                with (
-                    isolated_checkpoint_context(),
-                    bind_task_context_engine(None),
-                    bind_goal_state_provider(None),
-                    bind_explicit_execution_context(
-                        ExplicitExecutionContext(
-                            task_id=context.task_id,
-                            sub_task_id=None,
-                            agent_id=None,
-                            agent_name=None,
-                            agent_config=None,
-                            skill_catalog=None,
-                            hook_run=None,
-                            runtime_agent_path=None,
-                            root_run_id=context.run_id,
-                            local_run_id=None,
-                            root_run_state=None,
-                        )
-                    ),
+                with lifecycle.isolate_root_services(
+                    ExplicitExecutionContext(
+                        task_id=context.task_id,
+                        sub_task_id=None,
+                        agent_id=None,
+                        agent_name=None,
+                        agent_config=None,
+                        skill_catalog=None,
+                        hook_run=None,
+                        runtime_agent_path=None,
+                        root_run_id=context.run_id,
+                        local_run_id=None,
+                        root_run_state=None,
+                    )
                 ):
                     from agentloom.execution.context_engine.runtime import ensure_task_context_engine
 
@@ -389,45 +380,35 @@ class Application:
                         )
                         engine_scope.enter_context(ensure_task_context_engine(effective))
                         with app.bind():
-                            try:
-                                yield app
-                            finally:
-                                app.close()
+                            yield app
                         lifecycle.complete_execution(None)
                     except BaseException as exc:
-                        if app is not None:
-                            app.close()
                         lifecycle.fail_execution(exc)
                         raise
                     finally:
-                        try:
-                            lifecycle.finalize_run(
-                                ApplicationRunFinalization(
-                                    context,
-                                    checkpoint_manager,
-                                    context.task_id,
-                                    None,
-                                    {},
-                                    bool(effective.get("checkpoint", {}).get("cleanup_on_success", True)),
-                                    services.log,
-                                    record_final_answer=services.recorder.record_final_answer,
-                                )
-                            )
-                        finally:
-                            try:
-                                lifecycle.close_resources(
-                                    ApplicationRunResources(
-                                        None,
-                                        None,
-                                        file_history,
-                                        services.log,
-                                        task_lease,
-                                        checkpoint_manager,
-                                        coordinator,
-                                    )
-                                )
-                            finally:
-                                engine_scope.close()
+                        lifecycle.finish_root_run(
+                            ApplicationRunFinalization(
+                                context,
+                                checkpoint_manager,
+                                context.task_id,
+                                None,
+                                {},
+                                bool(effective.get("checkpoint", {}).get("cleanup_on_success", True)),
+                                services.log,
+                                record_final_answer=services.recorder.record_final_answer,
+                            ),
+                            ApplicationRunResources(
+                                None,
+                                None,
+                                file_history,
+                                services.log,
+                                task_lease,
+                                checkpoint_manager,
+                                coordinator,
+                            ),
+                            drain=app.close if app is not None else lambda: None,
+                            close_engine=engine_scope.close,
+                        )
         except BaseException as exc:
             lifecycle.persist_uncaught_failure(
                 runtime_context=context,
@@ -437,7 +418,7 @@ class Application:
             )
             raise
         finally:
-            lifecycle.release_run_lease(lease)
+            lifecycle.release_run_lease(lease, original_error=sys.exception())
 
     def _invoke_definition(
         self, definition: dict, item: WorkItem, index: int, *, agent_factory: Callable[[], Any] | None = None
@@ -491,29 +472,38 @@ class Application:
             task_id=report.task_id if report else self.runtime_context.task_id,
             duration_seconds=monotonic() - started,
         )
+        from agentloom.execution.observability import TraceStorageError
+
+        infrastructure_error = None
         if cleanup:
-            raise WorkerBatchError(
+            infrastructure_error = WorkerBatchError(
                 "Worker cleanup did not complete",
                 phase="cleanup",
                 original_error=error or report.cleanup_errors[0].error,
                 outcomes=(result,),
                 cleanup_errors=cleanup,
             )
-        from agentloom.execution.observability import TraceStorageError
-
-        if isinstance(error, TraceStorageError) or getattr(error, "category", None) in {
+        elif isinstance(error, TraceStorageError) or getattr(error, "category", None) in {
             "infrastructure",
             "consistency",
             "storage",
         }:
-            raise WorkerBatchError(
+            infrastructure_error = WorkerBatchError(
                 "required invocation infrastructure failed",
                 phase="trace" if isinstance(error, TraceStorageError) else "infrastructure",
                 original_error=(report.primary_error if report else None) or error,
                 outcomes=(result,),
             )
-        if error is not None and not isinstance(error, Exception):
-            raise InvocationControlError(error, result)
+        controls = [primary_error, error]
+        if report is not None:
+            controls.extend(entry.error for entry in report.cleanup_errors)
+        control_error = next(
+            (cause for cause in controls if cause is not None and not isinstance(cause, Exception)), None
+        )
+        if control_error is not None:
+            raise InvocationControlError(control_error, result, infrastructure_error)
+        if infrastructure_error is not None:
+            raise infrastructure_error
         return result
 
     def _map_callback(

@@ -72,6 +72,12 @@ class ApplicationRunResources:
     coordinator: Any | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ApplicationRunSecondaryError:
+    phase: str
+    error: BaseException
+
+
 class ApplicationRunLifecycle:
     """Own terminal state for exactly one top-level Application Run.
 
@@ -102,8 +108,8 @@ class ApplicationRunLifecycle:
         lease.acquire()
         try:
             runtime_context.write_manifest(**manifest)
-        except BaseException:
-            self.release_run_lease(lease)
+        except BaseException as exc:
+            self.release_run_lease(lease, original_error=exc)
             raise
         return lease
 
@@ -111,6 +117,70 @@ class ApplicationRunLifecycle:
         """Create one root Task and its first attempt without requiring an Agent."""
         checkpoint_manager.record_task_created(task_id, created_at=datetime.now().astimezone().isoformat(), **metadata)
         checkpoint_manager.record_run_started(task_id)
+
+    @staticmethod
+    @contextmanager
+    def isolate_root_services(execution_context: Any):
+        """Reset inherited root services for both Application entrypoints."""
+        from agentloom.execution.checkpoint.coordinator import isolated_checkpoint_context
+        from agentloom.execution.context_engine.runtime import bind_task_context_engine
+        from agentloom.execution.goal import bind_goal_state_provider
+        from agentloom.execution.trace import bind_explicit_execution_context
+
+        with (
+            isolated_checkpoint_context(),
+            bind_task_context_engine(None),
+            bind_goal_state_provider(None),
+            bind_explicit_execution_context(execution_context),
+        ):
+            yield
+
+    def finish_root_run(
+        self,
+        finalization: ApplicationRunFinalization,
+        resources: ApplicationRunResources,
+        *,
+        drain: Callable[[], None],
+        close_engine: Callable[[], None],
+    ) -> None:
+        """Drain, persist and close every owner while preserving control signals."""
+        original = self.error
+        errors: list[ApplicationRunSecondaryError] = []
+        for phase, callback in (
+            ("drain", drain),
+            ("finalization", lambda: self.finalize_run(finalization)),
+            ("resources", lambda: self.close_resources(resources)),
+            ("context_engine", close_engine),
+        ):
+            try:
+                callback()
+            except BaseException as exc:
+                errors.append(ApplicationRunSecondaryError(phase, exc))
+                if phase == "drain":
+                    if self.phase == "finalization":
+                        self.fail_finalization(exc)
+                    else:
+                        self.fail_execution(exc)
+                elif phase == "context_engine":
+                    self.fail_cleanup(exc)
+        controls = [original, *(entry.error for entry in errors)]
+        control = next((error for error in controls if error is not None and not isinstance(error, Exception)), None)
+        if control is not None:
+            self.retain_secondary_errors(control, errors)
+            raise control
+        if errors:
+            primary = errors[-1].error
+            self.retain_secondary_errors(primary, errors[:-1])
+            raise primary
+
+    @staticmethod
+    def retain_secondary_errors(original: BaseException, errors: list[ApplicationRunSecondaryError]) -> None:
+        """Keep typed causes on the propagated object instead of replacing it."""
+        secondary = tuple(entry for entry in errors if entry.error is not original)
+        if secondary:
+            original.run_secondary_errors = (*getattr(original, "run_secondary_errors", ()), *secondary)
+            for entry in secondary:
+                original.add_note(f"Run {entry.phase} also failed: {type(entry.error).__name__}: {entry.error}")
 
     @contextmanager
     def bind_services(self, runtime_context: Any, effective_config: dict, *,
@@ -383,6 +453,8 @@ class ApplicationRunLifecycle:
                         manifest_updates=finalization.manifest_updates,
                     )
                 except Exception as exc:
+                    if self.error is not None:
+                        self.retain_secondary_errors(self.error, [ApplicationRunSecondaryError("observability", exc)])
                     finalization.log.warning(
                         "Failed to persist Run observability: %s",
                         exc,
@@ -400,6 +472,8 @@ class ApplicationRunLifecycle:
             except Exception as exc:
                 if self.outcome == "completed":
                     raise
+                if self.error is not None:
+                    self.retain_secondary_errors(self.error, [ApplicationRunSecondaryError("manifest", exc)])
                 finalization.log.warning(
                     "Failed to persist terminal manifest: %s",
                     exc,
@@ -483,7 +557,8 @@ class ApplicationRunLifecycle:
                 ended_at=datetime.now().astimezone().isoformat(),
                 error=self.error_message,
             )
-        except Exception:
+        except Exception as exc:
+            self.retain_secondary_errors(error, [ApplicationRunSecondaryError("manifest", exc)])
             return
 
     def _validate_resumable_checkpoint(
@@ -612,13 +687,16 @@ class ApplicationRunLifecycle:
         if task_lease_error is not None:
             raise task_lease_error
 
-    def release_run_lease(self, run_lease: Any | None) -> None:
+    def release_run_lease(self, run_lease: Any | None, *, original_error: BaseException | None = None) -> None:
         if run_lease is None:
             return
         try:
             run_lease.release()
-        except BaseException:
+        except BaseException as exc:
             self.enter_cleanup()
+            if original_error is not None and not isinstance(original_error, Exception):
+                self.retain_secondary_errors(original_error, [ApplicationRunSecondaryError("run_lease", exc)])
+                raise original_error from None
             raise
 
 

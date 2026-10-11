@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -377,6 +378,19 @@ class WorkerExecutionSettings(BaseModel):
                 "use Application defaults/workers or the map concurrency argument"
             )
         return value
+
+
+def validate_worker_execution(
+    section: Mapping[str, Any] | WorkerExecutionSettings | None, *, scope: Literal["project", "application"]
+) -> WorkerExecutionSettings:
+    """Validate each source before composition can override invalid values."""
+    settings = WorkerExecutionSettings.model_validate({} if section is None else section)
+    if scope == "project" and "workers" in settings.model_fields_set:
+        raise ValueError(
+            "Project worker_execution must not contain Application-private workers; "
+            "move workers to the Application config/system.yaml"
+        )
+    return settings
 
 
 class RootSettings(BaseModel):

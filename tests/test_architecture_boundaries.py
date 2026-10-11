@@ -192,6 +192,21 @@ def test_configuration_does_not_load_runtime_implementations() -> None:
     """)
 
 
+def test_public_project_system_load_does_not_load_execution() -> None:
+    run_fresh("""
+        import sys
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from agentloom.config.system_loader import load_project_system_config
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'config').mkdir()
+            (root / 'config/system.yaml').write_text('worker_execution:\\n  defaults:\\n    concurrency: 20\\n')
+            assert load_project_system_config(root)['worker_execution']['defaults']['concurrency'] == 20
+        assert not any(name == 'agentloom.execution' or name.startswith('agentloom.execution.') for name in sys.modules)
+    """)
+
+
 def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
     offenders: list[str] = []
     for source_path in (ROOT / "src").rglob("*.py"):
@@ -204,7 +219,7 @@ def test_configuration_owns_its_vocabulary_without_reverse_imports() -> None:
             else:
                 continue
             for module, name in imports:
-                if "configuration" in source_path.relative_to(ROOT / "src").parts and (
+                if "config" in source_path.relative_to(ROOT / "src").parts and (
                     module == "agentloom.execution"
                     or module.startswith("agentloom.execution.")
                 ):

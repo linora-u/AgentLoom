@@ -3,146 +3,17 @@
 from __future__ import annotations
 
 import json
-import os
 from contextlib import contextmanager
-from pathlib import Path
-from threading import Barrier, Condition, Event, Thread
+from threading import Barrier, Event, Lock, Thread, get_ident
 
 import pytest
 import yaml
-from agentloom.execution.agent_runtime import AgentRuntimeResult, RuntimeCapabilities, RuntimeUsage
 from agentloom.execution.concurrency import WorkItem
 from jsonschema import ValidationError
 
+from test_support.worker_batch import batch_project as _batch_project
 
-class Probe:
-    def __init__(self):
-        self.condition = Condition()
-        self.starts = []
-        self.closed = []
-        self.active = 0
-        self.peak = 0
-        self.behavior = lambda payload: payload
-        self.close_behavior = lambda payload: None
-        self.construct_error = None
-        self.root_behavior = None
-        self.resource_close = None
-
-    def wait_starts(self, count):
-        with self.condition:
-            assert self.condition.wait_for(lambda: len(self.starts) >= count, timeout=10), self.starts
-
-
-@pytest.fixture
-def batch_project(tmp_path, monkeypatch):
-    from agentloom.app.composition import build_builtin_runtime_registry
-    from agentloom.config.config import bind_config, load_project_config
-    from agentloom.execution.trace import capture_explicit_execution_context
-
-    def write(path, config):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump(config))
-
-    write(
-        tmp_path / "config/system.yaml",
-        {
-            "runtime": {"root_dir": str(tmp_path / "runtime")},
-            "checkpoint": {"enabled": False},
-            "self_learning": {"enabled": False},
-            "logging": {"console_enabled": False},
-            "default_toolsets": [],
-        },
-    )
-    write(
-        tmp_path / "config/model.yaml",
-        {
-            "model": {
-                "default_model_type": "test",
-                "test": {"model": "fixture/model", "adapter": "openai_chat", "api_key": "fixture-secret"},
-            }
-        },
-    )
-    application = tmp_path / "applications/batch"
-    worker = application / "workflows/worker.yaml"
-    write(
-        worker,
-        {
-            "name": "worker",
-            "description": "Controlled Worker.",
-            "task": "Process supplied input.",
-            "agent_runtime": "batch-fixture",
-            "tools": [],
-            "toolsets": [],
-            "input_schema": {
-                "type": "object",
-                "properties": {"value": {}, "action": {}},
-                "required": ["value"],
-                "additionalProperties": False,
-            },
-        },
-    )
-    probe = Probe()
-
-    class Runtime:
-        runtime_id = "batch-fixture"
-        capabilities = RuntimeCapabilities(False, False, True, True)
-
-        def __init__(self, definition):
-            self.definition = definition
-            self.payload = None
-            self.closed = False
-            if probe.construct_error is not None:
-                raise probe.construct_error
-
-        def run(self, request):
-            if "Input data (JSON):\n" not in request.task:
-                return AgentRuntimeResult(state="success", output=probe.root_behavior())
-            self.payload = json.loads(request.task.split("Input data (JSON):\n", 1)[1])
-            execution = capture_explicit_execution_context()
-            if probe.resource_close is not None:
-                from agentloom.execution.resources import register_resource
-
-                register_resource(
-                    "same-resource-key",
-                    lambda: probe.resource_close(self.payload, self.definition.instance_id),
-                    instance_id=self.definition.instance_id,
-                )
-            with probe.condition:
-                probe.starts.append((self.payload, execution, self.definition, request))
-                probe.active += 1
-                probe.peak = max(probe.peak, probe.active)
-                probe.condition.notify_all()
-            return AgentRuntimeResult(
-                state="success",
-                output=probe.behavior(self.payload),
-                usage=RuntimeUsage(input_tokens=3, output_tokens=2, total_tokens=5),
-            )
-
-        def snapshot(self):
-            return None
-
-        def close(self):
-            if self.closed:
-                return
-            probe.close_behavior(self.payload)
-            self.definition.tool_gateway.close()
-            self.closed = True
-            if self.payload is not None:
-                with probe.condition:
-                    probe.closed.append(self.payload)
-                    probe.active -= 1
-                    probe.condition.notify_all()
-
-    registry = build_builtin_runtime_registry()
-    registry.register("batch-fixture", capabilities=Runtime.capabilities, factory=Runtime)
-    monkeypatch.setattr("agentloom.app.validation.build_builtin_runtime_registry", lambda: registry)
-    monkeypatch.setattr("agentloom.app.agent.build_builtin_runtime_registry", lambda: registry)
-    original_cwd = Path.cwd()
-    try:
-        with bind_config(load_project_config(tmp_path)):
-            yield tmp_path, application, worker, probe, write
-    finally:
-        os.chdir(original_cwd)
+batch_project = _batch_project
 
 
 def test_application_open_owns_one_run_and_returns_ordered_worker_receipts(batch_project):
@@ -162,6 +33,259 @@ def test_application_open_owns_one_run_and_returns_ordered_worker_receipts(batch
         manifest_path = app.run.manifest_path
     assert len(probe.closed) == 2
     assert json.loads(manifest_path.read_text())["status"] == "completed"
+
+
+def test_observer_control_survives_secondary_required_receipt_failure(batch_project, monkeypatch):
+    from agentloom.app import Application
+    from agentloom.execution.context import RuntimeContext
+
+    root, application, _worker, probe, _write = batch_project
+    original = KeyboardInterrupt("original observer signal")
+    write_record = RuntimeContext.write_batch_record
+    writes = 0
+
+    def write(self, batch_id, record):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("required receipt unavailable")
+        return write_record(self, batch_id, record)
+
+    def observer(event):
+        raise original
+
+    monkeypatch.setattr(RuntimeContext, "write_batch_record", write)
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            app.worker("workflows/worker.yaml").map(
+                [WorkItem("a", {"value": 1}), WorkItem("b", {"value": 2})], event_sink=observer
+            )
+        assert caught.value is original
+        result = original.batch_outcome
+        assert [item.status for item in result.outcomes] == ["success", "canceled"]
+        assert result.infrastructure_errors[0].category == "persistence"
+        assert original.batch_error.original_error.args == ("required receipt unavailable",)
+        record = app.runtime_context.read_batch_record(result.batch_id)
+        assert all(record[key] == value for key, value in result.to_dict().items())
+    assert probe.active == 0 and probe.closed == [{"value": 1}]
+
+
+def test_worker_control_survives_secondary_cleanup_and_owner_retry(batch_project):
+    from agentloom.app import Application
+
+    root, application, _worker, probe, _write = batch_project
+    original = KeyboardInterrupt("original Worker signal")
+    attempts = []
+
+    def work(payload):
+        raise original
+
+    def cleanup(payload):
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise OSError("secondary cleanup unavailable")
+
+    probe.behavior = work
+    probe.close_behavior = cleanup
+    with pytest.raises(KeyboardInterrupt) as caught:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            app.worker("workflows/worker.yaml").map([WorkItem("a", {"value": 1}), WorkItem("b", {"value": 2})])
+    assert caught.value is original
+    result = original.batch_outcome
+    assert [item.status for item in result.outcomes] == ["failed", "canceled"]
+    assert result.outcomes[0].error.error_type == "KeyboardInterrupt"
+    assert result.outcomes[0].cleanup_errors[0].message == "secondary cleanup unavailable"
+    assert original.batch_error.phase == "cleanup"
+    assert attempts == [{"value": 1}, {"value": 1}]
+    assert probe.active == 0 and len(probe.closed) == 1
+
+
+def test_broken_stop_token_stops_observation_and_rejects_all_unstarted_work(batch_project):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkerBatchError
+
+    root, application, _worker, probe, _write = batch_project
+
+    class BrokenStop:
+        calls = 0
+
+        def is_set(self):
+            self.calls += 1
+            raise OSError("stop observation unavailable")
+
+    token = BrokenStop()
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        with pytest.raises(WorkerBatchError) as caught:
+            app.worker("workflows/worker.yaml").map([WorkItem("a", {"value": 1})], stop_token=token)
+        assert caught.value.phase == "stop_observation"
+        assert [item.status for item in caught.value.outcomes] == ["canceled"]
+        assert not probe.starts and token.calls == 1
+        assert app.runtime_context.read_batch_record(caught.value.outcome.batch_id)["status"] == "failed"
+
+
+def test_true_once_stop_at_invocation_start_is_latched_for_entire_batch(batch_project):
+    from agentloom.app import Application
+
+    root, application, _worker, probe, _write = batch_project
+    controller = get_ident()
+
+    class StartupStop:
+        calls = 0
+        lock = Lock()
+
+        def is_set(self):
+            if get_ident() == controller:
+                return False
+            with self.lock:
+                self.calls += 1
+                return self.calls == 1
+
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        result = app.worker("workflows/worker.yaml").map(
+            [WorkItem("a", {"value": 1}), WorkItem("b", {"value": 2})], stop_token=StartupStop()
+        )
+        assert result.status == "stopped"
+        assert [item.status for item in result.outcomes] == ["canceled", "canceled"]
+        assert all(item.invocation_id is None for item in result.outcomes)
+        assert not probe.starts
+
+
+@pytest.mark.parametrize("entrypoint", ["standalone", "runner"])
+def test_root_cleanup_failure_cannot_replace_original_worker_control(batch_project, entrypoint):
+    from agentloom.app import Application, current_run_app
+    from agentloom.app.run import ApplicationRunInterrupted
+    from agentloom.app.runner import execute_app
+
+    root, application, _worker, probe, write = batch_project
+    original = KeyboardInterrupt("original Worker control")
+    attempts = []
+
+    def work(payload):
+        raise original
+
+    def cleanup(payload, identity):
+        attempts.append(identity)
+        raise OSError("owned handle still open")
+
+    probe.behavior = work
+    probe.resource_close = cleanup
+    if entrypoint == "standalone":
+        with pytest.raises(KeyboardInterrupt) as caught:
+            with Application.open(application, project_root=root, file_logging=False) as app:
+                app.worker("workflows/worker.yaml").map([WorkItem("a", {"value": 1})])
+        assert caught.value is original
+    else:
+        workflow = application / "workflows/root.yaml"
+        write(
+            workflow,
+            {
+                "name": "batch-root",
+                "description": "Orchestrate.",
+                "task": "Execute plan.",
+                "agent_runtime": "batch-fixture",
+                "tools": [],
+                "toolsets": [],
+            },
+        )
+        probe.root_behavior = lambda: (
+            current_run_app().worker("workflows/worker.yaml").map([WorkItem("a", {"value": 1})])
+        )
+        with pytest.raises(ApplicationRunInterrupted) as caught:
+            execute_app(workflow, file_logging=False)
+        assert caught.value.original_error is original
+    assert len(original.batch_outcome.outcomes) == 1
+    assert original.batch_outcome.outcomes[0].cleanup_errors[0].message == "owned handle still open"
+    assert original.run_secondary_errors[0].phase == "resources"
+    assert original.run_secondary_errors[0].error.exceptions[0].args == ("owned handle still open",)
+    assert len(attempts) == 2 and len(set(attempts)) == 1
+
+
+@pytest.mark.parametrize("entrypoint", ["standalone", "runner"])
+@pytest.mark.parametrize("phase", ["manifest", "run_lease"])
+def test_root_secondary_persistence_and_lease_errors_preserve_control(batch_project, monkeypatch, entrypoint, phase):
+    from agentloom.app import Application, current_run_app
+    from agentloom.app.run import ApplicationRunInterrupted
+    from agentloom.app.runner import execute_app
+    from agentloom.execution.context import RuntimeContext, RuntimeRunLease
+
+    root, application, _worker, probe, write = batch_project
+    original = KeyboardInterrupt("original control")
+
+    def work(payload):
+        raise original
+
+    probe.behavior = work
+    if phase == "manifest":
+        update = RuntimeContext.update_manifest
+
+        def persist(self, **updates):
+            if updates.get("status") in {"failed", "interrupted"}:
+                raise OSError("terminal manifest unavailable")
+            return update(self, **updates)
+
+        monkeypatch.setattr(RuntimeContext, "update_manifest", persist)
+    else:
+        release = RuntimeRunLease.release
+
+        def release_then_fail(self):
+            release(self)
+            raise OSError("run lease release evidence unavailable")
+
+        monkeypatch.setattr(RuntimeRunLease, "release", release_then_fail)
+
+    if entrypoint == "standalone":
+        with pytest.raises(KeyboardInterrupt) as caught:
+            with Application.open(application, project_root=root, file_logging=False) as app:
+                app.worker("workflows/worker.yaml").map([WorkItem("a", {"value": 1})])
+        assert caught.value is original
+    else:
+        workflow = application / "workflows/root.yaml"
+        write(
+            workflow,
+            {
+                "name": "batch-root",
+                "description": "Orchestrate.",
+                "task": "Execute plan.",
+                "agent_runtime": "batch-fixture",
+                "tools": [],
+                "toolsets": [],
+            },
+        )
+        probe.root_behavior = lambda: (
+            current_run_app().worker("workflows/worker.yaml").map([WorkItem("a", {"value": 1})])
+        )
+        with pytest.raises(ApplicationRunInterrupted) as caught:
+            execute_app(workflow, file_logging=False)
+        assert caught.value.original_error is original
+    assert original.run_secondary_errors
+    assert all(entry.phase == phase for entry in original.run_secondary_errors)
+    assert len(original.batch_outcome.outcomes) == 1
+    assert probe.active == 0 and len(probe.closed) == 1
+
+
+def test_initial_manifest_control_survives_run_lease_release_failure(batch_project, monkeypatch):
+    from agentloom.app import Application
+    from agentloom.execution.context import RuntimeContext, RuntimeRunLease
+
+    root, application, _worker, probe, _write = batch_project
+    original = KeyboardInterrupt("initial manifest interrupted")
+    release = RuntimeRunLease.release
+
+    def write(self, **manifest):
+        raise original
+
+    def release_then_fail(self):
+        release(self)
+        raise OSError("lease release unavailable")
+
+    monkeypatch.setattr(RuntimeContext, "write_manifest", write)
+    monkeypatch.setattr(RuntimeRunLease, "release", release_then_fail)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        with Application.open(application, project_root=root, file_logging=False):
+            pytest.fail("failed initialization must not enter owner scope")
+    assert caught.value is original and not probe.starts
+    assert original.run_secondary_errors[0].phase == "run_lease"
+    assert original.run_secondary_errors[0].error.args == ("lease release unavailable",)
 
 
 @contextmanager
@@ -184,6 +308,70 @@ def background(call):
     finally:
         thread.join(timeout=12)
         assert not thread.is_alive(), "batch failed to drain"
+
+
+def test_broken_stop_observation_drains_actual_started_work_and_cleanup(batch_project):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkerBatchError
+
+    root, application, _worker, probe, _write = batch_project
+    gate, failed_observation = Event(), Event()
+
+    def work(payload):
+        assert gate.wait(timeout=10)
+        return payload
+
+    class BrokenAfterStart:
+        failures = 0
+
+        def is_set(self):
+            if probe.starts:
+                self.failures += 1
+                failed_observation.set()
+                raise OSError("stop observation failed after start")
+            return False
+
+    token = BrokenAfterStart()
+    probe.behavior = work
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        with background(
+            lambda: app.worker("workflows/worker.yaml").map(
+                [WorkItem("a", {"value": 1}), WorkItem("b", {"value": 2})], stop_token=token
+            )
+        ) as (results, errors, thread):
+            try:
+                assert failed_observation.wait(timeout=10)
+                assert thread.is_alive() and not probe.closed
+                assert len(probe.starts) == 1
+            finally:
+                gate.set()
+        assert not results and len(errors) == 1 and isinstance(errors[0], WorkerBatchError)
+        assert [item.status for item in errors[0].outcomes] == ["success", "canceled"]
+        assert token.failures == 1 and probe.active == 0 and len(probe.closed) == 1
+
+
+@pytest.mark.parametrize("control", [False, True])
+def test_owner_drain_error_still_closes_root_resources_after_success(batch_project, monkeypatch, control):
+    from agentloom.app import Application
+    from agentloom.execution.resources import register_resource
+
+    root, application, _worker, probe, _write = batch_project
+    original = KeyboardInterrupt("owner drain interrupted") if control else OSError("owner drain unavailable")
+    close = Application.close
+    root_closed = []
+
+    def close_then_fail(self):
+        close(self)
+        raise original
+
+    monkeypatch.setattr(Application, "close", close_then_fail)
+    with pytest.raises(type(original)) as caught:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            register_resource("root-owned", lambda: root_closed.append("closed"))
+            result = app.worker("workflows/worker.yaml").map([WorkItem("a", {"value": 1})])
+            assert result.status == "completed"
+    assert caught.value is original
+    assert root_closed == ["closed"] and probe.active == 0 and len(probe.closed) == 1
 
 
 @pytest.mark.parametrize("capacity", [1, 2, 20, 32, 65])

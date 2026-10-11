@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from .config_validation import validate_system_snapshot
+from .config_validation import validate_system_snapshot, validate_worker_execution
 from .layered_builder import LayeredConfigBuilder
 from .yaml_loader import load_unique_yaml
 
@@ -74,8 +74,6 @@ def load_project_system_config(
         source_name="config/system.yaml",
     )
     # Validate project scope before an Application can override these values.
-    from agentloom.execution.concurrency.policy import validate_worker_execution
-
     if "worker_execution" in system_yaml:
         validate_worker_execution(system_yaml["worker_execution"], scope="project")
     layered_builder = LayeredConfigBuilder(
