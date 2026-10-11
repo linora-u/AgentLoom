@@ -822,3 +822,30 @@ def test_pi_resume_fingerprint_tracks_registered_skill_metadata(tmp_path) -> Non
     for change in ({'name': 'other'}, {'description': 'Other evidence.'},
                    {'location': tmp_path / 'other/SKILL.md'}):
         assert _configuration_key(replace(registered, skills=(replace(skill, **change),))) != _configuration_key(registered)
+
+
+def test_registry_retains_rejected_runtime_cleanup_failure_for_its_original_run(tmp_path):
+    from agentloom.execution import RuntimeHome, bind_run_context
+    from agentloom.execution.resources import close_run_resources
+
+    @dataclass
+    class RejectedRuntime(_RecordingRuntime):
+        attempts: int = 0
+
+        def close(self):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise OSError("temporary rejected Runtime close failure")
+
+    runtime = RejectedRuntime("wrong-runtime", [])
+    registry = RuntimeRegistry()
+    registry.register("smolagents", capabilities=runtime.capabilities, factory=lambda definition: runtime)
+    definition = replace(_definition("smolagents"), instance_id="original-instance")
+    context = RuntimeHome(tmp_path / "runtime").new_context(application_id="rejected-runtime")
+    with bind_run_context(context):
+        with pytest.raises(AgentRuntimeError, match="wrong-runtime") as captured:
+            registry.create(definition)
+        assert captured.value.runtime_cleanup_errors[0][0] == "runtime_contract_close"
+        assert str(captured.value.runtime_cleanup_errors[0][1]) == "temporary rejected Runtime close failure"
+        close_run_resources()
+    assert runtime.attempts == 2
