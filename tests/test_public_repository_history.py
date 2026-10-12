@@ -19,11 +19,13 @@ CONFIG = {"private_repository": "owner/private", "public_repository": "owner/pub
           "required_public_checks": []}
 
 
-def commit(repo, message, *, author="Fixture", email="fixture@example.test", date="1700000000 +0800"):
+def commit(repo, message, *, author="Fixture", email="fixture@example.test", date="1700000000 +0800",
+           committer_date=None):
     sync.command("git", "add", "-A", cwd=repo)
     env = os.environ.copy()
     env.update({"GIT_AUTHOR_NAME": author, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date,
-                "GIT_COMMITTER_DATE": date})
+                "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.test",
+                "GIT_COMMITTER_DATE": committer_date or date})
     sync.command("git", "commit", "--cleanup=verbatim", "-F", "-", cwd=repo,
                  data=message.encode(), env=env)
     return sync.command("git", "rev-parse", "HEAD", cwd=repo).decode().strip()
@@ -68,7 +70,7 @@ def body(base, head, commits=None):
                                              "source_head": head, "commits": commits or []}) + "\n-->\n"
 
 
-def test_mixed_commits_preserve_messages_authors_dates_modes_and_exclude_private_objects(repositories, tmp_path):
+def test_mixed_commits_use_fixed_identity_and_preserve_messages_dates_modes_and_isolation(repositories, tmp_path):
     source, public, base = repositories
     (source / "public.txt").write_text("first public change\n")
     (source / "run.sh").write_text("#!/bin/sh\nexit 0\n")
@@ -76,7 +78,7 @@ def test_mixed_commits_preserve_messages_authors_dates_modes_and_exclude_private
     secret = source / "applications/news_agent/private.txt"
     secret.write_text("PRIVATE_MIXED\n")
     first = commit(source, "修复运行时\n\nFull body with trailing spaces.  \n\nCo-authored-by: Peer <peer@example.test>\n",
-                   author="原作者", email="author@example.test")
+                   author="原作者", email="author@example.test", committer_date="1700000300 +0530")
     secret.write_text("PRIVATE_ONLY\n")
     skipped = commit(source, "Private-only strategy\n")
     # Exercise file/directory replacement and deletion during consecutive snapshots.
@@ -85,17 +87,21 @@ def test_mixed_commits_preserve_messages_authors_dates_modes_and_exclude_private
     (source / "public.txt/renamed.txt").write_text("second public change\n")
     (source / "run.sh").unlink()
     last = commit(source, "Move public file\n\nRetain the complete second body.\n",
-                  author="Contributor", email="contributor@example.test", date="1700000123 -0500")
+                  author="Contributor", email="contributor@example.test", date="1700000123 -0500",
+                  committer_date="1700000500 +0000")
     mapping, title, target = export(repositories, tmp_path)
     assert [item["source"] for item in mapping if item["exported"]] == [first, last]
     assert mapping[1] == {"source": skipped, "public": mapping[0]["public"], "exported": False}
     assert title == "Move public file"
     for item in (mapping[0], mapping[2]):
         assert raw_message(target, item["public"]) == raw_message(source, item["source"])
-        assert sync.command("git", "show", "-s", "--format=%an%n%ae%n%aI", item["public"], cwd=target) == \
-            sync.command("git", "show", "-s", "--format=%an%n%ae%n%aI", item["source"], cwd=source)
-        assert sync.command("git", "show", "-s", "--format=%cn%n%ce", item["public"], cwd=target).decode() == \
-            "linora-u\n260928258+linora-u@users.noreply.github.com\n"
+        assert sync.command("git", "show", "-s", "--format=%an%n%ae%n%cn%n%ce",
+                            item["public"], cwd=target).decode().splitlines() == [
+            "linora-u", "260928258+linora-u@users.noreply.github.com",
+            "linora-u", "260928258+linora-u@users.noreply.github.com",
+        ]
+        assert sync.command("git", "show", "-s", "--format=%aI%n%cI", item["public"], cwd=target) == \
+            sync.command("git", "show", "-s", "--format=%aI%n%cI", item["source"], cwd=source)
         assert sync.local_tree(item["public"], target) == sync.public_tree(sync.local_tree(item["source"]), PRIVATE)
     assert sync.local_tree(mapping[0]["public"], target)["run.sh"][0] == "100755"
     assert sync.is_ancestor(sync.command("git", "rev-parse", "HEAD", cwd=public).decode().strip(), "HEAD", target)

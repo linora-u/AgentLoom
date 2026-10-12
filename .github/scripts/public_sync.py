@@ -371,19 +371,19 @@ def has_public_changes(history):
 
 
 def source_commit(ref):
-    """Read the original message bytes and identity without running PR code."""
+    """Keep source message bytes and dates, with the public publication identity."""
     headers, message = command("git", "cat-file", "commit", ref).split(b"\n\n", 1)
     fields = {}
     for line in headers.splitlines():
         if line.startswith((b"author ", b"committer ", b"encoding ")):
             key, value = line.split(b" ", 1)
             fields[key] = value
-    name, rest = fields[b"author"].rsplit(b" <", 1)
-    email, author_date = rest.rsplit(b"> ", 1)
+    author_date = fields[b"author"].rsplit(b"> ", 1)[1]
     committer_date = fields[b"committer"].rsplit(b"> ", 1)[1]
     env = os.environ.copy()
     env.update({
-        "GIT_AUTHOR_NAME": os.fsdecode(name), "GIT_AUTHOR_EMAIL": os.fsdecode(email),
+        "GIT_AUTHOR_NAME": "linora-u",
+        "GIT_AUTHOR_EMAIL": "260928258+linora-u@users.noreply.github.com",
         "GIT_AUTHOR_DATE": author_date.decode(),
         "GIT_COMMITTER_NAME": "linora-u",
         "GIT_COMMITTER_EMAIL": "260928258+linora-u@users.noreply.github.com",
@@ -647,7 +647,9 @@ class Coordinator:
             "title": (self._private_pr_title or title)[:256], "head": branch, "base": "main",
             "body": (
                 "## Summary\n\n```text\ndevelopment tree -> public files -> public CI -> public merge\n```\n\n"
-                "Preserve original commit messages, authors, and author dates for public changes. "
+                "Preserve original commit messages and author/committer dates for public changes. "
+                "Set both Author and Committer to linora-u "
+                "<260928258+linora-u@users.noreply.github.com>, regardless of source identity. "
                 "Private-only commits are skipped; private files and Git parents are never copied.\n\n"
                 "## Evidence\n\n- **Before:** Source commits have not been published with their individual history.\n"
                 "  **After:** The staged public tree exactly matches the export; all four public checks must succeed before merge.\n\n"
