@@ -173,3 +173,73 @@ Reviewed frozen `bb3c63a97b70ad7db8f39bc3711a60d4d1f5d129` against `bc5cff6e61ab
 **Delivery remains open:** PR #11 is draft and baseline-targeted while another task owns prerequisite publication. Required final acceptance must be refreshed appropriately after any product repair; PR retarget/public synchronization and task cleanup remain integration deliverables.
 
 Spec: **one new actionable finding; original control-preservation closure incomplete.**
+
+
+## Terminal-control corrective review on 30605297
+
+These independent reports preserve their original timing: both preceded final
+delivered-source acceptance, and the Spec report preceded the successful isolated
+Python 3.12 retry. They do not replace the first review axes above.
+
+### Standards
+
+Reviewed frozen SHA `306052971e6eaba16bbaef3ccbc32023c7033782` on `codex/worker-batch-terminal-control`; corrective diff `bb3c63a9...30605297`, original baseline `bc5cff6e61abf2a6d7ba7b0b6d2efac210463659`. HEAD and tracked worktree were unchanged and clean.
+
+Retained the prior ownership/import standards and complete Fowler judgement baseline. Tooling-enforced formatting, imports, and typing are excluded.
+
+**Hard violations:** none identified. `ApplicationRunLifecycle.persist_uncaught_failure` continues to own terminal-state and secondary-error selection. Returning its selected exception makes that decision explicit; both public callers consume it without reproducing selection policy or introducing a second lifecycle owner. Ordinary failure followed by the first control signal updates the lifecycle's own error/outcome through its existing outcome classifier. The standalone entrypoint retains its direct-propagation adapter; the runner retains its public Run-error adapter. Shared root isolation/drain/finalization/resource teardown remains centralized. Configuration dependency direction is unaffected.
+
+**Judgement findings:** none actionable. No new duplication, speculative abstraction, cross-object state mutation, or uninformative domain naming identified. The test helper centralizes the two public Application seams, while parameterization covers control combinations and distinct timing cases without copied test orchestration.
+
+Inspected, without rerunning, the new test source and `worker-batch-terminal-control-20261012/control-matrix.xml`: all 26 public-seam cases passed, zero failures/errors/skips. Assertions observe exact propagated exception identity, structured secondary causes, actual started/canceled dispositions, resource closure, and runner terminal events; they do not mirror private lifecycle flags.
+
+Standards: **0 hard findings; 0 actionable judgement findings.** Prior Standards closures remain intact. Worst remaining hard issue: **none identified**.
+
+### Spec
+
+Read-only closure review froze clean commit `306052971e6eaba16bbaef3ccbc32023c7033782`, delta `bb3c63a9..30605297`. Contract: `docs/specs/worker-batch-execution-v1.md` (S). Original 50-story/39-decision/26-scenario scope remains unchanged.
+
+**Original P1 closed in the reviewed repair.** S:137: “Control exceptions also stop/drain before propagation”; S:180: “Original and cleanup causes retained”. `ApplicationRunLifecycle.persist_uncaught_failure` now catches secondary `BaseException`, retains it as a typed manifest cause, and returns the selected terminal error. If a control is already pending, its exact object survives. If only an ordinary error was pending, the first persistence control propagates while retaining that earlier error. Both standalone and runner entrypoints consume the selected result; the runner again applies its existing `ApplicationRunInterrupted.original_error` adapter for KeyboardInterrupt. No unconditional swallowing of the first control was introduced.
+
+The original public reproducer passes on this committed source under its independent ten-second watchdog (`final-watchdog-probe-result.json`: exit zero, 0.726 seconds). Both entrypoints retain the original object and attached complete batch receipt, with one closed Runtime and zero active work. The 26-case public matrix covers both entrypoints, KeyboardInterrupt/SystemExit/custom controls, original-plus-secondary controls, first control after ordinary failure, and first control after successful work. Its assertions inspect exact identity, structured secondary causes, actual started/canceled dispositions, invocation IDs, drained Runtime resources and runner terminal events.
+
+Actual retained red→green logs/JUnit prove the masking failure and the otherwise-hidden first-control swallowing regression before the selected-error correction. Final committed Python 3.14 focused evidence records 162 passed, zero skipped. No new incorrect implementation, missing requirement within this delta, or unrequested behavior identified.
+
+**Final gates remain distinct and open.** S:197–198: “Completion requires the acceptance matrix, supported-version checks and both Runtime Application validations on the delivered revision.” Historical `bb3c63a9` broad/live successes do not prove this repaired revision. The initial final Python 3.12 attempt failed before collection because Phoenix plugin autoload lacks `pkg_resources`; it is not a product failure or a passing minimum-version result. Root/E must supply repaired-revision acceptance evidence. PR retarget/public synchronization and worktree cleanup remain integration delivery work.
+
+Spec: **zero new findings; terminal-persistence P1 repair verified; final acceptance/publication pending.**
+
+The retained focused minimum-version follow-up is
+`worker-batch-terminal-control-20261012/final-py312-attempt2.xml`: 162 passed, zero
+skips, JUnit 8.911 s, exit zero in its accompanying result JSON on `30605297`.
+The initial Phoenix/plugin-autoload failure remains preserved. Integration
+`ed506f44` has the exact same complete non-doc tree, fingerprint `2314313f…`.
+The final acceptance report records the new 582-case version runs, full regression
+and both bounded live Provider campaigns; no historical green replaced them.
+
+## Delivered-source review on ed506f44
+
+The terminal Standards report remains the independent Standards axis for this
+identical source. The latest independent Spec audit below also inspects actual
+final acceptance and cleanup/secret evidence. Original reports and open-gate
+statements above retain their historical context.
+
+### Spec
+
+Read-only delivered-source audit froze clean `ed506f4474552ab13ed622894c7e64ce6da89516`. Its complete non-documentation tree is identical to reviewed terminal-control repair `30605297` (fingerprint `2314313f…`); the selected-source fingerprint `51cd41e1…` matches both acceptance preflights and live reports. Original 50-story/39-decision/26-scenario scope remains intact.
+
+**Product findings closed.** Prior reviews plus the terminal-control closure establish ordinary/control secondary-error preservation, exact first-control identity and batch receipt, structured causes, actual drain, failed-stop observation handling, startup-stop latching, maintained caller migration and standalone test-support independence. Actual final acceptance XML includes all 26 new public terminal-control cases on each supported Python version. No remaining product finding or additional scope creep identified.
+
+**Local completion gate verified.** S:197–200: “Completion requires the acceptance matrix, supported-version checks and both Runtime Application validations on the delivered revision” and “Preserve failed attempts and cleanup diagnostics.” Inspected authoritative receipts under `.agentloom/validation/worker-batch-final-20261012/final-ed506f44` and `worker-batch-acceptance-20261012/final-ed506f44`:
+
+- CI-equivalent regression exits zero with unchanged source: actual XML has **2410 passed**, one Windows/wexpect-only skip, zero failures/errors.
+- Python 3.12.13 and 3.14.8 acceptance each exits zero with **582 passed, no skips**; standalone repo_map each has **60 passed, no skips**.
+- First post-repair bounded live Pi/smolagents campaigns exit zero without watchdog expiration (32.81/14.00 seconds). Both CLI terminals and manifests are completed, full persisted batch records match reports, all two-item outcomes succeed with distinct invocation IDs, and outputs equal independently recorded physical Tool evidence.
+- Contemporaneous child OS/port/thread/private-directory checks and parent process-exit receipts show no remaining owned resources. These are run-time observations, not present-day PID reinterpretations. Provider request retries remain bounded at one and do not replay complete Workers.
+- Actual artifact scan reports **46,483 files**, zero credential/fixture matches and zero read errors; secret-bearing model inputs are separately classified, with current credential inputs mode 0600.
+
+The initial Python 3.12 Phoenix/plugin-autoload failure remains preserved; isolated rerun XML proves 162 focused tests passed on the same repaired source. Historical failures were not discarded or substituted for current evidence.
+
+**Delivery remains pending separately:** prerequisite merge owned by another task, PR retarget, public CI/synchronization, private/public merge and issue closure. Product/local acceptance closure does not claim those external steps are complete.
+
+Spec: **zero remaining product findings; delivered-source local acceptance verified; publication pending.**

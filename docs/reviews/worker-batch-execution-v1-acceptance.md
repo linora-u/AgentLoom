@@ -1,10 +1,10 @@
 # Worker batch v1 验收记录
 
-集成版本 `bb3c63a9` 已通过 CI 等价宽套（2,384 passed、1 项 Windows-only skip）、
-Python 3.12/3.14 验收（各 556 passed、0 skipped）、repo_map 独立收集（各 60 passed）
-和两个有界真实 Provider CLI campaign。原 F 修复及这些物证见本报告末尾。
-随后独立 Spec 复核发现：终态 manifest 写入再次抛出 control exception 时，仍会遮蔽
-最初的控制信号。该组合修复及新版本验收尚待完成；#110 的 PR 基线、公开 CI、合并和清理也未关闭。
+最终冻结源码 `ed506f44` 已通过 CI 等价宽套（2,410 passed、1 项 Windows-only skip）、
+Python 3.12/3.14 验收（各 582 passed、0 skipped）、repo_map 独立收集（各 60 passed）
+及两个有界真实 Provider 完整 CLI。终态持久化的原始 control 保留问题也已修复，新增
+26 个公开组合在两个版本和宽套均通过。产品验收门槛关闭；#110 的 PR 基线切换、公开
+CI/合并、ticket closure 和 worktree 清理仍由 integration 完成交付。
 
 合同：[Spec](../specs/worker-batch-execution-v1.md)，
 [任务图](../specs/worker-batch-execution-v1-tasks.md)。主要测试入口是
@@ -148,7 +148,7 @@ Python callback thread drain；确定性测试与成功 live child 有该证据�
 下表每个合同 ID 恰好归属一行。A：policy/value tests；B：storage/resource/invocation tests；
 C：`test_worker_batch_application.py`；D：`test_worker_batch_legacy.py`、maintained caller tests；
 E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence；F：原审查修复和复核。
-下表中的测试已在 `bb3c63a9` 的最终 JUnit 中逐名核对，合同 ID 计数不是替代行为验收。
+下表中的测试已在 `ed506f44` 的最终 JUnit 中逐名核对，合同 ID 计数不是替代行为验收。
 设计禁止项检查使用
 `src/app/application.py`、`src/execution/concurrency/batch_runner.py` 和
 [Context ownership](../research/worker-batch-context-ownership.md)，不创造额外验收接口。
@@ -162,12 +162,12 @@ E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence�
 | 26,27,28,29 | 13,14,15 | B canonical分记录/root references；C相同scope pinned revisions；E实际credential scan与记录关联 |
 | 30,31,32,33 | 26,27 | C/B fresh invocation、root memory/coordinator/context跨owner及背景drain；E真实Hook/usage/checkpoint、PID/listener/thread独立oracle |
 | 34,35,36,37,38 | 22,29,30,33 | C collect/fail-fast/startup race；F true-once startup stop和broken-token停止观测/实际drain；E真实HTTP错误、阻塞同步Tool stop/drain；无强制终止或产品退出deadline |
-| 39,40 | 21,31,32 | B/C cleanup/required persistence/trace/observer；E公开executor rejection；F原始control与普通二次persistence/cleanup及root lease错误已通过；终态持久化再次抛control的复核P1待修复 |
+| 39,40 | 21,31,32 | B/C cleanup/required persistence/trace/observer；E公开executor rejection；F原始control与普通二次persistence/cleanup、root lease错误及terminal control/control组合已通过；三个公开新增测试覆盖26种组合 |
 | 41 | 34 | C不重放；E真实副作用后HTTP错误、一次实际Tool执行；Provider请求retry与Worker replay分开 |
 | 42,43,44 | 28 | C同步registration-close race、根资源寿命、stale binding/self-close与nested map独立窗口 |
 | 45 | 11,35,38 | E容量1/20时真实响应含两个Tool calls；Pi Tools回归；同步map无hidden asyncio.run，async offload为文档中显式Application adapter，native async延后 |
 | 46 | 36,37 | Dlegacy payload/receipt/status/order、auto/retired配置诊断、repo_map/Goal迁移；F移除mixed fixture退役配置并提取稳定shared test support；repo_map两版本独立collection各60passed |
-| 47,48,49 | — | C/E公开seam；bb3c63a9真实Pi/smol完整runner/CLI；Python最低3.12与开发3.14各556passed；后续control修复版本须更新验收 |
+| 47,48,49 | — | C/E公开seam；ed506f44真实Pi/smol完整runner/CLI；Python最低3.12与开发3.14各582passed，宽套2410passed；未用历史green替代新版本验收 |
 
 ## 26 个 acceptance matrix 场景
 
@@ -189,8 +189,8 @@ E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence�
 | 14 | fail-fast完整dispositions/drain | C ordinary-failures；E真实Provider failure fail-fast |
 | 15 | 显式stop/真实同步Tool阻塞 | E `test_real_synchronous_tool_stop_drains_actual_started_work_and_resources`；C stop cleanup；F `test_broken_stop_observation_drains_actual_started_work_and_cleanup` |
 | 16 | submitted/startup stop race | C `test_stop_at_submitted_startup_seam_has_no_fictitious_invocation_identity`；F `test_true_once_stop_at_invocation_start_is_latched_for_entire_batch` |
-| 17 | observer普通/control异常 | C observer-failure；F `test_observer_control_survives_secondary_required_receipt_failure`；终态写入再次抛control的复核P1仍待修复 |
-| 18 | runtime creation/close/resource close | C construction/cleanup/root retry；B retained handles；F `test_worker_control_survives_secondary_cleanup_and_owner_retry`及root teardown故障；Pi真实physical lifecycle fault tests；同一复核P1待修复 |
+| 17 | observer普通/control异常 | C observer-failure；F `test_observer_control_survives_secondary_required_receipt_failure`；terminal-control公开矩阵保留原始signal与secondary cause |
+| 18 | runtime creation/close/resource close | C construction/cleanup/root retry；B retained handles；F `test_worker_control_survives_secondary_cleanup_and_owner_retry`及root teardown故障；Pi真实physical lifecycle fault tests；新增terminal-control矩阵已通过 |
 | 19 | side effect后失败无整项重放 | E `test_real_provider_failure_keeps_dispositions_and_never_replays_side_effect` |
 | 20 | owner exit-registration race/stale | C `test_owner_close_registration_race_drains_accepted_and_rejects_zero_work`、nested/stale |
 | 21 | capacity-one parent-child | C `test_nested_child_map_uses_independent_window_and_self_close_fails_immediately` |
@@ -198,15 +198,15 @@ E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence�
 | 23 | 并发记录/root refs/credentials | B storage；C双batch；E actual secret scan |
 | 24 | Worker容量与多Tool calls解耦 | E fixed-plan两runtime、容量1/20、同响应read+MCP；Pi Tools真实dispatch回归 |
 | 25 | 固定plan在1/20等价 | E `test_fixed_business_plan_survives_capacity_changes_with_real_runtime_ownership` |
-| 26 | 真实Pi/smol Application/CLI | E deterministic真runtime两CLI；bb3c63a9有界live均完整CLI成功；后续产品修复须更新相关验收 |
+| 26 | 真实Pi/smol Application/CLI | E deterministic真runtime两CLI；ed506f44有界live均完整CLI成功，终态/receipt/物理清理一致 |
 
 审计没有把已知缺口计作通过。原 F 配置导入、mixed-runtime caller、repo_map collection、
 broken-token、startup stop及普通二次cleanup/persistence修复已经通过集成版本测试。
-新增的 terminal persistence control/control 组合仍属产品缺口，后续修复要保留原始对象和
-secondary cause，并刷新新版本验收。早期 prompt-root 网络 preflight 只用于定位连接问题，
+新增的 terminal persistence control/control 缺口已由 `30605297` 保留原始对象和
+secondary cause，并在集成源码 `ed506f44` 完成全部新版本验收。早期 prompt-root 网络 preflight 只用于定位连接问题，
 不替代新 map 的任何验收结果。
 
-## 集成版本 bb3c63a9 的证据与后续门槛
+## 历史集成版本 bb3c63a9 的证据与后续门槛
 
 2026-10-12 回读的冻结版本为 `bb3c63a97b70ad7db8f39bc3711a60d4d1f5d129`。
 这次记录只修改文档，没有再运行 Provider，也没有改变产品或测试。完整非 docs tree 的
@@ -320,7 +320,7 @@ model 输入为 0600。不删除历史失败，也不为报告改写历史产物
 exit records、CLI terminal、完整 batch 和 physical cleanup 核对进程完成状态。这些索引仍
 明确记录复核新增的 control/control 缺口，不能把“ID 齐全”或旧绿色测试当作它已通过。
 
-### 尚未关闭的交付要求
+### 当时尚未关闭的交付要求（修复后证据见下节）
 
 独立 Standards 复核在 `bb3c63a9` 没有剩余 hard/judgement finding；独立 Spec 复核确认
 原修复成立，但新增 P1：`persist_uncaught_failure` 只捕获 `Exception`，终态写入第二个
@@ -332,3 +332,93 @@ exit records、CLI terminal、完整 batch 和 physical cleanup 核对进程完�
 另一个任务拥有 main 前置提交发布；本报告不改变 PR #11 的 draft/baseline-target 状态。
 PR retarget、公开同步 CI/合并、ticket closure 和本任务 worktree cleanup 仍是 integration
 交付要求，不能因为当前版本的验收证据齐全而标记整个 spec 完成。
+
+## 最终冻结源码 ed506f44：产品验收关闭
+
+`306052971e6eaba16bbaef3ccbc32023c7033782` 修复 terminal persistence 的第二个 control
+遮蔽原始信号问题，集成冻结点为 `ed506f4474552ab13ed622894c7e64ce6da89516`。
+二者完整非 docs tree 相同，SHA-256 为
+`2314313f9b7a3263073b77ed4f7036d47d5ab5390ca57192c69f2a08097c993e`。
+Runtime harness 选择的 source tree 指纹为
+`51cd41e1c0ecbf4be41ba8123ce5b6d834e73798709e04676cb13367323aa479`。
+下面每个测试和 campaign 都在 clean 冻结源码上运行，返回后确认 source unchanged。
+本报告提交只改 docs，不以旧版本的绿色结果替代修复版本验收。
+
+新 acceptance 证据根目录为
+`/Users/bytedance/code/AgentLoom-private/.agentloom/validation/worker-batch-acceptance-20261012/final-ed506f44`。
+完整宽套证据另在同级 `worker-batch-final-20261012/final-ed506f44`。
+
+| 检查 | 真实结果 | 证据文件 |
+| --- | --- | --- |
+| Python 3.12.13 合同/真实 Runtime/迁移/架构验收 | 582 passed，0 skipped，JUnit 222.638 s，exit 0 | `py312-acceptance.xml/log`、`py312-acceptance-result.json` |
+| Python 3.14.8 同范围验收 | 582 passed，0 skipped，JUnit 215.624 s，exit 0 | `py314-acceptance.xml/log`、`py314-acceptance-result.json` |
+| repo_map 独立收集，3.12 / 3.14 | 各 60 passed、0 skipped，JUnit 21.254 / 21.169 s，exit 0 | `repo-map-py312.xml/log`、`repo-map-py314.xml/log`及各自 result |
+| CI 等价宽套，Python 3.14.8 | 2,410 passed、1 Windows-only skip；日志 761.45 s、JUnit 761.405 s、进程 wall 763.089 s，exit 0 | final 目录的 `pytest.xml/log`、`attempt.json`、`result.json` |
+| Pi 完整真实 Provider CLI，容量 1 / 2 项 | `run.completed`，batch completed，2/2 success，32.809 s，exit 0，无 timeout | `live-pi-attempt1/campaign.json`、`pi/report.json`、`pi/cli.stdout` |
+| smolagents 完整真实 Provider CLI，容量 2 / 2 项 | `run.completed`，batch completed，2/2 success，13.999 s，exit 0，无 timeout | `live-smolagents-attempt1/campaign.json`、`smolagents/report.json`、`smolagents/cli.stdout` |
+
+支持版本 preflight 均导入 E 工作树自己的 source：Python 3.12 的 MCP 为 1.30.0，
+3.14/live 的 MCP 为 1.26.0，其他已列 Runtime 依赖与前节相同；均为 Node24.15.0/ABI137、
+Pi SDK1.0.0。唯一 skip 仍是 Windows/wexpect 专用编码测试；Runtime 和 batch 无跳过。
+
+### 精确启动记录和公开合同覆盖
+
+每次启动前已保存精确 argv、cwd、环境 overlay、source assert、版本和两个 tree 指纹：
+
+- `commands.json`：两个支持版本及两个 repo_map 独立 pytest argv；`preflight-py312.json` / `preflight-py314.json` 记录实际导入路径和依赖。
+- `results.json` 及四个 `*-result.json`：真实退出码、耗时、JUnit 数量、最终 source 状态。
+- `live-launch-attempt1.json`：两个有界 Provider 父进程 argv；各 `campaign.json`：真实 child argv、退出码、耗时、父进程 PID 复查。
+- 宽套 `attempt.json` / `result.json`：根 integration 的完整 CI 等价命令，使用上一节相同 pytest scope 和新的绝对 JUnit 路径。
+
+支持版本使用全 `tests/application_test`（包含新 terminal-control module）及前节实际观测的
+其他合同/Runtime/架构 modules，显式关闭 plugin autoload、加载 AnyIO/pytest-mock、采用
+importlib collection。pytest source assert 通过结构化 subprocess argv 执行，没有历史 shell
+引号错误。所有实际命令均保存于 JSON，没有反推或伪造缺失的历史 argv。
+Provider 命令仍为前节相同 profile/items/capacity/deadline 参数，新目的地是上述 `final-ed506f44`
+目录；smol 使用同一进程内 Ark route。每个 Runtime 只有一次新 attempt，未重放 Worker。
+
+`final-contract-evidence-audit.json` 核对原 Spec、当前报告归属表及实际 XML：50 stories、
+39 decisions、26 matrix rows 无重复或遗漏；63 个公开 batch/配置边界测试函数在两个版本
+和宽套均有通过记录。新增 terminal-control module 的 26 个公开变体也在三个 XML 中逐项核对：
+
+- 18 个 original/secondary 控制类型组合：KeyboardInterrupt、SystemExit、custom BaseException × 两个公开 entrypoints。
+- 2 个普通 Application 错误后首个 terminal control：新 control 传播，原普通 cause 保留。
+- 6 个成功工作后首个 terminal control：信号可观测，成功 batch 保持真实状态。
+
+这些断言检查 exact exception identity、typed secondary causes、实际 started/canceled
+dispositions、invocation IDs、真实 Runtime drain 及 runner terminal events，不检查私有线程池状态。
+独立两轴复核在 `30605297` 无新 finding，其源码与冻结版本相同；原复核文本保留在
+[review-fixes](worker-batch-execution-v1-review-fixes.md)。复核时尚未完成的最低版本 focused
+运行随后实际通过：`final-py312-attempt2.xml` 为 162 passed、0 skipped、8.911 s；首次 Phoenix
+autoload 缺少 `pkg_resources` 的失败日志没有删除。宽套和两版本 582 进一步关闭最终版本门槛。
+
+### 终态、资源和历史证据保全
+
+Pi Run/batch：`run_20261012T041646873607Z_59f24e57b4b1` /
+`batch_20261012T041650513931Z_77ec7c2c961b`；smol Run/batch：
+`run_20261012T041646873635Z_e287889c2460` / `batch_20261012T041650223313Z_f8062570e399`。
+请求 overlay 均为 retries1/timeout45/max-output2048；每项独立 invocation、真实 Tool trace、
+Hook/local 身份、usage、checkpoint 和 persisted batch/root receipt 一致。
+子进程退出前所有 owned PID/listener/callback thread 无残留，Pi 3 个 private directory 删除；
+父进程复查 Pi 5 个及 smol 2 个已登记 PID，全部退出。child actual-key scan 为 221 / 243 个
+文件，campaign 层 225 / 247，均零匹配。`final-terminal-evidence-audit.json` 交叉核对真实
+exit records、CLI `run.completed`、完整 batch、物理清理和宽套 source unchanged。
+
+E 工作树内遗留的 `e-runtime-attempt3` 至 `8` 已按原内容和 modes 归档至：
+`/Users/bytedance/code/AgentLoom-private/.agentloom/validation/worker-batch-delivery-20261012/retired-worktree-evidence/acceptance-validation`。
+`acceptance-validation-archive.json` 记录 11,205 个 regular files、1,448 个目录、15 个 symlink、
+22,164,565 bytes，内容/mode mismatch 为 0。只复制验证证据，保留 symlink 而不复制目标；
+没有复制 venv、SDK、node_modules 或 caches。工作树清理不会丢失历史 scaffolding 失败物证。
+
+完整实际凭据和 fixture-key 扫描覆盖全部 9 个任务证据目录，包括这份归档、初期 preflight、
+F/terminal 修复 red→green、历史失败以及新宽套/live。当前扫描为 46,483 个文件、
+87,514,847 bytes，actual credential / synthetic fixture match / read error 均为 0，见
+`final-artifact-secret-scan.json`。239 个 model 输入单独分类、排除于产物计数；其中含当前
+实际凭据的 6 个输入全部 0600。历史纯 fixture modes 如实保留，新 live config 为 0700、
+model 为 0600；没有输出或保存 API key / Pi access-refresh 值。
+
+产品修复、完整合同矩阵、支持版本、两个真实 Runtime 和宽套验收均已关闭。
+main 前置提交仍由其他任务发布；PR base/public CI/合并、issue closure 是剩余外部交付工作。
+清理已开始：`worker-batch-delivery-20261012/worktree-cleanup.json` 的 2026-10-12 04:21 UTC
+快照记录 policy/application/legacy/terminal-control 四个工作树已正常移除，分支保留；
+lifecycle/review-fixes/E 的后续清理由 merger 在文档合入后处理，最终状态以该 durable receipt 为准。本报告没有将 draft/baseline-target PR 视作已发布或已合并。
