@@ -508,3 +508,26 @@ def test_smol_adapter_owns_todo_and_terminal_tools(mode, present):
         assert ("## Task Tracking" in runtime._native_runtime.prompt_templates["system_prompt"]) is present
     finally:
         runtime.close()
+
+
+def test_runtime_close_retries_only_failed_native_handle():
+    gateway = _RecordingGateway()
+
+    class Native:
+        memory = SimpleNamespace(steps=[])
+        step_callbacks = SimpleNamespace(register=lambda *_args, **_kwargs: None)
+        attempts = 0
+
+        def close(self):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise OSError("temporary native close failure")
+
+    native = Native()
+    runtime = SmolagentsRuntimeAdapter(native, model_binding=_definition().model, tool_gateway=gateway)
+    with pytest.raises(OSError, match="temporary native close failure"):
+        runtime.close()
+    runtime.close()
+    runtime.close()
+    assert native.attempts == 2
+    assert gateway.close_calls == 1

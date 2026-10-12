@@ -42,7 +42,8 @@ print(scan_app_structure('applications/<app_name>'))
   `input_schema` / `output_schema`。
 - `tools` 是否与 YAML `task` 动作匹配。
 - `agent_runtime`、`model_type`、所选基座的 `runtime_options` 是否合理。
-- Agent YAML 是否误写 LLM 参数、无效 `runtime_options.planning_interval` / `runtime_options.todo_mode` / `concurrency`、非字符串 `runtime_options.prompt_template_path`、错误 `fixed_args` 或 `mcp_servers`。
+- Agent YAML 是否误写 LLM 参数、无效 `runtime_options.planning_interval` / `runtime_options.todo_mode`、非字符串 `runtime_options.prompt_template_path`、错误 `fixed_args` 或 `mcp_servers`。
+- Agent YAML 不得配置已退休的 `concurrency` / `worker_execution`；Worker policy 只配置在项目/Application system.yaml，所有 concurrency 值都为严格正整数。
 - 生成器不得输出旧顶层 smol 参数：运行时会静默忽略，不会替作者转换或拒绝。`todo_mode` 的 `"on"` / `"off"` 必须加引号。
 - Goal mapping 是否显式配置 `enabled`、Worker 是否错误配置 Goal；所有
   `task` 是否都是非空字符串或非空字符串列表。

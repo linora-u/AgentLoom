@@ -691,6 +691,7 @@ def _walk_definitions(
     cache: AgentDefinitionCache,
     root_path_is_pinned: bool = False,
     snapshot_session: _DefinitionSnapshotSession | None = None,
+    application_config: Mapping[str, Any] | None = None,
 ) -> ApplicationDefinitionInspection:
     from agentloom.app.paths import worker_reference_candidate
 
@@ -738,8 +739,8 @@ def _walk_definitions(
             effective_catalog = catalog
             if base is not None:
                 try:
-                    application_config = None
-                    if path_is_pinned:
+                    captured_application_config = application_config
+                    if path_is_pinned and captured_application_config is None:
                         if snapshot_session is None:
                             raise ValueError("Pinned Application inspection requires a snapshot session")
                         current = path.parent
@@ -747,7 +748,7 @@ def _walk_definitions(
                             current = current.parent
                         if current.name != "workflows":
                             raise ValueError("Cannot locate Application workflows directory")
-                        application_config = snapshot_session.read_config(
+                        captured_application_config = snapshot_session.read_config(
                             current.parent / "config" / "system.yaml"
                         )
                     snapshots[path] = build_effective_agent_config_snapshot(
@@ -755,7 +756,7 @@ def _walk_definitions(
                         source_name=str(path),
                         base_config=base,
                         source_path_is_pinned=path_is_pinned,
-                        application_config=application_config,
+                        application_config=captured_application_config,
                     )
                     # Explicit inspection catalogues remain supported for tools
                     # that validate in-memory definitions without project models.
@@ -907,6 +908,7 @@ def inspect_application_definition(
     base_config: UnifiedConfig | None = None,
     root_path_is_pinned: bool = False,
     snapshot_session: _DefinitionSnapshotSession | None = None,
+    application_config: Mapping[str, Any] | None = None,
 ) -> ApplicationDefinitionInspection:
     """Read and validate one complete topology without constructing a runtime."""
     root = project_root.resolve()
@@ -929,6 +931,7 @@ def inspect_application_definition(
         cache=definition_cache if definition_cache is not None else {},
         root_path_is_pinned=root_path_is_pinned,
         snapshot_session=snapshot_session,
+        application_config=application_config,
     )
     return ApplicationDefinitionInspection(
         inspection.definitions,

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 # ─── Helpers ────────────────────────────────────────────────────── #
 
-def _make_minimal_config(concurrency=None):
+def _make_minimal_config():
     """Build a minimal YAML config dict for testing."""
     config = {
         "name": "test_worker",
@@ -32,8 +32,6 @@ def _make_minimal_config(concurrency=None):
             "additionalProperties": False,
         },
     }
-    if concurrency is not None:
-        config["concurrency"] = concurrency
     return config
 
 

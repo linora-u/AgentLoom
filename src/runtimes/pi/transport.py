@@ -1,30 +1,37 @@
 """Correlated JSONL transport. Readers never execute callbacks outside the Run context."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import os
+import signal
+import subprocess
+import sys
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Queue, Empty
-import signal
-import sys
-import subprocess
+from queue import Empty, Queue
 from tempfile import TemporaryDirectory
 from threading import Lock, RLock, Thread
-import time
-from typing import Callable
 from uuid import uuid4
 
-from agentloom.runtimes.pi.protocol import (
-    BridgeError, Cancel, Close, Event, Request, RequestPayload, Response,
-    decode_message, encode_message,
-)
-from agentloom.runtimes.pi.install import find_node, installed_pi_entry
-from agentloom.runtimes.pi.environment import build_pi_subprocess_env
 from agentloom.execution.agent_runtime import AgentRuntimeError, RuntimeErrorCategory
-from agentloom.execution.resources import register_resource
 from agentloom.execution.process import terminate_process_tree
+from agentloom.execution.resources import register_resource
+from agentloom.runtimes.pi.environment import build_pi_subprocess_env
+from agentloom.runtimes.pi.install import find_node, installed_pi_entry
+from agentloom.runtimes.pi.protocol import (
+    BridgeError,
+    Cancel,
+    Close,
+    Event,
+    Request,
+    RequestPayload,
+    Response,
+    decode_message,
+    encode_message,
+)
 
 
 @dataclass
@@ -264,23 +271,28 @@ class PiTransport:
                 return
             self._closing = True
         try:
-            if self.process.poll() is None:
-                try:
-                    self.request(Close(method="close"), timeout=2)
-                    self.process.wait(timeout=2)
-                except (AgentRuntimeError, subprocess.TimeoutExpired):
-                    self._terminate()
-                    self.process.wait(timeout=2)
+            try:
+                if self.process.poll() is None:
+                    try:
+                        self.request(Close(method="close"), timeout=2)
+                        self.process.wait(timeout=2)
+                    except (AgentRuntimeError, subprocess.TimeoutExpired):
+                        self._terminate()
+                        self.process.wait(timeout=2)
+            finally:
+                self._terminate()
+                self._reader.join(timeout=2)
+                for pipe in (self.process.stdin, self.process.stdout):
+                    if pipe is not None:
+                        pipe.close()
+                # Validate buffered frames before installing a synthetic close reason.
+                # A late duplicate response must retain its protocol failure.
+                self._fail("Pi bridge closed", category="interrupted")
+                self._directory.cleanup()
+            with self._lock:
+                self._closed = True
         finally:
-            self._terminate()
-            self._closed = True
-            self._reader.join(timeout=2)
-            for pipe in (self.process.stdin, self.process.stdout):
-                if pipe is not None:
-                    pipe.close()
-            # Validate buffered frames before installing a synthetic close reason.
-            # A late duplicate response must retain its protocol failure.
-            self._fail("Pi bridge closed", category="interrupted")
-            self._directory.cleanup()
+            with self._lock:
+                self._closing = False
         if self._failure is not None and self._failure.category != "interrupted":
             raise self._failure

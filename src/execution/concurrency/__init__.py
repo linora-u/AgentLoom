@@ -1,19 +1,56 @@
-"""
-Concurrency utilities for AgentLoom framework.
+"""Finite Worker batch contracts and Runtime-independent concurrency utilities."""
 
-Provides thread-safe rate limiting, parallel agent execution, and
-shared 429-error coordination for multi-threaded LLM API calls.
-"""
-
+from agentloom.execution.concurrency.batch_models import (
+    BatchEvent,
+    BatchOutcome,
+    BatchStatus,
+    CleanupDiagnostic,
+    FailureMode,
+    JSONInput,
+    ObserverDiagnostic,
+    WorkerBatchError,
+    WorkerError,
+    WorkerOutcome,
+    WorkerStatus,
+    WorkItem,
+    WorkPlan,
+)
+from agentloom.execution.concurrency.models import TaskResult
+from agentloom.execution.concurrency.parallel_executor import ParallelAgentExecutor
+from agentloom.execution.concurrency.policy import (
+    ResolvedWorkerExecution,
+    WorkerExecutionSource,
+    WorkerExecutionSourceName,
+    resolve_worker_execution,
+    validate_concurrency,
+    validate_worker_execution,
+)
 from agentloom.execution.concurrency.rate_limiter import (
     GlobalRateLimiterRegistry,
     GlobalRateLimitState,
     ThreadSafeRateLimiter,
 )
-from agentloom.execution.concurrency.parallel_executor import ParallelAgentExecutor
-from agentloom.execution.concurrency.models import TaskResult
 
 __all__ = [
+    "BatchEvent",
+    "BatchOutcome",
+    "BatchStatus",
+    "CleanupDiagnostic",
+    "FailureMode",
+    "JSONInput",
+    "ObserverDiagnostic",
+    "WorkerBatchError",
+    "WorkerError",
+    "WorkerOutcome",
+    "WorkerStatus",
+    "WorkItem",
+    "WorkPlan",
+    "ResolvedWorkerExecution",
+    "WorkerExecutionSource",
+    "WorkerExecutionSourceName",
+    "resolve_worker_execution",
+    "validate_concurrency",
+    "validate_worker_execution",
     "GlobalRateLimiterRegistry",
     "GlobalRateLimitState",
     "ThreadSafeRateLimiter",

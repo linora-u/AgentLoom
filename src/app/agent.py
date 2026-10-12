@@ -13,6 +13,7 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from agentloom.app.invocation import InvocationEvidence
     from agentloom.app.lifecycle import ApplicationRunLifecycle
 
 from agentloom.app.composition import build_builtin_runtime_registry
@@ -726,10 +727,30 @@ class RoleDrivenAgent(BaseAgent):
 
         registry = build_builtin_runtime_registry()
         definition = self._build_runtime_definition()
+        from agentloom.execution import get_current_run_context
+        from agentloom.execution.resources import register_resource
+
+        run_owned = get_current_run_context() is not None
+        if run_owned:
+            register_resource(
+                f"invocation-gateway:{id(definition.tool_gateway)}",
+                definition.tool_gateway.close,
+                instance_id=self._agent_id,
+            )
         try:
             runtime = registry.create(definition)
-        except BaseException:
-            definition.tool_gateway.close()
+        except BaseException as error:
+            # Bound invocations release the gateway in their normal finally
+            # path, so a failed close cannot replace the creation error and
+            # remains registered for the original Run's finalization retry.
+            if not run_owned:
+                try:
+                    definition.tool_gateway.close()
+                except BaseException as cleanup_error:
+                    from agentloom.app.invocation import InvocationCleanupError
+
+                    error._invocation_cleanup_errors = (InvocationCleanupError("tool_gateway_close", cleanup_error),)
+                    error.add_note(f"Tool gateway close also failed: {cleanup_error}")
             raise
         profile = self._role_profile()
         if profile.enable_sub_task_tracking:
@@ -757,6 +778,7 @@ class RoleDrivenAgent(BaseAgent):
         application_lifecycle: "ApplicationRunLifecycle | None" = None,
         resume: bool = False,
         additional_args: dict[str, Any] | None = None,
+        invocation_evidence: "InvocationEvidence | None" = None,
     ) -> JSONValue:
         """Run inside one explicit root-run binding.
 
@@ -784,6 +806,7 @@ class RoleDrivenAgent(BaseAgent):
                         resume=resume,
                         additional_args=additional_args,
                         owns_root_run=owns_root_run,
+                        invocation_evidence=invocation_evidence,
                     ).run()
 
         with self._cached_runtime_run_lock:

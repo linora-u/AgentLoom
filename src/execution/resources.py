@@ -8,15 +8,24 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from weakref import WeakValueDictionary
 from threading import RLock
+from weakref import WeakValueDictionary
 
 from agentloom.execution import get_current_run_context
 from agentloom.execution.trace import get_current_agent_id
 
 RuntimeKey = tuple[str, str, str, str]
 _lock = RLock()
-_resources: dict[tuple[RuntimeKey, str, str], Callable[[], None]] = {}
+
+
+@dataclass
+class _ResourceHandle:
+    close: Callable[[], None]
+    lock: RLock = field(default_factory=RLock)
+    closed: bool = False
+
+
+_resources: dict[tuple[RuntimeKey, str, str], _ResourceHandle] = {}
 
 
 @dataclass
@@ -56,13 +65,38 @@ def register_resource(key: str, close: Callable[[], None], *, instance_id: str |
     if context is None:
         return
     owner = instance_id if instance_id is not None else get_current_agent_id() or ""
+    resource_key = (context.runtime_key, owner, key)
     with _lock:
         state = _scope(context.runtime_key)
         cancelled = state.run_closed or owner in state.closed_instances
-        if not cancelled:
-            _resources.setdefault((context.runtime_key, owner, key), close)
+        handle = _resources.setdefault(resource_key, _ResourceHandle(close))
     if cancelled:
-        close()
+        _close_handle(resource_key, handle)
+
+
+def _close_handle(resource_key: tuple[RuntimeKey, str, str], handle: _ResourceHandle) -> None:
+    # Leave a failed handle registered under its original owner. The final Run
+    # cleanup may retry it, and concurrent cleanup cannot call it twice at once.
+    with handle.lock:
+        if not handle.closed:
+            handle.close()
+            handle.closed = True
+        with _lock:
+            if _resources.get(resource_key) is handle:
+                del _resources[resource_key]
+
+
+def retain_failed_resource(key: str, close: Callable[[], None], *, instance_id: str) -> None:
+    """Retain an already-failed close for the original Run's finalization retry.
+
+    Unlike registering new work, this never calls the failed callback during
+    registration, even when instance cleanup already marked its owner closed.
+    """
+    context = get_current_run_context()
+    if context is None:
+        return
+    with _lock:
+        _resources.setdefault((context.runtime_key, instance_id, key), _ResourceHandle(close))
 
 
 def _close(instance_id: str | None) -> None:
@@ -80,15 +114,15 @@ def _close(instance_id: str | None) -> None:
             for key in _resources
             if key[0] == context.runtime_key and (instance_id is None or key[1] == instance_id)
         ]
-        callbacks = [_resources.pop(key) for key in keys]
+        handles = [(key, _resources[key]) for key in keys]
     errors = []
-    for callback in reversed(callbacks):
+    for resource_key, handle in reversed(handles):
         try:
-            callback()
-        except Exception as exc:
+            _close_handle(resource_key, handle)
+        except BaseException as exc:
             errors.append(exc)
     if errors:
-        raise ExceptionGroup("Execution resource cleanup failed", errors)
+        raise BaseExceptionGroup("Execution resource cleanup failed", errors)
 
 
 def close_instance_resources(instance_id: str) -> None:

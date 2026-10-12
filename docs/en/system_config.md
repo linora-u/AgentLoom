@@ -21,6 +21,7 @@ See [configuration path migration](config_paths.md) when upgrading existing conf
 
 ## Table of Contents
 
+- [worker_execution — Finite Worker Capacity](#worker_execution--finite-worker-capacity)
 - [redaction — Content Redaction](#redaction--content-redaction)
 - [Quick Reference: Representative YAML Structure](#quick-reference-representative-yaml-structure)
 - [1. system — System Metadata](#1-system--system-metadata)
@@ -40,6 +41,16 @@ See [configuration path migration](config_paths.md) when upgrading existing conf
 - [Appendix B: Application-Level Override and Directory Structure](#appendix-b-application-level-override-and-directory-structure)
 
 ---
+
+## worker_execution — Finite Worker Capacity
+
+Set project `worker_execution.defaults.concurrency` to a strict positive integer
+(default **1**). Application `config/system.yaml` can replace the default and add
+`workers` keyed by real Application-relative Worker YAML paths. Project Worker
+tables, Agent-local settings, unsupported Supervisor defaults and `auto` are
+rejected. Each `BoundWorker.map()` resolves its own call override; Worker count
+is independent of Provider RPM and Runtime Tool dispatch. See the full
+[policy, batch and migration contract](agent_config.md#312-worker_execution--finite-worker-batches).
 
 ## redaction — Content Redaction
 

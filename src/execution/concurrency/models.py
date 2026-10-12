@@ -4,8 +4,8 @@ Data models for the concurrency module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -15,9 +15,9 @@ class TaskResult:
 
     Attributes:
         task_id: Unique identifier for the task.
-        status: One of "completed", "failed", or "skipped" (circuit breaker).
+        status: One of "completed", "failed", or "skipped" (unstarted cancellation).
         result: Return value from the agent tool (only if completed).
-        error: Error message string (only if failed).
+        error: Error message string or unstarted cancellation reason.
         error_trace: Full traceback string (only if failed).
         duration_seconds: Wall-clock execution time.
     """
@@ -25,6 +25,6 @@ class TaskResult:
     task_id: str
     status: str  # "completed" | "failed" | "skipped"
     result: Any = None
-    error: Optional[str] = None
-    error_trace: Optional[str] = None
+    error: str | None = None
+    error_trace: str | None = None
     duration_seconds: float = 0.0

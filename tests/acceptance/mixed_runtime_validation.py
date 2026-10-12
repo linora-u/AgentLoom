@@ -2,17 +2,17 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
-from dataclasses import replace
 import json
 import os
-from pathlib import Path
 import shutil
 import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
 
 import yaml
 
@@ -124,7 +124,7 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
     mode, direction = case.split('_', 1)
     workflow = workspace / f'applications/{APP}/workflows/{direction}.yaml'
     definition = yaml.safe_load(workflow.read_text())
-    definition.update(model_type=profile, concurrency=3)
+    definition.update(model_type=profile)
     worker_path = workflow.parent.parent / definition['worker_agents'][0]['path']
     worker = yaml.safe_load(worker_path.read_text())
     worker['model_type'] = profile
@@ -133,7 +133,7 @@ def run_mixed(case: str, workspace: Path, profile: str) -> list[dict]:
     tokens = ['MIXED-ALPHA-8149']
     if mode == 'parallel':
         tokens = ['MIXED-ALPHA-8149', 'MIXED-BETA-3952', 'MIXED-REPEAT-6471']
-        for name, token in zip(['left', 'right', 'repeat'], tokens):
+        for name, token in zip(['left', 'right', 'repeat'], tokens, strict=True):
             (workspace / f'{name}.txt').write_text(f'Verification token: {token}\n')
         definition['workflow'] = ('First issue two inspect_note calls in one parallel batch: {"query":"left.txt"} and {"query":"right.txt"}. '
             'These are two different files; preserve each query exactly. After both finish, call inspect_note({"query":"repeat.txt"}) separately. '

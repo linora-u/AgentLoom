@@ -17,12 +17,13 @@ import re
 import stat
 import threading
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, TextIO
+from weakref import WeakValueDictionary
 
 _SAFE_PART = re.compile(r"[^A-Za-z0-9._-]+")
 _CURRENT_RUN_CONTEXT: contextvars.ContextVar[RuntimeContext | None] = contextvars.ContextVar(
@@ -32,6 +33,22 @@ _DIRECTORY_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os
 _FILE_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 RUNTIME_ROOT_ENV = "AGENTLOOM_RUNTIME_ROOT"
 _UNSET_ROOT_MEMORY_SNAPSHOT = object()
+_MANIFEST_LOCKS: WeakValueDictionary[str, Any] = WeakValueDictionary()
+_MANIFEST_LOCKS_GUARD = threading.RLock()
+
+
+@contextmanager
+def _locked_manifest(path: Path) -> Iterator[None]:
+    # RuntimeContext copies (including independently created equivalent
+    # contexts) must coordinate the entire read/modify/write transaction.
+    with _MANIFEST_LOCKS_GUARD:
+        key = str(path)
+        lock = _MANIFEST_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _MANIFEST_LOCKS[key] = lock
+    with lock:
+        yield
 
 
 class RootRunState:
@@ -357,6 +374,50 @@ class RuntimeContext:
     @property
     def manifest_path(self) -> Path:
         return self.run_dir / "manifest.json"
+
+    def batch_record_path(self, batch_id: str) -> Path:
+        """Return one batch's canonical Run-owned receipt path."""
+        identity = validate_runtime_id(batch_id, field="batch_id")
+        return self.run_dir / "batches" / f"{identity}.json"
+
+    def write_batch_record(self, batch_id: str, payload: Mapping[str, Any]) -> Path:
+        """Persist separate batch evidence with canonical parent identities."""
+        from agentloom.execution.agent_runtime import copy_json_value
+        from agentloom.self_learning.redaction import redact_value
+
+        path = self.batch_record_path(batch_id)
+        if not isinstance(payload, Mapping):
+            raise TypeError("batch record must be a mapping")
+        record = copy_json_value(payload, field_name="batch record")
+        identity = {
+            "batch_id": batch_id,
+            "application_id": self.application_id,
+            "task_id": self.task_id,
+            "run_id": self.run_id,
+        }
+        for key, value in identity.items():
+            if key in record and record[key] != value:
+                raise ValueError(f"batch record {key} does not match its owner")
+        record = {"schema_version": 1, **record, **identity}
+        _ensure_runtime_directory(path.parent, root=self.root_dir)
+        self.atomic_write_run_file(
+            path,
+            json.dumps(redact_value(record), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
+        return path
+
+    def read_batch_record(self, batch_id: str) -> dict[str, Any]:
+        """Read required batch evidence without following runtime symlinks."""
+        record = json.loads(self.read_run_file(self.batch_record_path(batch_id)))
+        if not isinstance(record, dict):
+            raise ValueError("batch record must contain a JSON object")
+        for key, value in {
+            "batch_id": batch_id, "application_id": self.application_id,
+            "task_id": self.task_id, "run_id": self.run_id,
+        }.items():
+            if record.get(key) != value:
+                raise ValueError(f"batch record {key} does not match its owner")
+        return record
 
     @property
     def logs_dir(self) -> Path:
@@ -749,19 +810,18 @@ class RuntimeContext:
             pass
 
     def update_manifest(self, **updates: Any) -> None:
-        payload: dict[str, Any] = {}
-        if self.manifest_path.exists():
-            try:
+        with _locked_manifest(self.manifest_path):
+            payload: dict[str, Any] = {}
+            if self.manifest_path.exists():
                 loaded = json.loads(self.read_run_file(self.manifest_path))
-                if isinstance(loaded, dict):
-                    payload = loaded
-            except (OSError, json.JSONDecodeError):
-                payload = {}
-        payload.update(updates)
-        self.atomic_write_run_file(
-            self.manifest_path,
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        )
+                if not isinstance(loaded, dict):
+                    raise ValueError("Run manifest must contain a JSON object")
+                payload = loaded
+            payload.update(updates)
+            self.atomic_write_run_file(
+                self.manifest_path,
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            )
 
     def as_dict(self) -> dict[str, str]:
         data = asdict(self)

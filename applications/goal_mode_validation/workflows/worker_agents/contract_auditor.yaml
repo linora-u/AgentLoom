@@ -5,7 +5,6 @@ model_type: "summary"
 runtime_options:
   max_steps: 2
   smart_summary: false
-concurrency: 1
 
 task: |
   Inspect the requested AgentLoom Goal Mode contract slice using only the

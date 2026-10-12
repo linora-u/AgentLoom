@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from .config_validation import validate_system_snapshot
+from .config_validation import validate_system_snapshot, validate_worker_execution
 from .layered_builder import LayeredConfigBuilder
 from .yaml_loader import load_unique_yaml
 
@@ -73,6 +73,9 @@ def load_project_system_config(
         load_config_mapping(system_path, require_exists=require_exists),
         source_name="config/system.yaml",
     )
+    # Validate project scope before an Application can override these values.
+    if "worker_execution" in system_yaml:
+        validate_worker_execution(system_yaml["worker_execution"], scope="project")
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(
             snapshot,

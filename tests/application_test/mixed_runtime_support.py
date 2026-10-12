@@ -17,6 +17,12 @@ class ModelReply(NamedTuple):
     finish_reason: str
 
 
+class ProviderFailure(NamedTuple):
+    """A controlled external HTTP error selected by the actual request."""
+    status: int
+    message: str
+
+
 @contextmanager
 def model_service(
     program: Callable[
@@ -44,6 +50,13 @@ def model_service(
                 return
             try:
                 answer = program(request)
+                if isinstance(answer, ProviderFailure):
+                    self.send_response(answer.status)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': {'message': answer.message,
+                        'type': 'invalid_request_error'}}).encode())
+                    return
                 finish_override = None
                 if isinstance(answer, ModelReply):
                     answer, finish_override = answer
@@ -133,7 +146,7 @@ def project(root: Path, url: str, *, supervisor: str, worker: str) -> Path:
     workflow = root / 'applications/mixed/workflows/root.yaml'
     write_yaml(workflow, {'name': 'mixed', 'agent_runtime': supervisor, 'model_type': 'supervisor',
         'description': 'Verify repository facts with a Worker.', 'task': 'Ask inspect_note to read note.txt and return its token.',
-        'tools': [], 'toolsets': [], 'worker_agents': [{'path': 'workflows/worker_agents/inspect.yaml'}], 'concurrency': 3})
+        'tools': [], 'toolsets': [], 'worker_agents': [{'path': 'workflows/worker_agents/inspect.yaml'}]})
     write_yaml(workflow.parent / 'worker_agents/inspect.yaml', {
         'name': 'inspect_note', 'agent_runtime': worker, 'model_type': 'worker',
         'description': 'Read one requested file.', 'task': 'Read the file named in query and return its exact token.',

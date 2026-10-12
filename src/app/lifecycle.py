@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
@@ -68,6 +69,13 @@ class ApplicationRunResources:
     log: Any
     task_lease: Any | None
     checkpoint_manager: CheckpointManager | None
+    coordinator: Any | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationRunSecondaryError:
+    phase: str
+    error: BaseException
 
 
 class ApplicationRunLifecycle:
@@ -91,6 +99,114 @@ class ApplicationRunLifecycle:
         self._resumable = False
         self._runtime_events: list[RuntimeEvent] = []
         self._runtime_events_lock = RLock()
+        self._batch_records_lock = RLock()
+
+    def initialize_run(self, runtime_context: Any, **manifest: Any) -> Any:
+        """Allocate the canonical Run and lease for either public entrypoint."""
+        runtime_context.prepare_run()
+        lease = runtime_context.run_lease()
+        lease.acquire()
+        try:
+            runtime_context.write_manifest(**manifest)
+        except BaseException as exc:
+            self.release_run_lease(lease, original_error=exc)
+            raise
+        return lease
+
+    def start_task(self, checkpoint_manager: Any, task_id: str, **metadata: Any) -> None:
+        """Create one root Task and its first attempt without requiring an Agent."""
+        checkpoint_manager.record_task_created(task_id, created_at=datetime.now().astimezone().isoformat(), **metadata)
+        checkpoint_manager.record_run_started(task_id)
+
+    @staticmethod
+    @contextmanager
+    def isolate_root_services(execution_context: Any):
+        """Reset inherited root services for both Application entrypoints."""
+        from agentloom.execution.checkpoint.coordinator import isolated_checkpoint_context
+        from agentloom.execution.context_engine.runtime import bind_task_context_engine
+        from agentloom.execution.goal import bind_goal_state_provider
+        from agentloom.execution.trace import bind_explicit_execution_context
+
+        with (
+            isolated_checkpoint_context(),
+            bind_task_context_engine(None),
+            bind_goal_state_provider(None),
+            bind_explicit_execution_context(execution_context),
+        ):
+            yield
+
+    def finish_root_run(
+        self,
+        finalization: ApplicationRunFinalization,
+        resources: ApplicationRunResources,
+        *,
+        drain: Callable[[], None],
+        close_engine: Callable[[], None],
+    ) -> None:
+        """Drain, persist and close every owner while preserving control signals."""
+        original = self.error
+        errors: list[ApplicationRunSecondaryError] = []
+        for phase, callback in (
+            ("drain", drain),
+            ("finalization", lambda: self.finalize_run(finalization)),
+            ("resources", lambda: self.close_resources(resources)),
+            ("context_engine", close_engine),
+        ):
+            try:
+                callback()
+            except BaseException as exc:
+                errors.append(ApplicationRunSecondaryError(phase, exc))
+                if phase == "drain":
+                    if self.phase == "finalization":
+                        self.fail_finalization(exc)
+                    else:
+                        self.fail_execution(exc)
+                elif phase == "context_engine":
+                    self.fail_cleanup(exc)
+        controls = [original, *(entry.error for entry in errors)]
+        control = next((error for error in controls if error is not None and not isinstance(error, Exception)), None)
+        if control is not None:
+            self.retain_secondary_errors(control, errors)
+            raise control
+        if errors:
+            primary = errors[-1].error
+            self.retain_secondary_errors(primary, errors[:-1])
+            raise primary
+
+    @staticmethod
+    def retain_secondary_errors(original: BaseException, errors: list[ApplicationRunSecondaryError]) -> None:
+        """Keep typed causes on the propagated object instead of replacing it."""
+        secondary = tuple(entry for entry in errors if entry.error is not original)
+        if secondary:
+            original.run_secondary_errors = (*getattr(original, "run_secondary_errors", ()), *secondary)
+            for entry in secondary:
+                original.add_note(f"Run {entry.phase} also failed: {type(entry.error).__name__}: {entry.error}")
+
+    @contextmanager
+    def bind_services(self, runtime_context: Any, effective_config: dict, *,
+                      file_logging: bool | None = None, trace_exporter: Any = None):
+        """Own the shared Run context, trace, logger and redaction bindings."""
+        from types import SimpleNamespace
+
+        from agentloom.config.redaction import bind_redaction_policy
+        from agentloom.execution import bind_run_context
+        from agentloom.execution.logging import (
+            LoggingConfigBuilder,
+            bind_logger_backend,
+            get_logger,
+            initialize_run_logger,
+        )
+        from agentloom.execution.observability import RunTrace, bind_trace_recorder
+        from agentloom.execution.presentation import StepPresenter
+        builder = LoggingConfigBuilder().apply_mapping(effective_config.get('logging', {}), source='effective logging config')
+        from agentloom.app.invocation import bind_runtime_event_sink
+        from agentloom.config.config import get_config
+        from agentloom.execution.workspace import bind_workspace_project
+        with bind_workspace_project(get_config().agent_root), bind_redaction_policy(effective_config), bind_run_context(runtime_context), bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder, bind_runtime_event_sink(self.observe_runtime_event):
+            backend = initialize_run_logger(runtime_context, logging_builder=builder, file_logging=file_logging)
+            recorder.attach_presenter(StepPresenter(backend, RunTrace(recorder.storage, runtime_context.run_id)))
+            with bind_logger_backend(backend, context=runtime_context):
+                yield SimpleNamespace(recorder=recorder, logger_backend=backend, log=get_logger(backend, __name__))
 
     @property
     def phase(self) -> RunPhase:
@@ -148,6 +264,33 @@ class ApplicationRunLifecycle:
 
         with self._runtime_events_lock:
             return tuple(self._runtime_events)
+
+    def register_batch_record(self, runtime_context: Any, batch_id: str) -> None:
+        """Aggregate persisted batch references under the Application owner.
+
+        Invocation threads persist their own records. Only this lifecycle
+        performs the shared reference read/modify/write operation.
+        """
+        with self._batch_records_lock:
+            runtime_context.read_batch_record(batch_id)
+            manifest = json.loads(runtime_context.read_run_file(runtime_context.manifest_path))
+            if not isinstance(manifest, dict):
+                raise ValueError("Run manifest must contain a JSON object")
+            references = manifest.get("worker_batches", [])
+            if not isinstance(references, list):
+                raise ValueError("Run worker_batches must be a list")
+            reference = {
+                "batch_id": batch_id,
+                "record": runtime_context.batch_record_path(batch_id).relative_to(runtime_context.run_dir).as_posix(),
+            }
+            for existing in references:
+                if not isinstance(existing, dict):
+                    raise ValueError("Run worker_batches entries must be objects")
+                if existing.get("batch_id") == batch_id:
+                    if existing != reference:
+                        raise ValueError("Batch reference conflicts with its canonical identity")
+                    return
+            runtime_context.update_manifest(worker_batches=[*references, reference])
 
     def report_agent_invocation(
         self,
@@ -310,6 +453,8 @@ class ApplicationRunLifecycle:
                         manifest_updates=finalization.manifest_updates,
                     )
                 except Exception as exc:
+                    if self.error is not None:
+                        self.retain_secondary_errors(self.error, [ApplicationRunSecondaryError("observability", exc)])
                     finalization.log.warning(
                         "Failed to persist Run observability: %s",
                         exc,
@@ -327,6 +472,8 @@ class ApplicationRunLifecycle:
             except Exception as exc:
                 if self.outcome == "completed":
                     raise
+                if self.error is not None:
+                    self.retain_secondary_errors(self.error, [ApplicationRunSecondaryError("manifest", exc)])
                 finalization.log.warning(
                     "Failed to persist terminal manifest: %s",
                     exc,
@@ -391,8 +538,8 @@ class ApplicationRunLifecycle:
         manifest_initialized: bool,
         manifest_updates: Mapping[str, Any],
         error: BaseException,
-    ) -> None:
-        """Best-effort terminal manifest for failures outside finalization."""
+    ) -> BaseException:
+        """Persist terminal evidence and preserve the first control signal."""
 
         if self._phase == "cleanup":
             self.fail_cleanup(error)
@@ -402,7 +549,7 @@ class ApplicationRunLifecycle:
         else:
             self.fail_execution(error)
         if not manifest_initialized:
-            return
+            return error
         try:
             runtime_context.update_manifest(
                 **manifest_updates,
@@ -410,8 +557,16 @@ class ApplicationRunLifecycle:
                 ended_at=datetime.now().astimezone().isoformat(),
                 error=self.error_message,
             )
-        except Exception:
-            return
+        except BaseException as exc:
+            if isinstance(error, Exception) and not isinstance(exc, Exception):
+                # This is the first control signal, so it remains observable
+                # while retaining the ordinary failure that preceded it.
+                self.retain_secondary_errors(exc, [ApplicationRunSecondaryError(self.phase, error)])
+                self._error = exc
+                self._outcome = self.outcome_for(exc)
+                return exc
+            self.retain_secondary_errors(error, [ApplicationRunSecondaryError("manifest", exc)])
+        return error
 
     def _validate_resumable_checkpoint(
         self,
@@ -437,38 +592,37 @@ class ApplicationRunLifecycle:
         heartbeat: Any | None,
         file_history: Any | None,
         log: Any,
+        coordinator: Any | None = None,
     ) -> None:
-        """Close all resources scoped to active Agent execution."""
+        """Close all resources scoped to active Agent execution; preserve failures."""
 
-        try:
-            from agentloom.execution.resources import close_run_resources
-
-            close_run_resources()
-        except Exception as exc:
-            log.debug("Execution resource teardown failed: %s", exc)
+        errors: list[BaseException] = []
+        def close(callback):
+            try:
+                callback()
+            except BaseException as exc:
+                errors.append(exc)
+        from agentloom.execution.resources import close_run_resources
+        close(close_run_resources)
         if heartbeat is not None:
-            try:
-                heartbeat.stop()
-            except Exception:
-                pass
-            try:
-                heartbeat.close()
-            except Exception:
-                pass
-        try:
-            mcp_manager = getattr(supervisor, "_mcp_manager", None)
-            if mcp_manager is not None:
-                mcp_manager.disconnect_all()
-        except Exception:
-            pass
+            close(heartbeat.stop)
+            close(heartbeat.close)
+        mcp_manager = getattr(supervisor, '_mcp_manager', None)
+        if mcp_manager is not None:
+            close(mcp_manager.disconnect_all)
         if file_history is not None:
-            try:
-                file_history.close()
-            except Exception:
-                pass
-        invocation = self._invocation
-        if invocation is not None and invocation.coordinator is not None:
-            self.close_agent_coordinator(invocation.coordinator)
+            close(file_history.close)
+        target = coordinator
+        if target is None and self._invocation is not None:
+            target = self._invocation.coordinator
+        if target is not None:
+            close(lambda: self.close_agent_coordinator(target))
+        if errors:
+            primary = errors[0]
+            for extra in errors[1:]:
+                primary.add_note(f'Additional execution cleanup failure: {type(extra).__name__}: {extra}')
+            self.fail_cleanup(primary)
+            raise primary
 
     def close_agent_coordinator(self, coordinator: Any | None = None) -> None:
         """Deactivate the reported coordinator through one teardown path."""
@@ -496,6 +650,7 @@ class ApplicationRunLifecycle:
                 heartbeat=resources.heartbeat,
                 file_history=resources.file_history,
                 log=resources.log,
+                coordinator=resources.coordinator,
             )
         except BaseException as exc:
             execution_cleanup_error = exc
@@ -539,13 +694,16 @@ class ApplicationRunLifecycle:
         if task_lease_error is not None:
             raise task_lease_error
 
-    def release_run_lease(self, run_lease: Any | None) -> None:
+    def release_run_lease(self, run_lease: Any | None, *, original_error: BaseException | None = None) -> None:
         if run_lease is None:
             return
         try:
             run_lease.release()
-        except BaseException:
+        except BaseException as exc:
             self.enter_cleanup()
+            if original_error is not None and not isinstance(original_error, Exception):
+                self.retain_secondary_errors(original_error, [ApplicationRunSecondaryError("run_lease", exc)])
+                raise original_error from None
             raise
 
 

@@ -39,6 +39,7 @@ from agentloom.runtimes.smolagents.loom_mixin import LoomAgentMixin
 from agentloom.runtimes.smolagents.terminal import final_answer_binding
 from agentloom.runtimes.smolagents.tools.tools import tool
 from agentloom.self_learning.persistence.review_engine import ReviewEngine
+
 from tests.config_test_support import unit_config
 
 
@@ -307,7 +308,6 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
     agent = _make_agent(logger=DummyLoggerBackend())
     agent._effective_agent_config = {
         **agent._config,
-        "concurrency": 2,
         "checkpoint": {"enabled": True},
         "worker_agents": [{"path": 'workflows/worker_agents/worker.yaml'}],
     }
@@ -338,7 +338,6 @@ def test_invocation_populates_runtime_context_identity_and_real_requirements(
     assert request.run_id == "canonical-run"
     assert request.requirements == RuntimeRequirements(
         structured_tools=True,
-        parallel_tools=True,
         checkpoint_resume=True,
         subagents=True,
     )
@@ -2422,3 +2421,156 @@ def test_base_run_emits_task_fail_on_exception(monkeypatch):
     fail_event = next(item for item in events if item[0] is HookEvent.STOP_FAILURE)
     assert fail_event[2]["task_id"] == "task-fail"
     assert fail_event[2]["error"] == "boom-run"
+
+
+def test_agent_run_retains_identity_usage_and_successful_none_in_invocation_evidence(monkeypatch):
+    from agentloom.app.invocation import InvocationEvidence
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = RecordingAgentRuntime(side_effect=lambda request: AgentRuntimeResult(
+        state="success", output=None, usage=RuntimeUsage(input_tokens=7, output_tokens=3, total_tokens=10),
+    ))
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    evidence = InvocationEvidence()
+
+    assert agent.run(task_id="task-evidence", run_id="run-evidence", invocation_evidence=evidence) is None
+    report = evidence.report
+    assert report.agent_id == agent.get_agent_id()
+    assert (report.local_run_id, report.root_run_id, report.task_id) == (
+        "run-evidence", "run-evidence", "task-evidence",
+    )
+    assert report.output is None and report.answer_present
+    assert report.usage.total_tokens == 10
+    assert report.primary_error is None and report.cleanup_complete
+
+
+def test_invocation_evidence_keeps_primary_failure_failed_usage_and_cleanup_phase(monkeypatch):
+    from agentloom.app.invocation import InvocationEvidence
+    from agentloom.execution.agent_runtime import AgentRuntimeError
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = RecordingAgentRuntime(side_effect=lambda request: AgentRuntimeResult(
+        state="failed", output=None, usage=RuntimeUsage(input_tokens=11, output_tokens=2, total_tokens=13),
+    ))
+    close_error = OSError("runtime close failed")
+
+    def fail_close():
+        raise close_error
+
+    runtime.close = fail_close
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    evidence = InvocationEvidence()
+
+    with pytest.raises(AgentRuntimeError) as captured:
+        agent.run(invocation_evidence=evidence)
+
+    report = evidence.report
+    assert report.primary_error is captured.value
+    assert report.error_phase == "invocation"
+    assert report.runtime_results[0].state == "failed"
+    assert report.usage.total_tokens == 13
+    assert [(failure.phase, failure.error) for failure in report.cleanup_errors] == [("runtime_close", close_error)]
+    assert not report.cleanup_complete
+
+
+def test_failed_runtime_close_is_retained_for_original_run_finalization(monkeypatch, tmp_path):
+    from agentloom.app.invocation import InvocationEvidence
+    from agentloom.execution.resources import close_run_resources, register_resource
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    runtime = RecordingAgentRuntime(output="side-effect-already-done")
+    attempts = 0
+    closed = []
+
+    def close_runtime():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("temporary runtime close failure")
+        closed.append("runtime")
+
+    runtime.close = close_runtime
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    evidence = InvocationEvidence()
+    context = RuntimeHome(tmp_path / ".agentloom").new_context(application_id="owned-runtime")
+
+    with bind_run_context(context):
+        register_resource("sibling", lambda: closed.append("sibling"), instance_id="sibling")
+        with pytest.raises(Exception, match="temporary runtime close failure"):
+            agent.run(invocation_evidence=evidence)
+        assert attempts == 1
+        assert closed == []
+        assert evidence.report.output == "side-effect-already-done"
+        assert evidence.report.primary_error is None
+        assert evidence.report.cleanup_errors[0].phase == "runtime_close"
+        close_run_resources()
+
+    assert attempts == 2
+    assert sorted(closed) == ["runtime", "sibling"]
+
+
+def test_invocation_evidence_keeps_observed_usage_when_runtime_raises(monkeypatch):
+    from agentloom.app.invocation import InvocationEvidence
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    run_error = RuntimeError("failure after a billed model turn")
+
+    def fail_after_usage(request):
+        request.event_sink(RuntimeEvent(kind="usage", details={
+            "input_tokens": 17, "output_tokens": 3, "total_tokens": 20,
+        }))
+        raise run_error
+
+    runtime = RecordingAgentRuntime(side_effect=fail_after_usage)
+    monkeypatch.setattr(agent, "build_runtime", lambda: runtime)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    evidence = InvocationEvidence()
+    with pytest.raises(RuntimeError) as captured:
+        agent.run(invocation_evidence=evidence)
+    assert captured.value is run_error
+    assert evidence.report.usage.total_tokens == 20
+    assert evidence.report.runtime_events[0].kind == "usage"
+
+
+def test_runtime_creation_failure_keeps_original_error_and_failed_gateway_owner(monkeypatch, tmp_path):
+    from agentloom.app.invocation import InvocationEvidence
+    from agentloom.execution.agent_runtime import RuntimeRegistry
+    from agentloom.execution.resources import close_run_resources
+
+    agent = _make_agent(logger=DummyLoggerBackend())
+    creation_error = RuntimeError("runtime could not be created")
+    close_error = OSError("MCP disconnect failed")
+
+    class McpManager:
+        attempts = 0
+
+        def disconnect_all(self):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise close_error
+
+    manager = McpManager()
+    agent._mcp_manager = manager
+    registry = RuntimeRegistry()
+
+    def create_runtime(definition):
+        raise creation_error
+
+    registry.register("smolagents", capabilities=RecordingAgentRuntime.capabilities, factory=create_runtime)
+    monkeypatch.setattr(base_agent_module, "build_builtin_runtime_registry", lambda: registry)
+    monkeypatch.setattr(agent, "_inject_memory_snapshot", lambda tasks: tasks)
+    evidence = InvocationEvidence()
+    context = RuntimeHome(tmp_path / ".agentloom").new_context(application_id="creation-cleanup")
+    with bind_run_context(context):
+        with pytest.raises(RuntimeError) as captured:
+            agent.run(invocation_evidence=evidence)
+        assert captured.value is creation_error
+        assert evidence.report.primary_error is creation_error
+        assert evidence.report.error_phase == "runtime_creation"
+        assert evidence.report.cleanup_errors[0].error is close_error
+        assert manager.attempts == 1
+        close_run_resources()
+    assert manager.attempts == 2

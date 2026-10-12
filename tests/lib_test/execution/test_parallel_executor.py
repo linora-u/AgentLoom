@@ -17,7 +17,7 @@ def test_disabled_circuit_breaker_runs_remaining_tasks_after_failure() -> None:
             raise RuntimeError("temporary failure")
         return task_id
 
-    executor = ParallelAgentExecutor(max_workers=1, max_pending=1, circuit_breaker_threshold=None)
+    executor = ParallelAgentExecutor(max_workers=1)
     results = executor.execute_batch(
         [{"task_id": "first"}, {"task_id": "second"}, {"task_id": "third"}], run
     )
@@ -40,7 +40,7 @@ def test_parallel_then_serial_preserves_parent_context_and_legacy_globals(monkey
     baseline = capture_explicit_execution_context()
     barrier = Barrier(workers)
     executor = ParallelAgentExecutor(
-        max_workers=workers, max_pending=workers, circuit_breaker_threshold=None,
+        max_workers=workers,
     )
 
     for round_number in range(10):

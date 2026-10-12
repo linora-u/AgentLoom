@@ -205,6 +205,8 @@ class SmolagentsRuntimeAdapter:
         )
         self._close_lock = RLock()
         self._closed = False
+        self._native_closed = False
+        self._gateway_closed = False
         self._register_checkpoint_bridge()
 
     @property
@@ -558,24 +560,26 @@ class SmolagentsRuntimeAdapter:
 
     def close(self) -> None:
         with self._close_lock:
-            if self._closed:
+            if self._native_closed and self._gateway_closed:
                 return
             self._closed = True
-
-        first_error: Exception | None = None
-        native_close = getattr(self._native_runtime, "close", None)
-        if callable(native_close):
-            try:
-                native_close()
-            except Exception as exc:
-                first_error = exc
-
-        if self._tool_gateway is not None:
-            try:
-                self._tool_gateway.close()
-            except Exception as exc:
-                if first_error is None:
-                    first_error = exc
-
-        if first_error is not None:
-            raise first_error
+            errors: list[BaseException] = []
+            if not self._native_closed:
+                try:
+                    native_close = getattr(self._native_runtime, "close", None)
+                    if callable(native_close):
+                        native_close()
+                    self._native_closed = True
+                except BaseException as exc:
+                    errors.append(exc)
+            if not self._gateway_closed:
+                try:
+                    if self._tool_gateway is not None:
+                        self._tool_gateway.close()
+                    self._gateway_closed = True
+                except BaseException as exc:
+                    errors.append(exc)
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise BaseExceptionGroup("smolagents Runtime cleanup failed", errors)

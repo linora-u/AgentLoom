@@ -271,12 +271,11 @@ def test_runtime_preflight_uses_registry_capabilities(
 
     with pytest.raises(
         UnsupportedRuntimeError,
-        match="parallel_tools, checkpoint_resume, subagents",
+        match="checkpoint_resume, subagents",
     ):
         validate_runtime_agent_config(
             _agent_config(
                 agent_runtime="minimal",
-                concurrency=2,
                 checkpoint={"enabled": True},
                 worker_agents=[{"path": 'workflows/worker_agents/worker.yaml'}],
             ),
