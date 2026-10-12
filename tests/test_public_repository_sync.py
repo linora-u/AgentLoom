@@ -41,7 +41,7 @@ def test_export_rejects_private_or_unsafe_entries(path, mode):
         sync.validate_public_path(path, mode, PRIVATE_PATHS)
 
 
-def test_public_commit_keeps_source_author_public_ancestry_and_exact_file_modes(tmp_path, monkeypatch):
+def test_public_commit_uses_fixed_identity_and_keeps_public_ancestry_and_exact_file_modes(tmp_path, monkeypatch):
     source, public = tmp_path / "source", tmp_path / "public"
     for repo in [source, public]:
         repo.mkdir()
@@ -78,7 +78,7 @@ def test_public_commit_keeps_source_author_public_ancestry_and_exact_file_modes(
             assert real_command("git", "rev-parse", "HEAD^", cwd=cwd).strip() == parent
             identity = real_command("git", "show", "-s", "--format=%an%n%ae%n%cn%n%ce", cwd=cwd)
             assert identity.decode().splitlines() == [
-                "Fixture", "fixture@example.test",
+                "linora-u", "260928258+linora-u@users.noreply.github.com",
                 "linora-u", "260928258+linora-u@users.noreply.github.com",
             ]
             assert not (Path(cwd) / "applications/news_agent").exists()
