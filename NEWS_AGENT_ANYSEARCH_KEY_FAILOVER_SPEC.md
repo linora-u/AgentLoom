@@ -1,6 +1,6 @@
 # News Agent AnySearch Key 顺序切换规格
 
-状态：待实现。测试边界已由用户确认。
+状态：已实现；Worker 接入验收和 News Agent 全量回归通过。测试边界已由用户确认。
 
 ## Problem Statement
 
