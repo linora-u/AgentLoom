@@ -290,6 +290,10 @@ temporary `codex/worker-batch-baseline` at `2aba10e6`; it did not merge Worker b
 into main. Required public CI on the delivery revision, public then private main
 merges, and #109/#110 closure remain outstanding publication gates. Neither
 skipped checks nor a synchronization success proves those gates complete.
-The user's additional public-sync identity-rule change still needs clarification,
-implementation and affected validation; it is separate from the accepted product
-scope. The formal PR remains draft while that requested delivery change is pending.
+The user has confirmed the additional public-sync identity rule: **both Author
+and Committer are fixed to `linora-u`**. A separate bootstrap PR based on
+`origin/main` must deliver this change because the trusted coordinator uses the
+sync script on main. Its affected validation, public CI and public-then-private
+main merges precede marking Worker batch PR #12 ready. This additional delivery
+requirement is separate from the accepted product scope; its implementation and
+publication still need actual receipts. The formal Worker batch PR remains draft.

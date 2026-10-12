@@ -466,7 +466,10 @@ Worker batch 已发布。上文历史审查中 PR #11 的 draft/pending 描述�
 origin 一致，不包含之后创建的文档分支或之后发生的新提交。
 
 本次新建的隔离文档工作树在提交交给 merger 后另行清理，不计入已完成的 7 个旧工作树。
-用户追加的公共同步脚本身份规则调整仍待明确并实现；其合入及受影响验证另行记录，
-不属于上述既有产品验收证明，正式 PR 暂不推进 ready。
+用户已明确公共同步身份策略：**Author 和 Committer 都固定为 `linora-u`**。
+该新增调整通过基于 `origin/main` 的独立 bootstrap PR 交付；因 trusted coordinator 使用
+main 上的同步脚本，先完成该 PR 的公开 CI、公开 main 后私有 main 合并，再将 Worker batch
+PR #12 标为 ready。身份策略的实现、受影响验证和真实发布结果另行记录，不属于上述
+既有产品验收证明，当前正式 Worker batch PR 仍保持 draft。
 公开 CI、双仓正式 main 合并及票据关闭仍需真实结果；本记录不将 draft PR 或本地通过
 视作整个 spec 已完成。
