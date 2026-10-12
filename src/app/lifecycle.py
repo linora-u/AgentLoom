@@ -538,8 +538,8 @@ class ApplicationRunLifecycle:
         manifest_initialized: bool,
         manifest_updates: Mapping[str, Any],
         error: BaseException,
-    ) -> None:
-        """Best-effort terminal manifest for failures outside finalization."""
+    ) -> BaseException:
+        """Persist terminal evidence and preserve the first control signal."""
 
         if self._phase == "cleanup":
             self.fail_cleanup(error)
@@ -549,7 +549,7 @@ class ApplicationRunLifecycle:
         else:
             self.fail_execution(error)
         if not manifest_initialized:
-            return
+            return error
         try:
             runtime_context.update_manifest(
                 **manifest_updates,
@@ -557,9 +557,16 @@ class ApplicationRunLifecycle:
                 ended_at=datetime.now().astimezone().isoformat(),
                 error=self.error_message,
             )
-        except Exception as exc:
+        except BaseException as exc:
+            if isinstance(error, Exception) and not isinstance(exc, Exception):
+                # This is the first control signal, so it remains observable
+                # while retaining the ordinary failure that preceded it.
+                self.retain_secondary_errors(exc, [ApplicationRunSecondaryError(self.phase, error)])
+                self._error = exc
+                self._outcome = self.outcome_for(exc)
+                return exc
             self.retain_secondary_errors(error, [ApplicationRunSecondaryError("manifest", exc)])
-            return
+        return error
 
     def _validate_resumable_checkpoint(
         self,

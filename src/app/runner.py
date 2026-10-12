@@ -627,7 +627,7 @@ def _execute_app(
                 terminal_error = cleanup_exc
             run_attempt_lease = None
         emit_started()
-        lifecycle.persist_uncaught_failure(
+        terminal_error = lifecycle.persist_uncaught_failure(
             runtime_context=runtime_context,
             manifest_initialized=manifest_initialized,
             manifest_updates=durable_manifest_updates,

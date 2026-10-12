@@ -410,12 +410,14 @@ class Application:
                             close_engine=engine_scope.close,
                         )
         except BaseException as exc:
-            lifecycle.persist_uncaught_failure(
+            terminal_error = lifecycle.persist_uncaught_failure(
                 runtime_context=context,
                 manifest_initialized=context.manifest_path.is_file(),
                 manifest_updates={},
                 error=exc,
             )
+            if terminal_error is not exc:
+                raise terminal_error from exc
             raise
         finally:
             lifecycle.release_run_lease(lease, original_error=sys.exception())
