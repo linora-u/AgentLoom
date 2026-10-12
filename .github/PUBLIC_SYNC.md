@@ -32,12 +32,15 @@ to `origin` and open private PRs against `main`. The local pre-push hook rejects
 private `news_agent` history if a branch is accidentally pushed to `public`;
 the exporter creates separate commits with clean public parents.
 
-Public commits preserve the source commit's complete message, author, and author
-date. The committer uses `linora-u` and the verified GitHub noreply email
-`260928258+linora-u@users.noreply.github.com`. Commit SHAs and signatures change
-because the trees and parents are rewritten; private source parents are never
-imported. Messages and author identities for commits with public changes, and
-ready private PR titles, are deliberately published.
+New exported public commits use `linora-u` and the verified GitHub noreply email
+`260928258+linora-u@users.noreply.github.com` for both Author and Committer,
+regardless of the source identity. The source commit's complete message bytes,
+encoding, author date, and committer date are preserved, making retries
+deterministic. Commit SHAs and signatures change because the metadata, trees,
+and parents are rewritten; private source parents are never imported. Complete
+messages (including any author names or trailers in them) for commits with public
+changes, and ready private PR titles, are deliberately published. This policy
+does not modify source commits or rewrite existing published history.
 
 Open a private pull request against `main`. Draft PRs stay unpublished. A ready
 PR is processed automatically:
@@ -46,8 +49,9 @@ PR is processed automatically:
 2. Compare the public files with the private PR's current base. If public `main`
    has independent changes, stop; bring those changes into private `main` first.
 3. Rewrite each source commit containing public changes onto public parents.
-   Preserve its message and author metadata, skip private-only commits, and use
-   the private PR title for the public PR. Keep meaningful merges and conflict
+   Preserve its message bytes, encoding, and author/committer dates; set both
+   identities to `linora-u`, skip private-only commits, and use the private PR
+   title for the public PR. Keep meaningful merges and conflict
    resolutions; collapse redundant merge wrappers. Branches started before the
    current private base attach to the matching older public snapshot.
 4. Wait for `Python tests` and all three installation-profile checks to succeed.
