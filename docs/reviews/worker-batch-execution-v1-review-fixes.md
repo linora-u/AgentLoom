@@ -243,3 +243,53 @@ The initial Python 3.12 Phoenix/plugin-autoload failure remains preserved; isola
 **Delivery remains pending separately:** prerequisite merge owned by another task, PR retarget, public CI/synchronization, private/public merge and issue closure. Product/local acceptance closure does not claim those external steps are complete.
 
 Spec: **zero remaining product findings; delivered-source local acceptance verified; publication pending.**
+
+## Delivery update after main integration (2026-10-12)
+
+The independent Standards and Spec axes above remain unchanged at their recorded
+revisions and times. Their product/local acceptance closures stand; their older
+prerequisite, PR and cleanup statements are historical, with current delivery
+state recorded here and in the [acceptance report](worker-batch-execution-v1-acceptance.md).
+
+Prerequisite `bc5cff6e` is now in `origin/main` at `68d7aca5`, merged into integration
+`6adf618381dd6b34f48ef4d15f339670fbfe6074`. Its 24 incoming changes are confined to
+private `applications/news_agent/` files. `main-integration/merge.json` and
+`public-source-evidence-carryforward.json` verify the public product tree is
+identical to accepted `ed506f44`, preserving the existing 2,410-pass regression,
+582-pass acceptance per Python version, 60-pass standalone repo_map per version
+and both bounded live campaigns. This is public-product equivalence, not equality
+of the complete tree including the changed private application.
+
+The merger's actual Python 3.14.8 NewsAgent-only integration regression on
+`6adf6183` reports **360 passed, zero failures/errors/skips, pytest exit 0,
+162.8395 seconds wall time**, with tracked source/revision unchanged. Precise
+command/environment and original XML/log are retained under root
+`.agentloom/validation/worker-batch-delivery-20261012/main-integration/` in
+`news-agent-regression-attempt.json`, `news-agent-regression-result.json` and
+`news-agent-py314.xml/log`. The initial outer runner returned 90 because tests
+generated untracked `applications/news_agent/data/output/`; pytest exit 0 and the
+historical dirty-state snapshot remain unchanged. The merger preserved all 20
+runtime files (3,715 bytes) under ignored `test-generated-news-output/`, verified
+their hashes, then confirmed root clean in
+`news-agent-runtime-artifact-preservation.json` and
+`news-agent-regression-final-state.json`. `delivery-final-proof.json` verifies
+`6adf6183` pushed/read back from origin feature with no public product diff from
+`ed506f44`. The following documentation commit still needs merger integration and
+push. This documentation update reran no tests or Providers.
+
+All seven old implementation worktrees were normally removed by 04:41:27 UTC,
+with their branches preserved and historical evidence archived. The authoritative
+delivery-root `worktree-cleanup.json` retains both the earlier four-worktree
+snapshot and final `cleanup_history` / `latest_final_checks` with no remaining old
+task worktrees. The newly created documentation worktree needs its own removal
+after merger handoff and is not included in that completed cleanup count.
+
+Formal main delivery is now draft [PR #12](https://github.com/linora-u/AgentLoom-private/pull/12).
+Old [PR #11](https://github.com/linora-u/AgentLoom-private/pull/11) merged only into
+temporary `codex/worker-batch-baseline` at `2aba10e6`; it did not merge Worker batch
+into main. Required public CI on the delivery revision, public then private main
+merges, and #109/#110 closure remain outstanding publication gates. Neither
+skipped checks nor a synchronization success proves those gates complete.
+The user's additional public-sync identity-rule change still needs clarification,
+implementation and affected validation; it is separate from the accepted product
+scope. The formal PR remains draft while that requested delivery change is pending.

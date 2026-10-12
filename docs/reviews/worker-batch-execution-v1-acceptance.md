@@ -3,8 +3,10 @@
 最终冻结源码 `ed506f44` 已通过 CI 等价宽套（2,410 passed、1 项 Windows-only skip）、
 Python 3.12/3.14 验收（各 582 passed、0 skipped）、repo_map 独立收集（各 60 passed）
 及两个有界真实 Provider 完整 CLI。终态持久化的原始 control 保留问题也已修复，新增
-26 个公开组合在两个版本和宽套均通过。产品验收门槛关闭；#110 的 PR 基线切换、公开
-CI/合并、ticket closure 和 worktree 清理仍由 integration 完成交付。
+26 个公开组合在两个版本和宽套均通过。产品验收、main 前置基线准备和 7 个旧实现
+工作树清理均已完成。最新 main 合入 `6adf6183` 后的 NewsAgent 回归另有 360 passed。
+正式交付入口是 main draft [PR #12](https://github.com/linora-u/AgentLoom-private/pull/12)；
+公开 CI、双仓 main 合并和 #109/#110 关闭仍是发布门槛，详见末节交付更新。
 
 合同：[Spec](../specs/worker-batch-execution-v1.md)，
 [任务图](../specs/worker-batch-execution-v1-tasks.md)。主要测试入口是
@@ -417,8 +419,54 @@ F/terminal 修复 red→green、历史失败以及新宽套/live。当前扫描�
 实际凭据的 6 个输入全部 0600。历史纯 fixture modes 如实保留，新 live config 为 0700、
 model 为 0600；没有输出或保存 API key / Pi access-refresh 值。
 
-产品修复、完整合同矩阵、支持版本、两个真实 Runtime 和宽套验收均已关闭。
-main 前置提交仍由其他任务发布；PR base/public CI/合并、issue closure 是剩余外部交付工作。
-清理已开始：`worker-batch-delivery-20261012/worktree-cleanup.json` 的 2026-10-12 04:21 UTC
-快照记录 policy/application/legacy/terminal-control 四个工作树已正常移除，分支保留；
-lifecycle/review-fixes/E 的后续清理由 merger 在文档合入后处理，最终状态以该 durable receipt 为准。本报告没有将 draft/baseline-target PR 视作已发布或已合并。
+## main 交付更新（2026-10-12）
+
+产品修复、完整合同矩阵、支持版本、两个真实 Runtime 和宽套的本地验收均已关闭。
+前置基线 `bc5cff6e` 已进入 `origin/main` 的 `68d7aca5`，并合入 integration
+`6adf618381dd6b34f48ef4d15f339670fbfe6074`。这次合入只改变 24 个
+`applications/news_agent/` 私有文件；排除 docs/私有目录的公开产品树与已验收 `ed506f44`
+完全相同，指纹为 `a02be5f07159b2d01361e99b0df310ed7dde2de89319b502d179d87cdfd5bb5c`。
+这是公开产品源码等价证明，不声称含 NewsAgent 的完整非 docs tree 与旧冻结点相同。
+
+merger 在 `6adf6183` 使用 Python 3.14.8 / Node 24.15.0 执行整个
+`applications/news_agent/tests/`：**360 passed、0 failures/errors/skips，pytest exit 0，
+进程 wall 162.8395 s**。JUnit 和结果记录一致，返回后 tracked source/revision unchanged。
+首次外层验收 runner 因新增 untracked `applications/news_agent/data/output/` 的 clean-state
+检查返回 90，与 pytest exit 0 区分保留。merger 随后将 20 个运行产物（3,715 bytes）移动到
+ignored `test-generated-news-output/`，校验内容 hash 后确认根工作树恢复 clean；原结果中的
+dirty 状态未改写。此文档任务没有重跑 pytest 或 Provider。
+
+这次 main 集成证据位于
+`/Users/bytedance/code/AgentLoom-private/.agentloom/validation/worker-batch-delivery-20261012/main-integration`：
+
+- `merge.json`：真实 merge、24 个私有变更文件和公开产品树等价证明。
+- `public-source-evidence-carryforward.json`：逐项核对既有验收 XML、50/39/26 合同映射和公开源码未变。
+- `news-agent-regression-attempt.json` / `news-agent-regression-result.json`：精确 argv/cwd/env、真实退出码、耗时和源码检查；`news-agent-py314.xml/log` 为原始测试证据。
+- `news-agent-runtime-artifact-preservation.json` / `news-agent-regression-final-state.json`：运行产物保全及随后 root clean、tracked source unchanged 的真实复查。
+- `delivery-final-proof.json`：integration `6adf6183` 已 push 并读回 origin feature，根工作树 clean，公开产品 diff 相对 `ed506f44` 为空；之后的文档提交仍由 merger 合入并推送。
+
+| 交付项 | 已核实状态 |
+| --- | --- |
+| 本地产品验收 | 已完成；使用 `ed506f44` 的原始宽套、两版本、repo_map 和 live 证据，公开源码等价检查后保留效力 |
+| main 前置基线 | 已就绪；`68d7aca5` 包含 `bc5cff6e`，integration 已合入最新 main |
+| 7 个旧实现工作树 | 全部正常移除；policy/application/legacy/terminal-control/lifecycle/review-fixes/E 分支保留，历史证据已归档 |
+| 正式 main PR | [PR #12](https://github.com/linora-u/AgentLoom-private/pull/12) 已建立，当前为 draft；公开 CI、公开 main 后私有 main 合并、#109/#110 关闭仍待完成 |
+
+旧 [PR #11](https://github.com/linora-u/AgentLoom-private/pull/11) 于 06:12 UTC 合入临时
+`codex/worker-batch-baseline`，merge 为 `2aba10e6`；这不是正式 main 合并，不能用于宣称
+Worker batch 已发布。上文历史审查中 PR #11 的 draft/pending 描述按原审查时点保留。
+已出现的同步成功或 skipped checks 不替代正式交付 revision 的必要公开 CI。
+
+旧工作树清理以 delivery 根目录 `worktree-cleanup.json` 的
+`cleanup_history` / `latest_final_checks` 为准：最终清理结束于 **04:41:27 UTC**，
+`remaining_task_worktrees=[]`；最初 04:21 的四项清理快照也保留。
+`retired-worktree-evidence/` 保留 acceptance/runtime/lifecycle 归档；前节凭据扫描仍是当时
+46,483 个文件的快照，不扩称覆盖后来新增的交付 metadata。
+`all-local-branches-push-20261012.json` 记录 06:16 UTC 已有 10 个本地分支和 2 个 tag 与
+origin 一致，不包含之后创建的文档分支或之后发生的新提交。
+
+本次新建的隔离文档工作树在提交交给 merger 后另行清理，不计入已完成的 7 个旧工作树。
+用户追加的公共同步脚本身份规则调整仍待明确并实现；其合入及受影响验证另行记录，
+不属于上述既有产品验收证明，正式 PR 暂不推进 ready。
+公开 CI、双仓正式 main 合并及票据关闭仍需真实结果；本记录不将 draft PR 或本地通过
+视作整个 spec 已完成。
