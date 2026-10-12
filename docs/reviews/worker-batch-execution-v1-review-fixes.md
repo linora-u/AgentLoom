@@ -95,10 +95,15 @@ Unrequested behavior: no additional scope creep established.
   `tests` package. Application, legacy and repo_map tests import that same fixture.
   Independent repo_map collection runs all sixty cases with importlib mode; the
   legacy and public Application cases pass as well.
-- Final delivered-revision gate: **open**. The final acceptance matrix on Python
-  3.12/3.14, bounded live Pi/smol Provider campaigns, full CI-equivalent regression,
-  PR base/public synchronization and delivery are owned by the integration task.
-  These local fixes do not claim historical Runtime successes as final evidence.
+- Final delivered-revision gate: **open**. Acceptance on `bb3c63a9` passed: Python
+  3.12/3.14 each 556 cases, standalone repo_map each 60, full regression 2,384 plus
+  one Windows-only skip, and both bounded live Provider CLI campaigns. These runs
+  prove that source, not the later uncovered control/control combination or a
+  future repaired source. PR base/public synchronization and delivery are owned
+  by the integration task.
+  Subsequent independent Spec review found a second-control terminal-persistence
+  case; see the separate axes below. That repair and its delivered-source
+  acceptance remain open.
 
 ### Validation and retained attempts
 
@@ -133,3 +138,38 @@ and memory, YAML task sequences, structured subagent contracts, Hook stdin and
 PYTHONPATH="$PWD:$PWD/applications" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   .venv/bin/python -m pytest applications/repo_map/tests --import-mode=importlib -q
 ```
+
+## Independent closure review on bb3c63a9
+
+The following read-only reviews were conducted independently on the same frozen
+source. The original findings above remain unchanged. These separate axes record
+what each reviewer found after the first repair; neither is substituted for the
+other. Acceptance artifacts are documented in
+[the acceptance report](worker-batch-execution-v1-acceptance.md).
+
+### Standards
+
+Reviewed frozen HEAD `bb3c63a97b70ad7db8f39bc3711a60d4d1f5d129`; original baseline `bc5cff6e61abf2a6d7ba7b0b6d2efac210463659`. Closure scope: corrective diff `4a211d8d..bb3c63a9`, original Standards findings, and affected ownership/import boundaries. HEAD and tracked working tree remained unchanged and clean.
+
+Standards sources: repository ownership rules in `tests/test_architecture_boundaries.py`, `docs/en/tool_catalog.md`, `docs/research/worker-batch-context-ownership.md`, and the existing lifecycle owner contract; the full Fowler smell baseline was considered. No repository `CODING_STANDARDS.md`, `CONTRIBUTING.md`, or local `AGENTS.md` was found. Tooling-enforced formatting/import/type concerns are excluded.
+
+- **Original hard finding closed: configuration reverse-import.** `src/config/system_loader.py:9,77` now calls the validator owned by `src/config/config_validation.py:383`, beside the configuration schema. `src/execution/concurrency/policy.py` consumes that validator and retains capacity resolution; configuration does not reverse-load execution. An independent fresh-process probe imported the loader from this checkout, loaded capacity twenty, and found zero execution modules both before and after the public load. The corrected AST guard scans `config`; final XML contains all seventeen passing architecture checks, including actual public-loader execution.
+- **Original judgement finding closed: possible Duplicated Code.** `src/app/lifecycle.py:123,138` now owns the shared root-service isolation and ordered drain/finalization/resource/engine teardown transaction. Both `Application.open()` and the runner call these methods while retaining their distinct initialization and result adapters. This extracts the repeated ownership decision without introducing a configurable lifecycle framework, delegating facade, or duplicate resolver. The new phase/error record has concrete use in preserving teardown evidence. Final XML confirms the standalone/runner persistent-close cases, manifest/lease secondary failures, and drain failure after successful execution pass.
+
+No remaining or newly introduced actionable documented-standard violation or Fowler smell identified within this closure scope. Existing final regression evidence was inspected, not rerun: 2,384 passed, one Windows-only skip, zero failures/errors.
+
+Standards: **0 remaining hard findings; 0 remaining judgement findings.** Worst remaining hard issue: **none identified**.
+
+### Spec
+
+Reviewed frozen `bb3c63a97b70ad7db8f39bc3711a60d4d1f5d129` against `bc5cff6e61abf2a6d7ba7b0b6d2efac210463659`, concentrating on repair delta `4a211d8d..bb3c63a9`. Contract: `docs/specs/worker-batch-execution-v1.md` (S); original 50-story/39-decision/26-scenario mapping retained. No scope shrink or additional scope creep established.
+
+**Original closures verified:** ordinary secondary persistence/cleanup errors preserve the original Worker/observer control with complete dispositions, structured infrastructure diagnostics and drained invocations. Broken stop observation is latched and no longer retried; started work drains. Startup true-once stop prevents all later admission. Maintained mixed-runtime configuration is migrated, and standalone repo_map uses stable shared support rather than a collected test module.
+
+**[P1] Control propagation remains partial for a secondary control during terminal persistence.** `src/app/lifecycle.py:560` catches only `Exception` in `persist_uncaught_failure`. S:137: “Control exceptions also stop/drain before propagation”; S:180: “Original and cleanup causes retained”. Public probe `/tmp/agentloom_batch_final_control_secondary_probe.py` supplies an original Worker `KeyboardInterrupt` and a second `KeyboardInterrupt` from terminal-manifest writes. Both `Application.open` and `execute_app` raise the secondary object; neither preserves the original or its attached `batch_outcome`. The runner additionally bypasses `ApplicationRunInterrupted`. Actual work drains (`active=0`, one closed Runtime); the independent ten-second watchdog does not expire. Preserve the first control and retain the secondary cause across this best-effort persistence path.
+
+**Delivered-revision evidence verified, subject to that repair:** actual JUnit reports show 2384 passed plus one Windows-only skip in the CI-equivalent regression; Python 3.12/3.14 acceptance each reports 556 passed, zero skips; independently collected repo_map each reports 60 passed. Both bounded live Provider campaigns exit zero with `run.completed`, completed persisted batches, unique invocations and physical Tool/checkpoint evidence. Reports and parent process checks contain no surviving owned PID/listener/callback thread; credential scans report zero matches. The live/preflight Git source fingerprint exactly matches frozen HEAD. These artifacts close the previously missing runtime/version evidence at this revision, not the uncovered combination or a later repaired revision.
+
+**Delivery remains open:** PR #11 is draft and baseline-targeted while another task owns prerequisite publication. Required final acceptance must be refreshed appropriately after any product repair; PR retarget/public synchronization and task cleanup remain integration deliverables.
+
+Spec: **one new actionable finding; original control-preservation closure incomplete.**

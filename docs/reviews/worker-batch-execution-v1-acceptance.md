@@ -1,8 +1,10 @@
 # Worker batch v1 验收记录
 
-E（#109）交付真实 Runtime 的 Application/CLI 验收和完整合同索引。它不代表
-#110 的最终交付通过：已发现的组合控制异常、stop token 和回归问题须由 F 修复，
-修复后的最终版本还要完成有界真实 Provider 验证。
+集成版本 `bb3c63a9` 已通过 CI 等价宽套（2,384 passed、1 项 Windows-only skip）、
+Python 3.12/3.14 验收（各 556 passed、0 skipped）、repo_map 独立收集（各 60 passed）
+和两个有界真实 Provider CLI campaign。原 F 修复及这些物证见本报告末尾。
+随后独立 Spec 复核发现：终态 manifest 写入再次抛出 control exception 时，仍会遮蔽
+最初的控制信号。该组合修复及新版本验收尚待完成；#110 的 PR 基线、公开 CI、合并和清理也未关闭。
 
 合同：[Spec](../specs/worker-batch-execution-v1.md)，
 [任务图](../specs/worker-batch-execution-v1-tasks.md)。主要测试入口是
@@ -65,8 +67,8 @@ env PATH="/Users/bytedance/.nvm/versions/node/v24.15.0/bin:$PATH" \
 
 `ARTIFACTS` 为上述绝对证据目录，`ATTEMPT` 与表中日志名相同；实际展开后的命令另存
 `commands.json`；`contract-id-audit.json` 检查了 50/39/26 个 ID，无重复或遗漏。
-Ruff 与 `git diff --check` 通过。组合套件通过不能证明 repo_map
-独立 collection 可用，该问题仍属于 F。
+Ruff 与 `git diff --check` 通过。历史组合套件不能证明 repo_map 独立 collection 可用；
+F 的迁移及两个版本的独立 collection 结果另见最终集成版本证据。
 
 ## 真实 Runtime 和 Provider
 
@@ -118,8 +120,8 @@ smol 相应为 `--runtimes smolagents --profile deepseek_v4_1 --concurrency 2 --
 Adapter/SDK 的模型请求重试，与 map 的完整 Worker replay 不同。`db4dd5d3` 的 final campaign
 改为 `min(profile.num_retries, 1)`，并在 attempt 保存 `provider_request_policy`；实际 profile
 解析已确认 retries=1、timeout=45、max_output_tokens=2048。确定性 failure fixture 继续 retries=0。
-修复后最终版本的 live gate 应采用这个有界策略，并继续验证每个输入只有一个 invocation、
-物理副作用不重放。这里不把尚未执行的 retries=1 live gate 写成成功。
+`bb3c63a9` 的两个 live campaign 已采用这个有界策略，逐项校验实际 invocation、Tool
+证据和完整 CLI 终态。其结果见末尾；它们不证明后续产品修复版本已经通过。
 
 ## 物理清理和凭据检查
 
@@ -145,7 +147,9 @@ Python callback thread drain；确定性测试与成功 live child 有该证据�
 
 下表每个合同 ID 恰好归属一行。A：policy/value tests；B：storage/resource/invocation tests；
 C：`test_worker_batch_application.py`；D：`test_worker_batch_legacy.py`、maintained caller tests；
-E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence。设计禁止项检查使用
+E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence；F：原审查修复和复核。
+下表中的测试已在 `bb3c63a9` 的最终 JUnit 中逐名核对，合同 ID 计数不是替代行为验收。
+设计禁止项检查使用
 `src/app/application.py`、`src/execution/concurrency/batch_runner.py` 和
 [Context ownership](../research/worker-batch-context-ownership.md)，不创造额外验收接口。
 
@@ -157,13 +161,13 @@ E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence�
 | 18,19,20,21,22,23,24,25 | 16,17,18,19,20 | A深immutable JSON/None/error；C整计划验证、caller/sibling snapshot、ordering/fast refill/empty；E固定计划 |
 | 26,27,28,29 | 13,14,15 | B canonical分记录/root references；C相同scope pinned revisions；E实际credential scan与记录关联 |
 | 30,31,32,33 | 26,27 | C/B fresh invocation、root memory/coordinator/context跨owner及背景drain；E真实Hook/usage/checkpoint、PID/listener/thread独立oracle |
-| 34,35,36,37,38 | 22,29,30,33 | C collect/fail-fast/startup race；E真实HTTP错误、阻塞同步Tool stop/drain；无强制终止或产品退出deadline |
-| 39,40 | 21,31,32 | B/C cleanup/required persistence/trace/observer；E公开executor rejection；控制异常与第二次持久化/cleanup组合仍需F修复 |
+| 34,35,36,37,38 | 22,29,30,33 | C collect/fail-fast/startup race；F true-once startup stop和broken-token停止观测/实际drain；E真实HTTP错误、阻塞同步Tool stop/drain；无强制终止或产品退出deadline |
+| 39,40 | 21,31,32 | B/C cleanup/required persistence/trace/observer；E公开executor rejection；F原始control与普通二次persistence/cleanup及root lease错误已通过；终态持久化再次抛control的复核P1待修复 |
 | 41 | 34 | C不重放；E真实副作用后HTTP错误、一次实际Tool执行；Provider请求retry与Worker replay分开 |
 | 42,43,44 | 28 | C同步registration-close race、根资源寿命、stale binding/self-close与nested map独立窗口 |
 | 45 | 11,35,38 | E容量1/20时真实响应含两个Tool calls；Pi Tools回归；同步map无hidden asyncio.run，async offload为文档中显式Application adapter，native async延后 |
-| 46 | 36,37 | Dlegacy payload/receipt/status/order、auto/retired配置诊断、repo_map/Goal迁移；repo_map独立collection及旧mixed fixture待F |
-| 47,48,49 | — | C/E公开seam；真实Pi/smol runner/CLI；Python最低3.12与开发3.14；最终交付版本live gate仍未关闭 |
+| 46 | 36,37 | Dlegacy payload/receipt/status/order、auto/retired配置诊断、repo_map/Goal迁移；F移除mixed fixture退役配置并提取稳定shared test support；repo_map两版本独立collection各60passed |
+| 47,48,49 | — | C/E公开seam；bb3c63a9真实Pi/smol完整runner/CLI；Python最低3.12与开发3.14各556passed；后续control修复版本须更新验收 |
 
 ## 26 个 acceptance matrix 场景
 
@@ -183,10 +187,10 @@ E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence�
 | 12 | 首项阻塞、后项完成补位 | C fast-later-completion；E真实sibling resource-isolation观测 |
 | 13 | collect普通错误 | C ordinary-failures；E真实Provider failure collect |
 | 14 | fail-fast完整dispositions/drain | C ordinary-failures；E真实Provider failure fail-fast |
-| 15 | 显式stop/真实同步Tool阻塞 | E `test_real_synchronous_tool_stop_drains_actual_started_work_and_resources`；C stop cleanup |
-| 16 | submitted/startup stop race | C `test_stop_at_submitted_startup_seam_has_no_fictitious_invocation_identity` |
-| 17 | observer普通/control异常 | C observer-failure；二次persistence/cleanup遮蔽control异常的组合缺口由F关闭 |
-| 18 | runtime creation/close/resource close | C construction/cleanup/root retry；B retained handles；Pi真实physical lifecycle fault tests |
+| 15 | 显式stop/真实同步Tool阻塞 | E `test_real_synchronous_tool_stop_drains_actual_started_work_and_resources`；C stop cleanup；F `test_broken_stop_observation_drains_actual_started_work_and_cleanup` |
+| 16 | submitted/startup stop race | C `test_stop_at_submitted_startup_seam_has_no_fictitious_invocation_identity`；F `test_true_once_stop_at_invocation_start_is_latched_for_entire_batch` |
+| 17 | observer普通/control异常 | C observer-failure；F `test_observer_control_survives_secondary_required_receipt_failure`；终态写入再次抛control的复核P1仍待修复 |
+| 18 | runtime creation/close/resource close | C construction/cleanup/root retry；B retained handles；F `test_worker_control_survives_secondary_cleanup_and_owner_retry`及root teardown故障；Pi真实physical lifecycle fault tests；同一复核P1待修复 |
 | 19 | side effect后失败无整项重放 | E `test_real_provider_failure_keeps_dispositions_and_never_replays_side_effect` |
 | 20 | owner exit-registration race/stale | C `test_owner_close_registration_race_drains_accepted_and_rejects_zero_work`、nested/stale |
 | 21 | capacity-one parent-child | C `test_nested_child_map_uses_independent_window_and_self_close_fails_immediately` |
@@ -194,10 +198,137 @@ E：`test_worker_batch_runtime_application.py` 及本节 live/artifact evidence�
 | 23 | 并发记录/root refs/credentials | B storage；C双batch；E actual secret scan |
 | 24 | Worker容量与多Tool calls解耦 | E fixed-plan两runtime、容量1/20、同响应read+MCP；Pi Tools真实dispatch回归 |
 | 25 | 固定plan在1/20等价 | E `test_fixed_business_plan_survives_capacity_changes_with_real_runtime_ownership` |
-| 26 | 真实Pi/smol Application/CLI | E deterministic真runtime两CLI；上列live结果与限制；最终revision的有界live待F |
+| 26 | 真实Pi/smol Application/CLI | E deterministic真runtime两CLI；bb3c63a9有界live均完整CLI成功；后续产品修复须更新相关验收 |
 
-审计不是把已知缺口计作通过。F 的交付门槛包含：原始 control exception 在 cleanup/persistence
-组合中的传播；broken stop-token `is_set()` 的机制错误处理；配置启动导入路径；旧 mixed-runtime
-shared fixture 迁移；repo_map standalone collection；最终宽套与修复后版本的有界真实Provider运行。
-这些产品/迁移修复不混入 E 验收代码。早期 prompt-root 网络 preflight 只用于定位连接问题，
+审计没有把已知缺口计作通过。原 F 配置导入、mixed-runtime caller、repo_map collection、
+broken-token、startup stop及普通二次cleanup/persistence修复已经通过集成版本测试。
+新增的 terminal persistence control/control 组合仍属产品缺口，后续修复要保留原始对象和
+secondary cause，并刷新新版本验收。早期 prompt-root 网络 preflight 只用于定位连接问题，
 不替代新 map 的任何验收结果。
+
+## 集成版本 bb3c63a9 的证据与后续门槛
+
+2026-10-12 回读的冻结版本为 `bb3c63a97b70ad7db8f39bc3711a60d4d1f5d129`。
+这次记录只修改文档，没有再运行 Provider，也没有改变产品或测试。完整非 docs tree 的
+SHA-256 为 `616d69e2e305c47d737cda52e08cf7ff52804a46e760676b6297a87033e0b5f0`；
+Runtime harness 选择的 `src/applications/tests/test_support/config/pyproject.toml/uv.lock`
+tree 指纹为 `df552d1740be0180780ee7a3af0fcf596bade7b7d5a956b67eb519ce552df0e3`。
+支持版本 preflight 和两个 live attempt 都明确导入 E 工作树自己的
+`/Users/bytedance/code/.worktrees/agentloom-worker-batch-acceptance/src/__init__.py`；
+宽套导入根 integration 的 source。二者的完整非文档 tree 一致。
+
+下列 `final-bb3c63a9/` 路径相对既有 acceptance 证据目录；宽套证据另在
+`/Users/bytedance/code/AgentLoom-private/.agentloom/validation/worker-batch-final-20261011/`。
+已完成进程的状态由 `result.json` / `campaign.json` 的真实退出记录、CLI terminal event
+和 JUnit 交叉确认，不根据旧 session handle 是否存在推断成功。
+
+| 冻结版本检查 | 回读结果 | 权威物证 |
+| --- | --- | --- |
+| Python 3.12.13 验收 | 556 passed，0 skipped，JUnit 269.290 s | `final-bb3c63a9/py312-final-attempt2.xml` / `.log` |
+| Python 3.14.8 验收 | 556 passed，0 skipped，JUnit 267.875 s | `final-bb3c63a9/py314-final-attempt2.xml` / `.log` |
+| repo_map 独立收集，3.12 / 3.14 | 各 60 passed，0 skipped，JUnit 22.968 / 23.132 s | `final-bb3c63a9/repo-map-py312.xml`、`repo-map-py314.xml`及各自日志 |
+| CI 等价宽套，Python 3.14.8 | 2,384 passed、1 Windows-only skip；日志 1,015.72 s，JUnit 1,015.657 s；进程 wall 1,018.415 s、exit 0、source unchanged | final 证据目录的 `final-bb3c63a9/pytest.log`、`.xml`、`attempt.json`、`result.json` |
+| Pi 有界真实 Provider | 完整 CLI `run.completed`，2/2 success，容量 1，exit 0，90.655 s | `final-bb3c63a9/live-pi-attempt1/campaign.json`、`pi/report.json`、`pi/cli.stdout` |
+| smolagents 有界真实 Provider | 完整 CLI `run.completed`，2/2 success，容量 2，exit 0，16.565 s | `final-bb3c63a9/live-smol-attempt1/campaign.json`、`smolagents/report.json`、`smolagents/cli.stdout` |
+
+唯一 skip 是 `test_shell_tool_windows_encoding_patch`，原因是
+`Windows specific test reliant on wexpect`。Pi、smolagents、MCP 或 batch 相关测试没有跳过。
+原宽套 `9499f247` 的 63 项失败全部保留在 `pre-review-9499f247/`：62 项源于 mixed
+fixture 的退役 Supervisor `concurrency`，另 1 项为未修改的 Hook double-fork cleanup。
+该 Hook 例曾独立重跑通过，且包含在本次完整绿色宽套中；没有删除它的原始失败。
+
+版本来自 `preflight-py312.json` / `preflight-py314.json`，没有假定两个环境依赖完全相同：
+
+| 项目 | Python 3.12 环境 | Python 3.14 / live 环境 |
+| --- | --- | --- |
+| Python / pytest | 3.12.13 / 9.1.1 | 3.14.8 / 9.0.1 |
+| MCP | 1.30.0 | 1.26.0 |
+| smolagents / litellm / httpx / openai | 1.26.0 / 1.104.2 / 0.28.1 / 2.54.0 | 相同 |
+| Pi SDK / Node / Node ABI | 1.0.0 / 24.15.0 / 137 | 相同 |
+
+### 命令来源和实际收集范围
+
+历史支持版本 556 项的完整 shell argv 未持久化，不能从 JUnit 反推为“实际命令”。
+这里保留实际 JUnit/log 观测范围：A/B/C/D/E batch/value/policy/ownership suites；
+Runtime contract/builder；全部 `tests/application_test`；Pi Application/Tool/process lifecycle；
+Agent-as-Tool thread safety；legacy parallel executor；repo_map SkillBuilder；17 项 architecture
+checks。`final-contract-evidence-audit.json` 保存每个实际 module 的收集数量，以及 60 个
+公开 batch/配置边界测试函数在 3.12、3.14 和宽套中的通过变体数。
+repo_map 另以其整个 tests 目录独立收集，各 60 项。首个 Python wrapper 在收集前因 shell
+引号丢失而抛 `NameError: name 'src' is not defined`；`py312-final.log`、`py314-final.log`
+保留该失败，只有 `*-attempt2.xml` 用于验收。后续产品修复版本将先持久化精确 argv 再启动。
+
+宽套的精确 argv 已保存于 `attempt.json` / `result.json`。在根 integration 中，展开后的
+Python source assert wrapper 运行以下 pytest 参数；环境明确提供 Node24 和
+`PYTHONPATH="$PWD:$PWD/applications"`：
+
+```sh
+.venv/bin/python -c 'import sys;from pathlib import Path;import agentloom,pytest;assert Path(agentloom.__file__).resolve()==Path("/Users/bytedance/code/AgentLoom-private/src/__init__.py"),agentloom.__file__;raise SystemExit(pytest.main(sys.argv[1:]))' \
+  tests/ \
+  applications/memory_feature_validation/scripts/test_offline_memory_campaign_contract.py \
+  applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py \
+  applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py \
+  -q --tb=short --color=no \
+  --junitxml=/Users/bytedance/code/AgentLoom-private/.agentloom/validation/worker-batch-final-20261011/final-bb3c63a9/pytest.xml
+```
+
+两个 live campaign 的精确子进程 argv 在各自 `campaign.json`，以下只将证据路径缩写为
+`ARTIFACTS`，并去掉绝对工作树前缀以便阅读；执行使用 `.venv314`、Node24 和本 E source：
+
+```sh
+.venv314/bin/python tests/acceptance/worker_batch_validation.py --child \
+  --runtimes pi --profile codex_luna_news_initial --items 2 --concurrency 1 \
+  --output "$ARTIFACTS/final-bb3c63a9/live-pi-attempt1/pi" \
+  --model-source /Users/bytedance/code/AgentLoom-private
+
+.venv314/bin/python tests/acceptance/worker_batch_validation.py --child \
+  --runtimes smolagents --profile deepseek_v4_1 --items 2 --concurrency 2 \
+  --output "$ARTIFACTS/final-bb3c63a9/live-smol-attempt1/smolagents" \
+  --model-source /Users/bytedance/code/AgentLoom-private --ark-interface-route
+```
+
+两次真实请求策略均为 `num_retries=1`、`timeout=45`、`max_output_tokens=2048`，没有完整
+Worker replay。每次 2 项各有一个独立 invocation，Tool trace 和实物读取结果、Hook/local
+身份、usage、checkpoint、batch/root receipt 一致。
+
+Pi Run/batch：`run_20261011T103420482595Z_a4dbb8ff8b2e` /
+`batch_20261011T103437407990Z_7a6dc43380f7`；smol Run/batch：
+`run_20261011T103420482565Z_2190739ae41d` / `batch_20261011T103424403618Z_b11bbf36e7b3`。
+两个 live child 保存退出前 callback/portal thread 快照，PID、listener、owned thread 均无残留；
+Pi 3 个 private directory 已删除。campaign 父进程再次检查 Pi 的 5 个、smol 的 2 个已记录 PID，
+没有存活项。该容量 1 的 Pi 有限 live 样本不用于证明 sibling 并发；sibling resource isolation
+由两个版本的真实 Runtime 确定性并发测试独立证明。
+
+### 完整产物与合同审计
+
+两个 final live child 的实际 credential scan 分别为 227 / 243 个文件、0 matches；
+campaign 层连同 stdout/stderr/receipt 分别为 231 / 247、0 matches。
+补充扫描整个 acceptance、final 和 F review-fixes 三个任务证据目录，以当前 effective
+profiles 的实际 API key、Pi access/refresh 和 `fixture-key` / `fixture-secret` 两个哨兵
+在内存中匹配，未输出或持久化凭据值。完整结果为 34,652 个文件、63,388,922 bytes，
+actual credential / fixture match / read error 均为 0，见
+`final-bb3c63a9/final-artifact-secret-scan.json`。
+
+205 个 `model.yaml` 是输入配置，单独分类并排除于产物匹配计数。其中含当前实际凭据的
+3 个输入均为 0600；历史合成 fixture 输入保留原模式（总共 85 个 0600、120 个 0644），
+不能宣称整个历史目录每个 model 输入都为 0600。两个 final live config 目录为 0700、
+model 输入为 0600。不删除历史失败，也不为报告改写历史产物权限。
+
+`final-contract-evidence-audit.json` 核对 Spec 原文、上述归属表和最终 JUnit：50 stories、
+39 decisions、26 matrix rows 均一一归属，无重复或遗漏；60 个公开 batch/配置边界测试函数
+在两个 Python 版本和宽套均有实际通过记录。`final-terminal-evidence-audit.json` 从真实
+exit records、CLI terminal、完整 batch 和 physical cleanup 核对进程完成状态。这些索引仍
+明确记录复核新增的 control/control 缺口，不能把“ID 齐全”或旧绿色测试当作它已通过。
+
+### 尚未关闭的交付要求
+
+独立 Standards 复核在 `bb3c63a9` 没有剩余 hard/judgement finding；独立 Spec 复核确认
+原修复成立，但新增 P1：`persist_uncaught_failure` 只捕获 `Exception`，终态写入第二个
+`KeyboardInterrupt` 会遮蔽原始 Worker control。standalone 和 runner 的公开 probe 均失败，
+实际 invocation 已 drain；runner 还跳过原 `ApplicationRunInterrupted` adapter。
+完整分轴复核保留在 [review-fixes](worker-batch-execution-v1-review-fixes.md)，没有合并或改写排序。
+
+该产品修复、新 revision 的必要回归/支持版本/有界真实 Runtime gate、最终复核尚待完成。
+另一个任务拥有 main 前置提交发布；本报告不改变 PR #11 的 draft/baseline-target 状态。
+PR retarget、公开同步 CI/合并、ticket closure 和本任务 worktree cleanup 仍是 integration
+交付要求，不能因为当前版本的验收证据齐全而标记整个 spec 完成。
