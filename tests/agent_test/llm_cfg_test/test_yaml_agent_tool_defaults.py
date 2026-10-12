@@ -15,6 +15,8 @@ from agentloom.execution.logging import (
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnResult
 from agentloom.execution.tool_gateway import bind_tool
+from agentloom.config.config import bind_config
+from tests.config_test_support import unit_config
 
 
 class _NoopAdapter:
@@ -37,7 +39,8 @@ def _ensure_global_logger():
     prev = get_global_logger(create_if_missing=False)
     if prev is None:
         initialize_global_logger_once("test_yaml_tool_defaults")
-    yield
+    with bind_config(unit_config(Path(__file__).resolve().parents[3])):
+        yield
     if prev is None:
         set_global_logger(prev)
 

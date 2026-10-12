@@ -115,7 +115,7 @@ def probe(workspace: Path) -> dict:
           enabled: false
         default_toolsets: []
     """))
-    (config / "llm.yaml").write_text(
+    (config / "model.yaml").write_text(
         "model:\n"
         "  default_model_type: probe\n"
         "  probe:\n"
@@ -193,7 +193,8 @@ def probe(workspace: Path) -> dict:
     run([sys.executable, "-I", "-m", "agentloom", "--help"])
     console = Path(sys.executable).parent / "loom"
     run([str(console), "--help"])
-    checks += ["module CLI", "console CLI"]
+    run([str(console.with_name("agentloom")), "--help"])
+    checks += ["module CLI", "console CLIs"]
     script = outside / "deep" / "output" / "entry 'quoted'.py"
     run([str(console), "create", str(definition), "-o", str(script)])
     assert "sys.path" not in script.read_text()
@@ -206,19 +207,16 @@ def probe(workspace: Path) -> dict:
     manifests = list(runtime.rglob("manifest.json"))
     assert manifests, "real runner did not allocate Run evidence"
     checks += ["generated scaffold actual runner", "external Application tool and relative import", "Run manifest"]
-    # Inspected projects cannot replace the installed Studio/runtime package.
+    # Application projects cannot replace the installed runtime package.
     shadow = project / "agentloom"
     shadow.mkdir()
     shadow_marker = project / "shadow-executed"
     (shadow / "__init__.py").write_text(f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\nraise RuntimeError('shadow')\n")
     shadow_env = env.copy()
     shadow_env["PYTHONPATH"] = str(project)
-    response = run([sys.executable, "-I", "-u", "-m", "agentloom_studio_adapter"], cwd=project, child_env=shadow_env,
-                   input=json.dumps({"id": "probe", "method": "bootstrap", "params": {}}) + "\n")
-    rows = [json.loads(line) for line in response.splitlines()]
-    assert rows and rows[0]["ok"] is True, rows
+    run([sys.executable, "-I", "-m", "agentloom", "--help"], cwd=project, child_env=shadow_env)
     assert not shadow_marker.exists()
-    checks += ["isolated Studio RPC", "project/PYTHONPATH shadow rejection"]
+    checks += ["isolated CLI", "project/PYTHONPATH shadow rejection"]
     return {"checks": checks, **identity, "run_manifests": [str(p) for p in manifests]}
 
 

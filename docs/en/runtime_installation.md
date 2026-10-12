@@ -1,6 +1,9 @@
 # Runtime installation profiles
 
-AgentLoom requires Python 3.12 or newer. Choose a Python profile explicitly:
+AgentLoom requires Python 3.12 or newer. Checkout environments use the managed
+Python version pinned in `.python-version` (currently 3.14.8). `./install`
+downloads it through uv and upgrades an existing `.venv` to that version.
+An explicit `UV_PYTHON` overrides this selection. Choose a runtime profile:
 
 - `pi` installs the shared platform without `smolagents` or its instrumentation.
   Pi additionally requires Node.js **22.19 or newer** and npm. Environment proxy
@@ -31,7 +34,14 @@ runs its installer; the installer uses `npm ci` and the committed npm lock to
 download Pi. No upstream SDK source needs to be copied into this repository.
 For the complete source installation, `./install --runtime pi` performs both
 steps automatically. `agentloom update` preserves this runtime choice. The
-download lives under `runtimes/pi/bridge/node_modules/` inside the installed
+source installer uses the checkout's `.venv` by default, with stable launchers
+and installation records in `.agentloom`. Framework updates preserve other
+packages installed in that shared project environment. `AGENTLOOM_INSTALL_DIR` selects a
+custom root with its Python environment in `<root>/venv`. Workspace applications
+are installed separately with `uv sync --all-packages`; after changing from the
+installer's non-editable framework to an editable checkout, install Pi again
+with `.venv/bin/loom runtime install pi`. The download lives under
+`runtimes/pi/bridge/node_modules/` inside the installed
 package; editable development uses `src/runtimes/pi/bridge/node_modules/`.
 
 When selecting professional code tools in YAML, add `--extra code` to **both**
@@ -60,7 +70,7 @@ For development and the complete test suite:
 ```sh
 uv sync --locked --all-groups --extra smol --extra code
 uv run --locked --extra smol --extra code loom runtime install pi
-cp config/llm.example.yaml config/llm.yaml  # Only when no local config exists.
+cp config/model.example.yaml config/model.yaml  # Only when no local config exists.
 uv run --locked --extra smol --extra code pytest tests/
 ```
 

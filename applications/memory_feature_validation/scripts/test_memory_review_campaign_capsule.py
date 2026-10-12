@@ -378,7 +378,7 @@ def test_cleanup_removes_private_config_when_git_cleanup_fails(
 ) -> None:
     temporary = tmp_path / "private"
     capsule = temporary / "checkout"
-    config = capsule / "config" / "llm.yaml"
+    config = capsule / "config" / "model.yaml"
     config.parent.mkdir(parents=True)
     config.write_text("api_key: secret\n", encoding="utf-8")
 
@@ -433,7 +433,7 @@ def test_provision_installs_dependencies_without_the_project_and_writes_launcher
     monkeypatch,
 ) -> None:
     repo = tmp_path / "repo"
-    model_config = repo / "config" / "llm.yaml"
+    model_config = repo / "config" / "model.yaml"
     model_config.parent.mkdir(parents=True)
     model_config.write_text("summary: {}\n", encoding="utf-8")
     uv = tmp_path / "trusted" / "uv"
@@ -636,8 +636,7 @@ def test_runtime_layout_accepts_current_distribution_package_mappings(
     (tmp_path / "pyproject.toml").write_text(
         '[project.scripts]\nloom = "agentloom.__main__:main"\n'
         '[tool.setuptools.package-dir]\n'
-        'agentloom = "src"\n'
-        'agentloom_studio_adapter = "studio/python/agentloom_studio_adapter"\n',
+        'agentloom = "src"\n',
         encoding="utf-8",
     )
 
@@ -752,8 +751,6 @@ def test_mapped_canonical_capsule_launcher_executes_only_approved_source(
 @pytest.mark.parametrize("mapping", [
     'agentloom = "../src"', 'agentloom = "/mutable/src"', 'agentloom = "src/app"',
     'agentloom = "src"\nother = "src"', 'src = "src"', '"" = "src"',
-    'agentloom = "src"\nagentloom_studio_adapter = "../studio"',
-    'agentloom = "src"\nagentloom_studio_adapter = "studio/python/agentloom_studio_adapter"\nother = "src"',
 ])
 def test_trusted_launcher_rejects_unsupported_source_mappings(tmp_path: Path, mapping: str) -> None:
     root = tmp_path / "capsule"

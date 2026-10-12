@@ -5,7 +5,7 @@
 <h1 align="center">AgentLoom</h1>
 
 <p align="center">
-  <strong>用 YAML 构建多 Agent 应用，并通过可追溯证据的终端 Studio 运行和维护。</strong>
+  <strong>用 YAML 构建和运行多 Agent 应用。</strong>
 </p>
 
 <p align="center">
@@ -18,16 +18,9 @@
   <img alt="version 1.0.1" src="https://img.shields.io/badge/version-1.0.1-007EC6">
 </p>
 
-<p align="center">
-  <img alt="真实终端中运行的 AgentLoom Application Studio" src="../assets/agentloom-studio.svg">
-</p>
-
-<p align="center"><sub>开启 reduced-motion 后录制的真实终端会话。Studio 从当前项目读取 Application、Skill、校验状态、Run 和命令。</sub></p>
-
 AgentLoom 把多 Agent 系统当成一个**有执行契约的 Application**。YAML 定义
 Supervisor、类型化 Worker、模型、Tool、Skill、Hook、权限和 Runtime 策略。
-Application Studio 可以修改这份契约、展示 Diff、为副作用请求授权、发起运行、
-读取结构化证据，并根据失败证据继续修复。
+通过 CLI 或 Python API 执行 Application，并读取结构化运行证据。
 
 ## 核心价值
 
@@ -42,7 +35,7 @@ Supervisor 通过 `worker_agents` 显式选择 Worker；每个被选中的 Worke
 
 每个已分配存储的 Run 都有独立的 `run_id`、manifest 和带版本的生命周期事件；
 启用文件日志时还会生成有界日志，并保留审计记录和产物。逻辑任务使用稳定的
-`task_id` 恢复。Studio、CLI JSON/JSONL 和 Python API 读取同一份权威状态。预检
+`task_id` 恢复。CLI JSON/JSONL 和 Python API 读取同一份权威状态。预检
 拒绝发生在 Run 及其存储分配之前。
 
 ### 长任务有明确的完成责任人
@@ -64,7 +57,8 @@ Skill 是按需加载的模型上下文包。Hook 是独立显式授权的 Runti
 
 ## 快速开始
 
-源码安装器会针对当前代码版本构建 Studio，并准备锁定依赖的 Python 环境：
+源码安装器使用 uv 创建独立、锁定依赖的 Python 虚拟环境，并安装当前版本的
+`agentloom` 和 `loom` 命令：
 
 ```bash
 git clone https://github.com/linora-u/AgentLoom.git
@@ -73,17 +67,23 @@ cd AgentLoom
 ```
 
 目前支持 macOS 和 Linux Shell，需要 Git 与 Bash。安装器会通过官方安装器补齐
-`uv` 和 Bun，再把配套运行环境安装到 `~/.agentloom`。打开新终端后验证：
+`uv`，再把虚拟环境安装到当前仓库的 `.venv`，命令包装和安装记录放在仓库的
+`.agentloom`，无需手动激活环境。设置 `AGENTLOOM_INSTALL_DIR=/path/to/install`
+可自定义安装根目录，虚拟环境位于该目录的 `venv`。打开新终端后验证：
 
 ```bash
-agentloom --version
-agentloom --snapshot
+agentloom --help
+loom --help
 ```
+
+默认安装 `smol` Runtime 和专业 `code` 工具。选择 Pi 时使用
+`./install --runtime pi`，并准备 Node 22.19+ 与 npm；安装器会下载锁定版本的 SDK
+并构建桥接代码。`agentloom update` 会保留所选 Runtime。
 
 创建本地模型配置：
 
 ```bash
-cp config/llm.example.yaml config/llm.yaml
+cp config/model.example.yaml config/model.yaml
 ```
 
 ```yaml
@@ -101,65 +101,8 @@ model:
     tool_choice: "auto"
 ```
 
-`config/llm.yaml` 已被 Git 忽略，是 Studio 和 Application Agent 共用的唯一模型
-目录。在任意 AgentLoom 项目中启动 Studio：
-
-```bash
-agentloom
-
-# 或查看另一个项目
-agentloom --project /path/to/project
-```
-
-可以从一条包含角色和验收条件的需求开始：
-
-```text
-创建一个名为 release_review 的 Application。
-使用一个 Supervisor，以及负责 API 审查和测试审查的两个 Worker。
-模型类型只能从 config/llm.yaml 选择。
-完成校验后，在第一次真实 Run 前向我确认。
-```
-
-Studio 直接修改当前 Application，并展示每次 Diff。它按照下面的闭环工作：
-
-```text
-检查 → 修改 → 校验 → 请求 Run 权限 → 执行 → 检查证据 → 修复
-```
-
-如果用户没有批准执行，Studio 会明确报告“配置已校验，未运行”，不会把静态校验
-包装成运行成功。
-
-## Application Studio
-
-Studio 是围绕 Application 设计的控制面，不是简单的日志查看器。
-
-- **Application 工作区：**查看 Effective Config、Supervisor/Worker 拓扑、配置
-  来源、模型、Tool、Skill、Hook、MCP、权限和校验结果。
-- **Agent Loop：**检查项目、修改当前 Application、展示 Tool 与 Diff 卡片、提出
-  业务问题、执行冒烟运行，并诊断失败 Run。
-- **权限边界：**默认 `Application Only` 允许读取项目、写入当前 Application。
-  Shell、全局文件、其他 Application 和未知新路径需要可见的权限确认。
-  `Full Access` 是显式 Session 开关，退出后自动重置。
-- **Session 连续性：**切换 Application 会保留 Studio 对话记忆；`/new` 开始新
-  对话，`/compact` 在保留已完成文件修改和持久历史的前提下压缩当前上下文。
-- **Revision 安全：**每个 Run 固定 Application 内容哈希。后续修改只改变
-  Working Revision，不会热切换正在执行的 Running Revision。
-- **Run 诊断：**摘要展示终态、Goal 进度、token 用量、完成证据和恢复操作，默认
-  不展示全部底层事件。
-
-| 操作 | 按键 / 命令 |
-|---|---|
-| 发送 Studio 消息 | `Enter` |
-| 搜索 Application、Agent、Skill、Run、模型、权限和命令 | `Ctrl+X` |
-| 开始新对话 | `/new` |
-| 压缩当前对话 | `/compact` |
-| 选择 Studio 模型 | `/models` |
-| 刷新项目索引 | `/refresh` |
-| 诊断当前选中的失败 Run | `a` |
-| 关闭详情、拒绝决策或中断 Agent Loop | `Esc` |
-
-界面行为、架构、更新、调度和开发命令见
-[Application Studio](../../studio/README.md)。
+`config/model.yaml` 已被 Git 忽略，提供项目模型目录。Application 也可以在自身的
+`config/model.yaml` 中定义模型；Agent YAML 通过 `model_type` 选择模型。
 
 ## 定义 Application
 
@@ -189,11 +132,11 @@ agent_runtime: "smolagents"
 description: "Review an API release and its test evidence."
 model_type: "powerful"
 system_prompt:
-  path: ../config/prompts/reviewer.md
+  path: config/prompts/reviewer.md
 
 worker_agents:
-  - path: "applications/release_review/workflows/worker_agents/api_reviewer.yaml"
-  - path: "applications/release_review/workflows/worker_agents/test_reviewer.yaml"
+  - path: "workflows/worker_agents/api_reviewer.yaml"
+  - path: "workflows/worker_agents/test_reviewer.yaml"
 
 task: |
   Ask both Workers for evidence, reconcile conflicts, and return one release decision.
@@ -316,15 +259,16 @@ print(result.output, result.run.run_id)
 框架源码直接放在 `src/app/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等职责模块中。
 安装配置将 `src/` 映射为 Python 包名 `agentloom`，所以上面的导入实际加载
 `src/app/runner.py`，磁盘上不需要再套一层 `agentloom` 目录。
-先运行 `uv sync --python 3.12 --locked --all-groups` 安装项目，再调用 Python API。
-旧的 `src.*` 导入和模块命令已移除；命令入口为 `loom` 和 `python -m agentloom`。
+先运行 `uv sync --managed-python --locked --all-groups`，按仓库
+`.python-version` 安装项目，再调用 Python API。
+旧的 `src.*` 导入和模块命令已移除；命令入口为 `agentloom`、`loom` 和 `python -m agentloom`。
 各模块职责与迁移方式见[架构与迁移地图](../specs/architecture-migration-inventory.md)。
 
 存储分配后的失败携带同一 receipt；若预检阶段拒绝运行，会在分配运行存储前发出
 `run.rejected` 事件。详见[结构化 Run API](run_observability.md)。
 
 持久化 Schedule 复用相同的 Application 契约与 Run 生命周期。自动触发由单独的
-前台服务负责，关闭 Studio 不会留下隐藏 daemon：
+前台服务负责，需要显式启动：
 
 ```bash
 agentloom schedules --project /path/to/project serve
@@ -335,7 +279,6 @@ agentloom schedules --project /path/to/project serve
 | Application | 展示能力 |
 |---|---|
 | `ai_quality_analysis` | 十二个专业 Worker 协作完成分阶段代码审查 |
-| `unit_test_studio` | 通过确定性 Python 入口执行严格的 pytest 生成流程 |
 | `repo_map` | 确定性预处理、自底向上 Agent 分析、批处理和进度持久化 |
 | `goal_mode_validation` | Goal 显式完成、自动续跑和 checkpoint 恢复 |
 | `self_learning_smoke` | Session 历史、记忆提案、证据和审核边界 |
@@ -358,17 +301,11 @@ agentloom schedules --project /path/to/project serve
 
 ```bash
 # Framework
-uv run pytest tests -q
-
-# Studio
-cd studio
-bun test
-bun run typecheck
+uv run --locked --extra smol --extra code pytest tests -q
 ```
 
 - Issue：[github.com/linora-u/AgentLoom/issues](https://github.com/linora-u/AgentLoom/issues)
 - 联系方式：[raine_walker@163.com](mailto:raine_walker@163.com?subject=AgentLoom%20Collaboration)
-- Studio 来源与声明：[studio/upstream/README.md](../../studio/upstream/README.md)
 
 如果 AgentLoom 对你的项目有帮助，欢迎 Star，或贡献一个边界清晰的 Application、
 修复或验证用例。

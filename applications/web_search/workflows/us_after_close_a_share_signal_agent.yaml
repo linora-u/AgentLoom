@@ -7,7 +7,7 @@ description: |
 model_type: "powerful"
 
 mcp_servers:
-  path: "applications/web_search/config/.mcp.anysearch.json"
+  path: "config/.mcp.anysearch.json"
   timeout: 30
   tool_timeout: 90
   tool_name_prefix: true

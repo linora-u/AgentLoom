@@ -1,4 +1,4 @@
-"""Opt-in live acceptance. Creates isolated real YAML Applications using private llm.yaml.
+"""Opt-in live acceptance. Creates isolated real YAML Applications using private model.yaml.
 
 Run with this worktree's Python. Reports contain receipts and answers, never model settings.
 Each case has a process deadline and its own project/config/runtime directory.
@@ -49,8 +49,8 @@ def campaign(destination: Path, source: Path, limit: int):
         case = f"{profile}-{kind}"
         root = destination / case
         (root / "config").mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, root / "config/llm.yaml")
-        (root / "config/llm.yaml").chmod(0o600)
+        shutil.copy2(source, root / "config/model.yaml")
+        (root / "config/model.yaml").chmod(0o600)
         (root / "config/system.yaml").write_text("checkpoint: {enabled: false}\nself_learning: {enabled: false}\ndefault_toolsets: []\n")
         app = root / "applications/live/workflows/root.yaml"
         app.parent.mkdir(parents=True, exist_ok=True)
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--child", type=Path)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--llm", type=Path, default=Path("config/llm.yaml"))
+    parser.add_argument("--llm", type=Path, default=Path("config/model.yaml"))
     parser.add_argument("--limit", type=int, default=32)
     args = parser.parse_args()
     if args.child:

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -20,7 +19,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,9 +26,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-CASES = ("unit", "repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_contract", "goal_parallel")
+CASES = ("repo", "context_text", "context_json", "context_multi", "core", "markdown", "goal_contract", "goal_parallel")
 TIMEOUTS = {case: 900 for case in CASES} | {"goal_contract": 1500, "goal_parallel": 1200}
-WORKERS = ("function_intake", "scenario_planner", "pytest_generator", "test_refiner", "delivery_reporter")
 CONTEXT = {
     "text": [
         (
@@ -171,58 +168,6 @@ def copied_workflow(name: str, filename: str, workspace: Path, replacements: dic
     return dest / "workflows" / filename
 
 
-def verify_unit(workspace: Path) -> dict:
-    target = workspace / "fixture"
-    files = sorted((target / "test/generated").glob("test_*.py"))
-    if len(files) != 2:
-        raise AssertionError(f"Expected generated tests for both functions, got {files}")
-    original = ROOT / "applications/unit_test_studio/test/fixtures/sample_project/src/text_pipeline.py"
-    if (target / "src/text_pipeline.py").read_bytes() != original.read_bytes():
-        raise AssertionError("generation changed the source fixture")
-    suffix = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    xml = workspace / f"generated_pytest_{suffix}.xml"
-    with (workspace / f"generated_pytest_{suffix}.log").open("w") as log:
-        result = subprocess.run([sys.executable, "-m", "pytest", *map(str, files), "-q", f"--junitxml={xml}"],
-                                cwd=target, stdout=log, stderr=subprocess.STDOUT, timeout=90)
-    suites = ET.parse(xml).getroot().findall(".//testsuite")
-    counts = {key: sum(int(suite.get(key, "0")) for suite in suites) for key in ("tests", "failures", "errors", "skipped")}
-    if result.returncode or counts["tests"] <= 0 or any(counts[key] for key in ("failures", "errors", "skipped")):
-        raise AssertionError(f"Host pytest failed: {counts}; inspect {xml}")
-    # Inspect actual generated data, then compare with manually authored behavior oracle.
-    all_cases = {}
-    for path in files:
-        spec = importlib.util.spec_from_file_location(path.stem, path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        all_cases[module.FUNCTION_NAME] = module.TEST_CASES
-    required = {
-        "normalize_user_message": [("text", None, "TypeError"), ("text", "", None), ("max_len", 0, "ValueError")],
-        "extract_keywords": [("message", None, "TypeError"), ("message", "", None), ("limit", 0, None)],
-    }
-    for function, checks in required.items():
-        cases = all_cases.get(function, [])
-        for key, value, error in checks:
-            matching = [case for case in cases if key in case["input"] and case["input"][key] == value]
-            if not matching or (error and not any(case.get("raises") == error for case in matching)):
-                raise AssertionError(f"Required {function} scenario {key}={value!r}, exception={error} missing")
-        text_key = "text" if function == "normalize_user_message" else "message"
-        expected = "hello world" if function == "normalize_user_message" else ["hello", "world"]
-        if not any(case["input"] == {text_key: "  Hello, World!  "} and case.get("expected") == expected for case in cases):
-            raise AssertionError(f"Independent normal-input oracle absent for {function}")
-        empty = "" if function == "normalize_user_message" else ["empty"]
-        if not any(case["input"] == {text_key: ""} and case.get("expected") == empty for case in cases):
-            raise AssertionError(f"Independent empty-input oracle absent for {function}")
-        boundary_key = "max_len" if function == "normalize_user_message" else "limit"
-        if function == "normalize_user_message":
-            if not any(case["input"].get(boundary_key) == 3 and case.get("expected") == "hel" for case in cases):
-                raise AssertionError("Independent truncation oracle absent")
-        elif not any(case["input"].get(boundary_key) == 0 and case.get("expected") == [] for case in cases):
-            raise AssertionError("Independent zero-limit oracle absent")
-    assert_workers(workspace / "runtime", set(WORKERS), count=5)
-    assert_tools(workspace / "runtime", {"resolve_function_targets", "get_function_context", "plan_test_scenarios", "build_pytest_template", "upsert_pytest_file", "validate_and_refine_generated_tests", "collect_generation_report"})
-    return {"pytest": counts, "workers": list(WORKERS), "required_behavior_oracle": True}
-
-
 def verify_context(case: str, workspace: Path) -> dict:
     runtime = workspace / "runtime"
     entries = [json.loads(path.read_text()) for path in runtime.glob("**/context_store/entries/*.json")]
@@ -329,14 +274,6 @@ def child(case: str, workspace: Path) -> dict:
     C.raw.setdefault("runtime", {})["root_dir"] = str(workspace / "runtime")
     C.raw.setdefault("checkpoint", {})["cleanup_on_success"] = False
     os.environ["AGENTLOOM_GOAL_VALIDATION_OUTPUT_ROOT"] = str(workspace / "goal_reports")
-    if case == "unit":
-        target = workspace / "fixture"
-        shutil.copytree(ROOT / "applications/unit_test_studio/test/fixtures/sample_project", target)
-        payload = {"target_root": str(target), "targets": "src/text_pipeline.py:normalize_user_message,src/text_pipeline.py:extract_keywords", "output_dir": "test/generated"}
-        unit_workflow = copied_workflow("unit_test_studio", "unit_test_studio_agent.yaml", workspace, {})
-        execute(unit_workflow, workspace,
-                task="Generate Python pytest tests using Unit Test Studio.\nUse this JSON payload exactly:\n" + json.dumps(payload))
-        return verify_unit(workspace)
     if case.startswith("context_"):
         kind = case.removeprefix("context_")
         name = f"context_engine_{'multi_worker' if kind == 'multi' else kind + '_retrieve'}_validation"
@@ -397,9 +334,7 @@ def main() -> int:
             parser.error("--verify-existing requires one --case and its existing scenario --workspace")
         output = args.workspace / ("verification_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
         try:
-            if args.case == "unit":
-                value = verify_unit(args.workspace)
-            elif args.case == "repo":
+            if args.case == "repo":
                 value = verify_repo(args.workspace)
             elif args.case.startswith("context_"):
                 value = verify_context(args.case.removeprefix("context_"), args.workspace)

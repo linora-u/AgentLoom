@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from agentloom.config.yaml_loader import UniqueKeySafeLoader
+from agentloom.config.paths import resolve_config_path
 
 from .runtime import HookPlan
 from .types import HOOK_EVENT_NAMES, HookEvent, HookHandler
@@ -318,10 +319,7 @@ class HookPlanCompiler:
             raw_path = raw_reference.get("path")
             if not isinstance(raw_path, str) or not raw_path.strip():
                 raise ValueError(f"Enabled Bundle {location} requires a non-empty path")
-            bundle_root = Path(raw_path).expanduser()
-            if not bundle_root.is_absolute():
-                bundle_root = Path(layer.agent_root) / bundle_root
-            bundle_root = bundle_root.resolve()
+            bundle_root = resolve_config_path(raw_path, layer.agent_root).resolve()
             if not bundle_root.is_dir():
                 raise ValueError(f"Hook Bundle directory does not exist: {bundle_root}")
             manifest_path = bundle_root / _BUNDLE_MANIFEST_NAME

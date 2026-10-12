@@ -11,7 +11,7 @@ description: |
 model_type: "powerful"
 
 system_prompt:
-  path: ../config/prompts/code_review_agent.md
+  path: config/prompts/code_review_agent.md
 task: |
   Review the project available in this Application. Call get_module_context() to
   determine the target files, then coordinate the configured Worker stages and
@@ -24,15 +24,15 @@ tools:
     description: "Retrieve module context including module description and related code file list. Must be called before any worker agent."
 
 worker_agents:
-  - path: "project_scan.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/coding_standards.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/error_handling.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/concurrency_safety.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/security_scan.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/performance_analysis.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/architecture_review.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/scenario_coverage.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/testability_review.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/documentation_review.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/recommendations.yaml"
-  - path: "applications/ai_quality_analysis/workflows/worker_agents/report_integration.yaml"
+  - path: "workflows/worker_agents/project_scan.yaml"
+  - path: "workflows/worker_agents/coding_standards.yaml"
+  - path: "workflows/worker_agents/error_handling.yaml"
+  - path: "workflows/worker_agents/concurrency_safety.yaml"
+  - path: "workflows/worker_agents/security_scan.yaml"
+  - path: "workflows/worker_agents/performance_analysis.yaml"
+  - path: "workflows/worker_agents/architecture_review.yaml"
+  - path: "workflows/worker_agents/scenario_coverage.yaml"
+  - path: "workflows/worker_agents/testability_review.yaml"
+  - path: "workflows/worker_agents/documentation_review.yaml"
+  - path: "workflows/worker_agents/recommendations.yaml"
+  - path: "workflows/worker_agents/report_integration.yaml"

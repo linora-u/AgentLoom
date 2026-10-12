@@ -6,11 +6,11 @@
 
 ```bash
 pwd
-test -f config/llm.yaml
-git check-ignore -v config/llm.yaml || true
+test -f config/model.yaml
+git check-ignore -v config/model.yaml || true
 ```
 
-`config/llm.yaml` 通常是本机私有配置，缺失时先从同机可信工作区复制或让用户提供；不要凭空生成，也不要提交。
+`config/model.yaml` 通常是本机私有配置，缺失时先从同机可信工作区复制或让用户提供；不要凭空生成，也不要提交。
 
 ```bash
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
@@ -19,7 +19,7 @@ git check-ignore -v config/llm.yaml || true
 
 通过标准：`summary.valid == true` 且 `error_count == 0`。
 
-此脚本是 `agentloom.app.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML Agent 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。缺少本地 `config/llm.yaml` 会失败，不能跳过模型校验后报告通过。
+此脚本是 `agentloom.app.definition` 共享预检的 CLI 适配器，不维护第二套字段、路径、模型或 MCP 规则。它递归发现 `workflows/` 下全部 YAML Agent 定义，不跟随 symlink；相对路径中包含 `worker_agents` 目录段的定义按 Worker 处理，其余按 Supervisor 处理。它读取项目模型目录和有效配置，检查每个 Supervisor 的完整 Worker 引用图；未被引用的 Worker 也调用共享 Worker 校验。应用模型配置由框架自动合并，项目模型文件可省略；实际所需模型缺失会失败，不能跳过模型校验后报告通过。
 
 输出保留 `summary` 与 `errors` envelope；共享诊断使用 `field: definition`、`rule: shared_definition`，`message` 保留 canonical 原因。目录缺失、没有定义等 authoring 结构错误使用独立规则，不保证旧脚本的字段级 rule 名称。
 
@@ -126,7 +126,7 @@ export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 - 新 checkpoint 有 `task_events.jsonl`；`task_tree.json` 只是投影且能被 `loom list-tasks --detail` 展示。
 - 多 Worker 或重复 Worker 调用场景下，`workers/<worker>/calls/<call_index>/checkpoint.json` 存在，`call_index` 不互相覆盖。
 - resume 场景要实际执行 `loom run <workflow.yaml> --resume <task_id>`；若为了制造中断而提前停止，记录中断方式和恢复结果。
-- Goal 改动必须真实验证：普通 final 与 `max_steps` 后 continuation、根工具完成、Worker 工具隔离、旧预算字段静默忽略、旧预算耗尽 checkpoint resume、目标指纹拒绝、manifest/JSONL/Studio canonical Goal 对象。至少一条应是 30 分钟级复杂多 Worker Application，不能用简单问答替代。
+- Goal 改动必须真实验证：普通 final 与 `max_steps` 后 continuation、根工具完成、Worker 工具隔离、旧预算字段静默忽略、旧预算耗尽 checkpoint resume、目标指纹拒绝、manifest/JSONL canonical Goal 对象。至少一条应是 30 分钟级复杂多 Worker Application，不能用简单问答替代。
 - Resume 后必须证明 `task_id` 不变、`run_id` 改变，新旧 attempt 分属两个 run 目录，但都关联同一个 task checkpoint；heartbeat 和 run event 使用新 `run_id`。
 - 涉及 subagent/Worker checkpoint 时，要分别验证 Supervisor 中断恢复和 Worker 半路中断恢复；Worker 恢复必须证明没有新开重复 `call_index`，且能从 per-call memory checkpoint 继续。
 - file-history 场景要检查 `file-history/snapshots.json` 和备份文件，确认早期备份没有被后续 snapshot 覆盖。

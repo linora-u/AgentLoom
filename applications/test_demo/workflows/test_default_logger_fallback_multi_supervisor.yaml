@@ -20,4 +20,4 @@ tools:
   - name: "shell_tool"
 
 worker_agents:
-  - path: "applications/test_demo/workflows/worker_agents/test_default_logger_fallback_worker.yaml"
+  - path: "workflows/worker_agents/test_default_logger_fallback_worker.yaml"

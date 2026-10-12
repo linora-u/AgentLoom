@@ -243,7 +243,7 @@ def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_p
                   [('root-complete', 'update_goal', {'status': 'complete', 'evidence': 'Root verified denied Worker completion.'})]]
     with model_service(turns=[[('worker-complete', 'update_goal', {'status': 'complete', 'evidence': 'Worker must not settle root.'})]]) as (worker_url, worker_requests), model_service(turns=root_turns) as (url, requests):
         app = project(tmp_path, url)
-        llm = tmp_path / 'config/llm.yaml'
+        llm = tmp_path / 'config/model.yaml'
         config = yaml.safe_load(llm.read_text())
         config['model']['worker'] = {**config['model']['test'], 'base_url': worker_url}
         llm.write_text(yaml.safe_dump(config))
@@ -255,7 +255,7 @@ def test_worker_cannot_complete_root_goal_even_with_explicit_goal_function(tmp_p
             'input_schema': {'type': 'object', 'properties': {
                 'query': {'type': 'string', 'description': 'Request.'}},
                 'required': ['query'], 'additionalProperties': False}}))
-        select(app, goal=True, worker_agents=[{'path': 'probe.yaml'}])
+        select(app, goal=True, worker_agents=[{'path': 'workflows/worker_agents/probe.yaml'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert result.goal['status'] == 'complete'

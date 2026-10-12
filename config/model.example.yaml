@@ -1,0 +1,89 @@
+# AI Agents LLM 配置文件
+
+# ============================================
+# 模型配置
+# ============================================
+model:
+  # 全局默认模型类型；Agent 未指定 model_type 时必须配置这里
+  default_model_type: powerful
+
+  # Pi-only ChatGPT subscription profiles. Log in with Pi once; Pi owns and
+  # refreshes the saved OAuth credential. Do not put a token in this YAML.
+  codex_luna:
+    adapter: openai_chatgpt_responses
+    model: gpt-6-luna
+    context_window: 272000
+    max_output_tokens: 16384
+    timeout: 300
+    num_retries: 0
+    reasoning_effort: xhigh # max is also supported
+    web_search: auto # off | auto | required
+
+  codex_luna_search:
+    adapter: openai_chatgpt_responses
+    model: gpt-6-luna
+    context_window: 272000
+    max_output_tokens: 16384
+    timeout: 300
+    num_retries: 0
+    reasoning_effort: xhigh
+    web_search: required
+
+  # 强大模型配置（用于复杂任务，如代码生成、复杂推理）
+  powerful:
+    # Required wire protocol. Supported values:
+    # openai_chat, openai_responses, anthropic_messages, openai_chatgpt_responses.
+    adapter: openai_chat
+    base_url: "xxxxxxx"
+    api_key: "xxxxxxx"
+    model: "openai/gpt-5_5"
+    temperature: 0.2
+    # Context and generation budgets are distinct. Compression starts before
+    # the request would consume the output reserve.
+    context_window: 128000
+    max_output_tokens: 16384
+    timeout: 300
+    # 速率限制：每分钟最大请求数（用于 smolagents，防止超出 API 限制）
+    requests_per_minute: 10
+    # context_cache: true enables automatic prompt caching for ALL models.
+    # litellm handles per-provider behavior (Anthropic preserves, OpenAI strips, etc.)
+    context_cache: true
+    extra_body:
+      thinking:
+        type: "enabled"
+    # system_prompt_boundary: optional marker to split system prompt into
+    # static (cached) and dynamic (uncached) segments for higher cache hit rates.
+    # Example: system_prompt_boundary: "<!-- DYNAMIC_BOUNDARY -->"
+
+  # 快速模型配置（用于简单任务，如意图识别、分类）
+  fast:
+    adapter: openai_chat
+    # 使用 openai/ 前缀让 LiteLLM 识别这是 OpenAI 兼容端点
+    base_url: "xxxxxxx"
+    api_key: "xxxxxxx"
+    model: "gemini/gemini-3_1-pro-preview"
+    # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
+    temperature: 1.0
+    context_window: 50000
+    max_output_tokens: 8192
+    timeout: 300
+    context_cache: true
+  
+  # 摘要模型配置（用于文本摘要、内容提取）
+  summary:
+    adapter: openai_chat
+    # smolagents smart_summary requires this profile. Pi compacts using
+    # its selected model and does not require a separate summary profile.
+    base_url: "xxxxxxx"
+    api_key: "xxxxxxx"
+    model: "openai/gpt-5_5"
+    temperature: 0.2
+    context_window: 128000
+    max_output_tokens: 16384
+    timeout: 300
+    # Completed-run memory review owns its four-call budget and does not use
+    # SDK retries. One action step must not duplicate a side-effecting tool.
+    num_retries: 0
+    parallel_tool_calls: false
+    requests_per_minute: 10
+    context_cache: true

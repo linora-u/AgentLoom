@@ -1,6 +1,8 @@
-"""Definition-source and project-relative Application resource paths."""
+"""Application resource paths relative to the declaring configuration root."""
 
 from pathlib import Path
+
+from agentloom.config.paths import configuration_root, resolve_config_path
 
 
 def worker_reference_candidate(
@@ -13,21 +15,13 @@ def worker_reference_candidate(
 
     value = path_value.strip()
     configured = Path(value).expanduser()
-    root = Path(project_root).expanduser().resolve()
-    if configured.is_absolute():
-        candidate = configured
-    elif value.startswith(("./", "../", "worker_agents/")):
-        candidate = worker_folder.parent / configured
-    elif "/" in value or "\\" in value:
-        candidate = root / configured
-    elif configured.suffix:
-        candidate = worker_folder / configured
-    else:
+    if not configured.suffix:
         raise ValueError(
             f"worker_agents path '{value}' is missing a file extension; "
             f"must end with .yaml or .yml (e.g. '{value}.yaml')"
         )
-    return candidate.absolute()
+    root = configuration_root(worker_folder.parent / "agent.yaml", project_root)
+    return resolve_config_path(value, root)
 
 
 def resolve_worker_reference(path_value: str, worker_folder: Path, *, project_root: Path | str) -> Path:

@@ -12,7 +12,7 @@ model_type: "powerful"
 concurrency: auto
 
 system_prompt:
-  path: ../../config/prompts/dir_architecture_analysis.md
+  path: config/prompts/dir_architecture_analysis.md
 task: 基于本次传入的 dir_path、index_content 和 children_analyses 分析目录架构，按上述格式返回 Markdown。
 
 tools: []

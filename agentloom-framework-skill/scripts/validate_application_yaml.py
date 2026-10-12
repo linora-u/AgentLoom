@@ -5,11 +5,9 @@ Public CLI:
     .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
       --app-root applications/<app_name>
 
-Applications that load a local model catalog at runtime can pass
-``--model-config config/model.yaml`` (relative to ``--app-root``) so preflight
-checks the same model references.
+Application ``config/model.yaml`` is resolved by the framework automatically.
 
-This adapter owns directory discovery, optional runtime model-catalog overlay,
+This adapter owns directory discovery
 and the JSON envelope. Definition, Worker, model, configuration, and reference
 rules belong to agentloom.app.
 """
@@ -19,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -29,18 +28,25 @@ from agentloom.app.definition import (
     read_agent_definition,
 )
 from agentloom.config.config import load_project_config
-from agentloom.config.llm_config import LLMConfig
-from agentloom.config.yaml_loader import load_unique_yaml
 
 
 def _discover_project_root(start: Path) -> Path | None:
     candidates = [start.resolve(), *start.resolve().parents]
-    # The nearest AgentLoom config directory owns validation. If llm.yaml is
+    for candidate in candidates:
+        project_file = candidate / "pyproject.toml"
+        if project_file.is_file():
+            try:
+                project = tomllib.loads(project_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if project.get("project", {}).get("name") == "AgentLoom":
+                return candidate
+    # The nearest AgentLoom config directory owns validation. If model.yaml is
     # missing there, shared preflight should report that absence instead of
     # accidentally borrowing a model catalog from a parent temp/workspace tree.
     for candidate in candidates:
         config_dir = candidate / "config"
-        if (config_dir / "llm.yaml").is_file() or (config_dir / "system.yaml").is_file():
+        if (config_dir / "model.yaml").is_file() or (config_dir / "system.yaml").is_file():
             return candidate
     return None
 
@@ -75,12 +81,11 @@ def _emit(app_root: Path | str, errors: list[dict[str, str]], *, files_checked: 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate AgentLoom Application definitions with shared preflight.")
     parser.add_argument("--app-root", required=True, help="Application root path, e.g. applications/code_review")
-    parser.add_argument("--model-config", help="Optional model catalog path relative to --app-root")
     args = parser.parse_args()
     project_root = _discover_project_root(Path.cwd())
     if project_root is None:
         _emit(args.app_root, [_error(
-            Path.cwd(), "未找到 config/llm.yaml 或 config/system.yaml，无法定位项目根目录",
+            Path.cwd(), "未找到 config/model.yaml 或 config/system.yaml，无法定位项目根目录",
             root=Path.cwd(), field="project_root", rule="project_root_discovery",
         )])
         return 2
@@ -99,6 +104,7 @@ def main() -> int:
     files = [item.path for item in discovered]
     roles = {item.path: item.role for item in discovered}
     config_files_checked = int((app_root / "config/system.yaml").is_file())
+    config_files_checked += int((app_root / "config/model.yaml").is_file())
     if not files:
         _emit(app_root, [_error(
             workflows_dir, "workflows 中没有 Agent YAML 定义", root=project_root,
@@ -128,27 +134,6 @@ def main() -> int:
     except (OSError, UnicodeError, yaml.YAMLError, TypeError, ValueError) as exc:
         add(project_root / "config", f"{project_root}/config: {definition_error(exc)}")
         base = None
-    if base is not None and args.model_config:
-        model_path = app_root / args.model_config
-        try:
-            if not model_path.resolve().is_relative_to(app_root):
-                raise ValueError("--model-config must be inside --app-root")
-            local_raw = load_unique_yaml(model_path.read_text(encoding="utf-8")) or {}
-            local_models = local_raw.get("model") if isinstance(local_raw, dict) else None
-            if not isinstance(local_models, dict) or not local_models:
-                raise ValueError("local model catalog must define at least one model")
-            merged_raw = load_unique_yaml((project_root / "config/llm.yaml").read_text(encoding="utf-8")) or {}
-            if not isinstance(merged_raw, dict) or not isinstance(merged_raw.get("model"), dict):
-                raise ValueError("project model catalog must contain a model mapping")
-            merged_raw["model"].update(local_models)
-            merged = LLMConfig.from_dict(merged_raw)
-            for name in local_models:
-                if name not in merged.models:
-                    raise ValueError(f"local model catalog entry {name!r} is not a model profile")
-                base.llm.models[name] = merged.models[name]
-            config_files_checked += 1
-        except (OSError, UnicodeError, yaml.YAMLError, TypeError, ValueError) as exc:
-            add(model_path, f"{model_path}: {definition_error(exc)}")
     visited: set[Path] = set()
     for path, definition in parsed.items():
         if path in visited:

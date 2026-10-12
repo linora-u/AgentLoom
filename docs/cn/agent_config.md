@@ -6,15 +6,15 @@
 > **文档定位**：本文档详细说明 Agent YAML 的**每一个**配置参数。
 > 关于配置文件之间的覆盖关系，请参阅 [配置体系总览](config-overview.md)。
 > 关于 `config/system.yaml`，请参阅 [系统配置文档](system_config.md)。
-> 关于 `config/llm.yaml`，请参阅 [LLM 配置文档](llm_config.md)。
+> 关于 `config/model.yaml`，请参阅 [LLM 配置文档](llm_config.md)。
 
 Agent YAML 定义单个 Agent 的可选长期指令、必填用户任务、工具、模型和 Skill。Agent 分为 **Supervisor**（多 Agent 编排者）和 **Worker**（具体任务执行者）两种角色。
 Agent 运行时通过必填的 `agent_runtime` 选择；当前注册值为
 `smolagents` 和 `pi`。所有 Tool 均通过模型原生结构化 tool call 调用。
 
-两种角色只使用 `.yaml` 或 `.yml` 定义。Markdown 可作为 `system_prompt.path` 指向的提示词正文，不能直接作为 Agent 定义。Application Studio、CLI、Schedule 和 Python 入口读取同一份 YAML 任务。
+两种角色只使用 `.yaml` 或 `.yml` 定义。Markdown 可作为 `system_prompt.path` 指向的提示词正文，不能直接作为 Agent 定义。CLI、Schedule 和 Python 入口读取同一份 YAML 任务。
 
-> ⚠️ **LLM 配置隔离**：Agent YAML 中的 `model`/`llm`/`langfuse` 会被自动过滤并输出 warning。LLM 参数只能在 `config/llm.yaml` 中定义，Agent 通过 `model_type` 字段选择使用哪个预定义模型类型。
+> ⚠️ **LLM 配置隔离**：Agent YAML 中的 `model`/`llm`/`langfuse` 会被自动过滤并输出 warning。LLM 参数只能在 `config/model.yaml` 中定义，Agent 通过 `model_type` 字段选择使用哪个预定义模型类型。
 
 ---
 
@@ -98,11 +98,11 @@ model_type: "powerful"                   # 可选: "powerful", "fast", "summary"
 
 # ---- Supervisor 专属 ----
 worker_agents:
-  - path: "applications/my_app/workflows/worker_agents/project_scan.yaml"
-  - path: "applications/my_app/workflows/worker_agents/data_analysis.yaml"
+  - path: "workflows/worker_agents/project_scan.yaml"
+  - path: "workflows/worker_agents/data_analysis.yaml"
 
 runtime_options:
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
 
 skills:
   paths:
@@ -187,12 +187,12 @@ Supervisor 和 Worker 共有 4 个必填字段：
 | 字段 | 职责 | 写什么 | 不写什么 |
 |------|------|--------|----------|
 | `description` | **角色定位**（一两句话） | "作为 XX 智能体，你的核心职责是 YY" | 不写详细流程、不写具体步骤 |
-| `system_prompt` | **可选长期指令** | 角色、规则、工作方式；直写或 `{path: ../config/prompts/role.md}` | 本次任务 |
+| `system_prompt` | **可选长期指令** | 角色、规则、工作方式；直写或 `{path: config/prompts/role.md}` | 本次任务 |
 | `task` | **必填用户任务** | 一条任务或按顺序执行的任务列表 | 工具输入参数 |
 
 `system_prompt` 进入 Runtime 的 system / instructions 通道；不配置时使用 runtime 默认行为。`task` 进入 user 通道；列表中的后一项在前一项完成后才发送，沿用同一 Agent 会话。CLI 和 Python 入口不接受额外任务文字。
 
-`system_prompt.path` 相对于定义该 Agent 的 YAML 文件。若 YAML 位于 `workflows/`，可写 `../config/prompts/role.md`；若 Worker YAML 位于 `workflows/worker_agents/`，则写 `../../config/prompts/role.md`。例如 `my_pi_agent` 和代码审查 Application 已将部分长期指令放在各自的 `config/prompts/` 中。
+`system_prompt.path` 相对于 Application 根目录。Supervisor 和任意层级 Worker 都写 `config/prompts/role.md`；YAML 的目录深度不改变路径基准。
 
 #### Goal Mode（仅 Supervisor）
 
@@ -395,7 +395,7 @@ task: |
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `tools` | `list[dict]` | `[]` | 工具列表。详见 [第 4 节](#4-工具配置详解) |
-| `model_type` | `str` | 已配置的全局 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
+| `model_type` | `str` | 应用覆盖后的 `default_model_type` | 模型选择。详见 [3.7](#37-model_type--模型选择) |
 | `runtime_options.prompt_template_path` | `str` | 不设置 | smol 模板路径，仅字符串 |
 | `runtime_options.planning_interval` | `int` | 不设置 | 每 N 步强制规划。详见 [3.10](#310-runtime_optionsplanning_interval--规划间隔) |
 | `runtime_options.todo_mode` | `str` | "auto" | smol 当前任务跟踪；"on" / "off" 必须加引号 |
@@ -449,7 +449,7 @@ AgentLoom 按 schema 校验参数并执行已注册 Tool。框架不会从自然
 
 ### 3.7 `model_type` — 模型选择
 
-Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择**使用 `config/llm.yaml` 中定义的哪个模型类型。
+Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择**使用 `config/model.yaml` 中定义的哪个模型类型。
 
 | 预定义类型 | 适用场景 | 说明 |
 |-----------|----------|------|
@@ -457,11 +457,11 @@ Agent YAML 不能直接修改 LLM 参数，但可以通过 `model_type` **选择
 | `"fast"` | 简单分类、路由、轻量 Worker | 快速响应，成本低 |
 | `"summary"` | 文本摘要、信息提取 | 中等能力 |
 
-也支持 `llm.yaml` 中自定义的任意类型名（如 `"code_review"`）。
+也支持 `model.yaml` 中自定义的任意类型名（如 `"code_review"`）。
 
 **解析逻辑**：
 1. Agent YAML 指定了 `model_type` → 使用该值，如果该类型不存在，**直接报错 (`ValueError`)，不会静默回退**。
-2. 未指定 → 使用全局 `config/llm.yaml` 的 `model.default_model_type`。如果 `default_model_type` 未配置，或最终解析出的类型不存在，**同样直接报错**。
+2. 未指定 → 使用应用覆盖后的 `model.default_model_type`（应用未声明时继承项目配置）。如果 `default_model_type` 未配置，或最终解析出的类型不存在，**同样直接报错**。
 
 ---
 
@@ -489,10 +489,10 @@ smol 的自定义 System Prompt 模板使用非空字符串路径，不接受 `{
 
 ```yaml
 runtime_options:
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
 ```
 
-相对路径基于项目根目录解析，绝对路径直接使用。模板内容必须是合法 YAML mapping。
+相对路径基于声明配置的根目录解析：全局配置用 AgentLoom 项目根目录，Application/Agent 配置用 Application 根目录。绝对路径直接使用。模板内容必须是合法 YAML mapping。
 显式路径优先；未配置时，smol adapter 依次选择 `src/runtimes/smolagents/prompts/` 下已激活的模型家族模板、本地模板，再使用 smolagents 内置模板。`.example.yaml` 只是参考资源。
 
 ---
@@ -557,7 +557,7 @@ checkpoint 时仅保存在当前 run 的内存中。文件损坏时会告警并�
 | `N`（正整数） | 固定并发度，同时最多运行 N 个实例 |
 | 不设置 / `null` | 等同 `auto` |
 
-> `auto` 模式从 `config/llm.yaml` 中对应 `model_type` 的 `requests_per_minute` 读取 RPM。线程数 = `min(RPM, 10)`，rate limiter 以 `60/RPM` 秒为间隔控制实际请求速率。
+> `auto` 模式从 `config/model.yaml` 中对应 `model_type` 的 `requests_per_minute` 读取 RPM。线程数 = `min(RPM, 10)`，rate limiter 以 `60/RPM` 秒为间隔控制实际请求速率。
 
 **线程安全说明**：框架为每次并发调用创建**独立的 Agent 实例**（共享 Model 和 Config，但 Agent 的 `memory`、`state` 等有状态属性完全隔离）。这借鉴了 Cline `new SubagentRunner()` 和 LangGraph `Send()` 的设计模式。
 
@@ -631,7 +631,7 @@ mcp_servers:
   tool_name_prefix: true
 ```
 
-**路径解析**：相对路径从 `agent_root`（项目根目录）解析，与 `prompt.path` 规则一致。
+**路径解析**：全局配置中的路径相对 AgentLoom 项目根目录，Application/Agent 配置中的路径相对 Application 根目录。
 
 **与全局配置的合并**：Agent YAML 中的 `mcp_servers` 会与 `config/system.yaml` 中的全局 `mcp_servers` 合并。同名 Server 以 Agent 级别为准。
 
@@ -1097,40 +1097,36 @@ applications/{app_name}/
 
 - **Supervisor YAML** 必须位于 `applications/{app_name}/workflows/` 目录下
 - **Worker YAML** 必须位于 `applications/{app_name}/workflows/worker_agents/` 目录下
-- `worker_agents/` 下**允许创建子目录**，子目录名称无限制，但子目录中的 Worker **不能用简写文件名**，必须使用完整相对路径引用
+- `worker_agents/` 下**允许创建子目录**，子目录名称无限制，所有 Worker 都使用相对 Application 根目录的路径引用
 - 框架通过 Supervisor YAML 的路径自动推断 `{app_name}`（category），然后定位对应的 `worker_agents/` 目录
 - 如果 `workflows/` 或 `worker_agents/` 目录不存在，加载时会直接报错
 
-### 6.2 三种路径形式
+### 6.2 配置路径基准
 
-| 形式 | 判断条件 | 解析方式 | 示例 |
-|------|----------|----------|------|
-| **绝对路径** | 以 `/` 开头 | 直接使用 | `/home/user/project/worker.yaml` |
-| **相对路径** | 包含 `/` 或 `\` | 基于 `AGENT_ROOT` 拼接 | `applications/my_app/workflows/worker_agents/step0.yaml` |
-| **简写文件名** | 不含目录分隔符，**必须带后缀** | 在 `worker_agents/` 目录下查找 | `project_scan.yaml` |
+全局配置相对 AgentLoom 项目根目录；Application 和 Agent YAML 配置相对 Application 根目录。应用根是最近的 `workflows/` 的父目录，与 YAML 位于哪个子目录无关。
 
-**支持的文件后缀**：`.yaml`、`.yml`、`.md`
+Worker 使用 `workflows/worker_agents/project_scan.yaml`；跨应用使用 `../other_app/workflows/worker_agents/shared_worker.yaml`。裸文件名只表示应用根下的文件，不再自动查找 `worker_agents/`。Worker 定义仅支持 `.yaml` 和 `.yml`。
 
-> **注意**：简写文件名**必须包含文件后缀**（如 `.yaml`）。不带后缀的写法（如 `project_scan`）会直接报错。
+继承字段保留声明来源的基准；覆盖超时等非路径字段不会移动继承的文件。`../`、`~` 和绝对路径按已有能力规则解析，原有访问检查继续适用。命令行、Python API 入参和模型工具的路径仍使用各自的工作目录。
 
 ### 6.3 推荐写法
 
 ```yaml
-# ✅ 推荐：简写文件名（Worker 在同 app 的 worker_agents/ 下时，最简洁）
+# 应用内 Worker，相对 Application 根目录
 worker_agents:
-  - path: "project_scan.yaml"
+  - path: "workflows/worker_agents/project_scan.yaml"
 
 # ✅ 完整相对路径（跨 app 引用其他 app 的 Worker 时使用）
 worker_agents:
-  - path: "applications/other_app/workflows/worker_agents/shared_worker.yaml"
+  - path: "../other_app/workflows/worker_agents/shared_worker.yaml"
 
 # ✅ 完整相对路径（引用 worker_agents/ 子目录下的 Worker 时使用）
 worker_agents:
-  - path: "applications/my_app/workflows/worker_agents/analysis/deep_scan.yaml"
+  - path: "workflows/worker_agents/analysis/deep_scan.yaml"
 
 # ❌ 禁止：不带文件后缀
 worker_agents:
-  - path: "project_scan"               # 报错！必须带 .yaml/.yml/.md 后缀
+  - path: "project_scan"               # 报错！必须带 .yaml/.yml 后缀
 
 # ❌ 禁止：使用 name 字段
 worker_agents:
@@ -1226,7 +1222,7 @@ tools:
   - name: "list_directory"
 
 worker_agents:
-  - path: "applications/repo_map/workflows/worker_agents/dir_architecture_analysis.yaml"
+  - path: "workflows/worker_agents/dir_architecture_analysis.yaml"
 ```
 
 **Worker 示例**: `dir_architecture_analysis.yaml`
@@ -1288,7 +1284,7 @@ system_prompt:
 task: "扫描传入的目录并报告发现。"
 ```
 
-`prompts/project_scan.md` 相对该 YAML 所在目录解析。Markdown 文件本身不能作为 Agent 定义。
+`prompts/project_scan.md` 相对 Application 根目录解析。Markdown 文件本身不能作为 Agent 定义。
 
 ---
 
@@ -1354,13 +1350,13 @@ Agent YAML 中以下顶层字段能覆盖系统配置（源码 `_WORKFLOW_OVERLA
 
 | 被过滤的 Key | 唯一合法位置 |
 |-------------|-------------|
-| `model` | `config/llm.yaml` |
-| `llm` | `config/llm.yaml` |
-| `langfuse` | `config/llm.yaml` |
+| `model` | `config/model.yaml` |
+| `llm` | `config/model.yaml` |
+| `langfuse` | `config/model.yaml` |
 
 ```
 WARNING: Ignoring top-level key 'model' in agent config;
-         LLM settings must come from config/llm.yaml only.
+         LLM settings must come from config/model.yaml only.
 ```
 
 ### 9.5 Deep Merge 规则
@@ -1596,7 +1592,7 @@ rg 'SECURITY_BLOCK|WHITELIST_REJECT|PATH_VIOLATION' "$run_dir/audit/shell.jsonl"
 | `system_prompt` | ❌ | ✅ | ✅ | `str` / `{path: str}` | Runtime 默认指令 |
 | `goal` | ❌ | ✅ | ❌ | `bool`/`dict` | `false` |
 | `tools` | ❌ | ✅ | ✅ | `list[dict]` | `[]` |
-| `model_type` | ❌ | ✅ | ✅ | `str` | `config/llm.yaml` 中的 `model.default_model_type`；无隐式默认值 |
+| `model_type` | ❌ | ✅ | ✅ | `str` | `config/model.yaml` 中的 `model.default_model_type`；无隐式默认值 |
 | `runtime_options.prompt_template_path` | ❌ | ✅ | ✅ | `str` | 不设置 |
 | `runtime_options.planning_interval` | ❌ | ✅ | ✅ | `int` | 不设置 |
 | `runtime_options.todo_mode` | ❌ | ✅ | ✅ | `str` | `"auto"` |

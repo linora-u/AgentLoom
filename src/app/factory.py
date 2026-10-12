@@ -22,6 +22,7 @@ from agentloom.app.validation import (
 from agentloom.app.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
 from agentloom.config import C
 from agentloom.config.config import EffectiveAgentConfigSnapshot
+from agentloom.config.paths import configuration_root, normalize_config_paths
 from agentloom.execution.logging import (
     get_logger,
 )
@@ -482,6 +483,9 @@ def _load_mcp_tools(
     strict = effective_agent_config is not None and "_mcp_settings_snapshot" in effective_agent_config
     global_raw = (effective_agent_config or {}).get("mcp_servers")
     agent_raw = config.get("mcp_servers")
+    if agent_raw is not None:
+        root = configuration_root(config.get("_yaml_file_path") or agent_root, agent_root)
+        agent_raw = normalize_config_paths({"mcp_servers": agent_raw}, root)["mcp_servers"]
 
     if global_raw is None and agent_raw is None:
         return None

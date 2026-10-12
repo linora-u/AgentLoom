@@ -9,6 +9,14 @@ from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnResult
 from agentloom.execution.skills.catalog import SkillCatalog, SkillSource
 from agentloom.execution.trace import get_current_hook_run, get_current_skill_catalog
+from agentloom.config.config import bind_config
+from tests.config_test_support import unit_config
+
+
+@pytest.fixture(autouse=True)
+def _isolated_model_profiles():
+    with bind_config(unit_config(Path(__file__).resolve().parents[3])):
+        yield
 
 
 class _DummyRuntimeAgent:

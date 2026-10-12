@@ -2,6 +2,9 @@
 
 This document introduces the configuration system architecture of the AgentLoom framework, including configuration file classification, loading hierarchy, override mechanisms, and the independence of LLM configuration.
 
+
+The framework loads project `config/model.yaml` and the model file belonging to each Agent’s Application. Same-name Application profiles replace entire project profiles; other project models remain available. An Application may override `model.default_model_type`; otherwise it inherits the project default. Cross-Application Workers use their own definition directory. The project model file is optional when the Application supplies all required models. New executions and task attempts read current configuration; each running session keeps its selected model. Existing SDK retries and checkpoint compatibility rules remain unchanged. Existing `llm.yaml` files must migrate.
+
 ## 1. Configuration File Classification
 
 The configuration of AgentLoom is primarily divided into three major categories, stored in different configuration files:
@@ -9,9 +12,10 @@ The configuration of AgentLoom is primarily divided into three major categories,
 | Configuration File | Default Path | Role and Purpose |
 |----------|----------|------------|
 | `system.yaml` | `config/system.yaml` | **Global system configuration**. Controls tools, workspace policy, permissions, and runtime storage. |
-| `llm.yaml` | `config/llm.yaml` | **Global model configuration**. Every model type explicitly selects a wire adapter and independently configures its model name, credentials, endpoint, and request parameters. |
+| `model.yaml` | `config/model.yaml` | **Global model configuration**. Every model type explicitly selects a wire adapter and independently configures its model name, credentials, endpoint, and request parameters. |
 | `agent_xxx.yaml` | `applications/<app>/workflows/*.yaml` | **Agent configuration**. Defines role, runtime, required task, optional system prompt, tools, and model type. A top-level Supervisor may also enable [Goal Mode](goal_mode.md); Workers cannot own Goals. |
 | *Application-level system configuration* | `applications/<app>/config/system.yaml` | **Optional application-level override**. Used to override default system behaviors for specific applications (e.g., modifying tool access control or replacing default tools). |
+| *Application-level model configuration* | `applications/<app>/config/model.yaml` | **Optional model override**. Replaces whole profiles by model name while retaining other project models. |
 
 > For more information, refer to:
 > - [Agent YAML Configuration Reference](agent_config.md)
@@ -85,7 +89,7 @@ File logging follows `logging.file_enabled` and is bounded by size/backup count.
 
 ## 3. Complete Isolation of LLM Configuration
 
-In AgentLoom, **LLM configuration (`llm.yaml`) is physically isolated from system configuration (`system.yaml`)**.
+In AgentLoom, **LLM configuration (`model.yaml`) is physically isolated from system configuration (`system.yaml`)**.
 
 ### Why Isolation?
 - **Prevent leakage**: Ensures sensitive `api_key` values are not accidentally written into business Agent configurations.
@@ -143,7 +147,7 @@ for configuration, continuation, and schedule behavior.
 The Python package is `agentloom`; use `python -m agentloom` or the `loom`
 console command. The former `src` package and module commands have been removed.
 For an installed wheel launched outside a project, set `AGENTLOOM_PROJECT_ROOT`
-to the directory containing `config/system.yaml` and `config/llm.yaml`. Without
+to the directory containing `config/system.yaml`. Without
 an explicit root, the existing project-ancestor discovery still applies.
 Generated scripts record their project location relative to their output file
 and accept the same environment override. Project tools remain in

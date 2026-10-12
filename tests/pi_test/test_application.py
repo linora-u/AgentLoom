@@ -120,7 +120,7 @@ def project(root: Path, url: str):
              "max_output_tokens": 100, "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000,
              "supports_structured_output": True,
              "extra_headers": {"X-Fixture": "selected-profile"}}
-    (root / "config/llm.yaml").write_text(yaml.safe_dump({"model": {"default_model_type": "test", "test": model, "summary": model}}))
+    (root / "config/model.yaml").write_text(yaml.safe_dump({"model": {"default_model_type": "test", "test": model, "summary": model}}))
     app = root / "applications/pi/workflows/root.yaml"
     app.parent.mkdir(parents=True)
     app.write_text("name: pi\nagent_runtime: pi\ndescription: Answer directly.\nsystem_prompt: Say Pi answer.\ntask: Answer the configured request.\nruntime_options: {compaction: {enabled: false}, transport: sse, cacheWarming: 'off'}\ntools: []\ntoolsets: []\n")
@@ -157,6 +157,55 @@ def test_real_yaml_pi_no_tools_returns_receipt_and_exact_model_request(tmp_path)
     events = [json.loads(line) for line in (result.run.run_dir / "audit/runtime_events.jsonl").read_text().splitlines()]
     assert [e["details"]["state"] for e in events if e["kind"] == "terminal"] == ["success"]
     assert [e["details"]["total_tokens"] for e in events if e["kind"] == "usage"] == [15]
+
+
+def test_application_only_models_are_used_and_changes_apply_to_next_run(tmp_path):
+    with model_service() as (url, requests):
+        app = project(tmp_path, url)
+        global_path = tmp_path / "config/model.yaml"
+        profile = yaml.safe_load(global_path.read_text())["model"]["test"]
+        global_path.unlink()
+        local_path = app.parent.parent / "config/model.yaml"
+        local_path.parent.mkdir()
+        profile["model"] = "openai/application-before"
+        local_path.write_text(yaml.safe_dump({"model": {"default_model_type": "local", "local": profile}}))
+        with bind_config(load_project_config(tmp_path)):
+            first = execute_app(app, file_logging=False)
+            profile["model"] = "openai/application-after"
+            local_path.write_text(yaml.safe_dump({"model": {"default_model_type": "local", "local": profile}}))
+            second = execute_app(app, file_logging=False)
+    assert first.output == second.output == "Pi answer"
+    assert [payload["model"] for _, payload, _ in requests] == ["application-before", "application-after"]
+
+
+def test_application_local_model_profiles_override_tracked_profiles_and_refresh(tmp_path):
+    with model_service() as (url, requests):
+        app = project(tmp_path, url)
+        global_path = tmp_path / "config/model.yaml"
+        profile = yaml.safe_load(global_path.read_text())["model"]["test"]
+        global_path.unlink()
+        config = app.parent.parent / "config"
+        config.mkdir()
+        tracked = {**profile, "model": "openai/tracked", "api_key": ""}
+        local = {"model": "openai/local-before", "api_key": "private-before"}
+        (config / "model.yaml").write_text(
+            yaml.safe_dump({"model": {"default_model_type": "test", "test": tracked}})
+        )
+        local_path = config / "model.local.yaml"
+        local_path.write_text(yaml.safe_dump({"model": {"test": local}}))
+        with bind_config(load_project_config(tmp_path)):
+            first = execute_app(app, file_logging=False)
+            local = {"model": "openai/local-after", "api_key": "private-after"}
+            local_path.write_text(yaml.safe_dump({"model": {"test": local}}))
+            second = execute_app(app, file_logging=False)
+    assert first.output == second.output == "Pi answer"
+    assert [payload["model"] for _, payload, _ in requests] == [
+        "local-before", "local-after",
+    ]
+    assert [headers["authorization"] for _, _, headers in requests] == [
+        "Bearer private-before", "Bearer private-after",
+    ]
+    assert all("input_token_limit" not in payload for _, payload, _ in requests)
 
 
 def test_textual_tool_call_without_tools_gets_feedback_and_continues(tmp_path):
@@ -201,7 +250,7 @@ def test_repeated_textual_tool_call_without_tools_fails_instead_of_completing(tm
 
 
 def change_model(root, **changes):
-    path = root / "config/llm.yaml"
+    path = root / "config/model.yaml"
     config = yaml.safe_load(path.read_text())
     config["model"]["test"].update(changes)
     path.write_text(yaml.safe_dump(config))
@@ -219,6 +268,26 @@ def test_responses_profile_uses_native_responses_request(tmp_path):
     assert payload["max_output_tokens"] == 100
     assert payload["metadata"] == {"case": "responses"}
     assert not payload.get("tools")
+
+
+@pytest.mark.parametrize(("reasoning_summary", "expected_reasoning"), [
+    (None, {"effort": "high", "summary": "auto"}),
+    (False, {"effort": "xhigh"}),
+])
+def test_responses_reasoning_can_omit_unsupported_summary(tmp_path, reasoning_summary, expected_reasoning):
+    with model_service(responses=True) as (url, requests):
+        app = project(tmp_path, url)
+        changes = {"adapter": "openai_responses", "reasoning_effort": "xhigh"}
+        if reasoning_summary is not None:
+            changes["reasoning_summary"] = reasoning_summary
+        change_model(tmp_path, **changes)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(app, file_logging=False)
+    assert result.output == "Pi answer"
+    path, payload, _ = requests[0]
+    assert path == "/v1/responses"
+    assert payload["reasoning"] == expected_reasoning
+    assert "reasoning_summary" not in payload
 
 
 @pytest.mark.parametrize(

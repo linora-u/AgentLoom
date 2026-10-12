@@ -188,7 +188,7 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
         turns=[[('worker-left', 'probe', {'query': 'left'}), ('worker-right', 'probe', {'query': 'right'})]]
     ) as (url, requests):
         app = project(tmp_path, url)
-        model_path = tmp_path / 'config/llm.yaml'
+        model_path = tmp_path / 'config/model.yaml'
         config = yaml.safe_load(model_path.read_text())
         config['model']['worker'] = {**config['model']['test'], 'base_url': worker_url}
         model_path.write_text(yaml.safe_dump(config))
@@ -200,7 +200,7 @@ def test_pi_supervisor_runs_two_independent_pi_workers_with_callbacks(tmp_path):
             'input_schema': {'type': 'object', 'properties': {
                 'query': {'type': 'string', 'description': 'Requested fact.'}},
                 'required': ['query'], 'additionalProperties': False}}))
-        select(app, concurrency=2, worker_agents=[{'path': 'probe.yaml'}])
+        select(app, concurrency=2, worker_agents=[{'path': 'workflows/worker_agents/probe.yaml'}])
         with bind_config(load_project_config(tmp_path)):
             result = execute_app(app, file_logging=False)
     assert result.output == 'Pi answer'

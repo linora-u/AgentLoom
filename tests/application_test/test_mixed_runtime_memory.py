@@ -135,7 +135,7 @@ def test_smol_evidence_is_reviewed_then_used_by_a_new_pi_run(tmp_path, approval_
             policy_path.unlink()
             definition = yaml.safe_load(workflow.read_text())
             if approval_timing == 'during_next_root':
-                definition.update(agent_runtime='pi', tools=[], worker_agents=[{'path': 'inspect.yaml'}],
+                definition.update(agent_runtime='pi', tools=[], worker_agents=[{'path': 'workflows/worker_agents/inspect.yaml'}],
                                   task='Ask the Worker to inspect only the inherited snapshot.')
                 write_yaml(workflow, definition)
                 worker_path = workflow.parent / 'worker_agents/inspect.yaml'

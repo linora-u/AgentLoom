@@ -18,7 +18,7 @@ task: |
 不从 `description` 或运行参数伪造任务。
 
 Supervisor 和 Worker 的定义格式只支持 `.yaml`、`.yml`。Markdown 文件可作为
-`system_prompt.path` 引用的正文，但不能作为 Agent 定义。Studio 目录/详情、公开预检、
+`system_prompt.path` 引用的正文，但不能作为 Agent 定义。公开预检、
 schedule 目标与执行复用同一解析语义，包含嵌套 Application 和 workflow 目录；
 不要把 Markdown Worker 当成独立 Supervisor。重复 key、非法定义和越界/符号链接
 引用仍须拒绝，结构读取不得构造模型或分配 Run。
@@ -33,7 +33,7 @@ model_type: "powerful"
 runtime_options:
   max_steps: 80
 worker_agents:
-  - path: "applications/<app_name>/workflows/worker_agents/<worker>.yaml"
+  - path: "workflows/worker_agents/<worker>.yaml"
 task: |
   # <本次任务>
   ...
@@ -42,7 +42,7 @@ task: |
 规则：
 
 - `worker_agents` 只支持 `path`，不要写 `name`。
-- `path` 支持绝对路径、AgentLoom 根目录相对路径、`worker_agents/` 下文件名、或不带后缀的 Worker 名；生成时推荐写完整项目相对路径。
+- `path` 相对 Application 根目录，也支持绝对路径；必须带 `.yaml` 或 `.yml` 后缀。生成时写 `workflows/worker_agents/<worker>.yaml`，跨应用写 `../other_app/...`，不按文件名自动查找目录。
 - `agent_runtime` 必填；当前注册值为 `smolagents` 和 `pi`，需安装所选基座。缺失或未知值在预检阶段失败，不会回退。
 - Agent 只通过 provider 原生结构化工具调用执行 Tool。
 
@@ -126,7 +126,7 @@ runtime_options:
   planning_interval: 3
   smart_summary: false
   todo_mode: "off"
-  prompt_template_path: "applications/my_app/sysprompt/agent_prompt.yaml"
+  prompt_template_path: "sysprompt/agent_prompt.yaml"
   max_consecutive_model_errors: 5
 ```
 
@@ -135,9 +135,9 @@ runtime_options:
 ## 模型与配置
 
 - Agent YAML 不写 `model`、`llm`、`langfuse`。
-- `model_type` 必须存在于 `config/llm.yaml`。
+- `model_type` 必须存在于项目与 Agent 所属应用 `config/model.yaml` 合并后的有效模型目录。
 - 不写 `model_type` 时依赖 `model.default_model_type`，但生成新 Application 时推荐显式写出实际可用类型。
-- `summary` 模型类型是 `smart_summary` 依赖；`config/llm.yaml` 中只要配置了模型类型，就必须包含 `summary`。
+- 仅 smolagents 开启 `runtime_options.smart_summary` 时要求 `summary`；Pi 使用当前模型压缩上下文。
 - 每个模型类型（包括 `summary`）必须显式声明 `adapter`，合法值为 `openai_chat`、`openai_responses`、`anthropic_messages`。
 - `model` 只是传给 LiteLLM 的不透明模型名；不能根据名称或前缀推断 `adapter`。
 - 未知字段会作为 `extra_completion_params` 透传给 LiteLLM；`adapter` 是已知字段，不会透传给 provider。
@@ -238,3 +238,5 @@ metadata:
 - 包内资源和脚本通过 Agent 已有的常规文件/Shell 工具使用。
 - Skill 与 Hook 是独立模块；`SKILL.md` 中出现 `hooks` 会明确报迁移错误。
 - Hook 通过 Agent YAML 顶层 `hooks:` 直接声明，或显式引用带 `HOOK.yaml` 的独立 Bundle。
+
+配置文件路径按声明根解析：全局相对 AgentLoom，Application/Agent YAML 相对应用根；继承字段保持来源根。Worker 使用 `workflows/worker_agents/name.yaml`，不支持目录简写回退；跨应用用 `../other_app/...`。CLI/API 入参和工具工作目录不变。

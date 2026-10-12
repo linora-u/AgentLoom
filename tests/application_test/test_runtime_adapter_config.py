@@ -278,7 +278,7 @@ def test_runtime_preflight_uses_registry_capabilities(
                 agent_runtime="minimal",
                 concurrency=2,
                 checkpoint={"enabled": True},
-                worker_agents=[{"path": "worker.yaml"}],
+                worker_agents=[{"path": 'workflows/worker_agents/worker.yaml'}],
             ),
             tmp_path / "agent.yaml",
             agent_root=tmp_path,
@@ -368,7 +368,7 @@ def test_live_agent_definitions_use_the_current_runtime_contract() -> None:
 def test_shipped_llm_example_declares_adapter_for_every_model_type() -> None:
     from agentloom.config.model_adapters import MODEL_ADAPTERS
 
-    config = LLMConfig.load_from_yaml(PROJECT_ROOT / "config/llm.example.yaml")
+    config = LLMConfig.load_from_yaml(PROJECT_ROOT / "config/model.example.yaml")
 
     assert config.models
     assert all(settings.adapter in MODEL_ADAPTERS for settings in config.models.values())

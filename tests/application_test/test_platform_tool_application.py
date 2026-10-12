@@ -28,7 +28,7 @@ def platform_project(tmp_path, monkeypatch):
         "logging": {"console_enabled": False},
         "runtime": {"root_dir": "state/runtime"},
     }))
-    (config / "llm.yaml").write_text(yaml.safe_dump({"model": {
+    (config / "model.yaml").write_text(yaml.safe_dump({"model": {
         "default_model_type": "fixture", "fixture": {"model": "fixture/model", "adapter": "openai_chat"},
         "summary": {"model": "fixture/model", "adapter": "openai_chat"},
     }}))
@@ -129,7 +129,7 @@ def test_parallel_worker_applications_own_mcp_connections_and_run_context(platfo
         return "both workers completed"
 
     programs.update(platform=supervisor_program, probe=worker_program)
-    assert run(worker_agents=[{"path": "probe.yaml"}]).output == "both workers completed"
+    assert run(worker_agents=[{"path": 'workflows/worker_agents/probe.yaml'}]).output == "both workers completed"
     assert len(observed) == 2
     assert len({item[0] for item in observed}) == 2
     assert len({item[1] for item in observed}) == 1
@@ -235,8 +235,8 @@ def test_resume_rejects_changed_agent_definition_content(platform_project, chang
     prompt.parent.mkdir()
     prompt.write_text("Original instructions.", encoding="utf-8")
     updates = {
-        "worker_agents": [{"path": "helper.yaml"}],
-        "system_prompt": {"path": "prompts/instructions.md"},
+        "worker_agents": [{"path": 'workflows/worker_agents/helper.yaml'}],
+        "system_prompt": {"path": "workflows/prompts/instructions.md"},
     }
 
     def interrupt(_definition, _request):
@@ -392,7 +392,7 @@ json.dump({"decision": "allow"}, sys.stdout)
             {"name": "skill"},
             {"name": "memory"},
         ],
-        "worker_agents": [{"path": "storage_worker.yaml"}],
+        "worker_agents": [{"path": 'workflows/worker_agents/storage_worker.yaml'}],
     }
     files_before_run = {path for path in root.rglob("*") if path.is_file()}
     with pytest.raises(ApplicationRunInterrupted) as interrupted:
@@ -821,7 +821,7 @@ def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(plat
 
 def test_durable_tool_reference_pages_utf8_content_without_loss(platform_project):
     root, _, programs, _, run = platform_project
-    llm_path = root / "config/llm.yaml"
+    llm_path = root / "config/model.yaml"
     llm_config = yaml.safe_load(llm_path.read_text(encoding="utf-8"))
     for model in llm_config["model"].values():
         if isinstance(model, dict):

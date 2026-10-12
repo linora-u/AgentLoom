@@ -82,10 +82,12 @@ class AgentInvocation:
     answer_present: bool = False
 
     def run(self) -> JSONValue:
+        from agentloom.config.config import bind_model_config
         from agentloom.config.redaction import bind_redaction_policy
 
         effective = self.owner._effective_agent_config or self.owner._config
-        with bind_redaction_policy(effective, inherit=True) as enabled:
+        snapshot = getattr(self.owner, "_effective_agent_config_snapshot", None)
+        with bind_model_config(snapshot.llm if snapshot is not None else None), bind_redaction_policy(effective, inherit=True) as enabled:
             context = get_current_run_context()
             # The Application lifecycle owns manifest initialization.
             if context is not None and self.owns_root_run and context.manifest_path.is_file():

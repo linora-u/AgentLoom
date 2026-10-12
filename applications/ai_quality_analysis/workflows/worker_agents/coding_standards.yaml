@@ -11,7 +11,7 @@ toolsets:
   - "context"
   - "skills"
 system_prompt:
-  path: ../../config/prompts/coding_standards.md
+  path: config/prompts/coding_standards.md
 task: "Review the supplied project and module context for coding standards issues, then write the complete findings to temp/QA_CodingStandards.md."
 
 input_schema:

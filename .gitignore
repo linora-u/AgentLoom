@@ -83,8 +83,7 @@ target/
 profile_default/
 ipython_config.py
 
-# pyenv
-.python-version
+# Python version is pinned for uv-managed project environments.
 
 # pipenv
 Pipfile.lock
@@ -193,12 +192,18 @@ outputs/
 /applications/news_agent/data/*
 
 # Local/runtime-only content (must not be tracked)
+config/model.yaml
 config/llm.yaml
 .agent/
 
-# Keep generic legacy ignore for compatibility
+# Model configuration files may contain local credentials
+model.yaml
 llm.yaml
 applications/web_search/config/.mcp.anysearch.json
+applications/test_demo/config/.mcp.anysearch.json
+model.local.yaml
+applications/news_agent/config/.mcp.anysearch.json
+*.sqlite3
 
 # Isolated real-Application acceptance definitions and artifacts.
 **/.architecture_acceptance/

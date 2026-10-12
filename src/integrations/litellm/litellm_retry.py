@@ -272,6 +272,7 @@ def create_retry_wrapper(
         max_retry_delay = kwargs.pop("max_retry_delay", default_max_retry_delay)
         num_retries = kwargs.pop("num_retries", default_num_retries)
         model_type = kwargs.pop("_agent_loom_model_type", None)
+        rate_limit_key = kwargs.pop("_agent_loom_rate_limit_key", None) or model_type
 
         logger.debug(
             "Retry parameters: num_retries=%s, retry_delay=%s, max_retry_delay=%s",
@@ -294,8 +295,8 @@ def create_retry_wrapper(
                     GlobalRateLimiterRegistry,
                 )
 
-                state = GlobalRateLimiterRegistry.get_state(model_type)
-                limiter = GlobalRateLimiterRegistry.get_limiter(model_type)
+                state = GlobalRateLimiterRegistry.get_state(rate_limit_key)
+                limiter = GlobalRateLimiterRegistry.get_limiter(rate_limit_key)
             except Exception:
                 pass
 

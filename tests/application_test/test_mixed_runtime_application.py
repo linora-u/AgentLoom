@@ -20,6 +20,33 @@ from tests.application_test.mixed_runtime_support import (
 )
 
 
+@pytest.mark.parametrize("adapter", ["openai_chat", "openai_responses"])
+def test_smol_recovers_multiple_final_answers_with_a_reply_for_every_call(tmp_path, adapter):
+    def program(request):
+        messages = (tool_messages(request) if "messages" in request else
+                    [{"tool_call_id": item["call_id"]} for item in request["input"]
+                     if item.get("type") == "function_call_output"])
+        if not messages:
+            return [("answer-a", "final_answer", {"answer": "first"}),
+                    ("answer-b", "final_answer", {"answer": "second"})]
+        assert {message["tool_call_id"] for message in messages} == {"answer-a", "answer-b"}
+        return [("corrected", "final_answer", {"answer": "corrected-single-answer"})]
+
+    with model_service(program) as (url, requests):
+        workflow = project(tmp_path, url, supervisor="smolagents", worker="pi")
+        definition = yaml.safe_load(workflow.read_text())
+        definition["worker_agents"] = []
+        write_yaml(workflow, definition)
+        model_path = tmp_path / "config/model.yaml"
+        profiles = yaml.safe_load(model_path.read_text())
+        profiles["model"]["supervisor"]["adapter"] = adapter
+        write_yaml(model_path, profiles)
+        with bind_config(load_project_config(tmp_path)):
+            result = execute_app(workflow, file_logging=False)
+    assert result.output == "corrected-single-answer"
+    assert len(requests) == 2
+
+
 @pytest.mark.parametrize("supervisor,worker", [("smolagents", "pi"), ("pi", "smolagents")])
 def test_mixed_supervisor_receives_the_workers_actual_native_read(tmp_path, supervisor, worker):
     from agentloom.execution.observability import inspect_run
@@ -128,7 +155,7 @@ def test_smol_provider_retries_share_one_step_and_record_attempts(tmp_path):
         definition = yaml.safe_load(workflow.read_text())
         definition['worker_agents'] = []
         write_yaml(workflow, definition)
-        model_path = tmp_path / 'config/llm.yaml'
+        model_path = tmp_path / 'config/model.yaml'
         profiles = yaml.safe_load(model_path.read_text())
         profiles['model']['supervisor'].update(num_retries=2, retry_delay=0, max_retry_delay=0)
         write_yaml(model_path, profiles)
@@ -190,7 +217,7 @@ def test_smol_responses_request_matches_provider_http_body(tmp_path):
         definition = yaml.safe_load(workflow.read_text())
         definition['worker_agents'] = []
         write_yaml(workflow, definition)
-        profile_path = tmp_path / 'config/llm.yaml'
+        profile_path = tmp_path / 'config/model.yaml'
         profiles = yaml.safe_load(profile_path.read_text())
         profiles['model']['supervisor']['adapter'] = 'openai_responses'
         write_yaml(profile_path, profiles)
@@ -404,7 +431,7 @@ def test_tool_projection_uses_model_input_budget(tmp_path, runtime):
         definition['worker_agents'] = []
         definition['tools'] = [{'name': 'read' if runtime == 'pi' else 'read_file'}]
         write_yaml(workflow, definition)
-        profile_path = tmp_path / 'config/llm.yaml'
+        profile_path = tmp_path / 'config/model.yaml'
         profiles = yaml.safe_load(profile_path.read_text())
         profiles['model']['supervisor'].update(context_window=8192, max_output_tokens=1000)
         write_yaml(profile_path, profiles)

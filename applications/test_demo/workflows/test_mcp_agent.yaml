@@ -4,7 +4,7 @@ description: "Validate MCP client integration with MiniMax web_search"
 
 model_type: "powerful"
 
-mcp_servers: "applications/test_demo/config/.mcp.json"
+mcp_servers: "config/.mcp.json"
 
 tools:
   - name: "read_file"

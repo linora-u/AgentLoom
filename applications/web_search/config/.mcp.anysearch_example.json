@@ -4,7 +4,8 @@
       "type": "streamable-http",
       "url": "https://api.anysearch.com/mcp",
       "headers": {
-        "Authorization": "xxxxxxxxxxxxxxxx"
+        "Authorization": "<copy the exact value from your AnySearch console>",
+        "X-Anysearch-Client": "mcp/1.0.0"
       }
     }
   }

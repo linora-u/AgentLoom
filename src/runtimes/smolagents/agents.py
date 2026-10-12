@@ -63,7 +63,7 @@ class _SuccessfulRunStateMixin:
         **kwargs,
     ) -> Any:
         if stream:
-            return super().run(
+            return super().run(  # type: ignore[misc]
                 task,
                 stream=stream,
                 reset=reset,
@@ -77,7 +77,7 @@ class _SuccessfulRunStateMixin:
         wants_full_result = (
             bool(getattr(self, "return_full_result", False)) if return_full_result is None else return_full_result
         )
-        run_result = super().run(
+        run_result = super().run(  # type: ignore[misc]
             task,
             stream=False,
             reset=reset,
@@ -201,7 +201,6 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             index, record, output = execute_one(0)
             records[index] = record
             outputs[index] = output
-            yield output
         else:
             with ThreadPoolExecutor(self.max_tool_threads) as executor:
                 futures = []
@@ -212,10 +211,13 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
                     index, record, output = future.result()
                     records[index] = record
                     outputs[index] = output
-                    yield output
 
+        # smol may reject a final answer mid-iteration. Commit every settled
+        # reply first so its next model request still answers every call ID.
         memory_step.tool_results = [records[index] for index in range(len(calls))]
         memory_step.observations = "\n".join(outputs[index].observation for index in range(len(calls)))
+        for index in range(len(calls)):
+            yield outputs[index]
 
     def execute_tool_call_record(
         self,

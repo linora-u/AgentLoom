@@ -1,9 +1,10 @@
 """
-Independent Parsing for LLM Configuration (llm.yaml)
+Independent Parsing for LLM Configuration (model.yaml)
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -33,27 +34,27 @@ def _available_types_text(models: dict[str, Any]) -> str:
 
 def _missing_default_model_type_error(models: dict[str, Any]) -> str:
     return (
-        "No model_type was provided and config/llm.yaml does not set "
+        "No model_type was provided and config/model.yaml does not set "
         "`model.default_model_type`; the model call was not started. "
         "Fix: add `model_type: <type>` to the Agent YAML, or set "
-        "`model.default_model_type: <type>` in config/llm.yaml. "
+        "`model.default_model_type: <type>` in config/model.yaml. "
         f"Available model types: {_available_types_text(models)}."
     )
 
 
 def _unknown_model_type_error(model_type: Any, models: dict[str, Any]) -> str:
     return (
-        f"Model type '{model_type}' is not defined in config/llm.yaml; "
+        f"Model type '{model_type}' is not defined in config/model.yaml; "
         "the model call was not started. "
         f"Available model types: {_available_types_text(models)}. "
         "Fix: set Agent YAML `model_type` to one of the available types, "
-        f"or add `model.{model_type}.model: <provider/model>` in config/llm.yaml."
+        f"or add `model.{model_type}.model: <provider/model>` in config/model.yaml."
     )
 
 
 def _missing_default_target_error(default_type: str, models: dict[str, Any]) -> str:
     return (
-        f"config/llm.yaml sets `model.default_model_type: {default_type}`, "
+        f"config/model.yaml sets `model.default_model_type: {default_type}`, "
         "but that model type is not defined; the model call was not started. "
         f"Available model types: {_available_types_text(models)}. "
         f"Fix: change `model.default_model_type` to an available type, "
@@ -128,6 +129,7 @@ class LLMConfig(BaseModel):
 
     @classmethod
     def load_from_yaml(cls, path: Path) -> LLMConfig:
+        cls._check_filename_migration(path)
         if not path.exists():
             return cls()
         with path.open("r", encoding="utf-8") as f:
@@ -135,10 +137,22 @@ class LLMConfig(BaseModel):
 
         return cls.from_dict(raw)
 
+    @staticmethod
+    def _check_filename_migration(path: Path) -> None:
+        if path.name == "model.yaml":
+            for old_name in ("llm.yaml", "llm.yml"):
+                old_path = path.with_name(old_name)
+                if old_path.exists():
+                    raise ValueError(f"{old_path} is no longer supported; migrate it to {path} and remove the old file")
+
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> LLMConfig:
+        if not isinstance(raw, dict):
+            raise ValueError("model.yaml must be a mapping")
         langfuse_raw = raw.get("langfuse", {})
         model_raw = raw.get("model", {})
+        if not isinstance(model_raw, dict) or not isinstance(langfuse_raw, dict):
+            raise ValueError("model.yaml model and langfuse sections must be mappings")
         default_type = model_raw.get("default_model_type", "")
 
         # Build models dict
@@ -196,7 +210,7 @@ class LLMConfig(BaseModel):
             model_id = v.get("model", "")
             if not model_id:
                 raise ValueError(
-                    f"Model type '{k}' in llm.yaml is missing required 'model' field. "
+                    f"Model type '{k}' in model.yaml is missing required 'model' field. "
                     f"Each model type must specify a LiteLLM model ID "
                     f"(e.g., 'openai/gpt-4o', 'anthropic/claude-3-5-sonnet')."
                 )
@@ -204,12 +218,12 @@ class LLMConfig(BaseModel):
             adapter = v.get("adapter")
             if adapter is None:
                 raise ValueError(
-                    f"Model type '{k}' in llm.yaml is missing required 'adapter' field. "
+                    f"Model type '{k}' in model.yaml is missing required 'adapter' field. "
                     f"Choose one of: {', '.join(MODEL_ADAPTERS)}."
                 )
             if adapter not in MODEL_ADAPTERS:
                 raise ValueError(
-                    f"Model type '{k}' in llm.yaml has unsupported adapter {adapter!r}. "
+                    f"Model type '{k}' in model.yaml has unsupported adapter {adapter!r}. "
                     f"Choose one of: {', '.join(MODEL_ADAPTERS)}."
                 )
 
@@ -217,7 +231,7 @@ class LLMConfig(BaseModel):
                 raise ValueError(
                     f"Model type '{k}' uses removed field 'supports_native_tool_calls'. "
                     "AgentLoom now always sends structured tool schemas when tools are available; "
-                    "remove this field from config/llm.yaml."
+                    "remove this field from config/model.yaml."
                 )
 
             # Collect extra keys not in the known fields list.
@@ -258,21 +272,60 @@ class LLMConfig(BaseModel):
                 extra_completion_params=extra_completion_params,
             )
 
-        # Validate required model types:
-        # - 'summary': context compression (smart_summary) depends on it
-        if models:
-            for required in ("summary",):
-                if required not in models:
-                    raise ValueError(
-                        f"Model type '{required}' is required in llm.yaml but not found. "
-                        f"Defined types: {list(models.keys())}"
-                    )
-
         return cls(
             langfuse=LangfuseSettings(**langfuse_raw),
             default_model_type=str(default_type or ""),
             models=models
         )
+
+    def overlay_from_yaml(self, path: Path) -> LLMConfig:
+        """Replace complete named profiles; retain unspecified project models."""
+        self._check_filename_migration(path)
+        if not path.exists():
+            return self.model_copy(deep=True)
+        raw = load_unique_yaml(path.read_text(encoding="utf-8")) or {}
+        overlay = self.from_dict(raw)
+        changes: dict[str, Any] = {"models": {**self.models, **overlay.models}}
+        if "default_model_type" in raw.get("model", {}):
+            changes["default_model_type"] = overlay.default_model_type
+        return self.model_copy(deep=True, update=deepcopy(changes))
+
+    def patch_from_yaml(self, path: Path) -> LLMConfig:
+        """Patch fields of named profiles without copying public model settings."""
+        if not path.exists():
+            return self.model_copy(deep=True)
+        raw = load_unique_yaml(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict) or set(raw) != {"model"}:
+            raise ValueError(f"{path.name} must contain only a model mapping")
+        patches = raw["model"]
+        if not isinstance(patches, dict):
+            raise ValueError(f"{path.name} model must be a mapping")
+        models = dict(self.models)
+        for name, patch in patches.items():
+            if name in _RESERVED_MODEL_KEYS:
+                raise ValueError(f"{path.name} cannot patch reserved model key {name!r}")
+            if not isinstance(patch, dict):
+                raise ValueError(f"{path.name} model profile {name!r} must be a mapping")
+            current = models.get(name)
+            if current is None:
+                merged = dict(patch)
+            else:
+                merged = current.model_dump(
+                    exclude={"extra_completion_params", "input_token_limit"}
+                )
+                merged.update(current.extra_completion_params or {})
+                merged.update(patch)
+            models[name] = self.from_dict({"model": {name: merged}}).models[name]
+        return self.model_copy(deep=True, update={"models": deepcopy(models)})
+
+    def validate_runtime(self, runtime_id: str, options: dict[str, Any]) -> None:
+        """Only smol smart compression requires a separate summary profile."""
+        if runtime_id != "smolagents" or not options.get("smart_summary", True):
+            return
+        if "summary" not in self.models:
+            raise ValueError("Model type 'summary' is required in model.yaml when smolagents smart_summary is enabled")
+        if self.models["summary"].adapter in {"openai_codex_responses", "openai_chatgpt_responses"}:
+            raise ValueError("smolagents summary model requires a Python model adapter; Codex and ChatGPT adapters require Pi")
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """
@@ -301,7 +354,7 @@ class LLMConfig(BaseModel):
         if desired:
             raise ValueError(_unknown_model_type_error(model_type, self.models))
 
-        # If user did not request a type (empty/None), use global default_model_type.
+        # If user did not request a type (empty/None), use the effective default_model_type.
         default_type = self.default_model_type.strip().lower()
         if default_type and default_type in self.models:
             return self.models[default_type]

@@ -31,8 +31,8 @@ def validate(revision: str) -> dict[str, object]:
         )
         try:
             shutil.copyfile(
-                checkout / "config" / "llm.example.yaml",
-                checkout / "config" / "llm.yaml",
+                checkout / "config" / "model.example.yaml",
+                checkout / "config" / "model.yaml",
             )
             _run(
                 [

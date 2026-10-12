@@ -9,17 +9,17 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 
 ## 前置条件
 
-- 先进入 AgentLoom 根目录。运行时代码用 `pyproject.toml` 中 `[project].name == "AgentLoom"` 发现项目根；本 Skill 的操作前置检查额外要求 `config/llm.yaml` 存在，因为它是被忽略的本地模型配置，也是生成/验证 Application 前必须确认的环境条件。不要只用 `config/system.yaml` 判定环境可用。
-- 新建 worktree 或干净 checkout 后先检查 `config/llm.yaml`；该文件通常被 `.gitignore` 忽略，不会随 worktree 自动生成。缺失时从同机可信工作区复制，或让用户提供本地配置；不要提交该文件，也不要凭空生成模型配置。
+- 先进入 AgentLoom 根目录。运行时代码用 `pyproject.toml` 中 `[project].name == "AgentLoom"` 发现项目根。模型来自项目及 Agent 所属应用的 `config/model.yaml`；项目模型文件可省略，但有效模型目录必须包含实际所需类型。
+- 新建 worktree 或干净 checkout 后检查实际使用的模型配置。含凭据的本地文件可能被 `.gitignore` 忽略；需要项目级模型时从同机可信工作区复制，或让用户提供配置，不要提交密钥或凭空生成凭据。
 - 当前本地环境可能没有 `uv`；验证优先用 `.venv/bin/python` 和 `.venv/bin/loom`。
 - 框架 Python 导入统一使用 `agentloom.*`；职责模块的物理源码直接位于 `src/app/`、`src/execution/`、`src/runtimes/`、`src/integrations/` 等目录，由安装配置映射为 `agentloom`。不要新增 `src.*` 导入或旧路径转发。
-- 写 Application 前先读真实仓库结构与 `config/llm.yaml`，`model_type` 只能来自项目配置。
+- 写 Application 前先读真实仓库结构、项目和本应用的 `config/model.yaml`；`model_type` 必须来自框架合并后的模型目录，同名应用模型整条覆盖项目模型。
 - 如果用户目标不清晰，先问清“功能目标、输入、输出、验收标准”；不要为了显得完整而发明需求。
 
 ## 快速决策
 
 - 用户说“帮我实现一个功能 / 用框架做一个功能 / 创建一个应用 / 扩展框架能力”：先读 [`references/function-routing.md`](references/function-routing.md)，判断是新建 Application、扩展现有 Application、加 Worker、加 Tool、加私有 Skill、加 Hook，还是只改文档。
-- 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、llm.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
+- 用户说“有哪些配置 / 这个配置能不能写 / skill 漏了配置 / system.yaml、model.yaml、Agent YAML 怎么配”：先读 [`references/configuration-surface.md`](references/configuration-surface.md)，再按需要读 `docs/en/*.md` 和对应代码交叉验证。
 - 需要生成或修改 `applications/<app_name>/`：读 [`references/application-generation.md`](references/application-generation.md)。
 - 需要写 Agent YAML / Worker YAML / `input_schema` / `output_schema` / `worker_agents`：读 [`references/yaml-contract.md`](references/yaml-contract.md)。
 - 需要配置或实现 Goal Mode、长期 continuation 或 checkpoint resume：读 [`references/yaml-contract.md`](references/yaml-contract.md)
@@ -51,7 +51,7 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 3. 能用 Python 确定性完成的放进 `agent_tools/*.py`；需要推理、判断、写作的放进 Agent workflow。
 4. 单职责用单 Agent；多个可独立验收阶段才用 Supervisor + N Worker。
 5. Application 内容必须落到 `applications/<app_name>/`；框架级 Skill/Hook 扩展按真实加载路径落盘；README 必须同步写验证记录。
-6. 写配置前先确认配置归属：LLM 参数只进 `config/llm.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill 不得声明 Hook，Hook 只通过顶层 `hooks:` 或显式 `HOOK.yaml` Bundle 接入。
+6. 写配置前先确认配置归属：LLM 参数只进项目或所属应用的 `config/model.yaml`；应用行为优先用 `applications/<app>/config/system.yaml` 或 Agent YAML 白名单字段；Skill 不得声明 Hook，Hook 只通过顶层 `hooks:` 或显式 `HOOK.yaml` Bundle 接入。
 7. 新增或改变任何可配置字段时，必须同步更新 `references/configuration-surface.md` 和相关 YAML 契约；优先精简配置，只暴露用户确实需要调的字段，不为了“完整”增加开关。
 8. 框架功能不要新增兼容桥、旧字段回退或第二套路径；如果契约需要变化，直接改主路径、配置白名单、文档和验证。
 9. 设计或修改框架功能时必须先写验证矩阵：单测证明局部规则，真实 Application 证明完整运行链路；涉及上下文压缩时必须验证压缩后能按 `ContextRef` retrieve 原文，涉及 resume 时必须验证恢复后旧 ref 仍可 retrieve。
@@ -60,46 +60,12 @@ description: "当用户需要理解、开发、扩展或验证 AgentLoom 框架�
 12. 如果用户不确定 shell 权限怎么配，先用隔离 runtime 跑真实 workflow，读取当前 run 的 `audit/shell.jsonl` 里的 `[POLICY_SNAPSHOT]` 和拦截事件，再收敛 `allowed_commands`、`allowed_operators`、路径规则或 sandbox。
 13. 最后必须运行验证命令。能跑到哪一步就记录到哪一步，不把“未执行”说成“通过”。
 
-## AgentLoom 领域工具
+## 静态预检
 
-在 AgentLoom Application Studio 中优先调用 OpenCode Plugin 提供的
-`agentloom_domain` Tool；在 Codex、Claude Code 或 Shell 中，可调用同一
-个稳定 JSON CLI。两者共享领域真相，不要自行解析原始 Run Events 猜状态。
-
-支持的 action：
-
-- `catalog`：Applications、全局 Skills、Agents 与 Runs 的脱敏目录；
-- `application.detail`：Effective Config、来源、拓扑与 Working/Running Revision；模型侧默认每页 10 个 Agent，可用 `offset`/`limit`（最大 10）继续读取；
-- `application.validate`：YAML、引用与 Effective Config 校验摘要；
-- `application.impact`：全局或跨 Application 修改前计算影响范围；
-- `run.start` / `run.resume` / `run.restart` / `run.stop`：标准 Run 生命周期；
-- `run.detail`：结构化、限长的 Run 证据。
-
-Studio 检查和 Run 准备共用 `agentloom.app.definition` 的完整拓扑预检。
+Application 定义检查和 Run 准备共用 `agentloom.app.definition` 的完整拓扑预检。
 它解析 Supervisor 与所有 Worker 的 Skill 目录、校验 frontmatter 和同层重名，
-在分配 Run 前拒绝静态错误。运行复用已解析的 Skill 正文；新的检查或调用重新读取，
-不把磁盘编辑热切换到已有调用。静态检查不创建模型、连接 MCP、执行 Hook 或加载工具实现。
-
-调用格式：
-
-```bash
-.venv/bin/python -I -m agentloom_studio_adapter.domain_cli \
-  --project "$PWD" application.detail '{"application_id":"<app>"}'
-
-# Application 很大时继续读取下一页；不要读取 OpenCode managed tool-output 全文
-.venv/bin/python -I -m agentloom_studio_adapter.domain_cli \
-  --project "$PWD" application.detail \
-  '{"application_id":"<app>","offset":10,"limit":10}'
-
-.venv/bin/python -I -m agentloom_studio_adapter.domain_cli \
-  --project "$PWD" application.validate '{"application_id":"<app>"}'
-```
-
-输出固定为 `contract_version=1` 的 JSON envelope。`application.detail` 的
-模型投影使用 `schema_version=2`，会聚合重复 Skills/权限配置并显式返回
-`page.next_offset`；不要为了拿完整目录而读取 OpenCode managed tool-output
-文件。模型密钥、Base URL、认证 Header 不属于该合同，不能通过其他读取
-方式补进上下文。
+在分配 Run 前拒绝静态错误。运行复用已解析的 Skill 正文；新的检查或调用重新读取。
+静态检查不创建模型、连接 MCP、执行 Hook 或加载工具实现。
 
 ## 定义发现
 
@@ -114,9 +80,9 @@ Studio 检查和 Run 准备共用 `agentloom.app.definition` 的完整拓扑预�
 ```bash
 # 根目录校验
 pwd
-test -f config/llm.yaml
-# 新 worktree 缺失时，先确认它是否为被忽略的本地配置
-git check-ignore -v config/llm.yaml || true
+test -f pyproject.toml
+# 需要项目模型时检查被忽略的本地配置；应用可仅使用自己的 config/model.yaml
+git check-ignore -v config/model.yaml || true
 
 # 共享定义与 Effective Config 预检（含 Worker 引用图）
 .venv/bin/python agentloom-framework-skill/scripts/validate_application_yaml.py \
@@ -129,12 +95,6 @@ sys.path.insert(0, 'agentloom-framework-skill')
 from scripts.scan_tools import scan_app_structure
 print(scan_app_structure('applications/<app_name>'))
 "
-
-# Studio/Codex 共用的 Effective Config 与领域校验
-.venv/bin/python -I -m agentloom_studio_adapter.domain_cli \
-  --project "$PWD" application.detail '{"application_id":"<app_name>"}'
-.venv/bin/python -I -m agentloom_studio_adapter.domain_cli \
-  --project "$PWD" application.validate '{"application_id":"<app_name>"}'
 
 # Python 编译校验
 .venv/bin/python -m py_compile applications/<app_name>/<app_name>_app.py

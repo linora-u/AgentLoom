@@ -1,6 +1,0 @@
-mcp_servers: null
-checkpoint:
-  enabled: true
-  cleanup_on_success: false
-self_learning:
-  enabled: false
