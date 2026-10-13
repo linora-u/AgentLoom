@@ -2,7 +2,7 @@
 
 状态：有限批次执行已实现并验收；持久执行候选尚未交付。路线更新：2026-10-14。原研究基线：`94491c2d`；当前 main：`9cd4922c`。
 
-持久执行按用户最新要求改为优先接入成熟开源引擎，自研内核停止扩展。当前方案见 [开源接入规格](docs/specs/durable-worker-open-source-engine-integration-v2.md)。已完成 DBOS 官方 SDK 的首轮无模型验证，完整故障接入与真实新闻验收仍未完成。
+持久执行已在 worktree 接入 DBOS 3.2.0 的公开队列、事务提交和恢复接口，自研内核停止扩展。当前方案见 [开源接入规格](docs/specs/durable-worker-open-source-engine-integration-v2.md)。本机框架故障与 controller 验证已完成，NewsAgent 全日验收仍在进行；首轮暴露的工具及 Stop hook 绑定问题已通过真实 Pi 回归，正在恢复原日期。
 
 本轮已与用户确认：`concurrency` 是**单次 `map()` 的上限**。保留一行调用和
 `system 配置 < Supervisor binding < 本次代码参数` 的覆盖关系。
@@ -11,7 +11,7 @@
 [执行合同复核](docs/research/agentloom-worker-execution-contracts.md)。原研究中的备选 Interface
 保留作比较，当前设计以本文件为准。
 
-有限批次的交付证据见 [Worker batch 验收](docs/reviews/worker-batch-execution-v1-acceptance.md)。本轮新增 [持久执行开源研究](docs/research/durable-agent-execution-open-source.md)、[NewsAgent 接入与真实验收审查](docs/research/news-agent-concurrency-integration-review.md)，以及已确认的 [本地默认与可替换存储边界](docs/adr/0001-local-durable-execution-with-pluggable-store.md)。持久扩展的公开 API 与具体后端仍待确定。
+有限批次的交付证据见 [Worker batch 验收](docs/reviews/worker-batch-execution-v1-acceptance.md)。持久执行的上游选择、产品入口和逐项证据见 [DBOS 接入状态](docs/research/dbos-product-integration-status-20261014.md)，部署范围遵循 [本地默认与可替换存储边界](docs/adr/0001-local-durable-execution-with-pluggable-store.md)。
 
 ## 开发者只交任务，框架负责执行
 
@@ -41,7 +41,7 @@ Planner 和 Reducer 仍属于 Application；框架无法仅凭“20 并发”决
   → Application Reducer：检查完整性，汇总，规划下一阶段
 ```
 
-`app.worker()`、`BoundWorker`、`Application.open()` 已由 `agentloom.app` 导出。当前正式 NewsAgent pipeline 仍使用自身持久消费者，尚未迁移到这套有限批次入口。
+`app.worker()`、`BoundWorker`、`Application.open()` 已由 `agentloom.app` 导出。worktree 中的 NewsAgent 已迁移到框架持久入口；有限 `map()` 与持久队列各自保持原容量作用域。
 
 ## 并发上限只约束本次批次
 
@@ -322,9 +322,9 @@ Runner 不默认重试整个 Worker，不提供默认 circuit breaker。单次�
 
 1. 持久任务身份、输入与 attempt 记录、入队和可观察状态。
 2. 单机多进程共享 queue 容量，有空位才原子领取，单项完成后持续补位。
-3. 租约与续约、旧 attempt 条件提交、崩溃恢复和有次数/类别限制的重试。
+3. 上游 workflow 恢复和有次数／类别限制的重试；业务旧 attempt 条件提交由业务库授权校验。
 4. 每个 attempt 的公开宿主准备接口，绑定独立 session、工具固定参数及资源；它与有限 map 共用 invocation 内核。
-5. 停止领取、停止失租 Worker、确认本机资源退出后恢复补位。退出不明时保留可观察的阻塞状态，不仅归还数据库额度。
+5. 停止新 invocation 启动、停止旧 Worker、确认本机资源退出后恢复补位。退出不明时保留可观察的阻塞状态，不仅归还数据库额度。
 6. 分别记录业务提交、运行结果和资源清理回执，必需提交接口与可失败 event observer 分开。
 
 NewsAgent 继续拥有完整新闻分组、分类与判断合同、三阶段及行业净校验衔接、候选替换、封存与计分。现有 planner 使用目标容量及输入预算分组；本轮不把 `map(concurrency)` 当成分组算法，也不借执行迁移修改业务判断规则。
@@ -333,7 +333,17 @@ NewsAgent 继续拥有完整新闻分组、分类与判断合同、三阶段及�
 
 持久任务执行按可能重复尝试看待；外部 LLM/AnySearch 请求不承诺恰好一次。News 新业务尝试继续按当前定义与模型重算整项，并保存本次配置来源；恢复旧执行快照是另一合同，不能由后端 replay 隐式改变现有行为。
 
-SQLite 是本地首选候选。先验证 DBOS 的官方单 executor、多 CLI producer 接入，Prefect 作为进程隔离对照；其他引擎按部署、恢复与许可证比较。DBOS 是完整执行引擎，不能只换 Store 却保留自研领取循环。业务库与执行库分开，通过业务库内的完成回执和原子写权限协调，不能把跨库状态查询当作业务事务授权。[选型复评](docs/research/dbos-comparison-contract-reassessment-20261014.md)
+本地接入采用 DBOS 3.2.0、一个 executor 和多个 CLI producer；Prefect 等对照的取舍见 [开源选择](docs/research/durable-open-source-selection-20261014.md)。业务库与执行库分别使用 SQLite，通过业务库内的完成回执和原子写权限协调；不保留自研领取循环，不承诺跨库原子提交。
+
+开发者通过稳定 namespace 提交明确业务 revision：
+
+```python
+with Application.open(application, project_root=root) as app:
+    with app.durable(root=namespace_root) as execution:
+        handles = execution.worker("workflows/initial.yaml").submit_many(items, revision="1")
+```
+
+独立消费者使用 `loom durable serve APPLICATION --worker workflows/initial.yaml --root NAMESPACE_ROOT`。任务身份跨 Application Run 稳定；相同任务及 revision 的不同输入会拒绝。取消和恢复通过同一公开执行对象调用，恢复先核对旧本机资源，再进入原 Worker 队列。当前 OS Adapter 为 macOS launchd；Linux、真实 PostgreSQL 和多机执行仍未验证。
 
 ## 输出预算缺陷独立修复
 
@@ -341,7 +351,7 @@ SQLite 是本地首选候选。先验证 DBOS 的官方单 executor、多 CLI pr
 
 用户已确认：未配置不额外向 Provider 注入输出 cap，显式数字才限制，配置覆盖中的 null 可解除继承；输入预留独立。必须提供 cap 的协议使用已验证能力或要求显式配置，未知时提前报错。见 [预算 ADR](docs/adr/0002-explicit-output-cap-with-independent-input-reserve.md) 和 [完整根因分析](docs/research/model-output-budget-default-review.md)。
 
-只删 Python 默认值不够：离线真实 SDK 探针复现 Pi 会从 context metadata 补出 495,897 的请求上限。修复须贯通配置、Pi 最终 payload、smol/LiteLLM、内部摘要预算和实际 HTTP 合同；本轮仅确认修复方案，产品代码未改。全日实跑用已授权的本地显式 32,768 完成验证，不能据此宣称默认值缺陷已修复。
+只删 Python 默认值不够：离线真实 SDK 探针复现 Pi 会从 context metadata 补出 495,897 的请求上限。worktree 已贯通配置、Pi 最终 payload、smol/LiteLLM、内部摘要预算和实际 HTTP 合同，相关独立回归 294 项通过。[预算修复证据](.agentloom/validation/output-cap-contract-port-20261014-v1/REPORT.md)。当前全日实跑使用已授权的本地显式 32,768，其进度不能代替默认值的 HTTP 合同验证。
 
 ## 实施顺序和验收
 

@@ -1,6 +1,6 @@
 # 优先复用开源持久执行引擎
 
-2026-10-14。当前结论：停止扩展自研持久内核，保留 DBOS 官方单 executor 队列候选，任务进程生命周期优先复用成熟 OS 机制。Prefect 和 loky 已做真实 Application 对照，简单包装仍有资源退出缺口；不能提前宣布选型完成。[当前规格](../specs/durable-worker-open-source-engine-integration-v2.md)
+2026-10-14。当前选择为 DBOS 3.2.0 单本地 executor 队列加 macOS launchd。worktree 已提供产品入口与 News 接线，有本机局部验证证据；真实 2025-09-01 首轮全日退出 1／RED，绑定修复的单项真实 Pi 测试转为 GREEN，第二轮全日运行中。尚未合入 main。停止扩展自研持久内核；Prefect、loky 和历史失败继续保留为对照。[当前规格](../specs/durable-worker-open-source-engine-integration-v2.md)、[产品状态与固定一手来源](dbos-product-integration-status-20261014.md)
 
 ## 需求决定取舍
 
@@ -14,7 +14,7 @@
 
 | 项目 | 本地部署事实 | 对当前需求的判断 |
 | --- | --- | --- |
-| DBOS 3.2.0 | 官方库内 executor、SQLite 默认、公开 Queue／Client | 队列第一候选；20／30／20 已有运行证据；直接 Application 包装关闭失败为 RED，OS 同组接线三项通过，正式 Runtime 退出待验证 |
+| DBOS 3.2.0 | 官方库内 executor、SQLite 默认、公开 Queue／Client | 当前产品接入；早期无模型 20／30／20 满载、18 项框架与 21 项提交／业务／Host 通过证据保留；首轮全日 RED、绑定单项修复 GREEN，第二轮全日运行中 |
 | Prefect 3.8.8 | 一个 API server，默认 SQLite；官方 Process worker | 保留对照；普通 Process worker 接线遗留 native，同环境安装与 OTel pin 冲突，不足以简化当前迁移 |
 | Temporal | 官方本地 CLI 可持久化到 SQLite，但 start-dev 是开发模式 | 恢复语义与远程部署参照；不把开发服务或每 Worker 容量当作本次默认生产合同 |
 | Hatchet | embedded 自动启动 sidecar 与 bundled PostgreSQL，官方定位开发／CI | 本地接入便利，但增加数据库与进程部署；需验证生命周期，暂不优先 |
@@ -36,28 +36,28 @@ LangGraph SQLite checkpointer 能保存 Agent 状态，但不是跨 CLI 阶段�
 
 ## 已运行的上游证据
 
-隔离环境运行官方 DBOS 3.2.0，没有改 SDK、SQLite 事务配置或产品依赖：
+最初隔离环境运行官方 DBOS 3.2.0，没有改 SDK、SQLite 事务配置，当时未改变产品依赖：
 
 - 两个独立 CLI、一个 executor，完成 152 个无模型任务。三个阶段同时达到并守住 20／30／20。
 - 单额度同步任务取消后，下一任务仍等旧 body 与受控子进程退出后才开始。
 - 默认 `destroy()` 在 body 和子进程仍活着时返回；之后旧 body 的 checkpoint 报错。这个返回值不能作为安全重启依据。
 
-三项均保留完整时序和异常，程序退出 0 只表示观测断言完成。没有请求模型、AnySearch 或使用私有配置，也没有运行新的真实新闻日期。[完整实测](../../.agentloom/validation/dbos-official-single-executor-go-no-go-20261014-v1/REPORT.md)
+该轮三项保留完整时序和异常，程序退出 0 只表示观测断言完成。当时没有请求模型、AnySearch 或使用私有配置，也没有运行新的真实新闻日期；后续产品和全日状态见下文。[早期完整实测](/Users/bytedance/code/AgentLoom-private/.agentloom/validation/dbos-official-single-executor-go-no-go-20261014-v1/REPORT.md)
 
-三个队列拥有独立额度，底层共用 DBOS 的线程池。现有实测不能外推到 async、关闭失败、信号打断、孤儿资源或同身份 resume。上游源码在 workflow 结束或停驻时释放运行计数；收尾失败不能因此被当成资源退出。[退出补充核验](../../.agentloom/validation/dbos-contract-reassessment-20261014-v1/NATIVE_EXIT_SUPPLEMENT.md)
+三个队列拥有独立额度，底层共用 DBOS 的线程池。该轮同步实测不能外推到 async、关闭失败、信号打断、孤儿资源或同身份 resume；后续产品使用官方 preemptible async step，并另行验证这些具体边界。上游在 workflow 结束或停驻时释放运行计数，收尾失败仍不能当作资源退出。[早期退出补充核验](/Users/bytedance/code/AgentLoom-private/.agentloom/validation/dbos-contract-reassessment-20261014-v1/NATIVE_EXIT_SUPPLEMENT.md)、[当前取消／恢复合同](dbos-product-lifecycle-source-review-20261014.md)
 
 ## 进程资源单独复用成熟机制
 
 新增核对 AnyIO、Trio、loky、Supervisor、Huey 与 Prefect 的资源管理源码和测试，以及 launchd、systemd／cgroup 的系统合同。研究结论与引擎队列分开：队列恢复并不自动拥有 Agent 创建的全部本机进程。[进程研究](upstream-process-resource-ownership-20261014.md)
 
-loky 的公开 executor 接真实 Application，关闭阻塞与关闭失败通过，根 Worker `os._exit(17)` 后仍遗留 native，结果 2／3。macOS launchd 的同组清理实验通过，独立 session 的负例仍失败。进一步 DBOS 加 launchd 接真实 Application，让受控资源加入任务组后，三项故障通过。此处只证明受控资源接线，不覆盖正式 Pi／MCP 或宿主重启。[loky 比较](../../.agentloom/validation/dbos-loky-application-go-no-go-20261014-v1/REPORT.md)、[OS 组对照](../../.agentloom/validation/launchd-process-group-go-no-go-20261014-v1/REPORT.md)、[真实 Application](../../.agentloom/validation/dbos-launchd-application-go-no-go-20261014-v1/REPORT.md)
+loky 的公开 executor 接真实 Application，关闭阻塞与关闭失败通过，根 Worker `os._exit(17)` 后仍遗留 native，结果 2／3。macOS launchd 的同组清理实验通过，独立 session 的负例仍失败。进一步 DBOS 加 launchd 接真实 Application，让受控资源加入任务组后，三项故障通过。此处只证明受控资源接线，不覆盖正式 Pi／MCP 或宿主重启。[loky 比较](/Users/bytedance/code/AgentLoom-private/.agentloom/validation/dbos-loky-application-go-no-go-20261014-v1/REPORT.md)、[OS 组对照](/Users/bytedance/code/AgentLoom-private/.agentloom/validation/launchd-process-group-go-no-go-20261014-v1/REPORT.md)、[真实 Application](/Users/bytedance/code/AgentLoom-private/.agentloom/validation/dbos-launchd-application-go-no-go-20261014-v1/REPORT.md)
 
-优先路线因此收敛为 DBOS 调度，OS 管理一次完整 Application，业务库维护完成回执和写授权。当前框架内部自建 session，必须先核验 Pi／MCP／工具能归入受管理范围。Linux systemd／cgroup 保留为相应平台路径，没有 Linux 实测；macOS 进程组不宣传为任意第三方程序的通用容器。
+当前产品分工是 DBOS 调度、OS 管理一次完整 Application、业务库维护完成回执和写授权。Pi／smolagents／MCP 的 managed 资源接线已有正式 CLI 局部证据，普通独立 session 的历史负例继续保留。Linux systemd／cgroup 尚无实测；macOS 进程组不能覆盖任意第三方主动脱离行为。[Runtime 与 OS 证据](../specs/durable-worker-open-source-engine-integration-v2.md#runtime-适配已有局部验证)
 
-## 下一步只验证决定性缺口
+## 当前产品验证与剩余验收
 
-先用真实本机进程与业务事务验证两项：旧资源退出后才能补位，以及旧 Worker 提交权限的原子撤销。同时核对提交后 ACK 丢失和相同任务身份的输入冲突。公共单次 Runtime 入口必须复用已有 Application 调用，不能套回旧 durable 消费循环。
+worktree 已提供 `Application.durable()`、官方事务入队和独立消费者 CLI，News 三阶段调用公开 `BoundWorker.invoke()`。18 项框架测试覆盖提交／executor／单次调用，21 项提交／业务／Host 测试覆盖 grant、receipt、失败重算与用量。独立公开入口、OS 和 controller 复核保留原 RED 及修复证据；两个 producer 共用正式空载 executor 和三个 20／30／20 队列声明也有实际观测。计数有 4 项提交测试重叠，不能相加宣称 39 个不同测试。[产品状态与范围](dbos-product-integration-status-20261014.md#局部验收与独立复核)
 
-如果需要第二套持久 claim／lease／slot 才能成立，就停止该接线，继续选择能减少本项目实现的成熟路径。正式进程 Adapter、启动恢复和业务提交合同通过后，才迁移 News 链路并完整跑 2025-09-01，使用 DeepSeek v4.1、已授权的 AnySearch 自动切 key 和 20／30／20，推理前准备 trace。现有 Application／OS 小探针不代替全日验收。
+当前路径没有第二套持久 claim／lease／slot，业务 grant 不计时续租、receipt 不领取任务，OS 描述只记录已经进入引擎执行的资源身份和回执。2025-09-01 的 DeepSeek v4.1／AnySearch、20／30／20 首轮真实全日退出 1／RED，prepared snapshot 快返回导致可信 factory 新绑定和 Stop hooks 丢失；修复的单项真实 Pi 测试通过，第二轮全日运行中。推理前保存的输入／源码 hash、模型／容量和 trace 继续保留。[首轮 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v1.json)、[第二轮 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v2.json)、[全日状态](dbos-product-integration-status-20261014.md#全日首轮-red保留第二轮运行中)。本机局部探针不能代替全日验收，实际 PostgreSQL、Linux 和多机执行仍未验证；若后续需要重建持久调度内核，则重新评估接入路线。
 
 旧 SQLite `BUSY`、`522/SHORT_READ` 与索引异常继续分别保留未闭合的原因记录。新的引擎接入通过，也不能倒推这些历史故障已经定案。

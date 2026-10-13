@@ -12,7 +12,10 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Condition, Event
 from time import monotonic
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agentloom.execution.durable import DurableApplication
 
 from agentloom.app.definition import (
     _prepare_inspected_definition,
@@ -262,6 +265,18 @@ class Application:
                     )
                     self._bindings[identity] = BoundWorker(self, identity, prepared, normalized.input_validator)
             return self._bindings[identity]
+
+    def durable(self, *, root: str | Path | None = None, database_url: str | None = None) -> DurableApplication:
+        """Open a DBOS-backed persistent execution namespace for this Application.
+
+        The returned service is a context manager. It snapshots submissions,
+        keeps task identity independent of this Run and uses Worker system
+        policy. Finite ``map`` continues to own its per-call concurrency.
+        """
+        from agentloom.execution.durable import DurableApplication
+
+        self._require_open()
+        return DurableApplication(self, root=root, database_url=database_url)
 
     @classmethod
     @contextmanager

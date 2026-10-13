@@ -80,6 +80,27 @@ def test_single_invocation_retains_error_even_when_exception_is_false(batch_proj
     assert probe.closed == [{"value": 1}] and probe.active == 0
 
 
+def test_failed_runtime_result_preserves_measured_usage_through_agent_proxy(batch_project, monkeypatch):
+    from dataclasses import replace
+    from agentloom.app.agent import build_builtin_runtime_registry
+
+    root, application, _, probe, _ = batch_project
+    runtime = build_builtin_runtime_registry().validate("batch-fixture").factory
+    run = runtime.run
+
+    def fail(self, request):
+        return replace(run(self, request), state="failed")
+
+    monkeypatch.setattr(runtime, "run", fail)
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        outcome = app.worker("workflows/worker.yaml").invoke(WorkItem("failed", {"value": 1}))
+    assert outcome.status == "failed"
+    assert outcome.error.error_type == "AgentRuntimeError"
+    assert dict(outcome.usage) == {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5,
+                                  "cached_input_tokens": 0, "reasoning_tokens": 0}
+    assert probe.closed == [{"value": 1}] and probe.active == 0
+
+
 @pytest.mark.parametrize("phase", ["after_registration", "before_context_restore"])
 def test_control_at_activity_boundary_preserves_close_and_original_signal(batch_project, phase):
     # A regressed close must fail the test with a finite watchdog, rather than

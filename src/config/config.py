@@ -730,6 +730,47 @@ def build_effective_agent_config_snapshot(
     return EffectiveAgentConfigSnapshot(values=merged, layers=tuple(layers), llm=llm_config)
 
 
+def rebind_effective_agent_config_snapshot(agent_config: dict[str, Any]) -> EffectiveAgentConfigSnapshot:
+    """Apply trusted invocation bindings to captured configuration sources.
+
+    A prepared definition already has a pinned snapshot. Ordinary construction
+    deliberately reuses it, so mutating raw tools/hooks alone cannot bind host
+    dependencies. Recompile the Agent layer without rereading system or model
+    files, preserving the Application's original source and model snapshot.
+    """
+    pinned = agent_config.get("_effective_agent_config_snapshot")
+    if not isinstance(pinned, EffectiveAgentConfigSnapshot):
+        return build_effective_agent_config_snapshot(agent_config)
+    layers = list(deepcopy(pinned.layers))
+    agent_layer = next((layer for layer in reversed(layers) if layer.name == "agent"), None)
+    if agent_layer is None:
+        raise ValueError("Prepared Agent snapshot is missing its Agent source")
+    overlay = extract_workflow_overlay(agent_config, source_name=str(agent_layer.source_path))
+    replacement = ConfigLayerSnapshot("agent", overlay, agent_layer.root, agent_layer.source_path)
+    layers = [replacement if layer is agent_layer else layer for layer in layers]
+    builder = LayeredConfigBuilder(
+        validate_hook=lambda snapshot, source: validate_system_snapshot(snapshot, source.name)
+    )
+    for layer in layers:
+        builder.apply_mapping(str(layer.source_path), normalize_config_paths(layer.data, layer.root))
+    merged = builder.build()
+    merged.update(RootSettings.model_validate(merged).model_dump(exclude_unset=True))
+    global_root = layers[0].root
+    normalize_tool_access_control_section(merged, global_root)
+    validate_system_snapshot(merged, str(agent_layer.source_path))
+    _validate_review_model_references(merged, pinned.llm, source_name=str(agent_layer.source_path))
+    if agent_config.get("_yaml_file_path"):
+        merged["_yaml_file_path"] = str(agent_config["_yaml_file_path"])
+    for layer in layers:
+        if "default_toolsets" in layer.data:
+            merged["_default_toolsets_source"] = layer.name
+    if "_mcp_settings_snapshot" in pinned.values:
+        if merged.get("mcp_servers") != pinned.values.get("mcp_servers"):
+            raise ValueError("Trusted invocation bindings cannot replace captured MCP sources")
+        merged["_mcp_settings_snapshot"] = deepcopy(pinned.values["_mcp_settings_snapshot"])
+    return EffectiveAgentConfigSnapshot(merged, tuple(layers), deepcopy(pinned.llm))
+
+
 def build_effective_agent_config(
     agent_config: dict[str, Any] | None,
     *,

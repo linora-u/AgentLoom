@@ -210,6 +210,51 @@ Or ask a Skill-aware coding assistant to read
 [`agentloom-framework-skill/SKILL.md`](agentloom-framework-skill/SKILL.md), create
 the files, validate them, run the Application, and inspect `.agentloom` evidence.
 
+## Persistent Worker queues
+
+The optional `durable` extra uses DBOS 3.2.0 for persistent queues, admission,
+retries, and recovery. Its default storage is a local SQLite file. Declare each
+Worker's shared queue capacity in the Application's `config/system.yaml`:
+
+```yaml
+worker_execution:
+  workers:
+    workflows/research.yaml:
+      concurrency: 4
+```
+
+Submit through an Application Run, using a stable namespace root and an explicit
+business revision:
+
+```python
+from agentloom.app import Application
+from agentloom.execution.concurrency import WorkItem
+
+with Application.open(application, project_root=project_root) as app:
+    with app.durable(root=namespace_root) as execution:
+        handles = execution.worker("workflows/research.yaml").submit_many(
+            [WorkItem("research-1", {"query": "Investigate the release."})],
+            revision="1",
+        )
+```
+
+Start one dedicated consumer for that namespace. Other processes can submit to
+the same queues; they share the declared capacities. Finite `worker.map()` calls
+retain their separate per-call limits.
+
+```bash
+uv run --locked --extra durable loom durable serve APPLICATION \
+  --worker workflows/research.yaml --root NAMESPACE_ROOT
+```
+
+An existing task with different immutable input is rejected. Each invocation
+runs a complete Application under macOS launchd, and resource exit is checked
+before replacement. Generic execution requires explicit host authorization to
+replay work; applications that commit business side effects can supply a trusted
+host with completion receipts. The current OS adapter supports macOS; Linux and
+actual PostgreSQL or multi-host execution have not been validated. See the
+[execution contract](docs/specs/durable-worker-open-source-engine-integration-v2.md).
+
 ## Runtime model
 
 <p align="center">
