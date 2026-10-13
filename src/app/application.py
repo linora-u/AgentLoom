@@ -453,7 +453,9 @@ class Application:
                 for entry in report.cleanup_errors
             )
         )
-        primary_error = (report.primary_error if report else None) or error
+        primary_error = report.primary_error if report is not None else None
+        if primary_error is None:
+            primary_error = error
         category = getattr(primary_error, "category", None) or (report.error_phase if report else None)
         result = WorkerOutcome(
             item.id,
@@ -461,7 +463,7 @@ class Application:
             "success" if error is None else "failed",
             invocation_id=report.agent_id if report else agent.get_agent_id() if agent else None,
             output=output,
-            error=WorkerError.from_exception(primary_error, category=category) if error else None,
+            error=WorkerError.from_exception(primary_error, category=category) if error is not None else None,
             usage={}
             if report is None
             else {
@@ -481,7 +483,7 @@ class Application:
             infrastructure_error = WorkerBatchError(
                 "Worker cleanup did not complete",
                 phase="cleanup",
-                original_error=error or report.cleanup_errors[0].error,
+                original_error=error if error is not None else report.cleanup_errors[0].error,
                 outcomes=(result,),
                 cleanup_errors=cleanup,
             )
@@ -493,7 +495,7 @@ class Application:
             infrastructure_error = WorkerBatchError(
                 "required invocation infrastructure failed",
                 phase="trace" if isinstance(error, TraceStorageError) else "infrastructure",
-                original_error=(report.primary_error if report else None) or error,
+                original_error=primary_error,
                 outcomes=(result,),
             )
         controls = [primary_error, error]
@@ -611,7 +613,67 @@ class BoundWorker:
         )
 
     def _invoke(self, item: WorkItem, index: int) -> WorkerOutcome:
-        return self.owner._invoke_definition(self._definition, item, index)
+        try:
+            return self.invoke(item, index=index)
+        except BaseException as error:
+            outcome = getattr(error, "worker_outcome", None)
+            if not isinstance(error, Exception) and isinstance(outcome, WorkerOutcome):
+                raise InvocationControlError(error, outcome, getattr(error, "worker_infrastructure_error", None)) from error
+            raise
+
+    def invoke(
+        self,
+        item: WorkItem,
+        *,
+        agent_factory: Callable[[dict, Any], Any] | None = None,
+        index: int = 0,
+    ) -> WorkerOutcome:
+        """Execute one Worker synchronously without allocating a task pool.
+
+        The caller owns admission and retry. ``agent_factory`` is trusted host
+        code, receiving a copy of the prepared definition and the Run logger;
+        it is never loaded from task input or serialized to another process.
+        Process controls retain their original exception and attach the actual
+        ``worker_outcome`` and optional ``worker_infrastructure_error``.
+        Application closure waits for this invocation before root teardown.
+        """
+        from agentloom.execution import get_current_run_context
+
+        owner = self.owner
+        owner._require_open()
+        if get_current_run_context() is not owner.runtime_context or _CURRENT_APPLICATION.get() is not owner:
+            if owner._baseline is None:
+                raise RuntimeError("Application owner execution context is unavailable")
+            return owner._baseline.copy().run(self.invoke, item, agent_factory=agent_factory, index=index)
+        if not isinstance(item, WorkItem):
+            raise TypeError("invoke requires a WorkItem")
+        if type(index) is not int or index < 0:
+            raise ValueError("index must be a non-negative integer")
+        if self._input_validator is not None:
+            self._input_validator(item.mutable_input())
+        control = BatchControl(Event())
+        with owner._condition:
+            owner._require_open()
+            owner._batches.add(control)
+        active = _ACTIVE_BATCH_OWNER.set(owner)
+        try:
+            return owner._invoke_definition(
+                self._definition,
+                item,
+                index,
+                agent_factory=(lambda: agent_factory(deepcopy(self._definition), owner.logger))
+                if agent_factory is not None else None,
+            )
+        except InvocationControlError as interrupted:
+            error = interrupted.error
+            error.worker_outcome = interrupted.outcome
+            error.worker_infrastructure_error = interrupted.infrastructure_error
+            raise error
+        finally:
+            _ACTIVE_BATCH_OWNER.reset(active)
+            with owner._condition:
+                owner._batches.remove(control)
+                owner._condition.notify_all()
 
     def map(
         self,
