@@ -39,7 +39,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, search: str, completed: bool = True
     data["model"]["codex"] = {
         "adapter": "openai_chatgpt_responses" if provider == "openai" else "openai_codex_responses",
         "model": "gpt-6-luna",
-        "context_window": 272000, "max_output_tokens": 256,
+        "context_window": 272000, "max_output_tokens": None if provider == "openai" else 256,
         "timeout": 10, "num_retries": 0, "requests_per_minute": 2000000,
         "reasoning_effort": "xhigh", "web_search": search,
     }
@@ -235,7 +235,8 @@ def test_pi_native_settings_and_request_options_are_forwarded(tmp_path, monkeypa
         assert execute_app(app, file_logging=False).output == "Current result"
     observed = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
     settings = next(item["settings"] for item in observed if "settings" in item)
-    assert all(settings[key] == value for key, value in native.items())
+    assert all(settings[key] == value for key, value in native.items() if key != "compaction")
+    assert settings["compaction"] == {"reserveTokens": 65536, **native["compaction"]}
     request = next(item["request"] for item in observed if "request" in item)
     assert request == {"timeoutMs": 4321, "maxRetries": 0, "maxRetryDelayMs": 9876,
                        "transport": "sse", "maxTokens": 65536}
@@ -745,7 +746,9 @@ def test_sdk_window_and_usage_preserve_successful_tool_calls(tmp_path, monkeypat
     sdk_models = [json.loads(line) for line in (tmp_path / "sdk-models.jsonl").read_text().splitlines()]
     assert sdk_models[-1]["provider"] == "openai-codex"
     assert sdk_models[-1]["context_window"] == context_window
-    assert sdk_models[-1]["max_output_tokens"] == 65536
+    # Request caps no longer overwrite native catalogue capability metadata.
+    assert sdk_models[-1]["max_output_tokens"] > 0
+    assert sdk_models[-1]["max_output_tokens"] != context_window
     assert len(requests) == 2
     options = [json.loads(line) for line in (tmp_path / "sdk-options.jsonl").read_text().splitlines()]
     assert all(item["request"]["maxTokens"] == 65536 for item in options if "request" in item)
@@ -785,7 +788,7 @@ def test_native_compaction_preserves_completed_response_above_configured_window(
     assert len(compact_requests) == 1
     with inspect_run(result.run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
-        assert responses[0]["usage"] == {"input_tokens": 484013, "output_tokens": 40870}
+        assert responses[0]["usage"] == {"input_tokens": 484013, "output_tokens": 40870, "reasoning_tokens": 0}
 
 
 def test_native_search_retains_search_open_find_and_all_completed_calls(tmp_path, monkeypatch):

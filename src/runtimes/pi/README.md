@@ -98,8 +98,10 @@ or protected Shell query mapping are rejected before execution.
 | `model` | Preserve the model ID, removing the legacy `openai/` or `gemini/` routing prefix |
 | `base_url`, `api_key` | Selected endpoint and in-memory credentials; no user auth discovery |
 | Effective request headers | Literal private headers; no Pi command/env interpolation |
-| `temperature`, `max_output_tokens` | Native stream options. AgentLoom injects an explicitly configured Codex `max_output_tokens` into its payload; omitted/null Codex limits leave the provider's native model limit and send no cap |
-| `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved window is applied to the SDK model before session creation, including Codex and ChatGPT subscription models; `max_output_tokens` sets its generation limit |
+| `temperature`, `max_output_tokens` | Native stream options. Final HTTP payload preserves an explicit cap unchanged; omitted/null Chat, Responses and Codex profiles send no cap. ChatGPT public subscription profiles reject explicit caps |
+| `context_window`, `input_token_limit`, legacy `max_tokens` | Resolved window is applied before session creation. Legacy YAML `max_tokens` alone preserves its historical budgets and source |
+| `input_token_reserve` | Independent local input planning; default compaction reserve follows it. Clearing a cap retains the reserve; native compaction settings override it |
+| `max_model_output_tokens`, `model_output_capability_source` | Verified output capability only. Subscription catalog metadata remains native; custom unknown capability uses SDK-only `0`, never an HTTP cap or the context window |
 | `timeout` | Converted from seconds to native `retry.provider.timeoutMs`; the SDK owns timeout behavior |
 | `num_retries`, `retry_delay`, `max_retry_delay` | Mapped to native retry counts, `baseDelayMs`, `maxAgentDelayMs` and provider `maxRetryDelayMs`; the SDK owns retries and fallback |
 | `requests_per_minute` | No Pi SDK equivalent; Pi does not implement an additional limiter |
@@ -108,6 +110,14 @@ or protected Shell query mapping are rejected before execution.
 | `top_p`, `seed`, `reasoning_effort` | Explicit provider parameters; Responses maps reasoning effort into `reasoning.effort` |
 | `reasoning_summary: false` | For Responses profiles with an explicit `reasoning_effort`, omit the SDK's default `reasoning.summary` and send the configured effort. Leave unset to retain SDK defaults. `extra_body` still takes precedence. |
 | `tool_choice`, `parallel_tool_calls` | Native sampling parameters for compatible providers |
+
+Missing budget fields inherit in patches/overlays; explicit null clears a cap.
+Caps must be strict positive integers. Extra aliases, including nested
+`extra_body`, normalize only when they agree; conflicts fail before HTTP.
+Native internal summary budgets take priority over ordinary profile caps.
+Final HTTP traces include effective/wire cap, source and input reserve.
+Provider length truncation is retryable `output_validation` with raw reason,
+usage and budget evidence; retries do not silently raise the budget.
 
 `runtime_options` passes directly to `SettingsManager.inMemory`, except
 `max_stop_attempts`, which belongs to AgentLoom's Stop gate. Native settings
@@ -139,6 +149,20 @@ contract and evidence interfaces. HTTP capture uses the SDK's `fetch` option;
 search evidence uses `onProviderStreamEvent`, without waiting for a cloned
 response stream to close.
 
+Pi usage receipts preserve the SDK's reported reasoning token count across
+model turns and Stop continuations, including truncated and failed runs.
+Reasoning tokens are a subset of output, and cached input is a subset of input;
+neither is added again to the total. Per-model normalized usage includes
+`reasoning_tokens` when the SDK's original usage has `reasoning`, including an
+explicit zero. The original `response_ref` remains the source for which SDK
+fields were present. Aggregate zero is not proof that an unreported count was
+zero. Pi SDK1.0.0's OpenAI parsers normalize a missing provider reasoning split
+to zero when provider usage exists, so that upstream distinction is unavailable
+at this boundary; AgentLoom does not infer it or reconstruct it from token totals.
+Public Pi runtime usage events are cumulative snapshots for the entire runtime
+invocation, including completed Stop continuations. Read the latest snapshot;
+repeated bridge snapshots do not represent additional token use.
+
 Both subscription adapters use Pi's own OAuth credentials. **OpenAI → Sign in
 with ChatGPT** authorizes the public Responses API; **OpenAI Codex** authorizes
 the native Codex backend. AgentLoom passes Pi's `auth.json` path into its
@@ -159,7 +183,7 @@ model:
     adapter: openai_chatgpt_responses
     model: gpt-6-luna
     context_window: 272000
-    max_output_tokens: 16384
+    # Public subscription route: leave max_output_tokens unset.
     timeout: 300
     num_retries: 0
     reasoning_effort: xhigh

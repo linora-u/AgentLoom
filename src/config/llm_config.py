@@ -21,6 +21,7 @@ from agentloom.config.defaults import (
     DEFAULT_MODEL_TIMEOUT,
 )
 from agentloom.config.model_adapters import MODEL_ADAPTERS, AdapterKind
+from agentloom.config.output_budget import UNSET_BUDGET, input_plan, positive_budget, resolve_cap
 from agentloom.config.yaml_loader import load_unique_yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -92,8 +93,13 @@ class LlmModelTypeSettings(BaseModel):
     temperature: float = DEFAULT_MODEL_TEMPERATURE
     max_tokens: int = DEFAULT_MAX_TOKENS
     context_window: int = DEFAULT_MAX_TOKENS
-    max_output_tokens: int | None = Field(default=DEFAULT_MAX_OUTPUT_TOKENS, ge=1)
+    max_output_tokens: int | None = Field(default=None, ge=1, strict=True)
     input_token_limit: int = DEFAULT_MAX_TOKENS - DEFAULT_MAX_OUTPUT_TOKENS
+    input_token_reserve: int = Field(default=DEFAULT_MAX_OUTPUT_TOKENS, ge=1, strict=True)
+    input_reserve_source: str = "local_input_reserve_policy"
+    output_cap_source: str = "omitted"
+    max_model_output_tokens: int | None = Field(default=None, ge=1, strict=True)
+    model_output_capability_source: str | None = None
     timeout: int = DEFAULT_MODEL_TIMEOUT
     num_retries: int = DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = DEFAULT_MODEL_RETRY_DELAY
@@ -107,6 +113,41 @@ class LlmModelTypeSettings(BaseModel):
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body). Any YAML key not in the known fields list is collected here.
     extra_completion_params: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _budget_contract(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        values = dict(values)
+        extra = dict(values.get("extra_completion_params") or {})
+        if "max_completion_tokens" in values:
+            extra["max_completion_tokens"] = values.pop("max_completion_tokens")
+        cap, extra, source = resolve_cap(values.get("max_output_tokens", UNSET_BUDGET), extra,
+                                        source=values.get("output_cap_source"))
+        capability = positive_budget(values.get("max_model_output_tokens"), "max_model_output_tokens")
+        capability_source = values.get("model_output_capability_source")
+        if capability is not None and not (isinstance(capability_source, str) and capability_source.strip()):
+            raise ValueError("max_model_output_tokens requires model_output_capability_source from verified Provider documentation")
+        if cap is not None and capability is not None and cap > capability:
+            raise ValueError("max_output_tokens exceeds verified max_model_output_tokens")
+        if values.get("adapter") == "openai_chatgpt_responses" and cap is not None:
+            raise ValueError("openai_chatgpt_responses does not support an explicit output cap")
+        if values.get("adapter") == "anthropic_messages" and cap is None:
+            if capability is None:
+                raise ValueError("anthropic_messages requires max_output_tokens or verified max_model_output_tokens")
+            cap, source = capability, "verified_model_capability"
+        reserve, limit, reserve_source = input_plan(
+            values.get("context_window", DEFAULT_MAX_TOKENS), cap,
+            values.get("input_token_reserve", UNSET_BUDGET), legacy=source == "legacy_max_tokens")
+        values.update(max_output_tokens=cap, extra_completion_params=extra, output_cap_source=source,
+                      input_token_reserve=reserve,
+                      input_reserve_source=values.get("input_reserve_source", reserve_source))
+        if "input_token_limit" not in values:
+            values["input_token_limit"] = limit
+        elif type(values["input_token_limit"]) is not int or values["input_token_limit"] <= 0 or values["input_token_limit"] > limit:
+            raise ValueError("input_token_limit exceeds context_window minus required input reserve")
+        return values
 
     @model_validator(mode="before")
     @classmethod
@@ -177,30 +218,9 @@ class LLMConfig(BaseModel):
                 )
             )
             has_legacy_budget = "max_tokens" in v and "context_window" not in v and "max_output_tokens" not in v
-            if has_legacy_budget:
-                resolved_context_window = parsed_max_tokens
-                resolved_max_output_tokens = parsed_max_tokens
-                resolved_input_token_limit = parsed_max_tokens
-            else:
-                parsed_context_window = IntParser.parse(
-                    v.get("context_window", DEFAULT_MAX_TOKENS),
-                    default=DEFAULT_MAX_TOKENS,
-                )
-                # Codex can use its native generation limit when no cap is set.
-                # Other adapters retain their existing default budget.
-                output_default = None if v.get("adapter") == "openai_codex_responses" else DEFAULT_MAX_OUTPUT_TOKENS
-                output_value = v.get("max_output_tokens", output_default)
-                parsed_max_output_tokens = (None if output_value is None and v.get("adapter") == "openai_codex_responses" else IntParser.parse(
-                    output_value, default=DEFAULT_MAX_OUTPUT_TOKENS,
-                ))
-                resolved_context_window = int(parsed_context_window)
-                resolved_max_output_tokens = int(parsed_max_output_tokens) if parsed_max_output_tokens is not None else None
-                if resolved_max_output_tokens is not None and resolved_max_output_tokens >= resolved_context_window:
-                    raise ValueError(
-                        f"Model type '{k}' max_output_tokens ({resolved_max_output_tokens}) must be smaller "
-                        f"than context_window ({resolved_context_window})."
-                    )
-                resolved_input_token_limit = resolved_context_window - (resolved_max_output_tokens or 0)
+            resolved_context_window = parsed_max_tokens if has_legacy_budget else int(IntParser.parse(
+                v.get("context_window", DEFAULT_MAX_TOKENS), default=DEFAULT_MAX_TOKENS))
+            resolved_max_output_tokens = parsed_max_tokens if has_legacy_budget else v.get("max_output_tokens", UNSET_BUDGET)
             resolved_timeout = v.get("timeout", DEFAULT_MODEL_TIMEOUT)
             resolved_num_retries = v.get("num_retries", DEFAULT_MODEL_NUM_RETRIES)
             resolved_retry_delay = v.get("retry_delay", DEFAULT_MODEL_RETRY_DELAY)
@@ -238,14 +258,25 @@ class LLMConfig(BaseModel):
             # These are passed through to litellm.completion() as-is.
             _KNOWN_FIELDS = {
                 "model", "adapter", "base_url", "api_key", "temperature", "max_tokens",
-                "context_window", "max_output_tokens",
+                "context_window", "max_output_tokens", "input_token_limit", "input_token_reserve",
+                "input_reserve_source", "output_cap_source", "max_model_output_tokens", "model_output_capability_source", "extra_completion_params",
                 "timeout", "num_retries", "retry_delay", "max_retry_delay",
                 "extra_headers", "context_cache", "system_prompt_boundary",
                 "description", "requests_per_minute", "supports_structured_output",
             }
-            extra_completion_params = {
-                ek: ev for ek, ev in v.items() if ek not in _KNOWN_FIELDS
-            } or None
+            extra_completion_params = dict(v.get("extra_completion_params") or {})
+            extra_completion_params.update({ek: ev for ek, ev in v.items() if ek not in _KNOWN_FIELDS})
+            resolved_max_output_tokens, extra_completion_params, cap_source = resolve_cap(
+                resolved_max_output_tokens, extra_completion_params,
+                source="legacy_max_tokens" if has_legacy_budget else v.get("output_cap_source"))
+            if adapter == "anthropic_messages" and resolved_max_output_tokens is None and v.get("max_model_output_tokens") is not None:
+                resolved_max_output_tokens = positive_budget(v["max_model_output_tokens"], "max_model_output_tokens")
+                cap_source = "verified_model_capability"
+            reserve, resolved_input_token_limit, reserve_source = input_plan(
+                resolved_context_window, resolved_max_output_tokens,
+                v.get("input_token_reserve", UNSET_BUDGET), legacy=cap_source == "legacy_max_tokens")
+            if "input_token_limit" in v:
+                resolved_input_token_limit = v["input_token_limit"]
 
             models[k] = LlmModelTypeSettings(
                 model=model_id,
@@ -257,6 +288,11 @@ class LLMConfig(BaseModel):
                 context_window=resolved_context_window,
                 max_output_tokens=resolved_max_output_tokens,
                 input_token_limit=resolved_input_token_limit,
+                input_token_reserve=reserve,
+                input_reserve_source=v.get("input_reserve_source", reserve_source),
+                output_cap_source=cap_source,
+                max_model_output_tokens=v.get("max_model_output_tokens"),
+                model_output_capability_source=v.get("model_output_capability_source"),
                 timeout=int(resolved_timeout),
                 num_retries=int(resolved_num_retries),
                 retry_delay=float(resolved_retry_delay),
@@ -315,6 +351,13 @@ class LLMConfig(BaseModel):
                 )
                 merged.update(current.extra_completion_params or {})
                 merged.update(patch)
+                if "input_token_reserve" in patch:
+                    merged.pop("input_reserve_source", None)
+                if "max_output_tokens" in patch or "max_completion_tokens" in patch:
+                    merged.pop("output_cap_source", None)
+                    if current.output_cap_source == "legacy_max_tokens" and "input_token_reserve" not in patch:
+                        merged.pop("input_token_reserve", None)
+                        merged.pop("input_reserve_source", None)
             models[name] = self.from_dict({"model": {name: merged}}).models[name]
         return self.model_copy(deep=True, update={"models": deepcopy(models)})
 

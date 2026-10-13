@@ -1673,13 +1673,19 @@ class ConversationHistoryManager:
         *,
         context_window: int | None = None,
         max_output_tokens: int | None = None,
+        input_token_limit: int | None = None,
+        input_token_reserve: int | None = None,
+        input_reserve_source: str | None = None,
     ):
         self._internal_message_history: list[InternalChatMessage] = []
         if context_window is not None:
-            reserved_output = max_output_tokens or 0
-            if reserved_output >= context_window:
-                raise ValueError("max_output_tokens must be smaller than context_window")
-            self._max_tokens = context_window - reserved_output
+            from agentloom.config.output_budget import UNSET_BUDGET, input_plan
+            _, planned_limit, _ = input_plan(context_window, max_output_tokens,
+                UNSET_BUDGET if input_token_reserve is None else input_token_reserve,
+                legacy=input_reserve_source == "legacy_max_tokens")
+            if input_token_limit is not None and (type(input_token_limit) is not int or not 0 < input_token_limit <= planned_limit):
+                raise ValueError("input_token_limit exceeds context_window minus input reserve")
+            self._max_tokens = input_token_limit if input_token_limit is not None else planned_limit
         else:
             self._max_tokens = max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS
         self._smart_summary = smart_summary

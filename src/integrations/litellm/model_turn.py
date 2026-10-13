@@ -11,6 +11,7 @@ from agentloom.execution.model_protocol import (
     FunctionCallOutputItem,
     MessageItem,
     ModelItem,
+    ModelOutputTruncated,
     ModelProtocolError,
     ModelTurnAdapter,
     ModelTurnRequest,
@@ -113,8 +114,15 @@ def _traced_transport(
     turn_id = recorder.record_model_request(
         request, runtime="smolagents", boundary="litellm_input"
     ) if recorder else None
+    from contextlib import nullcontext
+
+    from agentloom.config.output_budget import UNSET_BUDGET, resolve_cap
+    from agentloom.execution.output_budget import WireBudget, bind_wire_budget, current_wire_budget
+    cap, _, source = resolve_cap(UNSET_BUDGET, request)
+    adapter = {"chat response": "openai_chat", "responses response": "openai_responses", "anthropic response": "anthropic_messages"}[response_context]
+    policy_scope = nullcontext() if current_wire_budget() is not None else bind_wire_budget(WireBudget(adapter, cap, source))
     try:
-        with bind_model_trace_turn(turn_id):
+        with bind_model_trace_turn(turn_id), policy_scope:
             response = _as_dict(transport(**request), context=response_context)
     except Exception as error:
         if recorder is not None and turn_id is not None:
@@ -134,7 +142,26 @@ def _validated_options(
         raise ValueError(
             f"reserved model turn option for {adapter_id}: {', '.join(overlap)}"
         )
-    return dict(options)
+    from agentloom.config.output_budget import UNSET_BUDGET, resolve_cap
+    cap, cleaned, _ = resolve_cap(UNSET_BUDGET, dict(options))
+    result = dict(cleaned or {})
+    if cap is not None:
+        result["max_output_tokens" if adapter_id == "openai_responses" else "max_tokens"] = cap
+    elif adapter_id == "anthropic_messages":
+        raise ValueError("anthropic_messages requires an explicit or verified output cap")
+    return result
+
+
+def _check_finish(reason: Any, usage: ModelUsage, *, request: Mapping[str, Any], adapter: AdapterKind) -> None:
+    if reason not in {"length", "max_output_tokens"}:
+        return
+    from agentloom.config.output_budget import UNSET_BUDGET, resolve_cap
+    from agentloom.execution.output_budget import WireBudget, current_wire_budget
+    policy = current_wire_budget()
+    if policy is None:
+        cap, _, source = resolve_cap(UNSET_BUDGET, dict(request))
+        policy = WireBudget(adapter, cap, source)
+    raise ModelOutputTruncated(str(reason), usage, policy.evidence())
 
 
 def _tool_definition_for_chat(tool: ToolDefinition) -> dict[str, Any]:
@@ -493,6 +520,8 @@ class OpenAIChatModelTurnAdapter:
         if not isinstance(choices, list) or len(choices) != 1:
             raise ModelProtocolError("chat response must contain exactly one choice")
         choice = _as_dict(choices[0], context="chat choice")
+        _check_finish(choice.get("finish_reason"), _usage_from_chat(response.get("usage")),
+                      request=wire_request, adapter=self.adapter_id)
         message = _as_dict(choice.get("message"), context="chat message")
 
         output: list[ModelItem] = []
@@ -578,6 +607,11 @@ class OpenAIResponsesModelTurnAdapter:
             ]
         wire_request.update(_validated_options(self.adapter_id, request.options))
         response = _traced_transport(self._transport, wire_request, response_context="responses response")
+        if response.get("status") == "incomplete":
+            reason = (response.get("incomplete_details") or {}).get("reason")
+            _check_finish(reason, _usage_from_responses(response.get("usage")),
+                          request=wire_request, adapter=self.adapter_id)
+            raise ModelProtocolError(f"Responses output incomplete ({reason})")
         return ModelTurnResult(
             items=_items_from_responses(response.get("output")),
             response_id=(

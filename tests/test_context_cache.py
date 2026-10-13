@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from agentloom.execution.model_protocol import MessageItem, ModelTurnRequest
 from agentloom.integrations.litellm import (
     AnthropicMessagesModelTurnAdapter,
     OpenAIChatModelTurnAdapter,
 )
-from agentloom.execution.model_protocol import MessageItem, ModelTurnRequest
 
 
 def _chat_response() -> dict:
@@ -40,6 +40,8 @@ def test_context_cache_marks_static_system_content(
     adapter.turn(
         ModelTurnRequest(
             model="opaque-model",
+            options={"max_output_tokens": 256}
+            if adapter_type is AnthropicMessagesModelTurnAdapter else {},
             items=(MessageItem(role="system", text="Static instructions"),),
         )
     )
@@ -80,6 +82,8 @@ def test_context_cache_boundary_keeps_dynamic_suffix_uncached(
     adapter.turn(
         ModelTurnRequest(
             model="opaque-model",
+            options={"max_output_tokens": 256}
+            if adapter_type is AnthropicMessagesModelTurnAdapter else {},
             items=(
                 MessageItem(
                     role="system",

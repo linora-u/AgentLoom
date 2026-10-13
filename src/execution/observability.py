@@ -459,6 +459,8 @@ class TraceRecorder:
                         "input_tokens": sum(int(raw_usage.get(key) or 0) for key in ("input", "cacheRead", "cacheWrite")),
                         "output_tokens": int(raw_usage.get("output") or 0),
                     }
+                    if raw_usage.get("reasoning") is not None:
+                        usage["reasoning_tokens"] = int(raw_usage["reasoning"])
                 else:
                     usage = {
                         "input_tokens": int(raw_usage.get("prompt_tokens") or raw_usage.get("input_tokens") or 0),

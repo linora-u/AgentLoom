@@ -77,6 +77,9 @@ class LoomAgentMixin:
         max_tokens: int | None = None,
         context_window: int | None = None,
         max_output_tokens: int | None = None,
+        input_token_limit: int | None = None,
+        input_token_reserve: int | None = None,
+        input_reserve_source: str | None = None,
         smart_summary: bool = True,
     ):
         self._before_run_callbacks = before_run_callbacks or []
@@ -84,6 +87,9 @@ class LoomAgentMixin:
             max_tokens=max_tokens,
             context_window=context_window,
             max_output_tokens=max_output_tokens,
+            input_token_limit=input_token_limit,
+            input_token_reserve=input_token_reserve,
+            input_reserve_source=input_reserve_source,
             smart_summary=smart_summary,
         )
         self._agent_loom_supports_reset_false_task_step_control = True

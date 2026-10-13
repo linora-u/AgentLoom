@@ -7,11 +7,12 @@ and configuration.
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 
 import litellm
 from agentloom.config.http_headers import normalize_http_headers
 from agentloom.config.llm_config import LlmModelTypeSettings
+from agentloom.config.output_budget import UNSET_BUDGET, UnsetBudget
 from agentloom.execution.logging import get_logger
 from agentloom.integrations.litellm.litellm_retry import patch_litellm_completion
 from agentloom.integrations.litellm.model_binding import (
@@ -40,7 +41,8 @@ class ModelConfigOverlay:
     temperature: float | None = None
     max_tokens: int | None = None
     context_window: int | None = None
-    max_output_tokens: int | None = None
+    max_output_tokens: int | None | UnsetBudget = UNSET_BUDGET
+    input_token_reserve: int | None = None
     timeout: int | None = None
     description: str | None = None
     num_retries: int | None = None
@@ -53,8 +55,8 @@ class ModelConfigOverlay:
     extra_completion_params: dict | None = None
 
     def to_mapping(self) -> dict:
-        mapping = {k: v for k, v in self.__dict__.items() if v is not None}
-        if self.max_tokens is not None and self.max_output_tokens is None:
+        mapping = {k: v for k, v in self.__dict__.items() if v is not UNSET_BUDGET and (v is not None or k == "max_output_tokens")}
+        if self.max_tokens is not None and self.max_output_tokens is UNSET_BUDGET:
             mapping["max_output_tokens"] = self.max_tokens
         return mapping
 
@@ -75,22 +77,19 @@ class ModelConfigBuilder:
         return self
 
     def build(self, base_config: ModelConfig) -> ModelConfig:
-        merged = replace(base_config)
-        split_budget_overridden = False
+        merged = asdict(base_config)
         for _source, layer in self._layers:
-            if not layer:
-                continue
-            split_budget_overridden = split_budget_overridden or bool(
-                {"context_window", "max_output_tokens"}.intersection(layer)
-            )
-            merged = replace(merged, **layer)
-        if split_budget_overridden:
-            if not isinstance(merged.max_output_tokens, int):
-                raise ValueError("max_output_tokens overlay must be an integer")
-            if merged.max_output_tokens >= merged.context_window:
-                raise ValueError("max_output_tokens must be smaller than context_window")
-            merged.input_token_limit = merged.context_window - merged.max_output_tokens
-        return merged
+            if {"context_window", "max_output_tokens", "input_token_reserve"}.intersection(layer):
+                merged.pop("input_token_limit", None)
+            if "input_token_reserve" in layer:
+                merged.pop("input_reserve_source", None)
+            if "max_output_tokens" in layer:
+                if merged.get("output_cap_source") == "legacy_max_tokens" and "input_token_reserve" not in layer:
+                    merged.pop("input_token_reserve", None)
+                    merged.pop("input_reserve_source", None)
+                merged.pop("output_cap_source", None)
+            merged.update(layer)
+        return ModelConfig(**merged)
 
     def cache_fragment(self) -> str:
         if not self._layers:
@@ -194,13 +193,15 @@ class ModelManager:
         litellm_params: dict[str, object] = {
             "model": model_config.model_id,
             "temperature": model_config.temperature,
-            "max_tokens": model_config.max_output_tokens,
             # Retry-related parameters
             "num_retries": model_config.num_retries,
             "retry_delay": model_config.retry_delay,
             "max_retry_delay": model_config.max_retry_delay,
             "timeout": model_config.timeout,
         }
+
+        if model_config.max_output_tokens is not None:
+            litellm_params["max_output_tokens" if model_config.adapter == "openai_responses" else "max_tokens"] = model_config.max_output_tokens
 
         # Send only headers configured for this model.
         request_headers = normalize_http_headers(model_config.extra_headers)
@@ -266,6 +267,11 @@ class ModelManager:
             context_window=model_config.context_window,
             max_output_tokens=model_config.max_output_tokens,
             input_token_limit=model_config.input_token_limit,
+            input_token_reserve=model_config.input_token_reserve,
+            input_reserve_source=model_config.input_reserve_source,
+            output_cap_source=model_config.output_cap_source,
+            max_model_output_tokens=model_config.max_model_output_tokens,
+            model_output_capability_source=model_config.model_output_capability_source,
             timeout=model_config.timeout,
             num_retries=model_config.num_retries,
             retry_delay=model_config.retry_delay,

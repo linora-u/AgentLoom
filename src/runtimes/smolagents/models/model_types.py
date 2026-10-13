@@ -8,7 +8,6 @@ from typing import Any, ClassVar
 
 from agentloom.config import C
 from agentloom.config.defaults import (
-    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_CONTEXT_CACHE,
     DEFAULT_MODEL_MAX_RETRY_DELAY,
@@ -58,8 +57,13 @@ class ModelConfig:
     temperature: float = DEFAULT_MODEL_TEMPERATURE
     max_tokens: int = DEFAULT_MAX_TOKENS
     context_window: int = DEFAULT_MAX_TOKENS
-    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
-    input_token_limit: int = DEFAULT_MAX_TOKENS - DEFAULT_MAX_OUTPUT_TOKENS
+    max_output_tokens: int | None = None
+    input_token_reserve: int | None = None
+    input_reserve_source: str | None = None
+    output_cap_source: str | None = None
+    max_model_output_tokens: int | None = None
+    model_output_capability_source: str | None = None
+    input_token_limit: int | None = None
     timeout: int = DEFAULT_MODEL_TIMEOUT  # seconds
     description: str = ""
     num_retries: int = DEFAULT_MODEL_NUM_RETRIES
@@ -74,6 +78,20 @@ class ModelConfig:
     # Extra parameters passed through to litellm.completion() (e.g. reasoning_effort,
     # extra_body for provider-specific features like DeepSeek thinking mode).
     extra_completion_params: dict[str, Any] | None = None
+
+    def __post_init__(self):
+        from agentloom.config.llm_config import LlmModelTypeSettings
+        budget = {"model": self.model_id or "", "adapter": self.adapter, "context_window": self.context_window,
+                  "max_output_tokens": self.max_output_tokens, "extra_completion_params": self.extra_completion_params,
+                  "max_model_output_tokens": self.max_model_output_tokens,
+                  "model_output_capability_source": self.model_output_capability_source}
+        for name in ("input_token_reserve", "input_token_limit", "input_reserve_source", "output_cap_source"):
+            if getattr(self, name) is not None:
+                budget[name] = getattr(self, name)
+        resolved = LlmModelTypeSettings(**budget)
+        for name in ("max_output_tokens", "input_token_reserve", "input_token_limit", "input_reserve_source",
+                     "output_cap_source", "extra_completion_params"):
+            setattr(self, name, getattr(resolved, name))
 
     @property
     def usable_input_tokens(self) -> int:
@@ -152,7 +170,12 @@ def _build_model_config_from_yaml(type_name: str) -> ModelConfig:
         temperature=float(resolved.temperature),
         max_tokens=int(resolved.max_tokens),
         context_window=int(resolved.context_window),
-        max_output_tokens=int(resolved.max_output_tokens),
+        max_output_tokens=resolved.max_output_tokens,
+        input_token_reserve=resolved.input_token_reserve,
+        input_reserve_source=resolved.input_reserve_source,
+        output_cap_source=resolved.output_cap_source,
+        max_model_output_tokens=resolved.max_model_output_tokens,
+        model_output_capability_source=resolved.model_output_capability_source,
         input_token_limit=int(resolved.input_token_limit),
         timeout=int(resolved.timeout),
         description=resolved.description,

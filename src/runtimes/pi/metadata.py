@@ -27,3 +27,6 @@ def validate_model(model: RuntimeModelSelection) -> None:
     if model.protocol not in {"openai_chat", "openai_responses", "openai_codex_responses",
                               "openai_chatgpt_responses"}:
         raise ValueError(f"Pi bridge does not map model protocol {model.protocol!r}")
+
+    from agentloom.config.llm_config import LlmModelTypeSettings
+    LlmModelTypeSettings.model_validate({**model.settings, "model": model.model_id, "adapter": model.protocol})

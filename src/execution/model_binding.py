@@ -42,7 +42,10 @@ class ModelTurnBinding:
     options: Mapping[str, Any] = field(default_factory=dict, repr=False)
     max_tokens: int = 0
     context_window: int = 0
-    max_output_tokens: int = 0
+    max_output_tokens: int | None = None
+    output_cap_source: str = "omitted"
+    input_token_reserve: int = 0
+    input_reserve_source: str = "unspecified"
     input_token_limit: int = 0
     requests_per_minute: int = 0
     description: str = ""
@@ -56,14 +59,16 @@ class ModelTurnBinding:
         for field_name in (
             "max_tokens",
             "context_window",
-            "max_output_tokens",
+            "input_token_reserve",
             "input_token_limit",
             "requests_per_minute",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{field_name} must be a non-negative integer")
-        if self.context_window and self.max_output_tokens > self.context_window:
+        if self.max_output_tokens is not None and (type(self.max_output_tokens) is not int or self.max_output_tokens <= 0):
+            raise ValueError("max_output_tokens must be a positive integer or null")
+        if self.context_window and self.max_output_tokens is not None and self.max_output_tokens > self.context_window:
             raise ValueError("max_output_tokens cannot exceed context_window")
         object.__setattr__(self, "model_type", normalized_type)
         object.__setattr__(self, "options", _frozen_options(self.options))
@@ -84,15 +89,30 @@ class ModelTurnBinding:
     ) -> ModelTurnResult:
         """Execute one canonical model turn with optional per-turn overrides."""
 
+        from agentloom.config.output_budget import CAP_ALIASES, UNSET_BUDGET, resolve_cap
+        from agentloom.execution.output_budget import WireBudget, bind_wire_budget
+
         merged_options = dict(self.options)
         if options:
+            # Explicit internal summary/per-turn budgets take priority; an absent
+            # override inherits. No profile budget can silently replace them.
+            if CAP_ALIASES.intersection(options):
+                for alias in CAP_ALIASES:
+                    merged_options.pop(alias, None)
             merged_options.update(options)
-        return self.adapter.turn(
-            ModelTurnRequest(
-                model=self.model_id,
-                items=items,
-                tools=tools,
-                instructions=instructions,
-                options=merged_options,
+        cap, merged_options, source = resolve_cap(UNSET_BUDGET, merged_options,
+            source="explicit_turn_budget" if options and CAP_ALIASES.intersection(options) else self.output_cap_source)
+        if cap is not None:
+            merged_options = dict(merged_options or {})
+            merged_options["max_output_tokens" if self.adapter_id == "openai_responses" else "max_tokens"] = cap
+        with bind_wire_budget(WireBudget(self.adapter_id, cap, source, self.input_token_reserve,
+                                        self.input_reserve_source)):
+            return self.adapter.turn(
+                ModelTurnRequest(
+                    model=self.model_id,
+                    items=items,
+                    tools=tools,
+                    instructions=instructions,
+                    options=merged_options or {},
+                )
             )
-        )
