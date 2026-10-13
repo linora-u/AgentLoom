@@ -90,7 +90,11 @@ def model_service(*, responses=False, fail_count=0, error_status=500, stall=None
                      "part": {"type": "output_text", "text": "", "annotations": []}},
                     {"type": "response.output_text.delta", "item_id": "msg_1", "output_index": 0, "content_index": 0, "delta": output_text},
                     {"type": "response.output_item.done", "output_index": 0, "item": message},
-                    {"type": "response.completed", "response": {"id": "resp_1", "model": request["model"], "status": "completed", "output": [message],
+                    {"type": "response.incomplete" if finish_reason in {"length", "max_output_tokens"} else "response.completed",
+                     "response": {"id": "resp_1", "model": request["model"],
+                        "status": "incomplete" if finish_reason in {"length", "max_output_tokens"} else "completed",
+                        "incomplete_details": {"reason": finish_reason} if finish_reason in {"length", "max_output_tokens"} else None,
+                        "output": [message],
                         "usage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15, "input_tokens_details": {"cached_tokens": 0}}}},
                 ]
                 for event in events:
@@ -625,7 +629,7 @@ def test_incomplete_turn_does_not_report_success(tmp_path):
     from agentloom.app.run import ApplicationRunError
     with model_service(finish="length") as (url, requests):
         app = project(tmp_path, url)
-        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match="max_steps_error"):
+        with bind_config(load_project_config(tmp_path)), pytest.raises(ApplicationRunError, match="model output token limit"):
             execute_app(app, file_logging=False)
     assert len(requests) == 1
     assert not (tmp_path / "should-not-exist").exists()

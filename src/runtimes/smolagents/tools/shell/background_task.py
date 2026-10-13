@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional
 
 if TYPE_CHECKING:
     from subprocess import Popen
@@ -75,6 +75,7 @@ class BackgroundTaskState:
     _stall_watchdog: Optional["StallWatchdog"] = field(default=None, repr=False)
     _runtime_key: RuntimeKey = field(default=None, repr=False)
     _output_reader: Optional[AnchoredOutputReader] = field(default=None, repr=False)
+    _close_process: Callable[[], None] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         # Directly-created states are supported by a few local callers.  Anchor
@@ -162,7 +163,10 @@ class BackgroundTaskRegistry:
                     for task in inst._tasks.values():
                         if not task.is_terminal:
                             try:
-                                graceful_kill(task.pid, grace_ms=500)
+                                if task._close_process is not None:
+                                    task._close_process()
+                                else:
+                                    graceful_kill(task.pid, grace_ms=500)
                             except Exception:
                                 pass
                         if task._size_watchdog:
@@ -252,6 +256,7 @@ class BackgroundTaskRegistry:
         description: str = "",
         size_watchdog: Optional[SizeWatchdog] = None,
         output_fd: Optional[int] = None,
+        close_process: Callable[[], None] | None = None,
     ) -> str:
         """Register a running process as a background task.
 
@@ -303,6 +308,7 @@ class BackgroundTaskRegistry:
                     _size_watchdog=size_watchdog,
                     _runtime_key=runtime_key,
                     _output_reader=output_reader,
+                    _close_process=close_process,
                 )
                 self._tasks[self._task_key(task_id, runtime_key)] = task
         except BaseException:
@@ -427,17 +433,24 @@ class BackgroundTaskRegistry:
         if task is None:
             return None
         if task.is_terminal:
+            if task._close_process is not None:
+                task._close_process()
             return task
 
-        # Send SIGTERM → SIGKILL.
-        graceful_kill(task.pid, grace_ms=2000)
+        # The concrete closer verifies exit; legacy callers wait their Popen.
+        if task._close_process is not None:
+            task._close_process()
+        else:
+            graceful_kill(task.pid, grace_ms=2000)
+            if task._process is not None:
+                task._process.wait(timeout=5)
 
         # Wait briefly for the monitor thread to pick up the exit.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline and not task.is_terminal:
             time.sleep(0.1)
 
-        # If still running, force-update state.
+        # Exit has been confirmed even if the monitor has not updated yet.
         if not task.is_terminal:
             task.status = "killed"
             task.end_time = time.monotonic()
@@ -461,38 +474,38 @@ class BackgroundTaskRegistry:
         return self._terminate_keys(owned_keys)
 
     def _terminate_keys(self, keys: list[tuple[RuntimeKey, str]]) -> int:
-        """Close captured task handles without consulting another Agent's trace."""
+        """Keep original handles until concrete cleanup succeeds."""
         with self._lock:
-            tasks = [self._tasks.pop(key) for key in keys if key in self._tasks]
-            now = time.monotonic()
-            for task in tasks:
+            tasks = [(key, self._tasks[key]) for key in keys if key in self._tasks]
+
+        errors = []
+        for key, task in tasks:
+            try:
+                if task._size_watchdog:
+                    task._size_watchdog.stop()
+                if task._stall_watchdog:
+                    task._stall_watchdog.stop()
+                process = task._process
+                if task._close_process is not None:
+                    # Also closes descendants after the root has exited.
+                    task._close_process()
+                elif process is not None and process.poll() is None:
+                    graceful_kill(task.pid, grace_ms=500)
+                    process.wait(timeout=5)
+                task.close_output_reader()
+            except BaseException as error:
+                errors.append(error)
+                continue
+            with self._lock:
                 if not task.is_terminal:
                     task.status = "killed"
-                    task.end_time = now
-                    task.exit_code = -15
+                    task.end_time = time.monotonic()
+                    task.exit_code = process.returncode if process is not None else None
+                if self._tasks.get(key) is task:
+                    self._tasks.pop(key)
 
-        for task in tasks:
-            if task._size_watchdog:
-                try:
-                    task._size_watchdog.stop()
-                except Exception:
-                    pass
-            if task._stall_watchdog:
-                try:
-                    task._stall_watchdog.stop()
-                except Exception:
-                    pass
-            process = task._process
-            if process is not None and process.poll() is None:
-                try:
-                    graceful_kill(task.pid, grace_ms=500)
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to terminate background task %s for run teardown: %s",
-                        task.task_id,
-                        exc,
-                    )
-            task.close_output_reader()
+        if errors:
+            raise BaseExceptionGroup("Background process cleanup failed", errors)
 
         return len(tasks)
 

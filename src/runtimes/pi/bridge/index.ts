@@ -141,7 +141,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
       api, baseUrl: s.base_url || "https://api.openai.com/v1", apiKey: "agentloom-runtime-key",
       models: [{id: modelId, name: modelId, reasoning: Boolean(s.extra_completion_params?.reasoning_effort), input: ["text"],
         cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, contextWindow: s.context_window,
-        maxTokens: s.max_output_tokens ?? s.context_window, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
+        maxTokens: s.max_model_output_tokens ?? 0, compat: {supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: "max_tokens"}}],
     });
     await runtime.setRuntimeApiKey("agentloom", s.api_key || "no-key");
   }
@@ -150,7 +150,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     runtime.registerProvider(providerId, {
       models: runtime.getModels(providerId).map(model => model.id === modelId
         ? {...model, contextWindow: s.context_window,
-          ...(s.max_output_tokens != null ? {maxTokens: s.max_output_tokens} : {})} : model),
+          ...(s.max_model_output_tokens != null ? {maxTokens: s.max_model_output_tokens} : {})} : model),
     });
   }
   const model = runtime.getModel(providerId, modelId);
@@ -172,6 +172,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
         maxRetryDelayMs: s.max_retry_delay * 1000}},
     enableAnalytics: false, enableInstallTelemetry: false, packages: [],
     ...nativeSettings,
+    compaction: {reserveTokens: s.input_token_reserve, ...nativeSettings.compaction},
   });
   const restored = p.checkpoint ? restoreSession(agentDir, p.cwd, p.checkpoint) : undefined;
   const manager = restored?.manager ?? SessionManager.inMemory(p.cwd);
@@ -222,9 +223,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};
     const extra = s.extra_completion_params || {};
     const projected = result;
-    // The Codex backend enforces this cap, but Pi's Codex provider omits maxTokens.
-    // The public ChatGPT subscription API does not support this request field.
-    if (codex && s.max_output_tokens != null) projected.max_output_tokens = s.max_output_tokens;
+    // Subscription backends expose different native service-tier names.
     if (subscription && extra.service_tier !== undefined)
       projected.service_tier = codex && extra.service_tier === "fast" ? "priority" : extra.service_tier;
     const publicSchemas = new Map(p.tools.map((tool: Obj) => [tool.visible_name, tool.parameters]));
@@ -285,7 +284,7 @@ async function run(frame: Frame, abort: AbortController) {
     // The public API documents this as the actual tier. Codex's subscription
     // backend does not expose an authoritative per-request tier in this field.
     effective: p.model.protocol === "openai_chatgpt_responses" ? tier : null});
-  const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0};
+  const usage = {input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0, reasoning_tokens: 0};
   let unavailableTool = false;
   let unavailableToolTurns = 0;
   let outputBudgetExhausted = false;
@@ -328,6 +327,8 @@ async function run(frame: Frame, abort: AbortController) {
         usage.output_tokens += u.output;
         usage.total_tokens += u.totalTokens;
         usage.cached_input_tokens += u.cacheRead;
+        // SDK reasoning is an optional subset of output, never another total.
+        usage.reasoning_tokens += u.reasoning ?? 0;
         event("model", {phase: "completed", stop_reason: e.message.stopReason});
       }
     });
@@ -411,6 +412,10 @@ async function run(frame: Frame, abort: AbortController) {
         continue;
       }
       break;
+    }
+    if (last?.role === "assistant" && last.stopReason === "length") {
+      outputBudgetExhausted = true;
+      outputValidationReason = "model output token limit";
     }
     if (nativeIncomplete || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");

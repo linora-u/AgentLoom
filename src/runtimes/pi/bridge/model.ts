@@ -1,4 +1,4 @@
-/** AgentLoom permissions and evidence around the native SDK stream; no request policy. */
+/** AgentLoom permissions, output-cap intent and evidence around the native SDK stream. */
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -121,6 +121,13 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         messages: permit.agent_context.length ? [...context.messages,
           {role: "user" as const, content: permit.agent_context.join("\n"), timestamp: Date.now()}] : context.messages};
       const events: unknown[] = [];
+      const nativeBudget = options?.maxTokens;
+      const effectiveCap = nativeBudget != null ? nativeBudget : settings.max_output_tokens;
+      const budgetSource = nativeBudget != null ? "native_internal_budget" : settings.output_cap_source || "omitted";
+      const budget = {effective_cap: effectiveCap ?? null, wire_cap: effectiveCap ?? null,
+        source: budgetSource, input_token_reserve: settings.input_token_reserve ?? null,
+        input_reserve_source: settings.input_reserve_source ?? null};
+      let rawReason: string | undefined;
       const {reasoning_effort: reasoningEffort, reasoning_summary: reasoningSummary,
         web_search: _search, service_tier: _tier,
         extra_body: extraBody, ...samplingParams} = settings.extra_completion_params || {};
@@ -130,7 +137,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
       const fetch = options?.fetch ?? globalThis.fetch;
       const stream = await nativeStream(model, selectedContext, {...options,
         temperature: subscription ? undefined : settings.temperature,
-        ...(settings.max_output_tokens != null ? {maxTokens: settings.max_output_tokens} : {}), headers,
+        ...(effectiveCap != null ? {maxTokens: effectiveCap} : {}), headers,
         cacheRetention: settings.context_cache ? "short" : "none",
         samplingParams: {...samplingParams, ...reasoningParams, ...extraBody},
         fetch: async (input, init) => {
@@ -144,18 +151,27 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
               !["authorization", "cookie", "set-cookie", "chatgpt-account-id", "proxy-authorization"]
                 .includes(name.toLowerCase())));
             await capture(permit.identity, attempt, "request", {method: request.method,
-              url: request.url, headers: safeHeaders, body: JSON.parse(encoded.toString("utf8"))},
+              url: request.url, headers: safeHeaders, body: JSON.parse(encoded.toString("utf8")), output_budget: budget},
               "openai_http_request");
           }
           return fetch(input, init);
         },
         onPayload: async (payload, selectedModel) => {
-          const outgoing = await options?.onPayload?.(payload, selectedModel) ?? payload;
+          const outgoing = {...(await options?.onPayload?.(payload, selectedModel) ?? payload) as Obj};
+          // SDK defaults, context clamps, minimums and extra_body merge have
+          // already run. Reapply explicit intent at the last payload seam.
+          const capField = model.api === "openai-completions"
+            ? ("max_completion_tokens" in outgoing ? "max_completion_tokens" : "max_tokens") : "max_output_tokens";
+          for (const alias of ["max_tokens", "max_completion_tokens", "max_output_tokens"]) delete outgoing[alias];
+          if (effectiveCap != null) outgoing[capField] = effectiveCap;
           await capture(permit.identity, attempt, "request", outgoing);
           requestCaptured = true;
           return outgoing;
         },
         onProviderStreamEvent: async (data, selectedModel) => {
+          const raw = data as Obj;
+          const reason = raw.response?.incomplete_details?.reason ?? raw.choices?.[0]?.finish_reason;
+          if (typeof reason === "string") rawReason = reason;
           if (subscription && ["response.output_item.done", "response.completed",
               "response.incomplete", "response.failed", "response.output_text.annotation.added"]
               .includes((data as Obj).type)) events.push(data);
@@ -163,6 +179,13 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         },
       });
       const message = await stream.result();
+      const normalized = message as AssistantMessage & Obj;
+      if (["length", "max_output_tokens"].includes(rawReason || "") || message.stopReason === "length") {
+        normalized.stopReason = "length";
+        delete normalized.errorMessage;
+        normalized.provider_finish_reason = rawReason || "length";
+      }
+      normalized.output_budget = budget;
       const evidence = subscription ? searchEvidence(events) : undefined;
       if (evidence) {
         if (settings.extra_completion_params?.web_search !== "off")

@@ -136,6 +136,16 @@ class PiRuntime:
                     pass
 
         def observe(event):
+            if event.event == "usage":
+                # Bridge usage is a cumulative snapshot for this run. Prefix
+                # completed Stop continuations without treating repeats as deltas.
+                part = RuntimeUsage.from_value(event.payload)
+                emit("usage", {**event.payload, **{
+                    name: getattr(usage, name) + getattr(part, name)
+                    for name in ("input_tokens", "output_tokens", "total_tokens",
+                                 "cached_input_tokens", "reasoning_tokens")
+                }})
+                return
             if event.event == "run" and event.payload.get("phase", "").startswith("auth_"):
                 phase = event.payload.get("phase")
                 if phase == "auth_open_browser":
@@ -257,7 +267,8 @@ class PiRuntime:
                 part = RuntimeUsage.from_value(result.usage)
                 usage = RuntimeUsage(input_tokens=usage.input_tokens + part.input_tokens,
                     output_tokens=usage.output_tokens + part.output_tokens, total_tokens=usage.total_tokens + part.total_tokens,
-                    cached_input_tokens=usage.cached_input_tokens + part.cached_input_tokens)
+                    cached_input_tokens=usage.cached_input_tokens + part.cached_input_tokens,
+                    reasoning_tokens=usage.reasoning_tokens + part.reasoning_tokens)
                 if result.error:
                     error = result.error
                     raise AgentRuntimeError(error.message, category="internal" if error.category == "protocol" else error.category,

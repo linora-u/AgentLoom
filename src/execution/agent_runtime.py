@@ -270,10 +270,16 @@ def require_runtime_state(
         category: RuntimeErrorCategory = "internal"
         if state == "interrupted":
             category = "interrupted"
-        raise AgentRuntimeError(
+        error = AgentRuntimeError(
             f"{error_prefix}: {state or 'missing_runtime_state'}",
             category=category,
         )
+        # A concrete failed result may still report real token consumption.
+        # Preserve it across the Agent proxy's state check for its invocation
+        # owner; throwing before return must not erase already measured usage.
+        if isinstance(result, AgentRuntimeResult):
+            error.runtime_result = result
+        raise error
 
 
 @dataclass(frozen=True, slots=True)

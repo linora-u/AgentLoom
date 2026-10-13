@@ -193,7 +193,10 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ No | Human-readable model description. Used in logs and documentation |
 | `temperature` | `float` | `0.1` | ❌ No | Creativity/randomness control (0.0 - 2.0). See [3.2 temperature Recommendations](#32-temperature-configuration-recommendations) |
 | `context_window` | `int` | `150000` | ❌ No | Total model context window used to budget input plus reserved output |
-| `max_output_tokens` | `int` | `16384` | ❌ No | Output capacity for one generation, including reasoning tokens; subscription differences are explained in 3.3 |
+| `max_output_tokens` | `int` \| `null` | `null` | ❌ No | Explicit generation cap, including reasoning tokens. Omitted/null sends no cap on optional-cap protocols; see 3.3 |
+| `input_token_reserve` | `int` | Local policy | ❌ No | Space reserved for generation during input planning; never sent as an output cap |
+| `max_model_output_tokens` | `int` \| `null` | `null` | ❌ No | Verified Provider output capability; requires `model_output_capability_source` |
+| `model_output_capability_source` | `str` \| `null` | `null` | ❌ No | Documentation/reference establishing the model's output capability |
 | `max_tokens` | `int` | `150000` | ❌ No | Deprecated compatibility alias; when used alone it supplies both legacy budgets. The old `"max"` value resolves to this finite default. |
 | `timeout` | `int` | `60` | ❌ No | Single HTTP request timeout (seconds). Interrupted if no response within this time |
 | `num_retries` | `int` | `5` | ❌ No | Number of retries on API call failure |
@@ -216,21 +219,53 @@ Except for `default_model_type`, **all dict-valued keys under the `model` block 
 
 ### 3.3 Context and output budgets
 
-Use `context_window` for the provider's total context capacity and
-`max_output_tokens` for the generation reserve. smolagents compresses model input
-against `context_window - max_output_tokens`; only `max_output_tokens` is sent to
-the provider as `max_tokens`. The legacy `max_tokens` field remains accepted when
-neither new field is set.
+`context_window` declares total context capacity. `max_output_tokens` declares
+the caller's output cap. Model output capability is a separate value,
+`max_model_output_tokens`, with a verified `model_output_capability_source`.
+Context capacity is never used as Provider output capability.
 
-Pi registers these settings as the native model's `contextWindow` and `maxTokens`;
-the Pi SDK manages input compaction. For `openai_codex_responses`, the native
-`onPayload` hook adds `max_output_tokens` to requests sent to
-`https://chatgpt.com/backend-api/codex/responses`. Live probes confirmed that this
-endpoint enforces the configured cap, including reasoning tokens.
-For `openai_chatgpt_responses`, ChatGPT sign-in through the public API
-[does not support `max_output_tokens`](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
-Pi omits that field; the setting declares SDK model capacity rather than a
-server-side generation cap on that route.
+Missing fields inherit during patches/typed overlays; explicit `null` removes an
+inherited cap. A cap must be a strict positive integer: booleans, zero, negative
+values and numeric strings fail before the model request. OpenAI Chat,
+Responses and Codex send no cap when it is unset. Explicit caps survive SDK
+defaults, minimums and context clamping unchanged at the final HTTP boundary.
+`max_tokens`, `max_completion_tokens` and `max_output_tokens` in extra parameters,
+including nested `extra_body`, must agree; equal aliases become one wire field,
+while conflicting values or a null override plus another cap fail.
+
+Anthropic Messages requires a cap. Configure it explicitly, or provide a verified
+model output capability; unknown capability fails before HTTP. ChatGPT sign-in
+through the public Responses API
+[does not support `max_output_tokens`](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations),
+so `openai_chatgpt_responses` rejects explicit caps. Codex's subscription backend
+supports them. Pi retains native catalog capability for subscription models;
+custom models use verified capability or an SDK-only unknown value `0`. That
+sentinel is never sent in the request or treated as a zero-output instruction.
+
+Input planning uses `input_token_reserve` independently. Uncapped profiles reserve
+16,384 tokens, or half of a smaller context window. Existing explicit-cap profiles
+retain their prior reserve; patches removing a cap retain that reserve. The input
+limit is the window minus at least the reserve and any explicit cap. An explicit
+input limit must fit within it. Pi uses the resolved reserve for default compaction
+settings; native compaction overrides and internal summary budgets keep priority.
+smolagents uses the input limit for compression. Reserve values never become HTTP
+output caps.
+
+The deprecated YAML `max_tokens` used alone retains its historical context,
+output and input budgets and reports source `legacy_max_tokens`; `"max"` retains
+its finite legacy default. Migrate to explicit `context_window` and an optional
+`max_output_tokens`; setting the latter to null clears a legacy cap.
+The legacy full-window input allowance has no independent reserve. Changing its
+cap resolves a new local reserve, unless the caller supplies one explicitly.
+
+Final request traces record `effective_cap`, `wire_cap`, output-cap source and input
+reserve. `input_reserve_source` records the reserve's separate origin. Pi and smol
+Runtime usage events are cumulative snapshots for the invocation, including usage
+reported with truncated responses. Reasoning and cached input are subsets of
+output and input; they are not added again to total usage.
+Provider `length`/`max_output_tokens` truncation is retryable `output_validation`,
+with raw reason, usage and budget evidence retained. Retries never raise the cap
+automatically. An uncapped request can still reach a Provider's own limit.
 
 ### 3.4 extra_headers Request Headers
 
@@ -437,7 +472,8 @@ Code default values (defaults.py)
 | `api_key` | `""` when unset |
 | `temperature` | `0.1` when unset |
 | `context_window` | `150000` when unset |
-| `max_output_tokens` | `16384` when unset |
+| `max_output_tokens` | No caller cap when unset; required-cap protocols need explicit or verified capability |
+| `input_token_reserve` | Local input planning policy; retained when an inherited cap is cleared |
 | `max_tokens` | Legacy compatibility alias |
 | `timeout` | `60` when unset |
 | `num_retries` | `5` when unset |
@@ -552,7 +588,7 @@ The following constants are defined in `src/config/defaults.py` and serve as the
 | Constant Name | Value | Corresponding Parameter |
 |--------|-----|---------|
 | `DEFAULT_MAX_TOKENS` | `150000` | `max_tokens` |
-| `DEFAULT_MAX_OUTPUT_TOKENS` | `16384` | `max_output_tokens` |
+| `DEFAULT_MAX_OUTPUT_TOKENS` | `16384` | Local input reserve policy; never an implicit request cap |
 | `DEFAULT_MODEL_TEMPERATURE` | `0.1` | `temperature` |
 | `DEFAULT_MODEL_TIMEOUT` | `60` | `timeout` |
 | `DEFAULT_MODEL_NUM_RETRIES` | `5` | `num_retries` |
@@ -576,7 +612,13 @@ class LlmModelTypeSettings(BaseModel):
     temperature: float = 0.1           # DEFAULT_MODEL_TEMPERATURE
     max_tokens: int = 150000           # DEFAULT_MAX_TOKENS
     context_window: int = 150000       # DEFAULT_MAX_TOKENS
-    max_output_tokens: int = 16384     # DEFAULT_MAX_OUTPUT_TOKENS
+    max_output_tokens: int | None = None
+    input_token_reserve: int = 16384  # local policy; resolved per profile
+    input_token_limit: int = 133616
+    input_reserve_source: str = "local_input_reserve_policy"
+    output_cap_source: str = "omitted"
+    max_model_output_tokens: int | None = None
+    model_output_capability_source: str | None = None
     timeout: int = 60                  # DEFAULT_MODEL_TIMEOUT
     num_retries: int = 5              # DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = 15.0         # DEFAULT_MODEL_RETRY_DELAY

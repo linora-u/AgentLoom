@@ -6,12 +6,13 @@ from contextlib import nullcontext
 from contextvars import copy_context
 from typing import Any
 
-from agentloom.runtimes.smolagents.monkey_patch import install_agentloom_runtime_adapters
-from agentloom.runtimes.smolagents.tool_proxy import build_smolagents_tool_proxies
 from agentloom.execution.agent_runtime import require_runtime_state
-from agentloom.execution.model_protocol import ModelProtocolError
+from agentloom.execution.model_protocol import ModelOutputTruncated, ModelProtocolError
 from agentloom.execution.tool_gateway import ToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord
+from agentloom.runtimes.smolagents.monkey_patch import install_agentloom_runtime_adapters
+from agentloom.runtimes.smolagents.tool_proxy import build_smolagents_tool_proxies
+
 from smolagents import (
     AgentAudio,
     AgentGenerationError,
@@ -114,12 +115,18 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
         max_tokens = kwargs.pop("max_tokens", None)
         context_window = kwargs.pop("context_window", None)
         max_output_tokens = kwargs.pop("max_output_tokens", None)
+        input_token_limit = kwargs.pop("input_token_limit", None)
+        input_token_reserve = kwargs.pop("input_token_reserve", None)
+        input_reserve_source = kwargs.pop("input_reserve_source", None)
         smart_summary = kwargs.pop("smart_summary", True)
         self._init_loom_agent(
             before_run_callbacks,
             max_tokens=max_tokens,
             context_window=context_window,
             max_output_tokens=max_output_tokens,
+            input_token_limit=input_token_limit,
+            input_token_reserve=input_token_reserve,
+            input_reserve_source=input_reserve_source,
             smart_summary=smart_summary,
         )
         super().__init__(*args, **kwargs)
@@ -136,6 +143,10 @@ class ToolCallingAgentV2(_SuccessfulRunStateMixin, LoomAgentMixin, ToolCallingAg
             # failures. Feed them back as recoverable parsing errors so the
             # next ReAct step can correct itself.
             cause = exc.__cause__
+            if isinstance(cause, ModelOutputTruncated):
+                # Budget exhaustion cannot be corrected by another ReAct step.
+                # Preserve its usage/reason for the Application failure policy.
+                raise
             if isinstance(cause, ModelProtocolError):
                 raise AgentParsingError(
                     f"Error while parsing tool call from model output: {cause}",

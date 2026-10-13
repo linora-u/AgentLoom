@@ -14,7 +14,7 @@ import os
 import signal
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from agentloom.execution.logging import get_logger
 from agentloom.runtimes.smolagents.tools.shell.output_reader import AnchoredOutputReader
@@ -51,8 +51,9 @@ def tree_kill(pid: int, sig: int = DEFAULT_KILL_SIGNAL) -> bool:
         logger.debug("Sent signal %s to process group %d", sig, pid)
         return True
     except ProcessLookupError:
-        # Process already exited — nothing to do.
-        return True
+        # The numeric process group may not exist while that PID is alive.
+        # Fall back to the concrete PID, never signal its inherited parent group.
+        pass
     except PermissionError:
         logger.debug("Permission denied for killpg(%d, %s)", pid, sig)
         return False
@@ -145,13 +146,17 @@ class SizeWatchdog:
         poll_interval_s: float = 5.0,
         output_reader: AnchoredOutputReader | None = None,
         output_fd: int | None = None,
+        close_process: Callable[[], None] | None = None,
     ):
         self._pid = pid
+        self._close_process = close_process
         self._output_path = output_path
         self._max_bytes = max_bytes
         self._poll_interval = poll_interval_s
         self._stopped = False
         self._thread: Optional["threading.Thread"] = None
+        self._cleanup_error: BaseException | None = None
+        self._cleanup_error_reported = False
         self._owns_output_reader = output_reader is None
         if output_reader is not None:
             self._output_reader = output_reader
@@ -180,6 +185,19 @@ class SizeWatchdog:
             name=f"size-watchdog-{self._pid}",
         )
         self._thread.start()
+        from agentloom.execution.resources import register_resource
+        register_resource(f"smol.size-watchdog:{id(self)}", self._close_owned_watchdog)
+
+    def _close_owned_watchdog(self) -> None:
+        """Deliver asynchronous close errors to this watchdog's original owner."""
+        self.stop()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            if self._thread.is_alive():
+                raise TimeoutError("Output watchdog has not exited")
+        if self._cleanup_error is not None and not self._cleanup_error_reported:
+            self._cleanup_error_reported = True
+            raise self._cleanup_error
 
     def stop(self) -> None:
         """Stop the watchdog (idempotent)."""
@@ -199,7 +217,14 @@ class SizeWatchdog:
                     size,
                     self._pid,
                 )
-                tree_kill(self._pid, signal.SIGKILL)
+                if self._close_process is not None:
+                    try:
+                        self._close_process()
+                    except BaseException as error:
+                        self._cleanup_error = error
+                        raise
+                else:
+                    tree_kill(self._pid, signal.SIGKILL)
                 self._stopped = True
                 if self._owns_output_reader and reader is not None:
                     reader.close()

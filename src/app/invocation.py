@@ -644,7 +644,10 @@ class AgentInvocation:
                     result = runtime_agent.run(request)
                 except BaseException as exc:
                     usage_events = [event for event in runtime_events[start:] if event.kind == "usage"]
-                    if usage_events:
+                    failed_result = getattr(exc, "runtime_result", None)
+                    if isinstance(failed_result, AgentRuntimeResult):
+                        self._runtime_results.append(failed_result)
+                    elif usage_events:
                         self._failed_runtime_usage.append(RuntimeUsage.from_value(usage_events[-1].details))
                     if recorder is not None:
                         recorder.record_agent_end(state="failed", error=exc)

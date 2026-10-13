@@ -12,7 +12,10 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Condition, Event
 from time import monotonic
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agentloom.execution.durable import DurableApplication
 
 from agentloom.app.definition import (
     _prepare_inspected_definition,
@@ -263,6 +266,18 @@ class Application:
                     self._bindings[identity] = BoundWorker(self, identity, prepared, normalized.input_validator)
             return self._bindings[identity]
 
+    def durable(self, *, root: str | Path | None = None, database_url: str | None = None) -> DurableApplication:
+        """Open a DBOS-backed persistent execution namespace for this Application.
+
+        The returned service is a context manager. It snapshots submissions,
+        keeps task identity independent of this Run and uses Worker system
+        policy. Finite ``map`` continues to own its per-call concurrency.
+        """
+        from agentloom.execution.durable import DurableApplication
+
+        self._require_open()
+        return DurableApplication(self, root=root, database_url=database_url)
+
     @classmethod
     @contextmanager
     def open(
@@ -453,7 +468,9 @@ class Application:
                 for entry in report.cleanup_errors
             )
         )
-        primary_error = (report.primary_error if report else None) or error
+        primary_error = report.primary_error if report is not None else None
+        if primary_error is None:
+            primary_error = error
         category = getattr(primary_error, "category", None) or (report.error_phase if report else None)
         result = WorkerOutcome(
             item.id,
@@ -461,7 +478,7 @@ class Application:
             "success" if error is None else "failed",
             invocation_id=report.agent_id if report else agent.get_agent_id() if agent else None,
             output=output,
-            error=WorkerError.from_exception(primary_error, category=category) if error else None,
+            error=WorkerError.from_exception(primary_error, category=category) if error is not None else None,
             usage={}
             if report is None
             else {
@@ -481,7 +498,7 @@ class Application:
             infrastructure_error = WorkerBatchError(
                 "Worker cleanup did not complete",
                 phase="cleanup",
-                original_error=error or report.cleanup_errors[0].error,
+                original_error=error if error is not None else report.cleanup_errors[0].error,
                 outcomes=(result,),
                 cleanup_errors=cleanup,
             )
@@ -493,7 +510,7 @@ class Application:
             infrastructure_error = WorkerBatchError(
                 "required invocation infrastructure failed",
                 phase="trace" if isinstance(error, TraceStorageError) else "infrastructure",
-                original_error=(report.primary_error if report else None) or error,
+                original_error=primary_error,
                 outcomes=(result,),
             )
         controls = [primary_error, error]
@@ -611,7 +628,100 @@ class BoundWorker:
         )
 
     def _invoke(self, item: WorkItem, index: int) -> WorkerOutcome:
-        return self.owner._invoke_definition(self._definition, item, index)
+        try:
+            return self.invoke(item, index=index)
+        except BaseException as error:
+            outcome = getattr(error, "worker_outcome", None)
+            if not isinstance(error, Exception) and isinstance(outcome, WorkerOutcome):
+                raise InvocationControlError(error, outcome, getattr(error, "worker_infrastructure_error", None)) from error
+            raise
+
+    def invoke(
+        self,
+        item: WorkItem,
+        *,
+        agent_factory: Callable[[dict, Any], Any] | None = None,
+        index: int = 0,
+    ) -> WorkerOutcome:
+        """Execute one Worker synchronously without allocating a task pool.
+
+        The caller owns admission and retry. ``agent_factory`` is trusted host
+        code, receiving a copy of the prepared definition and the Run logger;
+        it is never loaded from task input or serialized to another process.
+        Process controls retain their original exception and attach the actual
+        ``worker_outcome`` and optional ``worker_infrastructure_error``.
+        Application closure waits for this invocation before root teardown.
+        """
+        from agentloom.execution import get_current_run_context
+
+        owner = self.owner
+        owner._require_open()
+        if get_current_run_context() is not owner.runtime_context or _CURRENT_APPLICATION.get() is not owner:
+            if owner._baseline is None:
+                raise RuntimeError("Application owner execution context is unavailable")
+            return owner._baseline.copy().run(self.invoke, item, agent_factory=agent_factory, index=index)
+        if not isinstance(item, WorkItem):
+            raise TypeError("invoke requires a WorkItem")
+        if type(index) is not int or index < 0:
+            raise ValueError("index must be a non-negative integer")
+        if self._input_validator is not None:
+            self._input_validator(item.mutable_input())
+        control = BatchControl(Event())
+        previous_owner = _ACTIVE_BATCH_OWNER.get()
+        outcome = None
+        try:
+            # Guard before either mutation. A signal can arrive after add/set
+            # has changed state but before its return value is assigned.
+            with owner._condition:
+                owner._require_open()
+                owner._batches.add(control)
+            _ACTIVE_BATCH_OWNER.set(owner)
+            outcome = owner._invoke_definition(
+                self._definition,
+                item,
+                index,
+                agent_factory=(lambda: agent_factory(deepcopy(self._definition), owner.logger))
+                if agent_factory is not None else None,
+            )
+            return outcome
+        except InvocationControlError as interrupted:
+            error = interrupted.error
+            error.worker_outcome = interrupted.outcome
+            error.worker_infrastructure_error = interrupted.infrastructure_error
+            raise error
+        finally:
+            original_error = sys.exception()
+            cleanup_control = None
+            # Both operations are idempotent. Finish bookkeeping even when a
+            # control signal interrupts cleanup, then preserve the first one.
+            while True:
+                try:
+                    with owner._condition:
+                        owner._batches.discard(control)
+                        owner._condition.notify_all()
+                    break
+                except Exception:
+                    raise
+                except BaseException as error:
+                    if cleanup_control is None:
+                        cleanup_control = error
+            while True:
+                try:
+                    _ACTIVE_BATCH_OWNER.set(previous_owner)
+                    break
+                except Exception:
+                    raise
+                except BaseException as error:
+                    if cleanup_control is None:
+                        cleanup_control = error
+            if cleanup_control is not None:
+                if original_error is not None and not isinstance(original_error, Exception):
+                    original_error.worker_cleanup_interruption = cleanup_control
+                else:
+                    if outcome is not None:
+                        cleanup_control.worker_outcome = outcome
+                        cleanup_control.worker_infrastructure_error = None
+                    raise cleanup_control
 
     def map(
         self,

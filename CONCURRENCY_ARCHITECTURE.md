@@ -1,6 +1,8 @@
 # AgentLoom Worker 并发方案
 
-状态：设计提案，产品代码尚未实现。更新：2026-10-11。源码基线：`bc5cff6e`。
+状态：有限批次与 macOS 本地持久执行均已实现并验收。路线更新：2026-10-14。原研究基线：`94491c2d`。
+
+持久执行已接入 DBOS 3.2.0 的公开队列、事务提交和恢复接口，自研内核停止扩展。当前方案见 [开源接入规格](docs/specs/durable-worker-open-source-engine-integration-v2.md)。本机框架故障、controller 和 NewsAgent 全日验收通过：2025-09-01 完成封存与计分，失败与恢复见 [验收报告](docs/reviews/durable-worker-dbos-news-acceptance-20261014.md)。
 
 本轮已与用户确认：`concurrency` 是**单次 `map()` 的上限**。保留一行调用和
 `system 配置 < Supervisor binding < 本次代码参数` 的覆盖关系。
@@ -8,6 +10,8 @@
 源码与开源项目依据见[原研究记录](docs/research/agentloom-concurrency-architecture-research.md)和
 [执行合同复核](docs/research/agentloom-worker-execution-contracts.md)。原研究中的备选 Interface
 保留作比较，当前设计以本文件为准。
+
+有限批次的交付证据见 [Worker batch 验收](docs/reviews/worker-batch-execution-v1-acceptance.md)。持久执行的上游选择、产品入口和逐项证据见 [DBOS 接入状态](docs/research/dbos-product-integration-status-20261014.md)，部署范围遵循 [本地默认与可替换存储边界](docs/adr/0001-local-durable-execution-with-pluggable-store.md)。
 
 ## 开发者只交任务，框架负责执行
 
@@ -37,8 +41,7 @@ Planner 和 Reducer 仍属于 Application；框架无法仅凭“20 并发”决
   → Application Reducer：检查完整性，汇总，规划下一阶段
 ```
 
-`app.worker()`、`BoundWorker`、`Application.open()` 都是待实现的 Interface。当前
-`agentloom.app` 尚未导出这些能力，不能把示例当作现有可运行代码。
+`app.worker()`、`BoundWorker`、`Application.open()` 已由 `agentloom.app` 导出。NewsAgent 已迁移到框架持久入口；有限 `map()` 与持久队列各自保持原容量作用域。
 
 ## 并发上限只约束本次批次
 
@@ -311,27 +314,44 @@ Runner 不默认重试整个 Worker，不提供默认 circuit breaker。单次�
 产生外部副作用；仅有 `retryable=True` 不足以证明可以安全重放。重试由 Application 的业务
 幂等和持久 task attempt 合同决定。
 
-## NewsAgent 分两步接入
+## 持久执行进入框架，NewsAgent 保留业务编排
 
-有限计划先走上述 `map()`；修改并发值只改变同时执行数，不修改 WorkPlan。任务大小仍在
-NewsAgent 的 `config/settings.yaml` 中由 token 上限、相关报道和完整分段规则决定。
-不引入未经评测的 `target_items_per_task: 200`。
+用户已确认保持新闻筛选、校验、计分和失败恢复业务规则，评估统一执行层；持久任务和恢复纳入框架。默认本地持久化，首版单机多进程，存储接口可替换为未来远程后端。一次有限 `map()` 的合同保持不变，持久消费者有独立入口与容量域。
 
-持久任务继续由 NewsAgent Store/Consumer 负责注册、claim、lease、renew、recover、
-StageLedger 和阶段 seal。首版不把一次 `map()` 伪装成持久后台消费者，也不先发布通用
-`WorkerRunner.serve()`。以后以 NewsAgent 专用 Adapter 复用执行内核，claim 数只能匹配空闲槽位，
-不预领无法立即执行的 lease。
+以下执行机制由选定的上游引擎承担，AgentLoom 提供公开接入与 Runtime 生命周期合同：
 
-目前的本库结果提交已经在同一个 SQLite transaction 内检查 owner、running 状态和 lease；
-这能够拒绝旧 attempt 的本库写入，不必为此一律重造单调 fencing token。继续验证所有
-renew/commit/settle 的检查都覆盖当前 attempt。对外部副作用，仍需下游支持的幂等键或 fencing；
-一个本地 owner 检查无法替外部系统保证 exactly-once。
+1. 持久任务身份、输入与 attempt 记录、入队和可观察状态。
+2. 单机多进程共享 queue 容量，有空位才原子领取，单项完成后持续补位。
+3. 上游 workflow 恢复和有次数／类别限制的重试；业务旧 attempt 条件提交由业务库授权校验。
+4. 每个 attempt 的公开宿主准备接口，绑定独立 session、工具固定参数及资源；它与有限 map 共用 invocation 内核。
+5. 停止新 invocation 启动、停止旧 Worker、确认本机资源退出后恢复补位。退出不明时保留可观察的阻塞状态，不仅归还数据库额度。
+6. 分别记录业务提交、运行结果和资源清理回执，必需提交接口与可失败 event observer 分开。
 
-持久调用按 at-least-once 看待。现有恢复可能使用当前模型配置，尚未实现冻结 execution
-snapshot 的恢复。迁移时必须明确区分“重试当前配置”和“恢复原 snapshot”，不能悄悄承诺后者。
+NewsAgent 继续拥有完整新闻分组、分类与判断合同、三阶段及行业净校验衔接、候选替换、封存与计分。现有 planner 使用目标容量及输入预算分组；本轮不把 `map(concurrency)` 当成分组算法，也不借执行迁移修改业务判断规则。
 
-NewsAgent 当前分片使用 `initial_workers/refined_workers/validation_workers`，应先拆掉
-任务大小与执行容量的耦合。框架批处理验收与持久迁移分别交付，避免为了替换线程池先重写数据库。
+当前 Store 已保护旧 owner 的工具写入，但隔离故障注入复现了无 owner 的 retry 旁路：旧 attempt 1 晚到的异常可把 attempt 3 的失败重新置为 pending，最终 claim 出第 4 次尝试。框架的 fail/retry/recovery 必须在同一 attempt 条件下原子转移，不能只保护结果写入。
+
+持久任务执行按可能重复尝试看待；外部 LLM/AnySearch 请求不承诺恰好一次。News 新业务尝试继续按当前定义与模型重算整项，并保存本次配置来源；恢复旧执行快照是另一合同，不能由后端 replay 隐式改变现有行为。
+
+本地接入采用 DBOS 3.2.0、一个 executor 和多个 CLI producer；Prefect 等对照的取舍见 [开源选择](docs/research/durable-open-source-selection-20261014.md)。业务库与执行库分别使用 SQLite，通过业务库内的完成回执和原子写权限协调；不保留自研领取循环，不承诺跨库原子提交。
+
+开发者通过稳定 namespace 提交明确业务 revision：
+
+```python
+with Application.open(application, project_root=root) as app:
+    with app.durable(root=namespace_root) as execution:
+        handles = execution.worker("workflows/initial.yaml").submit_many(items, revision="1")
+```
+
+独立消费者使用 `loom durable serve APPLICATION --worker workflows/initial.yaml --root NAMESPACE_ROOT`。任务身份跨 Application Run 稳定；相同任务及 revision 的不同输入会拒绝。取消和恢复通过同一公开执行对象调用，恢复先核对旧本机资源，再进入原 Worker 队列。当前 OS Adapter 为 macOS launchd；Linux、真实 PostgreSQL 和多机执行仍未验证。
+
+## 输出预算缺陷独立修复
+
+完整实跑复现非 Codex 的未配置预算被框架默填 16,384，四个初筛批次因此耗尽输出，且 Provider 的 incomplete reason=length 被 Pi 归为普通错误。这个问题先按独立合同修复，不能靠提高并发或持久重投掩盖。
+
+用户已确认：未配置不额外向 Provider 注入输出 cap，显式数字才限制，配置覆盖中的 null 可解除继承；输入预留独立。必须提供 cap 的协议使用已验证能力或要求显式配置，未知时提前报错。见 [预算 ADR](docs/adr/0002-explicit-output-cap-with-independent-input-reserve.md) 和 [完整根因分析](docs/research/model-output-budget-default-review.md)。
+
+只删 Python 默认值不够：离线真实 SDK 探针复现 Pi 会从 context metadata 补出 495,897 的请求上限。产品已贯通配置、Pi 最终 payload、smol/LiteLLM、内部摘要预算和实际 HTTP 合同，相关独立回归 294 项通过。[预算修复证据](.agentloom/validation/output-cap-contract-port-20261014-v1/REPORT.md)。本次全日初筛使用显式 32,768，后续校验经授权调为 65,536；本地调参不替代默认值的 HTTP 合同验证。
 
 ## 实施顺序和验收
 
@@ -340,7 +360,9 @@ NewsAgent 当前分片使用 `initial_workers/refined_workers/validation_workers
 | 配置与预检 | typed worker_execution、路径身份、来源链、冻结记录；去掉 concurrency → parallel_tools 的错误映射 | 严格整数、各 system 层与代码覆盖、非法低层不被掩盖、未知字段拒绝 |
 | 生命周期与有限 map | Application facade、BoundWorker、输入/Outcome、有界窗口、stop/drain | 接入现有 invocation 和资源归属，不重复根 Run，不泄漏 sibling 资源 |
 | Supervisor 默认值 | 显式 binding Adapter 和 execution schema | system < Supervisor < 本次参数；as_tool 不被误说成受 map 上限约束 |
-| NewsAgent 迁移 | Planner 与容量分离，之后用专用 Consumer 复用内核 | 固定输入下计划不随容量变化；claim/renew/迟到提交/恢复各有证据 |
+| 输出预算语义修复 | 未指定、显式 cap、null 解除、输入预留独立；Responses length 归类 | 真实 SDK HTTP payload 合同、Pi/smol Application runner、完整 NewsAgent；不能只删默认常量 |
+| 持久执行后端比较 | 成熟开源引擎公开接入；首轮 DBOS，Prefect 对照；停止自研内核扩展 | 多进程提交共享额度、kill/recovery、旧资源实际退出、业务权限原子撤销、schema/version、提交后 ACK 丢失 |
+| NewsAgent 迁移 | 业务 planner/ledger/阶段与计分规则保留，迁移通用消费和恢复机制 | 完整单日、真实模型与 AnySearch；全量工具覆盖、封存计分、恢复与资源退出均有证据 |
 
 `.batch()` 与 `run_agents_parallel()` 在迁移期转调新内核，并明确结果顺序和失败策略的变化；
 删除 `auto` 前清点实际调用者，给出迁移错误。Runtime 继续自己处理 Tool calls，
@@ -365,4 +387,4 @@ NewsAgent 当前分片使用 `initial_workers/refined_workers/validation_workers
 并发数改变不得改变模型得到的任务合同。持久迁移另做崩溃、lease 失效、旧 owner 迟到写和
 CLI 重启验证；单元测试不能替代真实 Application 和 NewsAgent runner/CLI 证据。
 
-本轮只更新方案和研究。上述验收是后续实现要求，尚未作为已实现能力通过。
+有限批次相关验收已经交付，见前述验收记录。持久框架扩展仍为后续要求。本轮完整真实 NewsAgent 验收使用 DeepSeek v4.1 与 AnySearch，首轮因框架隐式 16,384 输出预算失败；用户授权将本地预算提高为 32,768 后，官方 run-day 与 evaluate 均退出 0 并封存。初筛 20 批/1,426 条、精筛 30 批/447 条、校验 23 项/189 候选（含 3 项行业净方向补充）全部完成；Store、runtime scope 和客户端 HTTP 边界的阶段观测峰值均为 20/30/20，供应商内部执行峰值未知。原 16 批完成记录未重做，累计采样 83 个归属进程最终存活 0。详见 [完整验收记录](.agentloom/validation/news-concurrency-20261012/full-2025-08-24-20261012T083423Z/campaign/full-day-acceptance.md)。产品代码未修改。

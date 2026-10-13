@@ -23,7 +23,7 @@ from agentloom.execution.agent_runtime import (
 )
 from agentloom.execution.logging import get_logger
 from agentloom.execution.model_binding import ModelTurnBinding
-from agentloom.execution.model_protocol import ModelProtocolError, ModelTurnResult
+from agentloom.execution.model_protocol import ModelOutputTruncated, ModelProtocolError, ModelTurnResult
 from agentloom.execution.tool_gateway import ToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord
 from agentloom.runtimes.smolagents.checkpoint_codec import (
@@ -124,6 +124,9 @@ def _runtime_error(error: Exception) -> AgentRuntimeError:
             f"Agent runtime trace failure: {trace_cause}",
             category="internal", cause=trace_cause, retryable=False,
         )
+    truncation = next((item for item in _exception_chain(error) if isinstance(item, ModelOutputTruncated)), None)
+    if truncation is not None:
+        return AgentRuntimeError(str(truncation), category="output_validation", cause=truncation, retryable=True)
     provider_cause = _provider_cause(error)
     if provider_cause is not None:
         from agentloom.integrations.litellm.litellm_retry import (
@@ -332,23 +335,23 @@ class SmolagentsRuntimeAdapter:
                 },
             )
 
-    def _observe_model_turn(self, turn: ModelTurnResult) -> None:
-        self._emit_event(
-            "model",
-            details={
-                "phase": "completed",
-                "item_count": len(turn.items),
-                "response_id": turn.response_id,
-            },
-        )
-        usage = RuntimeUsage(
-            input_tokens=turn.usage.input_tokens,
-            output_tokens=turn.usage.output_tokens,
-            total_tokens=turn.usage.total_tokens,
-            cached_input_tokens=turn.usage.cached_input_tokens,
-            reasoning_tokens=turn.usage.reasoning_tokens,
-            details=turn.usage.details,
-        )
+    def _observe_model_turn(self, turn: ModelTurnResult | ModelOutputTruncated) -> None:
+        if isinstance(turn, ModelOutputTruncated):
+            details = {"phase": "truncated", "raw_reason": turn.raw_reason,
+                       "output_budget": turn.output_budget}
+        else:
+            details = {"phase": "completed", "item_count": len(turn.items), "response_id": turn.response_id}
+        self._emit_event("model", details=details)
+        # Invocation failure collection consumes the last usage snapshot.
+        # Keep earlier completed turns when the current turn is truncated.
+        prior = next((event.details for event in reversed(self._event_context.get() or ())
+                      if event.kind == "usage"), {})
+        previous = RuntimeUsage.from_value(prior)
+        usage = RuntimeUsage(**{
+            name: getattr(previous, name) + getattr(turn.usage, name)
+            for name in ("input_tokens", "output_tokens", "total_tokens",
+                         "cached_input_tokens", "reasoning_tokens")
+        }, details=turn.usage.details)
         self._emit_event(
             "usage",
             details={
@@ -512,6 +515,10 @@ class SmolagentsRuntimeAdapter:
             usage = RuntimeUsage.from_value(
                 getattr(native_result, "token_usage", None)
             )
+            if callable(observe_turns):
+                reported = next((event.details for event in reversed(events) if event.kind == "usage"), None)
+                if reported is not None:
+                    usage = RuntimeUsage.from_value(reported)
             checkpoint = self._checkpoint()
             if checkpoint_sink is not None:
                 checkpoint_sink(checkpoint)
@@ -525,6 +532,8 @@ class SmolagentsRuntimeAdapter:
                     "input_tokens": usage.input_tokens,
                     "output_tokens": usage.output_tokens,
                     "total_tokens": usage.total_tokens,
+                    "cached_input_tokens": usage.cached_input_tokens,
+                    "reasoning_tokens": usage.reasoning_tokens,
                 },
             )
             self._emit_event(

@@ -25,6 +25,19 @@ class ModelProtocolError(RuntimeError):
     """The selected wire adapter could not satisfy its declared contract."""
 
 
+class ModelOutputTruncated(ModelProtocolError):
+    """Provider output ceiling reached; this does not silently raise the cap."""
+
+    category = "output_validation"
+    retryable = True
+
+    def __init__(self, raw_reason: str, usage: ModelUsage, output_budget: Mapping[str, Any]):
+        super().__init__(f"Model output token limit reached ({raw_reason})")
+        self.raw_reason = raw_reason
+        self.usage = usage
+        self.output_budget = dict(output_budget)
+
+
 def _frozen_mapping(value: Mapping[str, Any], *, field_name: str) -> Mapping[str, Any]:
     try:
         normalized = json.loads(json.dumps(dict(value), ensure_ascii=False))

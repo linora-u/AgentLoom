@@ -17,6 +17,7 @@ from agentloom.execution.model_protocol import (
     FunctionCallOutputItem,
     MessageItem,
     ModelItem,
+    ModelOutputTruncated,
     ModelProtocolError,
     ModelTurnResult,
     ReasoningItem,
@@ -212,7 +213,7 @@ class SmolagentsModelTurnBridge(Model):
             default=None,
         )
         self._turn_observer: ContextVar[
-            Callable[[ModelTurnResult], None] | None
+            Callable[[ModelTurnResult | ModelOutputTruncated], None] | None
         ] = ContextVar(
             f"agentloom_bridge_turn_observer_{id(self)}",
             default=None,
@@ -237,7 +238,7 @@ class SmolagentsModelTurnBridge(Model):
     @contextmanager
     def observe_turns(
         self,
-        observer: Callable[[ModelTurnResult], None],
+        observer: Callable[[ModelTurnResult | ModelOutputTruncated], None],
     ) -> Iterator[None]:
         """Observe canonical model turns for the enclosing runtime run only."""
 
@@ -289,12 +290,19 @@ class SmolagentsModelTurnBridge(Model):
             options["stop"] = list(stop_sequences)
         if self._require_tool_calls.get() and tools_to_call_from:
             options["tool_choice"] = "required"
-        turn = self.binding.turn(
-            items=_messages_to_items(messages),
-            tools=tuple(_tool_definition(tool) for tool in tools_to_call_from or ()),
-            options=options,
-        )
         turn_observer = self._turn_observer.get()
+        try:
+            turn = self.binding.turn(
+                items=_messages_to_items(messages),
+                tools=tuple(_tool_definition(tool) for tool in tools_to_call_from or ()),
+                options=options,
+            )
+        except ModelOutputTruncated as error:
+            # The Provider has already reported usage. Preserve that evidence
+            # even though this response cannot become a successful model turn.
+            if turn_observer is not None:
+                turn_observer(error)
+            raise
         if turn_observer is not None:
             turn_observer(turn)
         tool_calls: list[ChatMessageToolCall] = []

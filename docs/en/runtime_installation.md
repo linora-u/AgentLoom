@@ -15,6 +15,9 @@ An explicit `UV_PYTHON` overrides this selection. Choose a runtime profile:
 - `code` adds optional AST, outline and LSP dependencies, independently of the
   Agent runtime. Pi without this extra does not install Serena, AST-Grep or the
   Go/Node tool runtimes. Shared Shell governance keeps tree-sitter/Bash in core.
+- `durable` adds the pinned DBOS 3.2.0 execution engine and the local executor
+  lock. Add `--extra durable` to both `uv sync` and subsequent `uv run` commands
+  when using persistent Worker queues. The current OS adapter requires macOS.
 
 The two profiles can coexist. `--all-groups` includes development/build groups;
 it does **not** select runtime extras.
@@ -68,10 +71,10 @@ uv run --locked --extra smol --extra code loom run path/to/existing-application.
 For development and the complete test suite:
 
 ```sh
-uv sync --locked --all-groups --extra smol --extra code
-uv run --locked --extra smol --extra code loom runtime install pi
+uv sync --locked --all-groups --extra smol --extra code --extra durable
+uv run --locked --extra smol --extra code --extra durable loom runtime install pi
 cp config/model.example.yaml config/model.yaml  # Only when no local config exists.
-uv run --locked --extra smol --extra code pytest tests/
+uv run --locked --extra smol --extra code --extra durable pytest tests/
 ```
 
 ## Install the built release outside the checkout

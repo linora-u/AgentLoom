@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { access, readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createHash } from "node:crypto";
+import { managedBashOperations } from "./managed-bash.js";
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition,
   createBashToolDefinition, createLocalBashOperations, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 
@@ -32,7 +33,7 @@ export function capturedExecutor(name: string, cwd: string, args: Obj) {
       return imageMime;
     },
   };
-  const local = createLocalBashOperations();
+  const local = process.env.AGENTLOOM_MANAGED_PROCESS_GROUP ? managedBashOperations : createLocalBashOperations();
   const tool: ToolDefinition<any, any> = name === "read" ? createReadToolDefinition(cwd, {operations}) :
     name === "edit" ? createEditToolDefinition(cwd, {operations}) :
     name === "write" ? createWriteToolDefinition(cwd, {operations}) :

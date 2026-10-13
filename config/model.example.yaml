@@ -13,7 +13,7 @@ model:
     adapter: openai_chatgpt_responses
     model: gpt-6-luna
     context_window: 272000
-    max_output_tokens: 16384
+    # This subscription route does not support a caller output cap.
     timeout: 300
     num_retries: 0
     reasoning_effort: xhigh # max is also supported
@@ -23,7 +23,6 @@ model:
     adapter: openai_chatgpt_responses
     model: gpt-6-luna
     context_window: 272000
-    max_output_tokens: 16384
     timeout: 300
     num_retries: 0
     reasoning_effort: xhigh
@@ -38,8 +37,8 @@ model:
     api_key: "xxxxxxx"
     model: "openai/gpt-5_5"
     temperature: 0.2
-    # Context and generation budgets are distinct. Compression starts before
-    # the request would consume the output reserve.
+    # Explicit caller cap. Omit/null to use Provider-native output behavior.
+    # Input reserve is resolved separately and is never sent as an output cap.
     context_window: 128000
     max_output_tokens: 16384
     timeout: 300

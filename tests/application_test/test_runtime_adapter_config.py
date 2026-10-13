@@ -119,6 +119,9 @@ def _model_config(adapter: str | None) -> dict[str, object]:
     if adapter is not None:
         powerful["adapter"] = adapter
         summary["adapter"] = adapter
+    if adapter == "anthropic_messages":
+        powerful["max_output_tokens"] = 256
+        summary["max_output_tokens"] = 128
     return {"model": model}
 
 

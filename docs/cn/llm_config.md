@@ -193,7 +193,10 @@ model:
 | `description` | `str` | `"Model type '{k}' loaded from YAML config"` | ❌ 否 | 模型的人类可读描述。用于日志和文档 |
 | `temperature` | `float` | `0.1` | ❌ 否 | 创造力/随机性控制 (0.0 - 2.0)。详见 [3.2 temperature 建议](#32-temperature-配置建议) |
 | `context_window` | `int` | `150000` | ❌ 否 | 模型总上下文窗口，用于计算输入与预留输出预算 |
-| `max_output_tokens` | `int` | `16384` | ❌ 否 | 单次生成的输出容量（含推理 Token）；订阅接口的区别见 3.3 |
+| `max_output_tokens` | `int` \| `null` | `null` | ❌ 否 | 显式生成上限，含推理 Token。允许省略的协议未配置/null 时不发送上限，见 3.3 |
+| `input_token_reserve` | `int` | 本地策略 | ❌ 否 | 输入规划时为生成保留的空间，不作为输出上限发送 |
+| `max_model_output_tokens` | `int` \| `null` | `null` | ❌ 否 | 已核实的 Provider 输出能力，须同时配置 `model_output_capability_source` |
+| `model_output_capability_source` | `str` \| `null` | `null` | ❌ 否 | 核实模型输出能力的文档或参考来源 |
 | `max_tokens` | `int` | `150000` | ❌ 否 | 已弃用的兼容字段；单独使用时同时填充两项旧预算。旧值 `"max"` 会解析为该有限默认值。 |
 | `timeout` | `int` | `60` | ❌ 否 | 单次 HTTP 请求超时（秒）。超过此时间未响应则中断 |
 | `num_retries` | `int` | `5` | ❌ 否 | API 调用失败重试次数 |
@@ -216,18 +219,43 @@ model:
 
 ### 3.3 上下文与输出预算
 
-使用 `context_window` 声明服务端总上下文容量，使用 `max_output_tokens`
-声明生成预留。smolagents 按 `context_window - max_output_tokens` 压缩模型输入，
-只把 `max_output_tokens` 作为 `max_tokens` 发送给模型服务。仅当两个新字段都未设置时，
-继续接受旧的 `max_tokens` 配置。
+`context_window` 声明总上下文容量，`max_output_tokens` 声明调用方输出上限。
+模型输出能力另用 `max_model_output_tokens` 表示，并提供已核实的
+`model_output_capability_source`；不能用上下文容量代替输出能力。
 
-Pi 将这两项登记为原生模型的 `contextWindow` 和 `maxTokens`，输入压缩及
-compact 由 Pi SDK 管理。`openai_codex_responses` 在原生 `onPayload` 钩子中
-补充 `max_output_tokens`，传给 `https://chatgpt.com/backend-api/codex/responses`；
-该端点实测会按配置限制包含推理在内的生成 Token。
-`openai_chatgpt_responses` 使用公开 API 的 ChatGPT 订阅登录；该接口
+字段覆盖和 typed overlay 中，缺失继承，显式 `null` 解除继承。
+上限只接受严格正整数；bool、零、负数、数字字符串在模型请求前报错。
+OpenAI Chat、Responses、Codex 未配置时不发送上限。显式上限在最终 HTTP
+入口保留原值，不被 SDK 默认值、最小值或上下文 clamp 修改。
+额外参数和嵌套 `extra_body` 中的 `max_tokens`、`max_completion_tokens`、
+`max_output_tokens` 必须一致；同值归一为协议对应的一个字段，不同值或
+null 解除与另一上限冲突时报错。
+
+Anthropic Messages 必须有上限：显式配置，或使用已核实的模型输出能力，
+能力未知时在 HTTP 前报错。公开 Responses API 的 ChatGPT 订阅登录
 [不支持 `max_output_tokens`](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)，
-Pi 原生省略此字段，此时配置仅声明 SDK 模型输出容量，不控制服务端生成上限。
+因此 `openai_chatgpt_responses` 拒绝显式上限；Codex 订阅后端支持显式上限。
+Pi 为订阅模型保留原生 catalog 能力；自定义模型使用已核实能力，未知时使用
+仅供 SDK metadata 的 `0`。该 sentinel 不发送到模型服务，也不表示零输出。
+
+输入规划独立使用 `input_token_reserve`。无上限的 profile 默认预留 16,384
+Token，小窗口预留一半。已有显式上限的 profile 保留原输入预留，解除上限时
+也保留该预留。输入额度为窗口减去至少覆盖预留及显式上限的空间；显式输入
+额度必须落在该范围内。Pi 将预留映射到默认 compaction 设置，原生压缩覆盖
+和内部摘要显式预算优先；smolagents 按输入额度压缩。预留不会变成 HTTP 上限。
+
+旧 YAML `max_tokens` 单独使用时保留历史上下文、输出和输入含义，来源记为
+`legacy_max_tokens`；`"max"` 仍使用有限旧默认值。迁移时显式声明
+`context_window`，按需配置 `max_output_tokens`；null 可以解除旧上限。
+旧整窗输入额度没有独立预留；修改旧上限时重新按本地策略计算预留，或显式指定。
+
+最终请求 trace 保留 `effective_cap`、`wire_cap`、输出上限来源及输入预留。
+`input_reserve_source` 单独记录输入预留的来源。Pi 和 smol 的 Runtime usage
+是本次调用的累计快照，包含已报告的截断响应用量；reasoning 和缓存用量属于
+对应输出和输入的子集，不再计入总量。
+Provider 的 `length`/`max_output_tokens` 截断归类为可重试的
+`output_validation`，保留 raw reason、usage 和预算证据；重试不自动增加上限。
+未配置调用方上限时，仍可能触及 Provider 自身限制。
 
 ### 3.4 extra_headers 请求头
 
@@ -433,7 +461,8 @@ model:
 | `api_key` | 未设置时为 `""` |
 | `temperature` | 未设置时为 `0.1` |
 | `context_window` | 未设置时为 `150000` |
-| `max_output_tokens` | 未设置时为 `16384` |
+| `max_output_tokens` | 未设置时无调用方上限；必须上限的协议须提供显式值或已核实能力 |
+| `input_token_reserve` | 独立本地输入规划策略；解除继承上限时保留 |
 | `max_tokens` | 旧配置兼容别名 |
 | `timeout` | 未设置时为 `60` |
 | `num_retries` | 未设置时为 `5` |
@@ -548,7 +577,7 @@ LiteLLM 与目标 provider 决定。AgentLoom 不读取前缀来选择 adapter�
 | 常量名 | 值 | 对应参数 |
 |--------|-----|---------|
 | `DEFAULT_MAX_TOKENS` | `150000` | `max_tokens` |
-| `DEFAULT_MAX_OUTPUT_TOKENS` | `16384` | `max_output_tokens` |
+| `DEFAULT_MAX_OUTPUT_TOKENS` | `16384` | 本地输入预留策略，不是隐式请求上限 |
 | `DEFAULT_MODEL_TEMPERATURE` | `0.1` | `temperature` |
 | `DEFAULT_MODEL_TIMEOUT` | `60` | `timeout` |
 | `DEFAULT_MODEL_NUM_RETRIES` | `5` | `num_retries` |
@@ -572,7 +601,13 @@ class LlmModelTypeSettings(BaseModel):
     temperature: float = 0.1           # DEFAULT_MODEL_TEMPERATURE
     max_tokens: int = 150000           # DEFAULT_MAX_TOKENS
     context_window: int = 150000       # DEFAULT_MAX_TOKENS
-    max_output_tokens: int = 16384     # DEFAULT_MAX_OUTPUT_TOKENS
+    max_output_tokens: int | None = None
+    input_token_reserve: int = 16384  # 本地策略，按 profile 解析
+    input_token_limit: int = 133616
+    input_reserve_source: str = "local_input_reserve_policy"
+    output_cap_source: str = "omitted"
+    max_model_output_tokens: int | None = None
+    model_output_capability_source: str | None = None
     timeout: int = 60                  # DEFAULT_MODEL_TIMEOUT
     num_retries: int = 5              # DEFAULT_MODEL_NUM_RETRIES
     retry_delay: float = 15.0         # DEFAULT_MODEL_RETRY_DELAY

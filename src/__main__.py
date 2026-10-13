@@ -13,6 +13,7 @@ from agentloom.execution.cli import (
     clean_tasks,
     list_tasks,
 )
+from agentloom.execution.durable.cli import durable
 from agentloom.runtimes.pi.cli import runtime
 from agentloom.schedules.cli import (
     SCHEDULE_CLI_DEPENDENCIES_KEY,
@@ -71,6 +72,7 @@ for command in (
     create,
     schedules,
     runtime,
+    durable,
     list_tasks,
     clean_tasks,
     clean_runtime_command,

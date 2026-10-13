@@ -35,7 +35,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups --extra smol --extra code
+        run: uv sync --locked --all-groups --extra smol --extra code --extra durable
 
       - name: Set up the supported Node runtime
         uses: actions/setup-node@v6
@@ -44,7 +44,7 @@ jobs:
           node-version: '22.21.0'
 
       - name: Install the locked Pi SDK
-        run: uv run --locked --extra smol --extra code loom runtime install pi
+        run: uv run --locked --extra smol --extra code --extra durable loom runtime install pi
 
       - name: Prepare test LLM config
         run: cp config/model.example.yaml config/model.yaml
@@ -56,7 +56,7 @@ jobs:
         env:
           PYTHONPATH: .:applications
         run: >-
-          uv run --locked --extra smol --extra code pytest tests/
+          uv run --locked --extra smol --extra code --extra durable pytest tests/
           applications/memory_feature_validation/scripts/test_offline_memory_campaign_contract.py
           applications/memory_feature_validation/scripts/test_memory_review_campaign_capsule.py
           applications/memory_feature_validation/scripts/test_memory_review_campaign_contract.py

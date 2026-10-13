@@ -81,6 +81,8 @@ Documentation = "https://github.com/linora-u/AgentLoom/tree/main/docs/en"
 [project.optional-dependencies]
 # Pi's Node SDK is installed separately with `loom runtime install pi`.
 pi = []
+# DBOS owns persistence, admission and workflow recovery; OTLP stays framework-owned.
+durable = ["dbos==3.2.0", "filelock>=3.20,<4"]
 smol = [
     # Context propagation patches a verified 1.26.0 private timeout boundary.
     "smolagents[litellm,mcp,openai,telemetry]==1.26.0",
@@ -116,7 +118,8 @@ agentloom = "src"
 
 [tool.setuptools.package-data]
 agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm",
-    "runtimes/pi/bridge-v*.schema.json", "runtimes/pi/bridge/*.json", "runtimes/pi/bridge/*.ts"]
+    "runtimes/pi/bridge-v*.schema.json", "runtimes/pi/bridge/*.json", "runtimes/pi/bridge/*.ts",
+    "runtimes/pi/bridge/PI-LICENSE.txt"]
 
 [tool.setuptools.exclude-package-data]
 agentloom = ["**/node_modules/**", "**/dist/**", "**/.agentloom-install.*"]

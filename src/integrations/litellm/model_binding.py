@@ -12,6 +12,7 @@ from typing import Any
 from agentloom.config import C
 from agentloom.config.http_headers import normalize_http_headers
 from agentloom.config.llm_config import LLMConfig, LlmModelTypeSettings
+from agentloom.config.output_budget import UNSET_BUDGET, UnsetBudget
 from agentloom.execution.concurrency.rate_limiter import GlobalRateLimiterRegistry
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import ModelTurnAdapter
@@ -39,7 +40,10 @@ class ModelProfileOverlay:
     temperature: float | None = None
     max_tokens: int | None = None
     context_window: int | None = None
-    max_output_tokens: int | None = None
+    max_output_tokens: int | None | UnsetBudget = UNSET_BUDGET
+    input_token_reserve: int | None = None
+    max_model_output_tokens: int | None = None
+    model_output_capability_source: str | None = None
     timeout: int | None = None
     num_retries: int | None = None
     retry_delay: float | None = None
@@ -65,6 +69,9 @@ class ModelProfileOverlay:
                 ("max_tokens", self.max_tokens),
                 ("context_window", self.context_window),
                 ("max_output_tokens", self.max_output_tokens),
+                ("input_token_reserve", self.input_token_reserve),
+                ("max_model_output_tokens", self.max_model_output_tokens),
+                ("model_output_capability_source", self.model_output_capability_source),
                 ("timeout", self.timeout),
                 ("num_retries", self.num_retries),
                 ("retry_delay", self.retry_delay),
@@ -76,30 +83,24 @@ class ModelProfileOverlay:
                 ("requests_per_minute", self.requests_per_minute),
                 ("extra_completion_params", self.extra_completion_params),
             )
-            if value is not None
+            if value is not UNSET_BUDGET and (value is not None or field_name == "max_output_tokens")
         }
-        if self.max_tokens is not None and self.max_output_tokens is None:
+        if self.max_tokens is not None and self.max_output_tokens is UNSET_BUDGET:
             updates["max_output_tokens"] = self.max_tokens
-        if {"context_window", "max_output_tokens"}.intersection(updates):
-            context_window = int(
-                updates.get("context_window", settings.context_window)
-            )
-            max_output_tokens = int(
-                updates.get(
-                    "max_output_tokens",
-                    settings.max_output_tokens,
-                ) or 0
-            )
-            if max_output_tokens >= context_window:
-                raise ValueError(
-                    "max_output_tokens must be smaller than context_window"
-                )
-            updates["input_token_limit"] = (
-                context_window - max_output_tokens
-            )
-        return LlmModelTypeSettings.model_validate(
-            settings.model_dump() | updates
-        )
+        merged = settings.model_dump() | updates
+        if {"context_window", "max_output_tokens", "input_token_reserve"}.intersection(updates):
+            merged.pop("input_token_limit", None)
+        if "input_token_reserve" in updates:
+            merged.pop("input_reserve_source", None)
+        if "max_output_tokens" in updates:
+            merged.pop("output_cap_source", None)
+            if settings.output_cap_source == "legacy_max_tokens" and "input_token_reserve" not in updates:
+                # Legacy input allowance equals the whole window; it is not an
+                # independent reserve that can be retained after migration.
+                merged.pop("input_token_reserve", None)
+                merged.pop("input_reserve_source", None)
+        return LlmModelTypeSettings.model_validate(merged)
+
 
 
 def _install_existing_model_governance() -> None:
@@ -188,7 +189,10 @@ def _build_binding(
         options=_turn_options(normalized_type, settings, request_headers, rate_limit_key),
         max_tokens=settings.max_tokens,
         context_window=settings.context_window,
-        max_output_tokens=settings.max_output_tokens or 0,
+        max_output_tokens=settings.max_output_tokens,
+        output_cap_source=settings.output_cap_source,
+        input_token_reserve=settings.input_token_reserve,
+        input_reserve_source=settings.input_reserve_source,
         input_token_limit=settings.input_token_limit,
         requests_per_minute=requests_per_minute,
         description=settings.description,

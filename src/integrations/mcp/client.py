@@ -12,7 +12,7 @@ import anyio
 from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
 from agentloom.execution.tool_gateway import ToolBinding
 from anyio.from_thread import start_blocking_portal
-from mcp import ClientSession
+from mcp import ClientSession, StdioServerParameters
 from mcp.types import CallToolResult
 from mcpadapt.core import mcptools
 
@@ -35,20 +35,38 @@ class _MCPConnection:
         self._portal_context = start_blocking_portal(name="agentloom-mcp")
         self._portal = self._portal_context.__enter__()
         self._lifecycle: Future[None] | None = None
+        self._cancel_scope: anyio.CancelScope | None = None
         try:
-            self._lifecycle = self._portal.start_task_soon(self._serve)
+            self._lifecycle, self._cancel_scope = self._portal.start_task(self._serve)
             self._lifecycle.add_done_callback(lambda _: self._ready.set())
             if not self._ready.wait(timeout=options.get("connect_timeout", 30)):
                 raise TimeoutError("Timed out connecting to the MCP server")
             if self._session is None:
                 self._lifecycle.result()
                 raise RuntimeError("MCP connection ended before discovery")
-        except BaseException:
-            self.close()
+        except BaseException as startup_error:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                if cleanup_error is not startup_error:
+                    raise BaseExceptionGroup("MCP startup and cleanup failed", [startup_error, cleanup_error]) from None
             raise
 
-    async def _serve(self) -> None:
-        async with mcptools(self._parameters, self._tool_timeout) as (session, discovered):
+    async def _serve(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
+        # Cancel the async scope, never the lifecycle Future: a cancelled
+        # concurrent Future discards exceptions raised during transport cleanup.
+        with anyio.CancelScope() as scope:
+            task_status.started(scope)
+            await self._serve_transport()
+
+    async def _serve_transport(self) -> None:
+        from agentloom.execution.process_scope import managed_process_group
+        if isinstance(self._parameters, StdioServerParameters) and managed_process_group() is not None:
+            from agentloom.integrations.mcp.managed_stdio import managed_stdio_tools
+            transport = managed_stdio_tools(self._parameters, self._tool_timeout)
+        else:
+            transport = mcptools(self._parameters, self._tool_timeout)
+        async with transport as (session, discovered):
             adapter = AgentLoomMCPAdapter()
             self.tools = [adapter.adapt(partial(self.call_tool, tool.name), tool) for tool in discovered]
             self._session = session
@@ -76,11 +94,15 @@ class _MCPConnection:
             self._pending.clear()
         for future in pending:
             future.cancel()
-        if self._lifecycle is not None:
-            self._lifecycle.cancel()
-        # The portal joins its thread after the MCP context has unwound. A
-        # returned close therefore means the subprocess/transport is released.
-        self._portal_context.__exit__(None, None, None)
+        try:
+            if self._cancel_scope is not None:
+                self._portal.call(self._cancel_scope.cancel)
+            if self._lifecycle is not None:
+                self._lifecycle.result()
+        finally:
+            # Join the portal even when transport cleanup fails; the original
+            # lifecycle result remains visible to the synchronous caller.
+            self._portal_context.__exit__(None, None, None)
 
 
 class AgentLoomMCPClient:
