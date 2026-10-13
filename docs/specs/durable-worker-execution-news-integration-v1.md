@@ -4,9 +4,9 @@ Issue：[AgentLoom #114](https://github.com/linora-u/AgentLoom/issues/114)，标
 
 规格日期：2026-10-12。研究基线：`94491c2d4846e1c648bd00dfd1950a0fc4bd6ed2`。
 
-状态：路线重新评估（2026-10-14）。有限 Worker batch 已交付；本规格扩展持久执行，不重新定义有限 batch。
-按用户最新要求，自研持久内核停止扩展，改为验证成熟开源执行引擎；后端选择及业务同事务接线以
-[开源持久执行接入方案](durable-worker-open-source-engine-integration-v2.md) 为当前方案。原始验收目标与失败证据保留，尚未完成交付。
+状态：macOS 本机验收通过（2026-10-14）。有限 Worker batch 已交付；本规格扩展持久执行，不重新定义有限 batch。
+按用户最新要求，自研持久内核停止扩展，改为接入成熟开源执行引擎；后端选择及业务同事务接线以
+[开源持久执行接入方案](durable-worker-open-source-engine-integration-v2.md) 为当前方案。原始验收目标与失败证据保留；当前 2025-09-01 全日封存和计分通过，见 [验收报告](../reviews/durable-worker-dbos-news-acceptance-20261014.md)。
 测试入口沿用用户已确认的 Application 公开调用及正式 runner/CLI，并以完整 NewsAgent
 真实日期验证业务接入。遵循已接受的 ADR-0001（默认本地持久执行、可替换存储）和
 ADR-0002（显式输出上限、独立输入预留）。

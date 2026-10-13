@@ -1,8 +1,8 @@
 # AgentLoom Worker 并发方案
 
-状态：有限批次执行已实现并验收；持久执行候选尚未交付。路线更新：2026-10-14。原研究基线：`94491c2d`；当前 main：`9cd4922c`。
+状态：有限批次与 macOS 本地持久执行均已实现并验收。路线更新：2026-10-14。原研究基线：`94491c2d`。
 
-持久执行已在 worktree 接入 DBOS 3.2.0 的公开队列、事务提交和恢复接口，自研内核停止扩展。当前方案见 [开源接入规格](docs/specs/durable-worker-open-source-engine-integration-v2.md)。本机框架故障与 controller 验证已完成，NewsAgent 全日验收仍在进行；首轮暴露的工具及 Stop hook 绑定问题已通过真实 Pi 回归，正在恢复原日期。
+持久执行已接入 DBOS 3.2.0 的公开队列、事务提交和恢复接口，自研内核停止扩展。当前方案见 [开源接入规格](docs/specs/durable-worker-open-source-engine-integration-v2.md)。本机框架故障、controller 和 NewsAgent 全日验收通过：2025-09-01 完成封存与计分，失败与恢复见 [验收报告](docs/reviews/durable-worker-dbos-news-acceptance-20261014.md)。
 
 本轮已与用户确认：`concurrency` 是**单次 `map()` 的上限**。保留一行调用和
 `system 配置 < Supervisor binding < 本次代码参数` 的覆盖关系。
@@ -41,7 +41,7 @@ Planner 和 Reducer 仍属于 Application；框架无法仅凭“20 并发”决
   → Application Reducer：检查完整性，汇总，规划下一阶段
 ```
 
-`app.worker()`、`BoundWorker`、`Application.open()` 已由 `agentloom.app` 导出。worktree 中的 NewsAgent 已迁移到框架持久入口；有限 `map()` 与持久队列各自保持原容量作用域。
+`app.worker()`、`BoundWorker`、`Application.open()` 已由 `agentloom.app` 导出。NewsAgent 已迁移到框架持久入口；有限 `map()` 与持久队列各自保持原容量作用域。
 
 ## 并发上限只约束本次批次
 
@@ -351,7 +351,7 @@ with Application.open(application, project_root=root) as app:
 
 用户已确认：未配置不额外向 Provider 注入输出 cap，显式数字才限制，配置覆盖中的 null 可解除继承；输入预留独立。必须提供 cap 的协议使用已验证能力或要求显式配置，未知时提前报错。见 [预算 ADR](docs/adr/0002-explicit-output-cap-with-independent-input-reserve.md) 和 [完整根因分析](docs/research/model-output-budget-default-review.md)。
 
-只删 Python 默认值不够：离线真实 SDK 探针复现 Pi 会从 context metadata 补出 495,897 的请求上限。worktree 已贯通配置、Pi 最终 payload、smol/LiteLLM、内部摘要预算和实际 HTTP 合同，相关独立回归 294 项通过。[预算修复证据](.agentloom/validation/output-cap-contract-port-20261014-v1/REPORT.md)。当前全日实跑使用已授权的本地显式 32,768，其进度不能代替默认值的 HTTP 合同验证。
+只删 Python 默认值不够：离线真实 SDK 探针复现 Pi 会从 context metadata 补出 495,897 的请求上限。产品已贯通配置、Pi 最终 payload、smol/LiteLLM、内部摘要预算和实际 HTTP 合同，相关独立回归 294 项通过。[预算修复证据](.agentloom/validation/output-cap-contract-port-20261014-v1/REPORT.md)。本次全日初筛使用显式 32,768，后续校验经授权调为 65,536；本地调参不替代默认值的 HTTP 合同验证。
 
 ## 实施顺序和验收
 

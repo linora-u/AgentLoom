@@ -1,6 +1,6 @@
 # 优先复用开源持久执行引擎
 
-2026-10-14。当前选择为 DBOS 3.2.0 单本地 executor 队列加 macOS launchd。worktree 已提供产品入口与 News 接线，有本机局部验证证据；真实 2025-09-01 首轮全日退出 1／RED，绑定修复的单项真实 Pi 测试转为 GREEN，第二轮全日运行中。尚未合入 main。停止扩展自研持久内核；Prefect、loky 和历史失败继续保留为对照。[当前规格](../specs/durable-worker-open-source-engine-integration-v2.md)、[产品状态与固定一手来源](dbos-product-integration-status-20261014.md)
+2026-10-14。采用 DBOS 3.2.0 单本地 executor 队列与 macOS launchd。产品接入和 2025-09-01 完整日期验收通过：三阶段 80 个当前 workflow 均 SUCCESS，封存与计分完成。原失败和修复边界见 [全日验收](../reviews/durable-worker-dbos-news-acceptance-20261014.md)。自研持久内核停止扩展；Prefect、loky 和历史失败保留为对照。[当前规格](../specs/durable-worker-open-source-engine-integration-v2.md)、[固定一手来源](dbos-product-integration-status-20261014.md)。
 
 ## 需求决定取舍
 
@@ -14,7 +14,7 @@
 
 | 项目 | 本地部署事实 | 对当前需求的判断 |
 | --- | --- | --- |
-| DBOS 3.2.0 | 官方库内 executor、SQLite 默认、公开 Queue／Client | 当前产品接入；早期无模型 20／30／20 满载、18 项框架与 21 项提交／业务／Host 通过证据保留；首轮全日 RED、绑定单项修复 GREEN，第二轮全日运行中 |
+| DBOS 3.2.0 | 官方库内 executor、SQLite 默认、公开 Queue／Client | 当前产品接入；官方队列、业务回执与 OS 管理职责分开；20／30／20 实测，完整日期恢复后封存与计分通过 |
 | Prefect 3.8.8 | 一个 API server，默认 SQLite；官方 Process worker | 保留对照；普通 Process worker 接线遗留 native，同环境安装与 OTel pin 冲突，不足以简化当前迁移 |
 | Temporal | 官方本地 CLI 可持久化到 SQLite，但 start-dev 是开发模式 | 恢复语义与远程部署参照；不把开发服务或每 Worker 容量当作本次默认生产合同 |
 | Hatchet | embedded 自动启动 sidecar 与 bundled PostgreSQL，官方定位开发／CI | 本地接入便利，但增加数据库与进程部署；需验证生命周期，暂不优先 |
@@ -54,10 +54,12 @@ loky 的公开 executor 接真实 Application，关闭阻塞与关闭失败通�
 
 当前产品分工是 DBOS 调度、OS 管理一次完整 Application、业务库维护完成回执和写授权。Pi／smolagents／MCP 的 managed 资源接线已有正式 CLI 局部证据，普通独立 session 的历史负例继续保留。Linux systemd／cgroup 尚无实测；macOS 进程组不能覆盖任意第三方主动脱离行为。[Runtime 与 OS 证据](../specs/durable-worker-open-source-engine-integration-v2.md#runtime-适配已有局部验证)
 
-## 当前产品验证与剩余验收
+## 当前产品验收与限制
 
-worktree 已提供 `Application.durable()`、官方事务入队和独立消费者 CLI，News 三阶段调用公开 `BoundWorker.invoke()`。18 项框架测试覆盖提交／executor／单次调用，21 项提交／业务／Host 测试覆盖 grant、receipt、失败重算与用量。独立公开入口、OS 和 controller 复核保留原 RED 及修复证据；两个 producer 共用正式空载 executor 和三个 20／30／20 队列声明也有实际观测。计数有 4 项提交测试重叠，不能相加宣称 39 个不同测试。[产品状态与范围](dbos-product-integration-status-20261014.md#局部验收与独立复核)
+公开 `Application.durable()`、官方事务入队、独立消费者 CLI 已接入产品，News 三阶段复用 `BoundWorker.invoke()`。框架未增加第二套 claim／lease／slot；业务 grant 不计时续租，receipt 不领取任务，OS 描述记录已进入引擎执行的资源。[产品状态](dbos-product-integration-status-20261014.md)
 
-当前路径没有第二套持久 claim／lease／slot，业务 grant 不计时续租、receipt 不领取任务，OS 描述只记录已经进入引擎执行的资源身份和回执。2025-09-01 的 DeepSeek v4.1／AnySearch、20／30／20 首轮真实全日退出 1／RED，prepared snapshot 快返回导致可信 factory 新绑定和 Stop hooks 丢失；修复的单项真实 Pi 测试通过，第二轮全日运行中。推理前保存的输入／源码 hash、模型／容量和 trace 继续保留。[首轮 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v1.json)、[第二轮 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v2.json)、[全日状态](dbos-product-integration-status-20261014.md#全日首轮-red保留第二轮运行中)。本机局部探针不能代替全日验收，实际 PostgreSQL、Linux 和多机执行仍未验证；若后续需要重建持久调度内核，则重新评估接入路线。
+2025-09-01 全量 5,674 条准备后的新闻、115 个 ETF 行情文件使用 DeepSeek v4.1 和 AnySearch，三轮恢复后完成初筛 20、精筛 30、常规校验 20、行业净校验 10。80 个当前 workflow 均 SUCCESS，594 条候选完成，61 条信号完整计分；122 次 invocation 的退出及撤权证据保留。真实 Pi 绑定、AnySearch 协议错误与恢复、输出 cap、停止 admission 的回归及原失败均可追溯。[全日验收](../reviews/durable-worker-dbos-news-acceptance-20261014.md)
+
+默认 macOS 本地 SQLite，无需另部署服务。Linux、实际 PostgreSQL 和多机执行未验证；若后续合同需要重建持久调度内核，重新评估接入路线。队列线程池、逻辑终态、本机资源退出和远端模型请求分别观察，不能相互替代。
 
 旧 SQLite `BUSY`、`522/SHORT_READ` 与索引异常继续分别保留未闭合的原因记录。新的引擎接入通过，也不能倒推这些历史故障已经定案。

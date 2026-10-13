@@ -328,6 +328,24 @@ Post-allocation failures carry the same receipt; preflight rejection emits
 `run.rejected` before storage exists. See
 [Structured Run API](docs/en/run_observability.md).
 
+For finite parallel work, use `app.worker(path).map(items)`. For persistent
+tasks, install the `durable` extra and submit through the public DBOS adapter:
+
+```python
+from agentloom.app import Application
+
+with Application.open("applications/release_review", project_root=".") as app:
+    with app.durable(root=".agentloom/release-review-queue") as execution:
+        handles = execution.worker("workflows/research.yaml").submit_many(items, revision="1")
+```
+
+Consume the same namespace with
+`loom durable serve applications/release_review --worker workflows/research.yaml --root .agentloom/release-review-queue`.
+DBOS 3.2.0 owns queues and recovery; SQLite is the default. Each invocation
+runs under macOS launchd. Linux durable execution and remote database operation
+have not been validated. See the [execution specification](docs/specs/durable-worker-open-source-engine-integration-v2.md)
+and [full-day acceptance](docs/reviews/durable-worker-dbos-news-acceptance-20261014.md).
+
 Durable schedules use the same Application contract and Run lifecycle. Their
 automatic firing is handled by an explicit foreground service:
 

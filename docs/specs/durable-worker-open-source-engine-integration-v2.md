@@ -1,6 +1,6 @@
 # 开源持久执行接入方案
 
-2026-10-14。状态：worktree 已提供 DBOS 产品入口和 News 接线，有本机局部测试通过证据；2025-09-01 首轮真实全日退出 1／RED。可信 factory 绑定修复的一项真实 Pi 测试转为 GREEN，第二轮全日运行中，验收未完成。当前采用 DBOS 3.2.0 持久队列与 macOS launchd 管理任务进程，尚未合入 main。[产品接入状态与一手来源](../research/dbos-product-integration-status-20261014.md)
+2026-10-14。状态：macOS 本机产品和完整 NewsAgent 日期验收通过。采用 DBOS 3.2.0 公开持久队列与 macOS launchd；2025-09-01 经三轮恢复完成 80 个当前 workflow、封存和 61 条信号计分。原失败、测试范围和版本边界见 [验收报告](../reviews/durable-worker-dbos-news-acceptance-20261014.md)。[产品接入状态与一手来源](../research/dbos-product-integration-status-20261014.md)
 
 本方案按用户最新要求重新选择实现路线：采用成熟开源引擎，减少执行与业务存储的耦合。旧自研内核候选停止扩展，原始失败和全日结果继续保留。旧规格的业务目标、输出预算合同及真实 CLI 验收仍有效；后端选择与共享事务实现方式由本方案重新评估。
 
@@ -54,7 +54,7 @@ macOS 产品 Adapter 使用随系统提供的 launchd 管理一次完整 Applica
 - OS job 的描述只记录执行所需进程身份与输入引用，不成为另一套持久待办队列。领取、阶段容量、重试和恢复继续由 DBOS 负责；OS job 不配置业务重试。
 - 容量按任务的实际运行和收尾占用，远端 HTTP 请求另留在途记录；本地客户端退出不能证明 Provider 已停止推理。
 
-上述本机故障边界和业务写权限是接入 News 的先行条件。worktree 的产品与业务局部验证有通过证据，News 已迁到相同公开执行入口；首轮真实全日暴露可信 factory 绑定缺口，修复后的单项真实 Pi 测试通过，第二轮全日仍待结果。未知启动窗口继续保留边界。若后续需要自建另一套持久调度器，继续缩减实现路线，不能因为已写代码而坚持旧方案。
+上述本机故障边界和业务写权限是接入 News 的先行条件。产品、业务和公开调用回归通过，News 已迁到相同执行入口；全日暴露的可信绑定与 AnySearch 协议问题修复后，原日期完成封存和计分。未知启动窗口继续保留边界。若后续需要自建另一套持久调度器，继续缩减实现路线，不能因为已写代码而坚持旧方案。
 
 ## Runtime 适配已有局部验证
 
@@ -84,7 +84,7 @@ NewsAgent 保留 Planner、StageLedger 和三阶段衔接。筛选、计分以�
 
 Worker 入口在实际执行环境内重建可信 binding。传入完整任务描述；Agent、Runtime 和业务句柄均在该次执行内创建。父进程的活句柄、closure、threading.Event 不作为可透明跨进程传输的接口。
 
-main 的 `BoundWorker.map()` 只接受有限计划。worktree 已提供同步 `BoundWorker.invoke()`，DBOS／News Host 都复用该入口的结果、usage 与清理收集；可信 factory 在执行进程内绑定，该入口不领取任务、不做持久重试、不另起任务池。相关 90 项前期测试及两个真实信号窗口通过，最新产品测试另列于下文；仍未证明所有异步中断窗口安全，尚未合入 main。完整进程的终止交由 OS Adapter，不能借用旧 `DurableWorkerService.run_until_idle()`。[worktree 实现](../../src/app/application.py)
+`BoundWorker.map()` 只接受有限计划。产品提供同步 `BoundWorker.invoke()`，DBOS／News Host 都复用该入口的结果、usage 与清理收集；可信 factory 在执行进程内绑定，该入口不领取任务、不做持久重试、不另起任务池。相关 90 项前期测试及两个真实信号窗口通过，最新产品测试另列于下文；仍未证明所有异步中断窗口安全，部署限制另列于验收报告。完整进程的终止交由 OS Adapter，不能借用旧 `DurableWorkerService.run_until_idle()`。[公开调用实现](../../src/app/application.py)
 
 ## 验证决定是否继续
 
@@ -106,12 +106,14 @@ main 的 `BoundWorker.map()` 只接受有限计划。worktree 已提供同步 `B
 
 若严格退出合同要求再造通用持久调度器，候选接入即判过重，转下一成熟引擎，不扩大自研内核。无法由现成能力或小规模 Runtime 适配满足的合同应如实列出，不能隐去故障或放宽已有验收断言。
 
-全日验收目标仍是 2025-09-01：完整新闻与行情输入、DeepSeek v4.1、7 个已认证 AnySearch Key、20／30／20，推理前准备 trace，保留全部输出。首轮真实运行退出 1／RED：prepared snapshot 的快返回路径丢失 News trusted factory 新 fixed_args 和 Stop hooks，Worker 被错误标记为完成。修复重新绑定 captured layers、在所有绑定之后保存快照，保留已捕获的 LLM 配置；一项真实 Pi public factory 测试转为 GREEN。20 个初筛任务已通过官方 retry 进入 revision 2，累计 attempts 40，第二轮真实全日运行中，尚未完成验收。[首轮 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v1.json) 和原 RED 保留，[第二轮 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v2.json) 在推理前写入，详见 [全日状态](../research/dbos-product-integration-status-20261014.md#全日首轮-red保留第二轮运行中)。2025-08-31 的通过证据仅绑定原 AFE 候选，不外推到新引擎。
+完整 2025-09-01 已验收：原始 6,438 条，prepare 后 5,674 条，115 个 ETF 行情文件，DeepSeek v4.1、配置的 AnySearch、20／30／20。推理前保存 trace 和 hash；三轮失败与恢复、预算调整及源码变化分别保留。最终当前 revision 的 80 个 workflow 均 SUCCESS，594 条候选完成，61 条信号完整计分，全部本机 invocation 退出。[全日验收](../reviews/durable-worker-dbos-news-acceptance-20261014.md)。2025-08-31 的早期证据仅绑定原 AFE 候选，不外推到新引擎。
+
 
 ## 当前交付状态
 
-worktree 的 `durable` extra 已固定 `dbos==3.2.0`，提供 `Application.durable()`、有限批次提交和独立消费者 CLI。News 三阶段复用同一执行入口，业务 grant／receipt 留在自身 SQLite，controller 共用一个本机 executor；没有自有 claim／lease／持久 slot 内核，产品不调用 DBOS 私有 system tables。18 项框架测试、21 项提交／业务／Host 测试和独立复核支持这些局部结论。[产品接入状态](../research/dbos-product-integration-status-20261014.md)
+`durable` extra 固定 `dbos==3.2.0`，提供 `Application.durable()`、有限批次提交和独立消费者 CLI。News 三阶段复用同一调用入口，业务 grant／receipt 留在自身 SQLite，controller 共用一个本机 executor；没有自有 claim／lease／持久 slot 内核，产品不调用 DBOS 私有 system tables。[产品接入状态](../research/dbos-product-integration-status-20261014.md)
 
-2025-09-01 的真实模型／AnySearch 首轮运行退出 1／RED，绑定修复的单项真实 Pi 测试通过；第二轮全日运行中，未完成验收，未合入或推送。Linux、实际 PostgreSQL 与多机执行未验证。旧自研候选的 SQLite 锁失败及取消启动失败继续保留；本轮绑定失败或后续接入通过都不会把旧 `SQLITE_BUSY`、历史 `522/SHORT_READ` 或索引异常定案为已修复。
+本机局部故障、真实 Pi／MCP 回归和完整 News 日期均有证据；News 全量 431 passed，最后 discovery 修复另有新进程 5 passed，输出 cap 独立 294 passed。测试版本与重叠按各原记录说明。Linux、实际 PostgreSQL 与多机执行未验证。旧自研候选的 SQLite 锁及取消启动失败继续保留；本轮通过未将历史 `SQLITE_BUSY`、`522/SHORT_READ` 或索引异常定案为已修复。
+
 
 既有输出预算修复继续独立交付：未配置时不注入通用 cap，显式数字限制，null 可解除继承；输入压缩预留单独管理。该合同无需为更换任务引擎重新设计。

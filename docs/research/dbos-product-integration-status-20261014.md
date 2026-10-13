@@ -1,6 +1,6 @@
 # DBOS 产品接入状态与一手来源
 
-2026-10-14。worktree 已有 DBOS 3.2.0 产品入口和 News 三阶段接线，有本机局部验证证据。2025-09-01 首轮真实全日退出 1／RED；绑定修复的单项真实 Pi 测试转为 GREEN，第二轮全日运行中。尚未合入 main。本文核对当前接入及已有证据，不重新比较全部引擎。[当前规格](../specs/durable-worker-open-source-engine-integration-v2.md)、[选型记录](durable-open-source-selection-20261014.md)
+2026-10-14。本机产品与完整 NewsAgent 日期验收通过。2025-09-01 的 DeepSeek v4.1／AnySearch 三轮恢复后封存成功，80 个当前 revision 的官方 workflow 均 SUCCESS，61 条最终信号完整计分。原失败、源码版本边界与运行收尾见 [全日验收](../reviews/durable-worker-dbos-news-acceptance-20261014.md)。采用 DBOS 3.2.0 公开 API 和 macOS launchd；[当前规格](../specs/durable-worker-open-source-engine-integration-v2.md)、[选型记录](durable-open-source-selection-20261014.md)。
 
 ## 固定上游与产品依赖
 
@@ -42,15 +42,13 @@ namespace 锁保护本地 executor 身份，scope 锁保护一个已执行 invoc
 
 两组 pytest 有 4 项 submission 重叠，不能相加为 39 个不同测试。这些记录先于首轮真实全日暴露的 trusted factory 绑定缺口，不能用来宣称该修复候选已通过。早期官方 152 个同步无模型任务达到 20／30／20 的证据继续保留，其负载和代码状态与正式 News 全日不同。[早期共享容量实测](/Users/bytedance/code/AgentLoom-private/.agentloom/validation/dbos-official-single-executor-go-no-go-20261014-v1/REPORT.md)
 
-## 全日首轮 RED 保留，第二轮运行中
+## 全日恢复后完成
 
-2025-09-01 的正式 `news_agent.service run-day` 首轮使用 DeepSeek v4.1／AnySearch 和 20／30／20，[退出 1／RED](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/cli-exit-v1.json)。当前定位为 prepared snapshot 快返回绕过 News trusted factory 的新 fixed_args 和 Stop hooks，造成 Worker 假完成。修复在 [可信 worker 绑定](../../applications/news_agent/runtime/worker.py) 中重新绑定 captured layers，在全部绑定后才保存 snapshot；[配置重绑定](../../src/config/config.py) 保留已捕获的 LLM 配置。
+首轮可信绑定丢失、第二轮 AnySearch output schema 错误与修复经过均保留。第三轮通过官方 retry 恢复原日期，CLI exit 0；业务 20／30／30 批全部完成、594 条候选完成、80 份完成回执与当前 SDK SUCCESS 一致。122 个 OS invocation 的撤权、卸载、物理退出回执全部齐全，无仍活着的具体根进程或 loaded job，executor 已退出。官方 evaluate 的 61 条信号全部计分。[完整验收](../reviews/durable-worker-dbos-news-acceptance-20261014.md)
 
-新增 [真实 public factory 测试](../../applications/news_agent/tests/test_stage_pi.py) 从 RED 转为 GREEN，`1 passed in 5.21s`：覆盖 Stop block 后补齐、隐藏 session 参数、分类 schema、factory 返回后 prompt／YAML 修改不使快照漂移。该项通过只支持所测绑定路径，不代表全日通过。20 个初筛任务已通过官方 retry 进入 revision 2，累计 attempts 40；[第二轮 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v2.json) 在推理前保存，第二轮全日仍运行中。
+第三轮 pre-inference manifest 的 406 个运行源码文件与产品 commit `4be4da85` 一致；第二轮期间有源码更新，不能将整日恢复外推为一个冻结版本重跑。News 全量回归 431 passed，最后 discovery 修复另以新进程 5 passed；输出预算独立回归 294 passed。独立复核与局部计数按各自原版本保留，不累计成重复测试总数。
 
-第二轮运行期间，新增 rebind 的独立复核又发现 parsed MCP capture 丢失，已在纯配置探针中修复复验。其后新 job 会加载更新后的 helper；全日证据须按源码变更时间和对应阶段记录，不能宣称整日绑定单一 source hash。[绑定修复的原／新源码 manifest](../../.agentloom/validation/prepared-host-binding-independent-review-20261014-v1/FIXED-SOURCE-MANIFEST.json)
-
-推理前 [启动 manifest](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-manifest-v1.json) 保存了源码／输入 hash、模型／容量及 Application、业务、OS 与 observer trace 位置。[首轮原日志](../../.agentloom/validation/durable-news-dbos-full-2025-09-01-v1/run-day-v1.log) 和失败证据保留在同一目录。本文记录该失败及修复候选，不宣称完成、封存成功、合入或推送。
+初筛在本地显式 32,768 预算下完成；之后经用户授权改为 65,536，后续校验请求确认使用该值。84 次 measured usage 和 38 次 revoked 的未知 usage 分别保存。381 份业务 SQLite 诊断中无记录到的 SQLite 错误，首轮 observer 的只读列名笔误另列于验收记录。
 
 Linux、实际 PostgreSQL 和多机执行未验证；单本地 executor 的 owner 锁不能外推成分布式所有权。Provider 的远端推理是否停止也不能由本机进程退出推断。历史 `SQLITE_BUSY`、`522/SHORT_READ` 和索引异常的根因记录继续保留，新的接入或全日通过均不能倒推旧故障已修复。
 
