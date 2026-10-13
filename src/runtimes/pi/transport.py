@@ -71,11 +71,13 @@ class PiTransport:
         self._closing = False
         self._directory = TemporaryDirectory(prefix="agentloom-pi-")
         env.update(HOME=self._directory.name, XDG_CONFIG_HOME=self._directory.name, TMPDIR=self._directory.name)
+        from agentloom.execution.process_scope import child_starts_new_session
+        self._separate_process_group = child_starts_new_session()
         try:
             self.process = subprocess.Popen(
                 [node, str(entry), self._directory.name, str(pi_auth_path)], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
-                start_new_session=True, cwd=self._directory.name,
+                start_new_session=self._separate_process_group, cwd=self._directory.name,
             )
         except OSError:
             self._directory.cleanup()
@@ -259,10 +261,13 @@ class PiTransport:
                 elif self.process.poll() is None:
                     # No native Shell was selected: there are no detached SDK
                     # commands to scan for; preserve the bounded bridge close.
-                    try:
-                        os.killpg(self.process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    if self._separate_process_group:
+                        try:
+                            os.killpg(self.process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        self.process.kill()
                 self._terminated = True
 
     def close(self):

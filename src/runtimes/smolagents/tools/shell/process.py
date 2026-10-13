@@ -21,7 +21,7 @@ Key design decisions:
   overhead of sourcing ``~/.bashrc`` on every command.
 - Large output written directly to file descriptors; Python never
   buffers the full stream in memory.
-- Process tree cleanup via ``os.killpg`` (SIGTERM -> SIGKILL).
+- Concrete process handles share the framework's process-tree cleanup.
 """
 
 import functools
@@ -33,7 +33,7 @@ import sys
 import tempfile
 import threading
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from agentloom.config import C
 from agentloom.execution.logging import get_logger
@@ -552,6 +552,7 @@ class ShellProcess:
         runtime_context = None
         runtime_output_path = None
         promoted = False  # True if promoted to background
+        close_process = None
 
         try:
             from agentloom.execution import get_current_run_context
@@ -571,13 +572,13 @@ class ShellProcess:
                 )
             read_fd = os.dup(out_fd)
 
-            proc = subprocess.Popen(
+            from agentloom.execution.process import spawn_registered_process
+            proc, close_process = spawn_registered_process(
                 args,
                 stdout=out_fd,
                 stderr=out_fd,
                 stdin=subprocess.DEVNULL,
                 env=env,
-                start_new_session=True,
             )
 
             # Close our copy of the write FD — child has its own.
@@ -609,6 +610,7 @@ class ShellProcess:
                 output_file,
                 max_bytes=_MAX_OUTPUT_BYTES,
                 output_fd=read_fd,
+                close_process=close_process,
             )
             watchdog.start()
 
@@ -669,11 +671,7 @@ class ShellProcess:
                             )
                         except Exception:
                             pass
-                        graceful_kill(proc.pid)
-                        try:
-                            proc.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            pass
+                        close_process()
                         stall_killed = True
                         break
             else:
@@ -710,11 +708,7 @@ class ShellProcess:
                         )
                     except Exception:
                         pass
-                    graceful_kill(proc.pid)
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        pass
+                    close_process()
                     return ExecResult(
                         output=(f"{partial}\n\n[Stall Warning: {prompt_message}]"),
                         interrupted=True,
@@ -743,6 +737,7 @@ class ShellProcess:
                         command,
                         watchdog,
                         output_fd=read_fd,
+                        close_process=close_process,
                     )
                     promoted = True
                     # Audit the background promotion
@@ -781,11 +776,7 @@ class ShellProcess:
                     )
                 except Exception:
                     pass
-                graceful_kill(proc.pid)
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
+                close_process()
                 return ExecResult(output=partial, timed_out=True)
 
             # ---- Handle stall-kill result ----
@@ -821,52 +812,59 @@ class ShellProcess:
             )
 
         finally:
-            # Stop foreground stall watchdog and wait for its thread to
-            # finish before cleaning up the output file.  This prevents
-            # a race where the watchdog thread tries to read a file
-            # that has already been deleted.
-            if fg_stall is not None:
-                fg_stall.stop()
-                if fg_stall._thread is not None:
-                    fg_stall._thread.join(timeout=2.0)
+            # Keep the exact handle registered across promotion. Foreground
+            # completion/control closes it here; background owns the same
+            # callback until explicit kill or Application teardown.
+            try:
+                if close_process is not None and not promoted:
+                    close_process()
+            finally:
+                # Stop foreground stall watchdog and wait for its thread to
+                # finish before cleaning up the output file.  This prevents
+                # a race where the watchdog thread tries to read a file
+                # that has already been deleted.
+                if fg_stall is not None:
+                    fg_stall.stop()
+                    if fg_stall._thread is not None:
+                        fg_stall._thread.join(timeout=2.0)
 
-            if not promoted:
-                # Only clean up if we did NOT promote to background.
-                if watchdog:
-                    watchdog.stop()
-                if out_fd >= 0:
-                    try:
-                        os.close(out_fd)
-                    except OSError:
-                        pass
-                if read_fd >= 0:
-                    try:
-                        os.close(read_fd)
-                    except OSError:
-                        pass
-                    read_fd = -1
-                if runtime_context is not None and runtime_output_path is not None:
-                    try:
-                        runtime_context.remove_run_file(runtime_output_path)
-                    except (FileNotFoundError, RuntimeError):
-                        pass
-                elif output_file and os.path.exists(output_file):
-                    try:
-                        os.remove(output_file)
-                    except OSError:
-                        pass
-            else:
-                # Promoted — only close our FD, keep the file.
-                if out_fd >= 0:
-                    try:
-                        os.close(out_fd)
-                    except OSError:
-                        pass
-                if read_fd >= 0:
-                    try:
-                        os.close(read_fd)
-                    except OSError:
-                        pass
+                if not promoted:
+                    # Only clean up if we did NOT promote to background.
+                    if watchdog:
+                        watchdog.stop()
+                    if out_fd >= 0:
+                        try:
+                            os.close(out_fd)
+                        except OSError:
+                            pass
+                    if read_fd >= 0:
+                        try:
+                            os.close(read_fd)
+                        except OSError:
+                            pass
+                        read_fd = -1
+                    if runtime_context is not None and runtime_output_path is not None:
+                        try:
+                            runtime_context.remove_run_file(runtime_output_path)
+                        except (FileNotFoundError, RuntimeError):
+                            pass
+                    elif output_file and os.path.exists(output_file):
+                        try:
+                            os.remove(output_file)
+                        except OSError:
+                            pass
+                else:
+                    # Promoted — only close our FD, keep the file.
+                    if out_fd >= 0:
+                        try:
+                            os.close(out_fd)
+                        except OSError:
+                            pass
+                    if read_fd >= 0:
+                        try:
+                            os.close(read_fd)
+                        except OSError:
+                            pass
 
     def _promote_to_background(
         self,
@@ -875,6 +873,7 @@ class ShellProcess:
         command: str,
         watchdog: SizeWatchdog | None = None,
         output_fd: int | None = None,
+        close_process: Callable[[], None] | None = None,
     ) -> str:
         """Register a running process as a background task.
 
@@ -894,9 +893,13 @@ class ShellProcess:
                 description=command[:80],
                 size_watchdog=watchdog,
                 output_fd=output_fd,
+                close_process=close_process,
             )
         except BaseException:
-            graceful_kill(proc.pid, grace_ms=500)
+            if close_process is not None:
+                close_process()
+            else:
+                graceful_kill(proc.pid, grace_ms=500)
             raise
         logger.info(
             "Command promoted to background task %s: pid=%d",

@@ -652,28 +652,61 @@ class BoundWorker:
         if self._input_validator is not None:
             self._input_validator(item.mutable_input())
         control = BatchControl(Event())
-        with owner._condition:
-            owner._require_open()
-            owner._batches.add(control)
-        active = _ACTIVE_BATCH_OWNER.set(owner)
+        previous_owner = _ACTIVE_BATCH_OWNER.get()
+        outcome = None
         try:
-            return owner._invoke_definition(
+            # Guard before either mutation. A signal can arrive after add/set
+            # has changed state but before its return value is assigned.
+            with owner._condition:
+                owner._require_open()
+                owner._batches.add(control)
+            _ACTIVE_BATCH_OWNER.set(owner)
+            outcome = owner._invoke_definition(
                 self._definition,
                 item,
                 index,
                 agent_factory=(lambda: agent_factory(deepcopy(self._definition), owner.logger))
                 if agent_factory is not None else None,
             )
+            return outcome
         except InvocationControlError as interrupted:
             error = interrupted.error
             error.worker_outcome = interrupted.outcome
             error.worker_infrastructure_error = interrupted.infrastructure_error
             raise error
         finally:
-            _ACTIVE_BATCH_OWNER.reset(active)
-            with owner._condition:
-                owner._batches.remove(control)
-                owner._condition.notify_all()
+            original_error = sys.exception()
+            cleanup_control = None
+            # Both operations are idempotent. Finish bookkeeping even when a
+            # control signal interrupts cleanup, then preserve the first one.
+            while True:
+                try:
+                    with owner._condition:
+                        owner._batches.discard(control)
+                        owner._condition.notify_all()
+                    break
+                except Exception:
+                    raise
+                except BaseException as error:
+                    if cleanup_control is None:
+                        cleanup_control = error
+            while True:
+                try:
+                    _ACTIVE_BATCH_OWNER.set(previous_owner)
+                    break
+                except Exception:
+                    raise
+                except BaseException as error:
+                    if cleanup_control is None:
+                        cleanup_control = error
+            if cleanup_control is not None:
+                if original_error is not None and not isinstance(original_error, Exception):
+                    original_error.worker_cleanup_interruption = cleanup_control
+                else:
+                    if outcome is not None:
+                        cleanup_control.worker_outcome = outcome
+                        cleanup_control.worker_infrastructure_error = None
+                    raise cleanup_control
 
     def map(
         self,

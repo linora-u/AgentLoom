@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import json
+import inspect
+import os
+from pathlib import Path
+import subprocess
+import sys
 from threading import Event, Thread
 
 import pytest
@@ -73,6 +78,63 @@ def test_single_invocation_retains_error_even_when_exception_is_false(batch_proj
     assert result.error.error_type == "FalseFailure"
     assert result.error.message == "the invocation failed"
     assert probe.closed == [{"value": 1}] and probe.active == 0
+
+
+@pytest.mark.parametrize("phase", ["after_registration", "before_context_restore"])
+def test_control_at_activity_boundary_preserves_close_and_original_signal(batch_project, phase):
+    # A regressed close must fail the test with a finite watchdog, rather than
+    # leave the full suite hanging in Application finalization.
+    marker = "AGENTLOOM_SINGLE_INVOCATION_SIGNAL_CASE"
+    if os.environ.get(marker) != phase:
+        project_root = Path(__file__).resolve().parents[2]
+        child = subprocess.run(
+            [sys.executable, "-m", "pytest",
+             f"{Path(__file__).resolve()}::test_control_at_activity_boundary_preserves_close_and_original_signal[{phase}]",
+             "-q", "-o", "addopts="],
+            cwd=project_root,
+            env={**os.environ, marker: phase,
+                 "PYTHONPATH": os.pathsep.join(filter(None, [str(project_root), os.environ.get("PYTHONPATH")]))},
+            capture_output=True, text=True, timeout=20,
+        )
+        assert child.returncode == 0, child.stdout + child.stderr
+        return
+
+    from agentloom.app import BoundWorker
+
+    root, application, _worker, probe, _write = batch_project
+    source, first_line = inspect.getsourcelines(BoundWorker.invoke)
+    markers = ("_ACTIVE_BATCH_OWNER.set(owner)",) if phase == "after_registration" else (
+        "_ACTIVE_BATCH_OWNER.set(previous_owner)", "_ACTIVE_BATCH_OWNER.reset(active)"
+    )
+    target = next(first_line + index for index, text in enumerate(source)
+                  if any(part in text for part in markers))
+    original = KeyboardInterrupt("activity boundary control")
+    fired = False
+
+    def trace(frame, event, arg):
+        nonlocal fired
+        if (not fired and event == "line" and frame.f_code is BoundWorker.invoke.__code__
+                and frame.f_lineno == target):
+            fired = True
+            raise original
+        return trace
+
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        previous_trace = sys.gettrace()
+        try:
+            sys.settrace(trace)
+            with pytest.raises(KeyboardInterrupt) as caught:
+                app.worker("workflows/worker.yaml").invoke(WorkItem("signal", {"value": 1}))
+            assert caught.value is original and fired
+        finally:
+            sys.settrace(previous_trace)
+        app.close()
+    if phase == "after_registration":
+        assert probe.starts == [] and probe.closed == []
+    else:
+        assert len(probe.starts) == 1 and probe.closed == [{"value": 1}]
+        assert original.worker_outcome.status == "success"
+    assert probe.active == 0
 
 
 def test_application_close_waits_for_single_invocation_and_rejects_new_work(batch_project):

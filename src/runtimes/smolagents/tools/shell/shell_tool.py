@@ -302,13 +302,13 @@ def _run_in_background(
     output_path = str(output_path_obj)
 
     try:
-        proc = subprocess.Popen(
+        from agentloom.execution.process import spawn_registered_process
+        proc, close_process = spawn_registered_process(
             shell_args,
             stdout=out_fd,
             stderr=out_fd,
             stdin=subprocess.DEVNULL,
             env=env,
-            start_new_session=True,
         )
     except BaseException:
         os.close(out_fd)
@@ -326,6 +326,7 @@ def _run_in_background(
             output_path,
             max_bytes=_MAX_OUTPUT_BYTES,
             output_fd=out_fd,
+            close_process=close_process,
         )
         watchdog.start()
         registry = BackgroundTaskRegistry.get_instance()
@@ -336,12 +337,13 @@ def _run_in_background(
             description=original_command[:80],
             size_watchdog=watchdog,
             output_fd=out_fd,
+            close_process=close_process,
         )
     except BaseException:
         os.close(out_fd)
         if watchdog is not None:
             watchdog.stop()
-        graceful_kill(proc.pid, grace_ms=500)
+        close_process()
         try:
             runtime_context.remove_run_file(output_path_obj)
         except FileNotFoundError:

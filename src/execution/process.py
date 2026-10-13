@@ -9,7 +9,7 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from threading import Lock
 
 import psutil
@@ -63,7 +63,7 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
     known: dict[int, psutil.Process] = {}
     frozen: set[int] = set()
     process_group_id: int | None = None
-    if os.name == "posix":
+    if os.name == "posix" and process.poll() is None:
         try:
             # Resolve this before stopping the group: the group can outlive its
             # leader, but getpgid(leader_pid) cannot find it after leader exit.
@@ -72,6 +72,10 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
             pass
 
     def discover_lineage() -> None:
+        # A reaped Popen PID may have been reused by an unrelated process.
+        # Remaining tagged descendants can still be found without that PID.
+        if process.poll() is not None:
+            return
         try:
             parent = psutil.Process(process.pid)
             known[parent.pid] = parent
@@ -103,6 +107,18 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
     # parent receives SIGKILL. SIGSTOP first closes that late-side-effect race.
     # A timed-out process has no cleanup grace; token discovery below exists
     # only to find descendants that escaped the original process group.
+    # An isolated Application's tools share its OS-owned group. Never stop or
+    # kill the Application while closing just one tool process. Its host owns
+    # whole-group termination; here the concrete child tree remains the target.
+    shared_group = os.name == "posix" and process_group_id == os.getpgrp()
+    if shared_group:
+        process_group_id = None
+        # Quiesce this child tree before killing its parent. Otherwise a child
+        # with a deliberately clean env could be orphaned before discovery.
+        while True:
+            discover_lineage()
+            if not freeze_newly_discovered():
+                break
     if process_group_id is not None:
         try:
             os.killpg(process_group_id, signal.SIGSTOP)
@@ -116,7 +132,7 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
             os.killpg(process_group_id, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             pass
-    elif process.poll() is None:  # pragma: no cover - Windows
+    elif not shared_group and process.poll() is None:  # pragma: no cover - Windows
         process.kill()
 
     discover()
@@ -151,12 +167,56 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
             candidate.kill()
         except psutil.Error:
             pass
-    psutil.wait_procs(tuple(known.values()), timeout=1)
+    _gone, alive = psutil.wait_procs(tuple(known.values()), timeout=1)
+    if alive:
+        raise RuntimeError("owned process tree has not exited after termination")
     try:
         process.wait(timeout=1)
     except subprocess.TimeoutExpired:  # pragma: no cover - defensive fallback
         process.kill()
         process.wait()
+
+
+def spawn_registered_process(
+    command: Any, *, env: dict[str, str], **options: Any,
+) -> tuple[subprocess.Popen[Any], Callable[[], None]]:
+    """Start a concrete process owned by this Run, retaining its close callback.
+
+    Tools may transfer the Popen and callback to their background registry.
+    The callback is idempotent only after actual tree termination succeeds;
+    a failed callback retains its original resource owner for cleanup retry.
+    """
+    from agentloom.execution.process_scope import child_starts_new_session
+    from agentloom.execution.resources import register_resource, unregister_resource
+
+    token = uuid.uuid4().hex
+    process_env = {**env, _PROCESS_RUN_TOKEN_ENV: token}
+    key = f"owned-process:{token}"
+    process = None
+    cancelled = False
+    stopped = False
+    admission = Lock()
+
+    def close_process() -> None:
+        nonlocal cancelled, stopped
+        with admission:
+            cancelled = True
+            if process is not None and not stopped:
+                terminate_process_tree(process, token)
+                stopped = True
+
+    register_resource(key, close_process)
+    try:
+        with admission:
+            if cancelled:
+                raise InterruptedError("Execution resources are closed")
+            process = subprocess.Popen(command, env=process_env,
+                                       start_new_session=child_starts_new_session(), **options)
+    except BaseException:
+        close_process()
+        unregister_resource(key)
+        raise
+    return process, close_process
 
 
 def run_captured_process(
@@ -203,10 +263,11 @@ def run_captured_process(
             with admission:
                 if cancelled:
                     raise InterruptedError("Execution resources are closed")
+                from agentloom.execution.process_scope import child_starts_new_session
                 process = subprocess.Popen(
                     command, shell=shell, cwd=cwd, env=process_env,
                     stdin=stdin_stream, stdout=stdout_stream, stderr=stderr_stream,
-                    start_new_session=os.name == "posix",
+                    start_new_session=os.name == "posix" and child_starts_new_session(),
                 )
             process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
@@ -258,6 +319,7 @@ def run_process_to_fds(
     run_token = uuid.uuid4().hex
     process_env = dict(env)
     process_env[_PROCESS_RUN_TOKEN_ENV] = run_token
+    from agentloom.execution.process_scope import child_starts_new_session
     process = subprocess.Popen(
         command,
         shell=shell,
@@ -265,7 +327,7 @@ def run_process_to_fds(
         env=process_env,
         stdout=stdout_fd,
         stderr=stderr_fd,
-        start_new_session=os.name == "posix",
+        start_new_session=os.name == "posix" and child_starts_new_session(),
     )
     try:
         return process.wait(timeout=timeout)
@@ -285,4 +347,5 @@ __all__ = [
     "run_captured_process",
     "run_process_to_fds",
     "terminate_process_tree",
+    "spawn_registered_process",
 ]
