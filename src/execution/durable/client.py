@@ -141,7 +141,34 @@ class DurableApplication:
         """Request cancellation; completion is observed separately from this ACK."""
         if self.status(workflow_id) is None:
             raise ValueError("Task does not belong to this durable namespace")
-        self.client.cancel_workflow(workflow_id)
+        from filelock import FileLock
+
+        from .files import atomic_json
+        from .resource_owner import restore_resource
+        directory = self.root / "jobs" / workflow_id
+        directory.mkdir(parents=True, exist_ok=True)
+        resources = []
+        with FileLock(directory / "registration.lock"):
+            try:
+                for descriptor in directory.glob("*/description.json"):
+                    job = descriptor.parent
+                    atomic_json(job / "cancelled.json", {"invocation_id": job.name})
+                    resources.append(job)
+            finally:
+                self.client.cancel_workflow(workflow_id)
+        for job in resources:
+            try:
+                restore_resource(job).request_stop()
+            except FileNotFoundError:
+                # The already-cancelled registered launch may still be
+                # publishing its owner handshake. Its parent closes the gate.
+                continue
+            except Exception as error:
+                from .coordinator import _error_detail
+                try:
+                    atomic_json(job / "cleanup-failed.json", _error_detail(error, "cancel_request"))
+                except OSError:
+                    pass
 
     def resource_status(self, workflow_id: str | None = None):
         """Observe physical resources independently of DBOS's task status."""

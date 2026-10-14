@@ -19,7 +19,13 @@ from .client import TaskDescription, canonical_json
 from .files import atomic_json, read_json
 from .host import HostSpec
 from .os_job import AdmissionStopped, InvocationFailed, ResourceOwnershipError
-from .resource_owner import launch_resource, preflight_resources, resource_observations, restore_resource
+from .resource_owner import (
+    NotStartedResource,
+    launch_resource,
+    preflight_resources,
+    resource_observations,
+    restore_resource,
+)
 
 
 @dataclass
@@ -32,7 +38,15 @@ class _Attempt:
 
 
 def _error_detail(error, phase):
-    cause = getattr(error, "orig", None) or error
+    cause, seen = error, set()
+    while id(cause) not in seen:
+        seen.add(id(cause))
+        if getattr(cause, "sqlite_errorcode", None) is not None or getattr(cause, "errno", None) is not None:
+            break
+        nested = getattr(cause, "orig", None) or cause.__cause__ or cause.__context__
+        if nested is None:
+            break
+        cause = nested
     return {"error_type": type(error).__name__, "message": str(error), "phase": phase,
             **{name: getattr(cause, name) for name in ("errno", "sqlite_errorcode", "sqlite_errorname")
                if getattr(cause, name, None) is not None}}
@@ -43,6 +57,7 @@ class AttemptCoordinator:
         self._root, self._host_spec, self._host = root, host, host.build()
         self._stop = Event()
         self._external_stop = None
+        self._task_state = None
         self._accepted: dict[str, _Attempt] = {}
         self._admission = Lock()
 
@@ -51,6 +66,9 @@ class AttemptCoordinator:
 
     def bind_stop(self, stop):
         self._external_stop = stop
+
+    def bind_task_state(self, read_status):
+        self._task_state = read_status
 
     def preflight(self):
         preflight_resources()
@@ -75,7 +93,7 @@ class AttemptCoordinator:
                 self._record_error(attempt.job, error, "close_admission")
 
     def _assert_current(self, attempt):
-        if self.admission_stopped() or attempt.cancel.is_set():
+        if self.admission_stopped() or attempt.cancel.is_set() or (attempt.job / "cancelled.json").exists():
             raise AdmissionStopped("Execution attempt no longer has startup permission")
 
     def _cancel(self, attempt):
@@ -105,7 +123,11 @@ class AttemptCoordinator:
 
     def _record_error(self, job, error, phase):
         try:
-            atomic_json(job / "cleanup-failed.json", _error_detail(error, phase))
+            path = job / "cleanup-failed.json"
+            detail = _error_detail(error, phase)
+            if path.exists():
+                detail = {**read_json(path), "latest_error": detail}
+            atomic_json(path, detail)
         except OSError:
             pass  # Diagnostic failure must not replace the original cause.
 
@@ -155,6 +177,8 @@ class AttemptCoordinator:
                 attempt.resource = await asyncio.shield(startup)
             except Exception as error:
                 original = error
+                if getattr(error, "not_started", False) is True:
+                    attempt.resource = NotStartedResource(attempt.job)
         if attempt.resource is not None:
             try:
                 await asyncio.to_thread(self._cancel, attempt)
@@ -210,9 +234,16 @@ class AttemptCoordinator:
                             raise
                 elif not self._host_spec.allow_replay:
                     raise ResourceOwnershipError("Prior invocation has no result; trusted replay permission is required")
-            with self._admission:
+            # Registration and producer cancellation share one short fence.
+            # DBOS remains the source of task cancellation; only accepted
+            # resource attempts receive a local cancellation observation.
+            with FileLock(directory / "registration.lock"), self._admission:
                 if self.admission_stopped():
                     raise AdmissionStopped("Executor stopped admission")
+                if self._task_state is not None:
+                    row = self._task_state(task.workflow_id)
+                    if row is None or row.status == "CANCELLED":
+                        raise AdmissionStopped("Task was cancelled before attempt registration")
                 invocation_id = f"{time.time_ns():020d}-{uuid4().hex}"
                 job = directory / invocation_id
                 job.mkdir()
@@ -229,6 +260,13 @@ class AttemptCoordinator:
             if not (job / "result.json").exists():
                 raise InvocationFailed({"message": "Application exited without a result", "category": "process_exit"})
             return self._result(job)
+        except Exception as error:
+            if attempt is not None and not isinstance(error, AdmissionStopped):
+                try:
+                    atomic_json(attempt.job / "invocation-failed.json", _error_detail(error, "invoke"))
+                except OSError:
+                    pass  # Preserve the original invocation exception.
+            raise
         finally:
             if attempt is not None:
                 attempt.cancel.set()
@@ -268,6 +306,9 @@ class LegacyCoordinator:
 
     def bind_stop(self, stop):
         self.jobs.stop_token = stop
+
+    def bind_task_state(self, read_status):
+        pass
 
     def active_workflows(self):
         return tuple(self.jobs.active)
