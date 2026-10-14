@@ -54,6 +54,17 @@ def error_detail(error, phase, *, database=None):
     return detail
 
 
+def record_cleanup_error(job, error, phase, *, database=None):
+    try:
+        path = job / "cleanup-failed.json"
+        detail = error_detail(error, phase, database=database)
+        if path.exists():
+            detail = {**read_json(path), "latest_error": detail}
+        atomic_json(path, detail)
+    except (OSError, ValueError):
+        pass  # Diagnostic failure must never replace the original cause.
+
+
 def storage_metadata(root: Path, database_url: str):
     from sqlalchemy import make_url
 
@@ -94,10 +105,14 @@ class PersistenceTrace(logging.Handler):
         detail = {**error_detail(error, "dbos_background", database=self.database), "observed_at": time.time(),
                   "workflow_id": workflow_id}
         try:
+            path = self.root / "jobs" / workflow_id / "persistence-error.json" if workflow_id else None
+            if path is not None and path.exists():
+                previous = read_json(path)
+                detail["first_error"] = previous.get("first_error", previous)
             atomic_json(self.root / "latest-persistence-error.json", detail)
-            if detail["workflow_id"]:
-                atomic_json(self.root / "jobs" / detail["workflow_id"] / "persistence-error.json", detail)
-        except OSError:
+            if path is not None:
+                atomic_json(path, detail)
+        except (OSError, ValueError):
             pass  # Diagnostics cannot mask DBOS's original exception.
 
 
