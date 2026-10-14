@@ -14,7 +14,6 @@ from threading import Lock
 from typing import Any
 
 import psutil
-
 from agentloom.execution.cleanup import close_preserving_error as _close_preserving_error
 
 _PROCESS_RUN_TOKEN_ENV = "AGENTLOOM_SUBPROCESS_RUN_TOKEN"

@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(sys.platform not in {"darwin", "linux"}, reason=
 
 def test_application_keeps_native_cleanup_diagnostic_when_scope_retry_succeeds(batch_project, monkeypatch):
     from agentloom.app import Application
-    from agentloom.execution.concurrency import WorkItem, WorkerBatchError
+    from agentloom.execution.concurrency import WorkerBatchError, WorkItem
     from agentloom.execution.process import CapturedProcessTimeout, run_captured_process
 
     root, application, _worker, probe, _write = batch_project
@@ -64,6 +64,55 @@ def test_application_keeps_native_cleanup_diagnostic_when_scope_retry_succeeds(b
     assert errors[0].managed_cleanup_errors[0].errno == 5
     assert all(json.loads(path.read_text())["physical_exit_confirmed"]
                for path in root.rglob("native_resources/*/exited.json"))
+
+
+def test_application_keeps_control_identity_and_accumulates_both_native_cleanup_failures(batch_project, monkeypatch):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.process import run_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    fault = root / "fail-exit-write"
+    fault.touch()
+    injection = root / "filesystem-fault"
+    injection.mkdir()
+    (injection / "sitecustomize.py").write_text(
+        "import errno,os\nfrom pathlib import Path\n_replace=os.replace\n"
+        f"_fault=Path({str(fault)!r})\n"
+        "def replace(source,target,*args,**kwargs):\n"
+        "    if _fault.exists() and Path(target).name=='exited.json':\n"
+        "        raise OSError(errno.EIO,'current native cleanup write failure')\n"
+        "    return _replace(source,target,*args,**kwargs)\n"
+        "os.replace=replace\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(injection) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    original = KeyboardInterrupt("preserved native control")
+    earlier = OSError(28, "earlier cleanup error")
+    original.managed_cleanup_errors = (earlier,)
+    communicate = subprocess.Popen.communicate
+
+    def interrupted_communicate(process, *args, **kwargs):
+        if len(process.args) > 1 and str(process.args[1]).endswith("_process_guardian.py"):
+            raise original  # Native communication boundary; both real closes still run.
+        return communicate(process, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted_communicate)
+    probe.behavior = lambda _payload: run_registered_process(
+        [sys.executable, "-c", "import time;time.sleep(120)"], env=dict(os.environ),
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        try:
+            with pytest.raises(KeyboardInterrupt) as caught:
+                app.worker("workflows/worker.yaml").map([WorkItem("control", {"value": 1})])
+            assert caught.value is original
+            assert original.managed_cleanup_errors[0] is earlier
+            assert len(original.managed_cleanup_errors) == 3
+            assert all(error.errno == 5 for error in original.managed_cleanup_errors[1:])
+            diagnostics = original.worker_outcome.cleanup_errors
+            assert any("earlier cleanup error" in entry.message for entry in diagnostics)
+            assert sum("current native cleanup write failure" in entry.message for entry in diagnostics) >= 2
+        finally:
+            fault.unlink()  # Root teardown repairs only after public error observations.
 
 
 def _alive(identity):
