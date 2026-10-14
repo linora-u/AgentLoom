@@ -96,10 +96,12 @@ class Guardian:
             result = self.process.poll()
             if result is not None:
                 self.root_result = {"returncode": result}
-                if self.receipt_dir is not None:
-                    atomic_json(self.receipt_dir / "root-result.json", self.root_result)
+                # The OS result is a distinct observed fact. A failed receipt
+                # write must not erase it or substitute the guardian's code.
                 self.send({"event": "root_exit", **self.root_result})
                 self.stop()  # A native root's retirement closes its owned scope.
+                if self.receipt_dir is not None:
+                    atomic_json(self.receipt_dir / "root-result.json", self.root_result)
         if sys.platform == "linux":
             for process in psutil.Process().children():
                 if self.process is not None and process.pid == self.process.pid:
@@ -210,6 +212,8 @@ class Guardian:
         receipt = {"physical_exit_confirmed": True,
                    "generation": self.description["generation"] if self.description else None}
         if self.receipt_dir is not None:
+            if self.root_result is not None:
+                atomic_json(self.receipt_dir / "root-result.json", self.root_result)
             atomic_json(self.receipt_dir / "exited.json", receipt)
         self.send({"event": "extinct", **receipt})
         return True
