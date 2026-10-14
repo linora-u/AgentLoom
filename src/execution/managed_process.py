@@ -367,11 +367,11 @@ def native_owner_active():
 
 
 @contextmanager
-def managed_attempt_scope():
+def managed_attempt_scope(*, independent=False):
     from agentloom.execution.process_scope import managed_process_group
     from agentloom.execution.resources import register_resource, unregister_resource
 
-    if _SCOPE.get() is not None or managed_process_group() is not None:
+    if (not independent and _SCOPE.get() is not None) or managed_process_group() is not None:
         yield
         return
     scope = NativeProcessScope()

@@ -169,12 +169,15 @@ class AgentInvocation:
     def run(self) -> JSONValue:
         from agentloom.config.config import bind_model_config
         from agentloom.config.redaction import bind_redaction_policy
+        from agentloom.execution.managed_process import managed_attempt_scope
 
         identity = capture_explicit_execution_context()
         try:
             effective = self.owner._effective_agent_config or self.owner._config
             snapshot = getattr(self.owner, "_effective_agent_config_snapshot", None)
-            with bind_model_config(snapshot.llm if snapshot is not None else None), bind_redaction_policy(effective, inherit=True) as enabled:
+            with (bind_model_config(snapshot.llm if snapshot is not None else None),
+                  bind_redaction_policy(effective, inherit=True) as enabled,
+                  managed_attempt_scope()):
                 context = get_current_run_context()
                 # The Application lifecycle owns manifest initialization.
                 if context is not None and self.owns_root_run and context.manifest_path.is_file():
@@ -183,6 +186,8 @@ class AgentInvocation:
                 self._output = copy_json_value(result)
                 return result
         except BaseException as exc:
+            for cleanup in getattr(exc, "managed_cleanup_errors", ()):
+                self._record_cleanup_error("native_scope", cleanup)
             if self._primary_error is None and not self._cleanup_errors:
                 self._primary_error = exc
                 self._error_phase = self._phase
