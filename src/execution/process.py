@@ -9,9 +9,10 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any, Callable
+from typing import Any
 
 import psutil
 

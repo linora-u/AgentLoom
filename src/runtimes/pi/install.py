@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import platform
-from pathlib import Path
 import re
 import selectors
 import shutil
@@ -15,28 +14,41 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from uuid import uuid4
 
+from agentloom.runtimes.pi.environment import build_pi_subprocess_env
 from agentloom.runtimes.pi.metadata import (
     BRIDGE_VERSION,
     CAPABILITIES,
     SDK_VERSION,
 )
 from agentloom.runtimes.pi.protocol import (
+    PI_BRIDGE_PROTOCOL_VERSION,
     Handshake,
     HandshakeResult,
-    PI_BRIDGE_PROTOCOL_VERSION,
     Request,
     Response,
     decode_message,
     encode_message,
 )
-from agentloom.runtimes.pi.environment import build_pi_subprocess_env
 
 SDK_PACKAGE = "@earendil-works/pi-coding-agent"
 SDK_AI_PACKAGE = "@earendil-works/pi-ai"
 READY_MANIFEST = "ready.json"
 MAX_FRAME_BYTES = 8 * 1024 * 1024
+
+
+def _probe(command, **options):
+    # Installation stays an explicit administrative operation. Native version
+    # and ABI probes made by an Agent invocation belong to its resource scope.
+    from agentloom.execution.managed_process import native_owner_active
+
+    if native_owner_active():
+        from agentloom.execution.process import run_registered_process
+
+        return run_registered_process(command, **options)
+    return subprocess.run(command, **options)
 
 
 def source_bridge_dir() -> Path:
@@ -75,7 +87,7 @@ def _fingerprint(bridge: Path) -> str:
 
 def _node_abi(node: str, env: dict[str, str]) -> str:
     try:
-        probe = subprocess.run(
+        probe = _probe(
             [node, "-p", "process.versions.modules"],
             env=env,
             capture_output=True,
@@ -150,7 +162,7 @@ def find_node(env: dict[str, str]) -> str:
             continue
         inspected.add(candidate)
         try:
-            probe = subprocess.run([candidate, "--version"], env=env,
+            probe = _probe([candidate, "--version"], env=env,
                 capture_output=True, timeout=5, text=True, check=True)
             version = re.fullmatch(r"v(\d+)\.(\d+)\.\d+\s*", probe.stdout)
             if version:

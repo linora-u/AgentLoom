@@ -14,6 +14,7 @@ import tempfile
 from typing import Optional
 
 from agentloom.execution.logging import get_logger
+from agentloom.execution.process import run_registered_process
 
 logger = get_logger(__name__)
 
@@ -183,7 +184,7 @@ def create_snapshot(
         env = build_subprocess_env()
 
     try:
-        result = subprocess.run(
+        result = run_registered_process(
             [shell_path, "-l", "-c", script],
             capture_output=True,
             text=True,
