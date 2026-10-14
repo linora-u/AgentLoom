@@ -4,6 +4,10 @@
 
 持久执行已接入 DBOS 3.2.0 的公开队列、事务提交和恢复接口，自研内核停止扩展。当前方案见 [开源接入规格](docs/specs/durable-worker-open-source-engine-integration-v2.md)。本机框架故障、controller 和 NewsAgent 全日验收通过：2025-09-01 完成封存与计分，失败与恢复见 [验收报告](docs/reviews/durable-worker-dbos-news-acceptance-20261014.md)。
 
+2026-10-14 后续部署要求已更新：默认 macOS、Linux 均由成熟第三方库管理本机执行，不要求配置 launchd/systemd。顶层 Python 被 SIGKILL 后，允许独立监护进程继续存活，但须自动清理全部受管理任务后代并自行退出。已用 OpenClaw 公开 process SDK 实现 Node 控制桥，macOS 和 Linux 的 Application、真实 Pi/MCP 及进程故障探针均通过；默认切换和新后端全日验收尚未完成。见 [OpenClaw 接入规格](docs/specs/openclaw-process-owner-integration.md)、[Linux 验收](docs/reviews/openclaw-linux-process-owner-20261014.md) 和 [部署与故障边界](docs/adr/0003-library-owned-cross-platform-process-lifetime.md)。
+
+按用户要求新增 [OpenCode/OpenClaw 源码比较](docs/research/opencode-openclaw-execution-comparison-20261014.md)：OpenCode 将作用域清理与持久恢复分开，OpenClaw 已有受管理 Worker 的独立监护和所有者强杀测试。新接法使用公开命令 scope，不复制内部 relay/anchor；DBOS 队列和新闻业务保持现有职责。
+
 本轮已与用户确认：`concurrency` 是**单次 `map()` 的上限**。保留一行调用和
 `system 配置 < Supervisor binding < 本次代码参数` 的覆盖关系。
 

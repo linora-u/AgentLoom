@@ -46,6 +46,16 @@ jobs:
       - name: Install the locked Pi SDK
         run: uv run --locked --extra smol --extra code --extra durable loom runtime install pi
 
+      - name: Install the locked execution-owner SDK
+        run: |
+          uv run --locked --extra smol --extra code --extra durable loom runtime install execution-owner
+          uv run --locked --extra smol --extra code --extra durable python - <<'PY'
+          import os
+          from agentloom.execution.durable.openclaw_install import installed_owner_runtime
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
+              environment.write(f"AGENTLOOM_TEST_OPENCLAW_RUNTIME={installed_owner_runtime()}\n")
+          PY
+
       - name: Prepare test LLM config
         run: cp config/model.example.yaml config/model.yaml
 

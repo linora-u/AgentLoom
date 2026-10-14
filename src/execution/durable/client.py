@@ -143,10 +143,10 @@ class DurableApplication:
             raise ValueError("Task does not belong to this durable namespace")
         self.client.cancel_workflow(workflow_id)
 
-    def executor(self, workers: Sequence[str], *, host=None):
+    def executor(self, workers: Sequence[str], *, host=None, jobs=None):
         """Configure a dedicated local consumer from trusted Worker paths."""
         from .executor import DurableExecutor
-        return DurableExecutor(self, workers, host=host)
+        return DurableExecutor(self, workers, host=host, jobs=jobs)
 
     def resume(self, workflow_id: str):
         """Resume a terminal task only after its old OS invocation drains.

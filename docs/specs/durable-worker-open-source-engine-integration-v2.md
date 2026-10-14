@@ -2,6 +2,8 @@
 
 2026-10-14。状态：macOS 本机产品和完整 NewsAgent 日期验收通过。采用 DBOS 3.2.0 公开持久队列与 macOS launchd；2025-09-01 经三轮恢复完成 80 个当前 workflow、封存和 61 条信号计分。原失败、测试范围和版本边界见 [验收报告](../reviews/durable-worker-dbos-news-acceptance-20261014.md)。[产品接入状态与一手来源](../research/dbos-product-integration-status-20261014.md)
 
+后续部署目标已按用户要求改为第三方库管理的 macOS/Linux 本机执行，详见 [ADR-0003](../adr/0003-library-owned-cross-platform-process-lifetime.md)。下文记录已实现的 v2 及其验收范围；launchd 不再作为后续目标方案。替代 Adapter 已采用固定版 OpenClaw process SDK，macOS 接入验收通过，Linux 验收与默认切换状态见 [接入规格](openclaw-process-owner-integration.md)。
+
 本方案按用户最新要求重新选择实现路线：采用成熟开源引擎，减少执行与业务存储的耦合。旧自研内核候选停止扩展，原始失败和全日结果继续保留。旧规格的业务目标、输出预算合同及真实 CLI 验收仍有效；后端选择与共享事务实现方式由本方案重新评估。
 
 九个执行引擎及 Agent 集成方式的取舍集中见 [开源选型结论](../research/durable-open-source-selection-20261014.md)，每项链接到官方文档、固定源码和版本证据。

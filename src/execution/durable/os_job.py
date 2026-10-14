@@ -1,4 +1,4 @@
-"""launchd owns each entire Application; DBOS owns queue admission and retry.
+"""A process owner runs each entire Application; DBOS owns admission and retry.
 
 Resource descriptors retain actual OS identities/results across executor loss.
 They are not pending tasks or leases. No successor invocation can use this
@@ -66,6 +66,10 @@ def job_exited(job: Path) -> bool:
         # Ownership ended when physical exit was confirmed. A later process
         # using the same numeric PGID does not belong to this old invocation.
         return read_json(job / "exited.json")["physical_exit_confirmed"] is True
+    if read_json(job / "description.json").get("owner") == "openclaw":
+        # Only the public SDK's completed cleanup can certify this invocation.
+        # A root exit or an empty group alone cannot erase a failed SDK join.
+        return False
     path = job / "identity.json"
     if not path.exists():
         raise ResourceOwnershipError("OS job identity is unknown")
@@ -73,12 +77,12 @@ def job_exited(job: Path) -> bool:
     return not process_alive(identity) and not group_alive(identity)
 
 
-class LaunchdJobs:
+class OwnedJobs:
+    """Shared invocation/receipt contract; native lifetime belongs to an Adapter."""
+    owner: str
+
     def __init__(self, root: Path, host: HostSpec):
-        if sys.platform != "darwin":
-            raise RuntimeError("durable OS execution currently supports macOS launchd; Linux adapter is not validated")
         self.root, self.host_spec, self.host = root, host, host.build()
-        self.domain = f"gui/{os.getuid()}"
         self.active: dict[str, Path] = {}
         self.stopping = False
         self.stop_token = None
@@ -91,38 +95,11 @@ class LaunchdJobs:
         with self.admission:
             self.stopping = True
 
-    def _command(self, *arguments):
-        return subprocess.run(["/bin/launchctl", *arguments], capture_output=True, text=True)
+    def _start(self, job: Path):
+        raise NotImplementedError
 
-    def _remove(self, job: Path):
-        if (job / "unloaded.json").exists():
-            return
-        result = self._command("bootout", self.domain + "/" + read_json(job / "description.json")["label"])
-        if result.returncode != 0:
-            raise ResourceOwnershipError("launchd bootout failed: " + result.stderr.strip())
-        atomic_json(job / "unloaded.json", {"control_operation_completed": True})
-
-    def _discover_identity(self, job: Path):
-        path = job / "identity.json"
-        if path.exists():
-            return read_json(path)
-        # A launchd diagnostic is never an exit oracle. Recover the concrete
-        # pre-handler root by exact command arguments instead.
-        for process in psutil.process_iter(["pid", "cmdline", "create_time"]):
-            argv = process.info["cmdline"] or []
-            if argv[-3:] == ["-m", "agentloom.execution.durable.job_entry", str(job)]:
-                try:
-                    group = os.getpgid(process.pid)
-                except ProcessLookupError:
-                    continue
-                identity = {"pid": process.pid, "creation": process.info["create_time"], "group": group}
-                if identity["pid"] != identity["group"]:
-                    raise ResourceOwnershipError("Recovered OS job no longer owns its group")
-                atomic_json(path, identity)
-                return identity
-        if (job / "authorized.json").exists():
-            raise ResourceOwnershipError("Authorized OS job lost its identity; refusing replacement")
-        return None
+    def _terminate(self, job: Path):
+        raise NotImplementedError
 
     def _stop_sync(self, job: Path, *, revoke=True):
         descriptor = read_json(job / "description.json")
@@ -134,18 +111,11 @@ class LaunchdJobs:
             except Exception as caught:
                 error = caught
         if (job / "exited.json").exists():
-            self._remove(job)
+            self._terminate(job)
             if error is not None:
                 raise error
             return
-        # bootout prevents a loaded but not-yet-started job from running later.
-        self._remove(job)
-        identity = self._discover_identity(job)
-        if identity is not None:
-            # The named OS job owns termination/escalation. Avoid signalling a
-            # potentially reused numeric PGID from archived evidence.
-            while group_alive(identity) or process_alive(identity):
-                time.sleep(0.02)
+        self._terminate(job)
         atomic_json(job / "exited.json", {"physical_exit_confirmed": True, "time_ns": time.time_ns()})
         if error is not None:
             raise error
@@ -156,6 +126,7 @@ class LaunchdJobs:
             job = descriptor.parent
             value = read_json(descriptor)
             if (job / "exited.json").exists():
+                self._terminate(job)
                 if not (job / "revoked.json").exists():
                     if canonical_json(value["host"]) != canonical_json(self.host_spec.to_dict()):
                         raise ResourceOwnershipError("Old business grant uses another host; recover with its original host")
@@ -212,22 +183,11 @@ class LaunchdJobs:
                 job = directory / invocation_id
                 job.mkdir()
                 label = "dev.agentloom.job." + uuid4().hex
-                atomic_json(job / "description.json", {"label": label, "invocation_id": invocation_id,
+                atomic_json(job / "description.json", {"owner": self.owner, "label": label, "invocation_id": invocation_id,
                     "task": task.to_dict(), "host": self.host_spec.to_dict()})
-                plist = job / "job.plist"
-                plist.write_bytes(plistlib.dumps({"Label": label, "ProgramArguments": [sys.executable,
-                    "-m", "agentloom.execution.durable.job_entry", str(job)], "RunAtLoad": True,
-                    "KeepAlive": False, "AbandonProcessGroup": False, "ExitTimeOut": 5,
-                    "WorkingDirectory": str(Path.cwd()),
-                    "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-                        "PYTHONPATH": os.pathsep.join(str(Path(p or ".").resolve()) for p in sys.path)},
-                    "StandardOutPath": str(job / "stdout.log"), "StandardErrorPath": str(job / "stderr.log")}))
                 self.active[task.workflow_id] = job
-                # Finish this short OS control operation before cancellation can
-                # run bootout, preventing a late bootstrap after drain.
-                boot = self._command("bootstrap", self.domain, str(plist))
-            if boot.returncode:
-                raise ResourceOwnershipError("launchd bootstrap failed: " + boot.stderr.strip())
+                # Finish native admission before cancellation can run cleanup.
+                self._start(job)
             deadline = time.monotonic() + 30
             while not (job / "identity.json").exists():
                 if time.monotonic() > deadline:
@@ -241,6 +201,8 @@ class LaunchdJobs:
                     raise AdmissionStopped("Executor stopped before business authorization")
                 atomic_json(job / "authorized.json", {"invocation_id": invocation_id})
             while not job_exited(job):
+                if (job / "openclaw-cleanup-failed.json").exists():
+                    raise ResourceOwnershipError("OpenClaw cleanup failed; capacity remains retained")
                 await asyncio.sleep(0.05)
             atomic_json(job / "exited.json", {"physical_exit_confirmed": True, "time_ns": time.time_ns()})
             if not (job / "result.json").exists():
@@ -285,3 +247,70 @@ class LaunchdJobs:
             finally:
                 self.active.pop(task.workflow_id, None)
                 lock.release()
+
+
+class LaunchdJobs(OwnedJobs):
+    """Legacy Adapter, retained to drain previously loaded macOS jobs."""
+    owner = "launchd"
+
+    def __init__(self, root: Path, host: HostSpec):
+        if sys.platform != "darwin":
+            raise RuntimeError("The legacy launchd process owner is only available on macOS")
+        super().__init__(root, host)
+        self.domain = f"gui/{os.getuid()}"
+
+    def _command(self, *arguments):
+        return subprocess.run(["/bin/launchctl", *arguments], capture_output=True, text=True)
+
+    def _start(self, job: Path):
+        label = read_json(job / "description.json")["label"]
+        plist = job / "job.plist"
+        plist.write_bytes(plistlib.dumps({"Label": label, "ProgramArguments": [sys.executable,
+            "-m", "agentloom.execution.durable.job_entry", str(job)], "RunAtLoad": True,
+            "KeepAlive": False, "AbandonProcessGroup": False, "ExitTimeOut": 5,
+            "WorkingDirectory": str(Path.cwd()),
+            "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "PYTHONPATH": os.pathsep.join(str(Path(p or ".").resolve()) for p in sys.path)},
+            "StandardOutPath": str(job / "stdout.log"), "StandardErrorPath": str(job / "stderr.log")}))
+        boot = self._command("bootstrap", self.domain, str(plist))
+        if boot.returncode:
+            raise ResourceOwnershipError("launchd bootstrap failed: " + boot.stderr.strip())
+
+    def _remove(self, job: Path):
+        if (job / "unloaded.json").exists():
+            return
+        result = self._command("bootout", self.domain + "/" + read_json(job / "description.json")["label"])
+        if result.returncode != 0:
+            raise ResourceOwnershipError("launchd bootout failed: " + result.stderr.strip())
+        atomic_json(job / "unloaded.json", {"control_operation_completed": True})
+
+    def _discover_identity(self, job: Path):
+        path = job / "identity.json"
+        if path.exists():
+            return read_json(path)
+        for process in psutil.process_iter(["pid", "cmdline", "create_time"]):
+            argv = process.info["cmdline"] or []
+            if argv[-3:] == ["-m", "agentloom.execution.durable.job_entry", str(job)]:
+                try:
+                    group = os.getpgid(process.pid)
+                except ProcessLookupError:
+                    continue
+                identity = {"pid": process.pid, "creation": process.info["create_time"], "group": group}
+                if identity["pid"] != identity["group"]:
+                    raise ResourceOwnershipError("Recovered OS job no longer owns its group")
+                atomic_json(path, identity)
+                return identity
+        if (job / "authorized.json").exists():
+            raise ResourceOwnershipError("Authorized OS job lost its identity; refusing replacement")
+        return None
+
+    def _terminate(self, job: Path):
+        if read_json(job / "description.json").get("owner", "launchd") != self.owner:
+            raise ResourceOwnershipError("Use the original process owner to drain this invocation")
+        self._remove(job)
+        if (job / "exited.json").exists():
+            return
+        identity = self._discover_identity(job)
+        if identity is not None:
+            while group_alive(identity) or process_alive(identity):
+                time.sleep(0.02)

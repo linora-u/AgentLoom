@@ -1,20 +1,20 @@
 """Real Application/OS fault fixture; never used by product execution."""
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
-from threading import Event
 import time
+from pathlib import Path
+from threading import Event
 
 import psutil
 import pytest
-
 from agentloom.app import Application
 from agentloom.execution.durable import HostSpec
 from agentloom.execution.durable.files import atomic_json, read_json
 from agentloom.execution.resources import register_resource
+
 from test_support.worker_batch import batch_project
 
 
@@ -102,7 +102,16 @@ def main():
     next(fixture)  # Install this trusted fixture Runtime before preflight.
     try:
         with Application.open(application, project_root=project, file_logging=False) as app, app.durable(root=namespace) as execution:
-            execution.executor(["workflows/worker.yaml"], host=host).run(stop_token=stop)
+            jobs = None
+            if os.environ.get("AGENTLOOM_TEST_PROCESS_OWNER") == "launchd":
+                from agentloom.execution.durable.os_job import LaunchdJobs
+                jobs = LaunchdJobs(execution.root, host)
+            elif os.environ.get("AGENTLOOM_TEST_PROCESS_OWNER") == "openclaw":
+                from agentloom.execution.durable.openclaw_job import OpenClawJobs
+                jobs = OpenClawJobs(execution.root, host,
+                    runtime_root=Path(os.environ["AGENTLOOM_TEST_OPENCLAW_RUNTIME"]),
+                    node=os.environ["AGENTLOOM_TEST_OPENCLAW_NODE"])
+            execution.executor(["workflows/worker.yaml"], host=host, jobs=jobs).run(stop_token=stop)
     finally:
         try:
             next(fixture)
