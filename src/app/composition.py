@@ -16,6 +16,14 @@ if TYPE_CHECKING:
     from agentloom.schedules.mutations import ScheduleMutationService
 
 
+def build_durable_attempt_coordinator(root, host, *, jobs=None):
+    """One trusted default assembly for durable startup, stop and recovery."""
+    from agentloom.execution.durable.coordinator import AttemptCoordinator, LegacyCoordinator
+    if jobs is None:
+        return AttemptCoordinator(root, host)
+    return jobs if hasattr(jobs, "belongs_to") else LegacyCoordinator(jobs)
+
+
 def build_schedule_mutations(
     project_root: str | Path,
 ) -> ScheduleMutationService:
