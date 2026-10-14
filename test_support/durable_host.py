@@ -106,6 +106,17 @@ def main():
     host = HostSpec("test_support.durable_host:fixture_host", {"case": str(case)},
                     allow_replay=sys.argv[5] == "replay", max_attempts=1)
     patch = pytest.MonkeyPatch()
+    if os.environ.get("AGENTLOOM_TEST_ASYNCIO_THREADS"):
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        count = int(os.environ["AGENTLOOM_TEST_ASYNCIO_THREADS"])
+        configure = asyncio.BaseEventLoop.set_default_executor
+        executors = {}
+        def bounded_loop(loop, executor):
+            if loop not in executors:
+                executors[loop] = ThreadPoolExecutor(max_workers=count)
+            return configure(loop, executors[loop])
+        patch.setattr(asyncio.BaseEventLoop, "set_default_executor", bounded_loop)
     fixture = batch_project.__wrapped__(project, patch)
     next(fixture)  # Install this trusted fixture Runtime before preflight.
     try:

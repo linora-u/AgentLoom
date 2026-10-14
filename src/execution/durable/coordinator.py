@@ -170,6 +170,20 @@ class AttemptCoordinator:
             raise InvocationFailed(result.get("error") or {"message": "Worker failed"}, outcome=result)
         return result
 
+    async def _await_exit(self, resource):
+        # A native scope already has its own notification/cleanup owner. Do
+        # not occupy DBOS's shared executor thread for the model's lifetime.
+        # Control observations remain bounded; full drain keeps ownership.
+        while True:
+            observed = resource.observe()
+            if observed["physical_exit_confirmed"] or observed.get("not_started"):
+                await asyncio.to_thread(resource.wait_exited, timeout=1)
+                return
+            if observed["status"] == "cleanup_unconfirmed":
+                detail = observed.get("error") or {}
+                raise ResourceOwnershipError(detail.get("message", "Native cleanup remains unconfirmed"))
+            await asyncio.sleep(0.05)
+
     async def _drain(self, attempt, startup, authorization):
         original = None
         if startup is not None:
@@ -194,12 +208,12 @@ class AttemptCoordinator:
                 await asyncio.to_thread(self._cancel, attempt)
                 await asyncio.to_thread(self._revoke, attempt)
                 if attempt.resource is not None:
-                    await asyncio.to_thread(attempt.resource.wait_exited)
+                    await self._await_exit(attempt.resource)
                 elif original is not None:
                     # Only a launcher-certified not-started observation can
                     # permit release. An unknown launch failure retains scope.
                     resource = restore_resource(attempt.job)
-                    await asyncio.to_thread(resource.wait_exited)
+                    await self._await_exit(resource)
                 atomic_json(attempt.job / "exited.json", {"physical_exit_confirmed": True})
                 await asyncio.to_thread(self._revoke, attempt)
                 return
@@ -255,7 +269,7 @@ class AttemptCoordinator:
             attempt.resource = await asyncio.shield(startup)
             authorization = asyncio.create_task(asyncio.to_thread(self._authorize, attempt))
             await asyncio.shield(authorization)
-            await asyncio.to_thread(attempt.resource.wait_exited)
+            await self._await_exit(attempt.resource)
             atomic_json(job / "exited.json", {"physical_exit_confirmed": True})
             if not (job / "result.json").exists():
                 raise InvocationFailed({"message": "Application exited without a result", "category": "process_exit"})
