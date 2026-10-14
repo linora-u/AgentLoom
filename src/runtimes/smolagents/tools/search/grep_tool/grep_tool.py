@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from agentloom.execution.logging import get_logger
+from agentloom.execution.process import _close_preserving_error, spawn_registered_process
 from agentloom.execution.tool_governance.search import search_path_excluded
 
 logger = get_logger(__name__)
@@ -40,10 +41,9 @@ _SIGKILL_GRACE = 5
 
 # Exclude pattern utilities shared with glob_tool via search_utils.
 from agentloom.runtimes.smolagents.tools.search.search_utils import (
-    get_search_exclude_patterns,
     get_python_exclude_dirs,
+    get_search_exclude_patterns,
 )
-
 
 # =========================================================================
 # Public API
@@ -240,8 +240,8 @@ def _is_eagain_error(stderr: str) -> bool:
 def _run_ripgrep(args: List[str], timeout: int = _TIMEOUT_SECONDS, is_retry: bool = False) -> Tuple[int, str, str]:
     """Run ripgrep. Returns (returncode, stdout, stderr)."""
     try:
-        proc = subprocess.Popen(
-            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        proc, close_process = spawn_registered_process(
+            args, env=dict(os.environ), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
         )
     except OSError as exc:
@@ -266,6 +266,7 @@ def _run_ripgrep(args: List[str], timeout: int = _TIMEOUT_SECONDS, is_retry: boo
         stdout, stderr = "", ""
     finally:
         watchdog.cancel()
+        _close_preserving_error(close_process)
 
     rc = proc.returncode or 0
 

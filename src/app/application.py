@@ -451,7 +451,7 @@ class Application:
             try:
                 from agentloom.execution.managed_process import managed_attempt_scope
 
-                with managed_attempt_scope():
+                with managed_attempt_scope(independent=True):
                     agent = (
                         agent_factory()
                         if agent_factory is not None

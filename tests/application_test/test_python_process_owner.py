@@ -234,3 +234,126 @@ def test_cancel_during_real_bootstrap_construction_never_dispatches_native_comma
     assert receipt.outcomes[0].error.error_type == "InterruptedError", receipt.to_dict()
     assert not marker.exists() and not any(_alive(identity) for identity in bootstraps)
     assert not failures, failures
+
+
+@pytest.mark.parametrize("tool", ["grep", "glob", "snapshot"])
+def test_application_search_and_profile_helpers_join_default_native_owner(batch_project, tool):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.runtimes.smolagents.tools.search.glob_tool.glob_tool import glob_search
+    from agentloom.runtimes.smolagents.tools.search.grep_tool.grep_tool import grep_search
+    from agentloom.runtimes.smolagents.tools.shell.shell_snapshot import create_snapshot, remove_snapshot
+
+    root, application, _worker, probe, _write = batch_project
+    (root / "target.txt").write_text("native-search-target\n")
+
+    def behavior(_payload):
+        if tool == "grep":
+            assert "native-search-target" in grep_search("native-search-target", path=str(root))
+        elif tool == "glob":
+            assert "target.txt" in glob_search("*.txt", path=str(root))
+        else:
+            snapshot = create_snapshot("/bin/bash", env={"PATH": os.environ["PATH"], "HOME": str(root)})
+            try:
+                assert snapshot is not None
+            finally:
+                remove_snapshot(snapshot)
+        return {"tool": tool}
+
+    probe.behavior = behavior
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        receipt = app.worker("workflows/worker.yaml").map([WorkItem("helper", {"value": 1})])
+    assert receipt.outcomes[0].status == "success", receipt.to_dict()
+    descriptions = list(root.rglob("native_resources/*/description.json"))
+    assert descriptions, "Task helper bypassed the common native resource admission"
+    for description in descriptions:
+        assert json.loads(description.with_name("exited.json").read_text())["physical_exit_confirmed"]
+
+
+@pytest.mark.parametrize("recovered", [False, True])
+def test_application_retries_a_real_exit_receipt_write_failure_without_inventing_exit(batch_project, recovered):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.managed_process import ResourceCleanupError, recover_owned_process
+    from agentloom.execution.process import spawn_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    resources, anchors = [], []
+
+    def behavior(_payload):
+        process, _close = spawn_registered_process(
+            [sys.executable, "-c", "import time;time.sleep(120)"], env=dict(os.environ),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        directory = process.receipt_dir
+        resources.append(directory)
+        anchors.append(json.loads((directory / "description.json").read_text())["anchor"])
+        obstruction = directory / "exited.json"
+        obstruction.mkdir()  # Real os.replace failure in the independent owner.
+        try:
+            process.request_stop()
+            with pytest.raises(ResourceCleanupError) as caught:
+                process.wait_exited(timeout=5)
+            assert not process.observe()["physical_exit_confirmed"]
+            assert isinstance(caught.value.errno, int), "Original OS error code must survive the control channel"
+        finally:
+            obstruction.rmdir()
+        if recovered:
+            recovery = recover_owned_process(directory)
+            recovery.request_stop()
+            assert recovery.wait_exited(timeout=5)["physical_exit_confirmed"]
+        else:
+            _close()
+        return {"first_cleanup_error": str(caught.value)}
+
+    probe.behavior = behavior
+    try:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            receipt = app.worker("workflows/worker.yaml").map([WorkItem("retry", {"value": 1})])
+        assert receipt.outcomes[0].status == "success", receipt.to_dict()
+        assert resources and anchors
+        assert all(json.loads((directory / "exited.json").read_text())["physical_exit_confirmed"] for directory in resources)
+        assert not any(_alive(identity) for identity in anchors)
+    finally:
+        # Last-resort test cleanup is never used to satisfy the assertions.
+        for identity in anchors:
+            if _alive(identity):
+                psutil.Process(identity["pid"]).kill()
+
+
+def test_recovery_control_rejects_a_fragmented_wrong_generation_without_losing_owner(batch_project):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.process import spawn_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    identities = []
+
+    def behavior(_payload):
+        process, _close = spawn_registered_process(
+            [sys.executable, "-c", "import time;time.sleep(120)"], env=dict(os.environ),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        identities.append({"pid": process.pid, "creation": psutil.Process(process.pid).create_time()})
+        description = json.loads((process.receipt_dir / "description.json").read_text())
+        identities.append(description["anchor"])
+        with socket.socket(socket.AF_UNIX) as channel:
+            channel.connect(description["endpoint"])
+            channel.sendall(b'{"op":')
+            time.sleep(.03)  # Explicitly fragment the stream request.
+            channel.sendall(b'"stop","generation":"wrong-generation"}\n')
+        time.sleep(.03)
+        assert process.observe()["status"] == "running"
+        assert all(_alive(identity) for identity in identities)
+        return {"alive_after_wrong_generation": True}
+
+    probe.behavior = behavior
+    try:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            receipt = app.worker("workflows/worker.yaml").map([WorkItem("control", {"value": 1})])
+        assert receipt.outcomes[0].status == "success", receipt.to_dict()
+        assert not any(_alive(identity) for identity in identities)
+    finally:
+        for identity in identities:
+            if _alive(identity):
+                psutil.Process(identity["pid"]).kill()
