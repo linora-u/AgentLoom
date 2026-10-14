@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 import plistlib
 import subprocess
 import sys
 import time
+from pathlib import Path
 from threading import Lock
 from uuid import uuid4
 
-from filelock import FileLock, Timeout
 import psutil
+from filelock import FileLock, Timeout
 
 from .client import TaskDescription, canonical_json
 from .files import atomic_json, read_json
@@ -25,7 +25,7 @@ from .host import HostSpec
 
 
 class ResourceOwnershipError(RuntimeError):
-    pass
+    category = "infrastructure"
 
 
 class AdmissionStopped(ResourceOwnershipError):

@@ -272,3 +272,35 @@ def test_failed_dbos_terminal_commit_keeps_capacity_until_public_reconciliation(
             wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", process)
             assert len([event for event in events(case) if event["event"] == "runtime_started"
                         and event["item_id"] == "old"]) == 1
+
+
+def test_executor_stop_reports_unpersisted_terminal_and_later_recovery_is_clean(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    fault = case / "block-terminal-write"
+    fault.touch()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        old = worker.submit(WorkItem("old", {"value": 1, "action": "terminal-persistence-failure"}))
+        with consumer(root, application, namespace, case) as process:
+            wait_for(lambda: bool(execution.resource_status(old.workflow_id)) and
+                     execution.resource_status(old.workflow_id)[0].get("persistence_error"), process)
+            replacement = worker.submit(WorkItem("replacement", {"value": 2}))
+            process.send_signal(signal.SIGTERM)
+            process.wait(timeout=12)
+            assert process.returncode != 0, "A missing mandatory terminal record was reported as a clean executor stop"
+            assert "terminal completion remains unconfirmed" in (case / "consumer.log").read_text()
+            assert execution.status(old.workflow_id).status == "PENDING"
+            assert not any(event["event"] == "runtime_started" and event["item_id"] == "replacement"
+                           for event in events(case))
+        fault.unlink()
+        execution.cancel(old.workflow_id)
+        execution.resume(old.workflow_id)
+        with consumer(root, application, namespace, case) as recovered:
+            wait_for(lambda: execution.status(old.workflow_id).status == "SUCCESS", recovered)
+            wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", recovered)
+            assert len([event for event in events(case) if event["event"] == "runtime_started"
+                        and event["item_id"] == "old"]) == 1
+        assert recovered.returncode == 0
+        assert execution.storage_status()["last_error"]["sqlite_errorcode"] == sqlite3.SQLITE_FULL

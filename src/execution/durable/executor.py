@@ -113,15 +113,23 @@ class DurableExecutor:
                 if idle_since is not None and time.monotonic() - idle_since >= idle_timeout:
                     break
         finally:
-            self.jobs.stop_admission()
-            if launched:
-                for workflow_id in self.jobs.active_workflows():
-                    self.execution.client.cancel_workflow(workflow_id)
-                # The public preemptible async step awaits its cleanup. Status
-                # may already be CANCELLED while this concrete scope is alive.
-                while self.jobs.active_workflows():
-                    time.sleep(0.05)
-                DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=30)
-            if trace is not None:
-                detach_persistence_trace(trace)
-            lock.release()
+            try:
+                self.jobs.stop_admission()
+                if launched:
+                    for workflow_id in self.jobs.active_workflows():
+                        self.execution.client.cancel_workflow(workflow_id)
+                    # The public preemptible async step awaits its cleanup.
+                    # CANCELLED does not certify physical drain. Likewise,
+                    # destroy() does not certify its terminal record committed.
+                    while self.jobs.active_workflows():
+                        time.sleep(0.05)
+                    DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=30)
+                    pending = self.execution.client.list_workflows(application_name=self.execution.namespace,
+                        status=["PENDING"], load_input=False, load_output=False)
+                    if pending:
+                        raise ResourceOwnershipError(
+                            "Mandatory DBOS terminal completion remains unconfirmed; inspect storage_status before recovery")
+            finally:
+                if trace is not None:
+                    detach_persistence_trace(trace)
+                lock.release()
