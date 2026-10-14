@@ -869,6 +869,7 @@ class RuntimeRegistration:
     runtime_id: str
     capabilities: RuntimeCapabilities
     factory: RuntimeFactory | None = None
+    readiness: Callable[[], None] | None = None
 
 
 class RuntimeRegistry:
@@ -887,6 +888,7 @@ class RuntimeRegistry:
         *,
         capabilities: RuntimeCapabilities,
         factory: RuntimeFactory | None = None,
+        readiness: Callable[[], None] | None = None,
     ) -> None:
         if not runtime_id:
             raise ValueError("runtime_id must be non-empty")
@@ -896,7 +898,14 @@ class RuntimeRegistry:
             runtime_id=runtime_id,
             capabilities=capabilities,
             factory=factory,
+            readiness=readiness,
         )
+
+    def preflight(self, runtime_id: object) -> None:
+        """Check dependencies without constructing mutable runtime state."""
+        registration = self.validate(runtime_id)
+        if registration.readiness is not None:
+            registration.readiness()
 
     def validate(
         self,

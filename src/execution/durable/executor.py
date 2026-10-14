@@ -70,6 +70,8 @@ class DurableExecutor:
             for worker in self.workers.values():
                 worker.verify_queue()
             self.jobs.preflight()
+            for worker in self.workers.values():
+                worker.worker.preflight_runtime()
             self.jobs.recover()
             if stop.is_set():
                 return

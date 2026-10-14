@@ -88,5 +88,10 @@ def build_builtin_runtime_registry(
 
         return PiRuntime(definition)
 
-    registry.register("pi", capabilities=PI_CAPABILITIES, factory=pi_factory)
+    def pi_readiness() -> None:
+        from agentloom.runtimes.pi.install import installed_pi_entry
+
+        installed_pi_entry()  # Read/probe only; installation remains an explicit CLI operation.
+
+    registry.register("pi", capabilities=PI_CAPABILITIES, factory=pi_factory, readiness=pi_readiness)
     return registry

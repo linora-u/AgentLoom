@@ -633,6 +633,13 @@ class BoundWorker:
             }
         )
 
+    def preflight_runtime(self) -> None:
+        """Check this trusted Worker's dependencies without creating its Runtime."""
+        from agentloom.app.validation import build_builtin_runtime_registry
+
+        self.owner._require_open()
+        build_builtin_runtime_registry().preflight(self._definition["agent_runtime"])
+
     def _invoke(self, item: WorkItem, index: int) -> WorkerOutcome:
         try:
             return self.invoke(item, index=index)
