@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
-import sys
 import tempfile
 import time
 import uuid
@@ -15,6 +14,8 @@ from threading import Lock
 from typing import Any
 
 import psutil
+
+from agentloom.execution.cleanup import close_preserving_error as _close_preserving_error
 
 _PROCESS_RUN_TOKEN_ENV = "AGENTLOOM_SUBPROCESS_RUN_TOKEN"
 
@@ -306,19 +307,6 @@ def run_process_to_fds(
         raise CapturedProcessTimeout(f"process timed out {timeout_text}") from exc
     finally:
         _close_preserving_error(close_process)
-
-
-def _close_preserving_error(close):
-    original = sys.exception()
-    try:
-        close()
-    except BaseException as cleanup:
-        if original is None:
-            raise
-        if not isinstance(original, Exception):
-            original.managed_cleanup_errors = (*getattr(original, "managed_cleanup_errors", ()), cleanup)
-        else:
-            raise BaseExceptionGroup("Native execution and cleanup failed", [original, cleanup]) from None
 
 
 def run_registered_process(command, *, env=None, input=None, capture_output=False, timeout=None, check=False, **options):

@@ -20,6 +20,52 @@ batch_project = _batch_project
 pytestmark = pytest.mark.skipif(sys.platform not in {"darwin", "linux"}, reason="managed POSIX execution")
 
 
+def test_application_keeps_native_cleanup_diagnostic_when_scope_retry_succeeds(batch_project, monkeypatch):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem, WorkerBatchError
+    from agentloom.execution.process import CapturedProcessTimeout, run_captured_process
+
+    root, application, _worker, probe, _write = batch_project
+    fault = root / "fail-native-exit-write"
+    fault.touch()
+    injection = root / "filesystem-fault"
+    injection.mkdir()
+    (injection / "sitecustomize.py").write_text(
+        "import errno,os\nfrom pathlib import Path\n_replace=os.replace\n"
+        f"_fault=Path({str(fault)!r})\n"
+        "def replace(source,target,*args,**kwargs):\n"
+        "    if _fault.exists() and Path(target).name=='exited.json':\n"
+        "        raise OSError(errno.EIO,'original native cleanup write failure')\n"
+        "    return _replace(source,target,*args,**kwargs)\n"
+        "os.replace=replace\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(injection) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    errors = []
+
+    def behavior(_payload):
+        try:
+            run_captured_process([sys.executable, "-c", "import time;time.sleep(120)"],
+                                 env=dict(os.environ), cwd=str(root), shell=False, timeout=.1,
+                                 stdin=b"", stdout_limit=32, stderr_limit=32)
+        except BaseException as error:
+            errors.append(error)
+            fault.unlink()  # The later attempt-scope close can now actually succeed.
+            raise
+
+    probe.behavior = behavior
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        with pytest.raises(WorkerBatchError) as caught:
+            app.worker("workflows/worker.yaml").map([WorkItem("cleanup", {"value": 1})])
+    assert caught.value.phase == "cleanup"
+    outcome = caught.value.outcomes[0]
+    assert outcome.error.category == "infrastructure"
+    assert outcome.cleanup_errors and "original native cleanup write failure" in outcome.cleanup_errors[0].message
+    assert isinstance(errors[0].exceptions[0], CapturedProcessTimeout)
+    assert errors[0].managed_cleanup_errors[0].errno == 5
+    assert all(json.loads(path.read_text())["physical_exit_confirmed"]
+               for path in root.rglob("native_resources/*/exited.json"))
+
+
 def _alive(identity):
     try:
         process = psutil.Process(identity["pid"])

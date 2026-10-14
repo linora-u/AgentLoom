@@ -450,20 +450,13 @@ def managed_attempt_scope(*, independent=False):
             raise InterruptedError("Native resource admission is closed")
         yield
     finally:
-        original = sys.exception()
+        from agentloom.execution.cleanup import close_preserving_error
+
+        def close_scope():
+            scope.close()
+            unregister_resource(key)
+
         try:
-            try:
-                scope.close()
-                unregister_resource(key)
-            except BaseException as cleanup:
-                if original is None:
-                    raise
-                if not isinstance(original, Exception):
-                    original.managed_cleanup_errors = getattr(cleanup, "managed_cleanup_errors", (cleanup,))
-                else:
-                    error = BaseExceptionGroup("Invocation and native cleanup failed", [original, cleanup])
-                    error.category = "infrastructure"
-                    error.managed_cleanup_errors = getattr(cleanup, "managed_cleanup_errors", (cleanup,))
-                    raise error from None
+            close_preserving_error(close_scope)
         finally:
             _SCOPE.reset(token)
