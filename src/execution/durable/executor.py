@@ -31,11 +31,9 @@ class DurableExecutor:
         app = execution.application
         self.host = host or HostSpec("agentloom.execution.durable.host:application_host",
             {"application": str(app.application_root), "project_root": str(app.project_root)})
-        if jobs is None:
-            from .openclaw_job import OpenClawJobs
-            jobs = OpenClawJobs(execution.root, self.host)
-        self.jobs = jobs
-        if self.jobs.root != execution.root or self.jobs.host_spec != self.host:
+        from agentloom.app.composition import build_durable_attempt_coordinator
+        self.jobs = build_durable_attempt_coordinator(execution.root, self.host, jobs=jobs)
+        if not self.jobs.belongs_to(execution.root, self.host):
             raise ValueError("Process owner must belong to this execution root and trusted host")
         self._used = False
 
@@ -53,7 +51,7 @@ class DurableExecutor:
             raise RuntimeError("A durable executor requires a fresh dedicated process")
         self._used = True
         stop = stop_token or Event()
-        self.jobs.stop_token = stop
+        self.jobs.bind_stop(stop)
         root = self.execution.root
         lock = FileLock(root / "executor.lock")
         try:
@@ -104,18 +102,18 @@ class DurableExecutor:
                     continue
                 rows = self.execution.client.list_workflows(application_name=self.execution.namespace,
                     status=["ENQUEUED", "PENDING"], load_input=False, load_output=False)
-                idle = not rows and not self.jobs.active
+                idle = not rows and not self.jobs.active_workflows()
                 idle_since = (idle_since or time.monotonic()) if idle else None
                 if idle_since is not None and time.monotonic() - idle_since >= idle_timeout:
                     break
         finally:
             self.jobs.stop_admission()
             if launched:
-                for workflow_id in list(self.jobs.active):
+                for workflow_id in self.jobs.active_workflows():
                     self.execution.client.cancel_workflow(workflow_id)
                 # The public preemptible async step awaits its cleanup. Status
                 # may already be CANCELLED while this concrete scope is alive.
-                while self.jobs.active:
+                while self.jobs.active_workflows():
                     time.sleep(0.05)
                 DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=30)
             lock.release()
