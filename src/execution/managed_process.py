@@ -71,6 +71,7 @@ class OwnedProcess:
         self._guardian = self._channel = self._reader = None
         self.stdin = self.stdout = self.stderr = None
         self._released = False
+        self._constructing = True
         scope = _SCOPE.get()
         try:
             with self._launch_lock:
@@ -103,7 +104,7 @@ class OwnedProcess:
                 self._raise_error()
             if not gated:
                 self.release()
-        except Exception as error:
+        except BaseException as error:
             if not self._released:
                 # Only our bootstrap exists before release. It cannot run the
                 # native command, so safely retire it and certify no start.
@@ -111,12 +112,30 @@ class OwnedProcess:
                     if self._guardian.poll() is None:
                         self._guardian.kill()
                     self._guardian.wait()
-                self._extinct = self._ended = True
+                if self.receipt_dir is not None and (self.receipt_dir / "description.json").exists():
+                    from agentloom.execution._process_guardian import atomic_json
+
+                    try:
+                        atomic_json(self.receipt_dir / "exited.json", {
+                            "physical_exit_confirmed": True, "generation": self._generation,
+                        })
+                    except OSError as persistence_error:
+                        # Actual bootstrap wait still proves no start to this
+                        # caller. Keep persistence failure as a separate cause;
+                        # recovery will never accept a missing disk certificate.
+                        error.managed_cleanup_errors = (persistence_error,)
+                with self._condition:
+                    self._extinct = self._ended = True
+                    self._condition.notify_all()
                 if self._channel is not None:
                     self._channel.close()
                 error.physical_exit_confirmed = True
                 error.not_started = True
             raise
+        finally:
+            with self._condition:
+                self._constructing = False
+                self._condition.notify_all()
 
     def _send(self, value):
         with self._send_lock:
@@ -192,10 +211,25 @@ class OwnedProcess:
                 raise ResourceCleanupError("Native root result was not observed")
             return self.returncode
 
+    def communicate(self, input=None, timeout=None):
+        # The bootstrap's Popen owns only stdio descriptors. Its independent
+        # reader observes control frames, so binary/text payloads never mix
+        # with lifecycle messages and pipe backpressure cannot delay cleanup.
+        deadline = None if timeout is None else monotonic() + timeout
+        try:
+            output = self._guardian.communicate(input, timeout)
+            self.wait(None if deadline is None else max(0, deadline - monotonic()))
+        except subprocess.TimeoutExpired as error:
+            error.cmd = self.args
+            raise
+        return output
+
     def wait_exited(self, timeout=None):
         deadline = None if timeout is None else monotonic() + timeout
         with self._condition:
-            if not self._condition.wait_for(lambda: self._extinct or self._error or self._ended, timeout):
+            if not self._condition.wait_for(
+                lambda: self._extinct or (not self._constructing and (self._error or self._ended)), timeout,
+            ):
                 raise ResourceCleanupError("Native cleanup remains unconfirmed")
             if not self._extinct:
                 self._raise_error()
