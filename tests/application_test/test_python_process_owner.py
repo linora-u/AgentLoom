@@ -357,3 +357,45 @@ def test_recovery_control_rejects_a_fragmented_wrong_generation_without_losing_o
         for identity in identities:
             if _alive(identity):
                 psutil.Process(identity["pid"]).kill()
+
+
+def test_native_root_result_survives_its_receipt_write_failure_and_retry(batch_project):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.managed_process import ResourceCleanupError
+    from agentloom.execution.process import spawn_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    resources, anchors = [], []
+
+    def behavior(_payload):
+        process, _close = spawn_registered_process(
+            [sys.executable, "-c", "import time,sys;time.sleep(.2);sys.exit(7)"], env=dict(os.environ),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        resources.append(process.receipt_dir)
+        anchors.append(json.loads((process.receipt_dir / "description.json").read_text())["anchor"])
+        obstruction = process.receipt_dir / "root-result.json"
+        obstruction.mkdir()
+        try:
+            assert process.wait(timeout=5) == 7, "Observed native exit code is independent of receipt storage"
+            with pytest.raises(ResourceCleanupError) as caught:
+                process.wait_exited(timeout=5)
+            assert isinstance(caught.value.errno, int)
+            assert not process.observe()["physical_exit_confirmed"]
+        finally:
+            obstruction.rmdir()
+        _close()
+        return {"actual_root_code": process.returncode}
+
+    probe.behavior = behavior
+    try:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            receipt = app.worker("workflows/worker.yaml").map([WorkItem("result", {"value": 1})])
+        assert receipt.outcomes[0].status == "success", receipt.to_dict()
+        assert all(json.loads((directory / "root-result.json").read_text())["returncode"] == 7 for directory in resources)
+        assert not any(_alive(identity) for identity in anchors)
+    finally:
+        for identity in anchors:
+            if _alive(identity):
+                psutil.Process(identity["pid"]).kill()
