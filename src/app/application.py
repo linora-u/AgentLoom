@@ -449,12 +449,15 @@ class Application:
         agent = None
         with bind_config(self.project_config):
             try:
-                agent = (
-                    agent_factory()
-                    if agent_factory is not None
-                    else YamlConfiguredAgent(config=deepcopy(definition), logger=self.logger)
-                )
-                output = agent.run(additional_args=item.mutable_input(), invocation_evidence=evidence)
+                from agentloom.execution.managed_process import managed_attempt_scope
+
+                with managed_attempt_scope():
+                    agent = (
+                        agent_factory()
+                        if agent_factory is not None
+                        else YamlConfiguredAgent(config=deepcopy(definition), logger=self.logger)
+                    )
+                    output = agent.run(additional_args=item.mutable_input(), invocation_evidence=evidence)
             except BaseException as exc:
                 error = exc
         report = evidence.report
@@ -468,6 +471,9 @@ class Application:
                 for entry in report.cleanup_errors
             )
         )
+        if error is not None:
+            cleanup += tuple(CleanupDiagnostic("native_scope", type(entry).__name__, str(entry))
+                             for entry in getattr(error, "managed_cleanup_errors", ()))
         primary_error = report.primary_error if report is not None else None
         if primary_error is None:
             primary_error = error

@@ -9,8 +9,8 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
 from threading import Lock
+from typing import Any, Callable
 
 import psutil
 
@@ -186,6 +186,7 @@ def spawn_registered_process(
     The callback is idempotent only after actual tree termination succeeds;
     a failed callback retains its original resource owner for cleanup retry.
     """
+    from agentloom.execution.managed_process import launch_owned_process, native_owner_active
     from agentloom.execution.process_scope import child_starts_new_session
     from agentloom.execution.resources import register_resource, unregister_resource
 
@@ -195,6 +196,7 @@ def spawn_registered_process(
     process = None
     cancelled = False
     stopped = False
+    managed = native_owner_active()
     admission = Lock()
 
     def close_process() -> None:
@@ -202,7 +204,10 @@ def spawn_registered_process(
         with admission:
             cancelled = True
             if process is not None and not stopped:
-                terminate_process_tree(process, token)
+                if managed:
+                    process.close()
+                else:
+                    terminate_process_tree(process, token)
                 stopped = True
 
     register_resource(key, close_process)
@@ -210,8 +215,9 @@ def spawn_registered_process(
         with admission:
             if cancelled:
                 raise InterruptedError("Execution resources are closed")
-            process = subprocess.Popen(command, env=process_env,
-                                       start_new_session=child_starts_new_session(), **options)
+            process = (launch_owned_process(command, env=process_env, **options) if managed else
+                       subprocess.Popen(command, env=process_env,
+                                        start_new_session=child_starts_new_session(), **options))
     except BaseException:
         close_process()
         unregister_resource(key)
