@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sys
 import time
 import traceback
+from pathlib import Path
 
 import psutil
 
@@ -16,22 +16,25 @@ from .host import HostSpec, exception_outcomes
 
 def main():
     job = Path(sys.argv[1]).resolve(strict=True)
-    if os.getpid() != os.getpgrp():
-        raise RuntimeError("OS job must own its process group")
     atomic_json(job / "identity.json", {"pid": os.getpid(), "creation": psutil.Process().create_time(),
                                        "group": os.getpgrp()})
     # No host code, model request or business permission before acknowledgment.
     while not (job / "authorized.json").exists():
+        if (job / "cancelled.json").exists():
+            raise RuntimeError("Execution attempt cancelled before authorization")
         time.sleep(0.02)
     descriptor = read_json(job / "description.json")
     task = TaskDescription.from_dict(descriptor["task"])
     from agentloom.execution.process_scope import bind_managed_process_scope
 
+    from .authorization import assert_current_attempt, bind_attempt_authorization
+
     try:
-        with bind_managed_process_scope():
+        with bind_managed_process_scope(), bind_attempt_authorization(job, descriptor["invocation_id"]):
             # Factory imports/construction are part of the isolated invocation,
             # including any Runtime/tool transport they initialize.
             host = HostSpec(**descriptor["host"]).build()
+            assert_current_attempt()
             result = host.invoke(task, descriptor["invocation_id"])
         atomic_json(job / "result.json", {"result": result})
     except BaseException as error:

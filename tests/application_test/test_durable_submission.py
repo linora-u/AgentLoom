@@ -1,18 +1,51 @@
 """Public Application submissions using the real DBOS SQLite client."""
 import json
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 from agentloom.app import Application
 from agentloom.execution.concurrency import WorkItem
 from agentloom.execution.durable import QueueDeclarationConflict, TaskInputConflict
 from jsonschema import ValidationError
+
 from test_support.worker_batch import batch_project as _batch_project
 
 batch_project = _batch_project
+
+
+def test_durable_queue_keeps_persisted_and_live_capacity_equal(batch_project):
+    root, application, _, _, write = batch_project
+    write(application / "config/system.yaml", {"worker_execution": {"defaults": {"concurrency": 2}}})
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=root / "persistent") as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        worker.submit(WorkItem("one", {"value": 1}))
+        queue = execution.client.retrieve_queue(worker.queue_name)
+        assert queue.worker_concurrency == queue.global_concurrency == 2
+
+
+def test_queued_work_has_no_physical_attempt_before_consumer_admission(batch_project):
+    root, application, _, _, _ = batch_project
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=root / "persistent") as execution:
+        handle = execution.worker("workflows/worker.yaml").submit(WorkItem("queued", {"value": 1}))
+        assert execution.status(handle.workflow_id).status == "ENQUEUED"
+        assert execution.resource_status(handle.workflow_id) == []
+
+
+def test_stopped_namespace_upgrades_legacy_queue_without_losing_work(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace = root / "persistent"
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        handle = worker.submit(WorkItem("preserved", {"value": 1}))
+        execution.client.retrieve_queue(worker.queue_name).set_global_concurrency(None)
+        assert execution.queues_need_migration(["workflows/worker.yaml"])
+        execution.migrate_queues(["workflows/worker.yaml"])
+        assert not execution.queues_need_migration(["workflows/worker.yaml"])
+        assert execution.worker("workflows/worker.yaml").queue_name == worker.queue_name
+        assert execution.status(handle.workflow_id).status == "ENQUEUED"
 
 
 def test_durable_identity_input_snapshot_and_atomic_conflict(batch_project):
