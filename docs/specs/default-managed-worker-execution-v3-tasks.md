@@ -34,6 +34,8 @@
 
 ## 当前进展
 
-- 已完成基线门槛和开发 worktree 准备。
-- #124 按源码参考路线重新核对最小实现，#125 移除安装接法；旧 SDK 路线不再实施。
-- #126–#129 尚待实施和验收。
+- #124–#128 的实现已合入 integration：默认 Python 资源监护、撤销原包安装、DBOS 授权及恢复、有限 map 和 News 统一执行层。DBOS 保持唯一持久调度器，旧 SDK 路线已移除。
+- #129 的本地验收完成：macOS／Linux 公开故障矩阵、真实 Pi／MCP／smol、完整 2025-08-18 DeepSeek v4.1／AnySearch、封存和正式计分均有实际证据。当前 76 个任务全部 SUCCESS，两轮 96 个作用域确认退出；18 个原始 output 文件哈希不变。
+- 最终 CLI 因果修复及 43 项回归通过，Spec 和 Standards 两轴复评均无剩余发现。初筛／精筛源码为 `62dd0aeb`，校验 retry／补充任务为 `7a4d6787`，CLI 合入为 `07b93ba9`；完整日期没有因 CLI 改动重新计算。
+- [验收记录与证据索引](../reviews/default-managed-worker-execution-v3-acceptance.md) 按构建、入口和范围区分已有证据。历史 SQLite 522 仍是独立未定因事项。
+- [private PR #15](https://github.com/linora-u/AgentLoom-private/pull/15) 通过既有 public-sync 流程导出公开代码，四个必需 public 检查通过后协调两个 main；实际交付状态以 PR 和 Issues 为准。保留资料后删除本任务全部开发 worktree，保留同步状态分支。

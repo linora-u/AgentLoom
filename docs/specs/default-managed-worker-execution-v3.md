@@ -1,6 +1,8 @@
 # 默认受管并发执行规格
 
-规格日期：2026-10-14。状态：实施中；按用户最新要求修订为源码参考路线。
+规格日期：2026-10-14。状态：实施与本地验收完成；main 同步由 [private PR #15](https://github.com/linora-u/AgentLoom-private/pull/15) 协调。采用源码参考路线。
+
+[最终验收记录](../reviews/default-managed-worker-execution-v3-acceptance.md) 记录 macOS／Linux 公开故障矩阵、完整 2025-08-18 NewsAgent、两轮源码边界、官方计分、资源退出及最终 CLI 复评。下文的问题描述与已有原型证据保留其规格制定时的事实，不能代替该最终验收。
 
 本规格汇总有限 Worker 并发、持久执行、NewsAgent 接入及 OpenClaw 机制研究的最新决定。它替代早期方案中的自研持久调度内核、系统服务部署要求和用户选择进程 owner 的配置；既有业务规则、有限 Batch 合同和显式输出预算合同继续有效。
 
