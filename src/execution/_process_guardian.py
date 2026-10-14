@@ -61,6 +61,7 @@ class Guardian:
         self.temporary = None
         self.known_members = set()
         self.cleanup_request = None
+        self.cleanup_sequence = 0
 
     def send(self, value):
         if not self.parent_lost:
@@ -117,7 +118,7 @@ class Guardian:
         self.command = command
         self.receipt_dir = Path(command["receipt_dir"]) if command.get("receipt_dir") else None
         identity = {"pid": os.getpid(), "creation": psutil.Process().create_time(), "group": os.getpgrp()}
-        self.description = {"version": 1, "generation": command["generation"], "anchor": identity,
+        self.description = {"version": 2, "generation": command["generation"], "anchor": identity,
                             "parent": command["parent"]}
         if self.receipt_dir is not None:
             self.receipt_dir.mkdir(parents=True, exist_ok=True)
@@ -159,12 +160,19 @@ class Guardian:
     def stop(self, sig="SIGKILL", request_id=None):
         if request_id is not None:
             self.cleanup_request = request_id
+        self.cleanup_sequence += 1
         self.stopping = True  # Synchronous gate revocation precedes cleanup.
         self.cleanup_requested = True
         self.cleanup_at = time.monotonic()
+        self.send(self.cleanup_acknowledgement())
         if sig == "SIGTERM" and self.process is not None and self.process.poll() is None:
             self.process.terminate()
             self.cleanup_at += .3
+
+    def cleanup_acknowledgement(self):
+        return {"event": "cleanup_started", "request_id": self.cleanup_request,
+                "cleanup_sequence": self.cleanup_sequence,
+                "generation": self.description["generation"] if self.description else None}
 
     def cleanup(self):
         # Keep the anchor alive: group identity cannot be reassigned while this
@@ -189,7 +197,7 @@ class Guardian:
 
     def failure(self, error, event="cleanup_error"):
         detail = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure",
-                  "request_id": self.cleanup_request,
+                  "request_id": self.cleanup_request, "cleanup_sequence": self.cleanup_sequence,
                   **{name: getattr(error, name) for name in ("errno", "sqlite_errorcode", "sqlite_errorname")
                      if getattr(error, name, None) is not None}}
         if self.receipt_dir is not None:
@@ -237,6 +245,10 @@ class Guardian:
                         if (isinstance(message, dict) and message.get("op") == "stop"
                                 and message.get("generation") == self.description["generation"]):
                             self.stop(request_id=message.get("request_id"))
+                            try:
+                                client.sendall(json.dumps(self.cleanup_acknowledgement()).encode() + b"\n")
+                            except OSError:
+                                pass  # Accepted cleanup does not depend on the recovery caller remaining alive.
                     continue
                 chunk = self.channel.recv(65536)
                 if not chunk:
