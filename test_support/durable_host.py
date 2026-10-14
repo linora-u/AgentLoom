@@ -73,6 +73,40 @@ class FixtureHost:
 
         def behavior(payload):
             emit(self.root, "runtime_started", item_id=task.item.id, invocation_id=invocation_id)
+            if action == "captured-nested-timeout":
+                from agentloom.execution.process import CapturedProcessTimeout, run_captured_process
+
+                try:
+                    run_captured_process([sys.executable, value["value"]["entry"]],
+                        cwd=str(root), env=dict(os.environ), stdin=b"", timeout=8,
+                        stdout_limit=1024, stderr_limit=1024, shell=False)
+                except CapturedProcessTimeout:
+                    emit(self.root, "captured_nested_timeout", item_id=task.item.id)
+                    return payload
+                raise AssertionError("Long nested Application did not reach its actual capture timeout")
+            if action in {"detached-captured", "detached-mcp"}:
+                from agentloom.execution.process import run_captured_process
+                from agentloom.integrations.mcp.client import AgentLoomMCPClient
+                from mcp import StdioServerParameters
+
+                peer = Path(__file__).with_name("detached_resource_peer.py")
+                marker = self.root / f"detached-{task.item.id}.json"
+                # Deliberately minimal/forged tool-input environment. Only the
+                # verified scope, rather than these supplied markers, may own
+                # the actual transport and its ordinary detached descendant.
+                environment = value["value"].get("env", {})
+                if action == "detached-captured":
+                    run_captured_process([sys.executable, str(peer), str(marker), "captured"],
+                        cwd=str(root), env=environment, stdin=b"", timeout=90,
+                        stdout_limit=1024, stderr_limit=1024, shell=False)
+                else:
+                    client = AgentLoomMCPClient(StdioServerParameters(
+                        command=sys.executable, args=[str(peer), str(marker), "mcp"], env=environment,
+                    ))
+                    register_resource("detached-mcp", client.disconnect)
+                    tool = next(tool for tool in client.get_tools() if tool.definition.name == "spawn")
+                    assert tool.forward()["answer"] == 42
+                    time.sleep(90)
             if action in {"failure", "crash", "held"}:
                 child = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(120)"], start_new_session=False)
                 atomic_json(self.root / f"native-{task.item.id}.json", {"pid": child.pid,

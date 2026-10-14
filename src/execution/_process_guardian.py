@@ -2,7 +2,8 @@
 
 Only stdlib and the existing psutil dependency are used. The guardian pins its
 own group identity until every managed member has exited; it never schedules
-business work. Descendants must remain in this owned process group.
+business work. Managed descendants retain the group or the delegated scope
+generation, including ordinary detached Shell children.
 """
 from __future__ import annotations
 
@@ -18,6 +19,8 @@ import time
 from pathlib import Path
 
 import psutil
+from agentloom.execution.process import _marked_processes
+from agentloom.execution.process_scope import NATIVE_SCOPE_GENERATION_ENV, _guardian_generation
 
 SCOPE_FD_ENV = "AGENTLOOM_NATIVE_SCOPE_FD"
 
@@ -59,7 +62,7 @@ class Guardian:
         self.description = None
         self.listener = None
         self.temporary = None
-        self.known_members = set()
+        self.known_members = {}
         self.cleanup_request = None
         self.cleanup_sequence = 0
 
@@ -72,7 +75,14 @@ class Guardian:
                 self.stop()
 
     def members(self):
-        members = []
+        # Retain exact psutil identities after detachment, reparenting or
+        # termination: an unreadable zombie environment is not proof of exit.
+        members = {pid: process for pid, process in self.known_members.items() if process.is_running()}
+        # Only our framework-generated generation is delegated to this scope;
+        # a public PGID in an unrelated process's environment is not authority.
+        if self.command is not None:
+            members.update(_marked_processes(self.command["generation"], exclude={os.getpid()},
+                                             env_name=NATIVE_SCOPE_GENERATION_ENV))
         for process in psutil.process_iter(["pid"]):
             if process.pid <= 0 or process.pid == os.getpid():
                 continue
@@ -81,8 +91,7 @@ class Guardian:
                     # psutil's signaling methods verify create_time against PID
                     # reuse. Keep this exact handle through freeze and kill.
                     process.create_time()
-                    members.append(process)
-                    self.known_members.add(process.pid)
+                    members[process.pid] = process
             except (ProcessLookupError, psutil.NoSuchProcess):
                 pass
             except (PermissionError, psutil.AccessDenied):
@@ -90,7 +99,15 @@ class Guardian:
                     raise  # Known owned identities cannot silently disappear.
                 if process.uids().real == os.getuid():
                     raise  # Potential managed member remains unconfirmed.
-        return members
+        self.known_members = members
+        return list(members.values())
+
+    def nested_guardian(self, process):
+        # An actual framework guardian is a cleanup observer for its own
+        # delegated generation. Keep it in our exit barrier, but let killing
+        # its ordinary parent close the private control socket and initiate
+        # its own cleanup. Killing the observer would abandon that generation.
+        return _guardian_generation(process) is not None
 
     def reap(self):
         if self.process is not None and self.root_result is None:
@@ -115,6 +132,8 @@ class Guardian:
     def start(self, command):
         if self.command is not None:
             raise RuntimeError("Resource admission was already registered")
+        if command["generation"] != sys.argv[2]:
+            raise RuntimeError("Resource generation does not match its trusted bootstrap")
         self.command = command
         self.receipt_dir = Path(command["receipt_dir"]) if command.get("receipt_dir") else None
         identity = {"pid": os.getpid(), "creation": psutil.Process().create_time(), "group": os.getpgrp()}
@@ -144,10 +163,12 @@ class Guardian:
             env = {key: value for key, value in self.command["env"].items() if key != SCOPE_FD_ENV}
             env[SCOPE_FD_ENV] = str(read)
             env["AGENTLOOM_MANAGED_PROCESS_GROUP"] = str(os.getpgrp())
+            env[NATIVE_SCOPE_GENERATION_ENV] = self.command["generation"]
             self.process = subprocess.Popen(self.command["argv"], env=env, cwd=self.command.get("cwd"),
                                             stdin=0, stdout=1, stderr=2, pass_fds=(read,), close_fds=True)
             identity = {"pid": self.process.pid, "creation": psutil.Process(self.process.pid).create_time()}
-            os.write(write, json.dumps({"anchor": self.description["anchor"], "child": identity}).encode())
+            os.write(write, json.dumps({"anchor": self.description["anchor"], "child": identity,
+                                        "generation": self.command["generation"]}).encode())
         finally:
             os.close(read)
             os.close(write)
@@ -180,7 +201,8 @@ class Guardian:
         frozen = set()
         while True:
             members = self.members()
-            newly_found = [p for p in members if (p.pid, p.create_time()) not in frozen]
+            newly_found = [p for p in members if (p.pid, p.create_time()) not in frozen
+                           and not self.nested_guardian(p)]
             if not newly_found:
                 break
             for process in newly_found:
@@ -191,7 +213,8 @@ class Guardian:
                     pass
         for process in reversed(members):
             try:
-                process.kill()
+                if not self.nested_guardian(process):
+                    process.kill()
             except psutil.NoSuchProcess:
                 pass
 

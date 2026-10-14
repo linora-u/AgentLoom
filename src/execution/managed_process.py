@@ -85,15 +85,20 @@ class OwnedProcess:
         scope = _SCOPE.get()
         try:
             with self._launch_lock:
+                from agentloom.execution.process_scope import guardian_subprocess_env
+
+                guardian_env = guardian_subprocess_env()
                 if scope is not None:
                     scope.admit(self)
                 local, remote = socket.socketpair()
                 self._channel = local
                 try:
                     self._guardian = subprocess.Popen(
-                        [sys.executable, str(Path(__file__).with_name("_process_guardian.py")), str(remote.fileno())],
+                        [sys.executable, str(Path(__file__).with_name("_process_guardian.py")),
+                         str(remote.fileno()), self._generation],
                         stdin=stdin, stdout=stdout, stderr=stderr, text=text, encoding=encoding, errors=errors,
-                        bufsize=bufsize, pass_fds=(remote.fileno(),), close_fds=True, start_new_session=True,
+                        env=guardian_env, bufsize=bufsize, pass_fds=(remote.fileno(),),
+                        close_fds=True, start_new_session=True,
                     )
                 finally:
                     remote.close()

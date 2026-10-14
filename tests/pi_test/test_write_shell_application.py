@@ -169,6 +169,62 @@ def test_cancelled_native_bash_reaps_managed_detached_descendants(tmp_path, faul
         assert events[-1]["event"] in {"run.interrupted", "run.failed"}
 
 
+def test_top_python_sigkill_reaps_native_bash_detached_descendants(tmp_path):
+    import os
+    import shlex
+    import signal
+    import sys
+
+    import psutil
+
+    from tests.pi_test.test_process_lifecycle import node_launcher, start_cli, until
+
+    marker = tmp_path / "shell-processes.json"
+    script = tmp_path / "spawn.py"
+    script.write_text("import os,sys,json,subprocess,time\nfrom pathlib import Path\n"
+        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
+        f"Path({str(marker)!r}).write_text(json.dumps([os.getpid(),p.pid]))\ntime.sleep(60)\n")
+    command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+    tracked = []
+
+    def alive():
+        result = []
+        for process in tracked:
+            try:
+                if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
+                    result.append(process.pid)
+            except psutil.NoSuchProcess:
+                pass
+        return result
+
+    with model_service(turns=[[("long-bash", "bash", {"command": command})]]) as (url, _requests):
+        app = project(tmp_path, url)
+        select(app, tools=[{"name": "bash"}], shell_settings={"allowed_commands": ["*"], "sandbox": {"enabled": False}})
+        env, node_pid = node_launcher(tmp_path)
+        child = start_cli(tmp_path, app, env)
+        try:
+            until(marker.exists)
+            sdk = int(node_pid.read_text())
+            tracked = [psutil.Process(pid) for pid in [os.getpgid(sdk), sdk, *json.loads(marker.read_text())]]
+            os.kill(child.pid, signal.SIGKILL)
+            child.wait(timeout=12)
+            # Observe autonomous guardian cleanup before any recovery call or
+            # fixture safety cleanup. Handles also protect against PID reuse.
+            until(lambda: not alive(), timeout=12)
+            assert child.returncode == -signal.SIGKILL
+            assert alive() == []
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            for process in reversed(tracked):
+                if process.is_running():
+                    try:
+                        process.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+
+
 def test_signal_terminated_bash_is_recorded_as_error_not_successful_evidence(tmp_path):
     with model_service(turns=[[("killed-shell", "bash", {"command": "kill -KILL $$"})]]) as (url, requests):
         app = project(tmp_path, url)

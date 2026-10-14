@@ -46,13 +46,15 @@ def _read_preview(stream: Any, limit: int) -> tuple[str, int, bool]:
     return payload[:limit].decode("utf-8", errors="replace"), size, size > limit
 
 
-def _marked_processes(token: str, *, exclude: set[int]) -> dict[int, psutil.Process]:
+def _marked_processes(
+    token: str, *, exclude: set[int], env_name: str = _PROCESS_RUN_TOKEN_ENV,
+) -> dict[int, psutil.Process]:
     marked: dict[int, psutil.Process] = {}
     for candidate in psutil.process_iter():
         if candidate.pid in exclude:
             continue
         try:
-            if candidate.environ().get(_PROCESS_RUN_TOKEN_ENV) == token:
+            if candidate.environ().get(env_name) == token:
                 marked[candidate.pid] = candidate
         except (psutil.Error, OSError):
             continue
@@ -61,6 +63,7 @@ def _marked_processes(token: str, *, exclude: set[int]) -> dict[int, psutil.Proc
 
 def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
     """Terminate a process group plus descendants that escaped its session."""
+    from agentloom.execution.process_scope import _guardian_generation
 
     known: dict[int, psutil.Process] = {}
     frozen: set[int] = set()
@@ -93,7 +96,8 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
         newly_discovered = [candidate for pid, candidate in known.items() if pid not in frozen]
         for candidate in newly_discovered:
             try:
-                candidate.suspend()
+                if _guardian_generation(candidate) is None:
+                    candidate.suspend()
             except psutil.Error:
                 pass
             frozen.add(candidate.pid)
@@ -145,7 +149,8 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
             if candidate.pid == process.pid:
                 continue
             try:
-                candidate.terminate()
+                if _guardian_generation(candidate) is None:
+                    candidate.terminate()
             except psutil.Error:
                 pass
         time.sleep(0.01)
@@ -166,7 +171,8 @@ def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
         process.kill()
     for candidate in reversed(tuple(known.values())):
         try:
-            candidate.kill()
+            if _guardian_generation(candidate) is None:
+                candidate.kill()
         except psutil.Error:
             pass
     _gone, alive = psutil.wait_procs(tuple(known.values()), timeout=1)
@@ -189,11 +195,11 @@ def spawn_registered_process(
     a failed callback retains its original resource owner for cleanup retry.
     """
     from agentloom.execution.managed_process import launch_owned_process, native_owner_active
-    from agentloom.execution.process_scope import child_starts_new_session
+    from agentloom.execution.process_scope import child_starts_new_session, managed_subprocess_env
     from agentloom.execution.resources import register_resource, unregister_resource
 
     token = uuid.uuid4().hex
-    process_env = {**env, _PROCESS_RUN_TOKEN_ENV: token}
+    process_env = managed_subprocess_env({**env, _PROCESS_RUN_TOKEN_ENV: token})
     key = f"owned-process:{token}"
     process = None
     cancelled = False

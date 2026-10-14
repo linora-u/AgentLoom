@@ -97,9 +97,11 @@ async def managed_stdio_tools(server: StdioServerParameters, timeout):
     write, outgoing = anyio.create_memory_object_stream(0)
     try:
         from agentloom.execution.managed_process import launch_owned_process, native_owner_active
+        from agentloom.execution.process_scope import managed_subprocess_env
 
         command = [server.command, *server.args]
-        options = dict(env={**get_default_environment(), **(server.env or {})}, cwd=server.cwd, stderr=sys.stderr)
+        options = dict(env=managed_subprocess_env({**get_default_environment(), **(server.env or {})}),
+                       cwd=server.cwd, stderr=sys.stderr)
         if native_owner_active():
             process = _NativeProcess(await anyio.to_thread.run_sync(partial(
                 launch_owned_process, command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0, **options,
