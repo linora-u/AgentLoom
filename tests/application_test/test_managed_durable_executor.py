@@ -9,6 +9,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 from agentloom.app import Application
@@ -304,3 +305,68 @@ def test_executor_stop_reports_unpersisted_terminal_and_later_recovery_is_clean(
                         and event["item_id"] == "old"]) == 1
         assert recovered.returncode == 0
         assert execution.storage_status()["last_error"]["sqlite_errorcode"] == sqlite3.SQLITE_FULL
+
+
+def test_public_recover_bounds_legacy_exit_observation_without_releasing_live_ownership(batch_project, monkeypatch):
+    from agentloom.execution.durable import HostSpec
+    from agentloom.execution.durable.os_job import ResourceOwnershipError
+
+    root, application, _, _, _ = batch_project
+    original_run = subprocess.run
+    bootout = Event()
+
+    def launchctl_ack(command, *args, **kwargs):
+        if command[0] == "/bin/launchctl":
+            bootout.set()
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return original_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", launchctl_ack)  # OS service control boundary only.
+    native = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(120)"], start_new_session=True)
+    errors, observations, control = [], [], None
+    try:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            with app.durable(root=root / "durable") as execution:
+                worker = execution.worker("workflows/worker.yaml")
+                item = WorkItem("legacy", {"value": 1})
+                task = worker.description(item)
+                handle = worker.submit(item)
+                host = HostSpec("agentloom.execution.durable.host:application_host",
+                                {"application": str(application), "project_root": str(root)})
+                job = execution.root / "jobs" / handle.workflow_id / "old-launchd"
+                job.mkdir(parents=True)
+                (job / "description.json").write_text(json.dumps({"owner": "launchd", "label": "test-old-resource",
+                    "host": host.to_dict(), "invocation_id": job.name, "task": task.to_dict()}))
+                import psutil
+
+                (job / "identity.json").write_text(json.dumps({"pid": native.pid,
+                    "creation": psutil.Process(native.pid).create_time(), "group": os.getpgid(native.pid)}))
+
+                def recover():
+                    try:
+                        observations.extend(execution.recover(observation_timeout=.1))
+                    except ResourceOwnershipError as error:
+                        errors.append(error)
+
+                control = Thread(target=recover)
+                control.start()
+                control.join(timeout=1)
+                assert not control.is_alive(), "Public recovery blocked beyond its observation budget"
+                assert errors and not observations
+                assert native.poll() is None
+                assert not execution.resource_status(handle.workflow_id)[0]["physical_exit_confirmed"]
+                assert (job / "description.json").exists() and not (job / "exited.json").exists()
+                if sys.platform == "darwin":
+                    assert bootout.is_set(), "The original adapter still owns legacy stop responsibility"
+                    native.kill()
+                    native.wait(timeout=5)
+                    assert execution.recover(observation_timeout=.1)[0]["physical_exit_confirmed"]
+                else:
+                    assert "legacy launchd" in str(errors[0].__cause__)
+    finally:
+        # Release the real legacy scope only after bounded-control assertions.
+        if native.poll() is None:
+            native.kill()
+            native.wait(timeout=5)
+        if control is not None:
+            control.join(timeout=5)

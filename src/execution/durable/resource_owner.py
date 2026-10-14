@@ -59,12 +59,19 @@ class HistoricalResource:
             return
         if self.descriptor.get("owner", "launchd") == "launchd":
             from .host import HostSpec
-            LaunchdJobs(self.job.parents[2], HostSpec(**self.descriptor["host"]))._terminate(self.job)
-            atomic_json(self.job / "exited.json", {"physical_exit_confirmed": True})
+
+            # The control ACK closes legacy admission; it does not prove drain.
+            LaunchdJobs(self.job.parents[2], HostSpec(**self.descriptor["host"]))._remove(self.job)
             return
         raise ResourceOwnershipError("Old resource lacks confirmed exit; its original owner must drain it")
 
     def wait_exited(self, timeout=None):
+        if not self.observe()["physical_exit_confirmed"] and self.descriptor.get("owner", "launchd") == "launchd":
+            from .host import HostSpec
+
+            LaunchdJobs(self.job.parents[2], HostSpec(**self.descriptor["host"]))._terminate(
+                self.job, observation_timeout=timeout)
+            atomic_json(self.job / "exited.json", {"physical_exit_confirmed": True})
         if not self.observe()["physical_exit_confirmed"]:
             raise ResourceOwnershipError("Old resource exit remains unconfirmed")
         return self.observe()

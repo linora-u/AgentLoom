@@ -304,7 +304,7 @@ class LaunchdJobs(OwnedJobs):
             raise ResourceOwnershipError("Authorized OS job lost its identity; refusing replacement")
         return None
 
-    def _terminate(self, job: Path):
+    def _terminate(self, job: Path, *, observation_timeout=None):
         if read_json(job / "description.json").get("owner", "launchd") != self.owner:
             raise ResourceOwnershipError("Use the original process owner to drain this invocation")
         self._remove(job)
@@ -312,5 +312,8 @@ class LaunchdJobs(OwnedJobs):
             return
         identity = self._discover_identity(job)
         if identity is not None:
+            deadline = None if observation_timeout is None else time.monotonic() + observation_timeout
             while group_alive(identity) or process_alive(identity):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ResourceOwnershipError("Legacy launchd resource exit remains unconfirmed; ownership is retained")
                 time.sleep(0.02)
