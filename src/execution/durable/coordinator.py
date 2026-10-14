@@ -16,11 +16,13 @@ from uuid import uuid4
 from filelock import FileLock, Timeout
 
 from .client import TaskDescription, canonical_json
+from .diagnostics import error_detail as _error_detail
 from .files import atomic_json, read_json
 from .host import HostSpec
 from .os_job import AdmissionStopped, InvocationFailed, ResourceOwnershipError
 from .resource_owner import (
     NotStartedResource,
+    exit_receipt_persisted,
     launch_resource,
     preflight_resources,
     resource_observations,
@@ -37,27 +39,13 @@ class _Attempt:
     resource: object | None = None
 
 
-def _error_detail(error, phase):
-    cause, seen = error, set()
-    while id(cause) not in seen:
-        seen.add(id(cause))
-        if getattr(cause, "sqlite_errorcode", None) is not None or getattr(cause, "errno", None) is not None:
-            break
-        nested = getattr(cause, "orig", None) or cause.__cause__ or cause.__context__
-        if nested is None:
-            break
-        cause = nested
-    return {"error_type": type(error).__name__, "message": str(error), "phase": phase,
-            **{name: getattr(cause, name) for name in ("errno", "sqlite_errorcode", "sqlite_errorname")
-               if getattr(cause, name, None) is not None}}
-
-
 class AttemptCoordinator:
     def __init__(self, root: Path, host: HostSpec):
         self._root, self._host_spec, self._host = root, host, host.build()
         self._stop = Event()
         self._external_stop = None
         self._task_state = None
+        self._storage_metadata = None
         self._accepted: dict[str, _Attempt] = {}
         self._admission = Lock()
 
@@ -69,6 +57,9 @@ class AttemptCoordinator:
 
     def bind_task_state(self, read_status):
         self._task_state = read_status
+
+    def bind_storage_metadata(self, metadata):
+        self._storage_metadata = metadata
 
     def preflight(self):
         preflight_resources()
@@ -124,7 +115,7 @@ class AttemptCoordinator:
     def _record_error(self, job, error, phase):
         try:
             path = job / "cleanup-failed.json"
-            detail = _error_detail(error, phase)
+            detail = _error_detail(error, phase, database=self._storage_metadata)
             if path.exists():
                 detail = {**read_json(path), "latest_error": detail}
             atomic_json(path, detail)
@@ -181,7 +172,11 @@ class AttemptCoordinator:
                 return
             if observed["status"] == "cleanup_unconfirmed":
                 detail = observed.get("error") or {}
-                raise ResourceOwnershipError(detail.get("message", "Native cleanup remains unconfirmed"))
+                error = ResourceOwnershipError(detail.get("message", "Native cleanup remains unconfirmed"))
+                for name in ("errno", "sqlite_errorcode", "sqlite_errorname"):
+                    if name in detail:
+                        setattr(error, name, detail[name])
+                raise error
             await asyncio.sleep(0.05)
 
     async def _drain(self, attempt, startup, authorization):
@@ -277,7 +272,8 @@ class AttemptCoordinator:
         except Exception as error:
             if attempt is not None and not isinstance(error, AdmissionStopped):
                 try:
-                    atomic_json(attempt.job / "invocation-failed.json", _error_detail(error, "invoke"))
+                    atomic_json(attempt.job / "invocation-failed.json",
+                                _error_detail(error, "invoke", database=self._storage_metadata))
                 except OSError:
                     pass  # Preserve the original invocation exception.
             raise
@@ -306,7 +302,7 @@ class AttemptCoordinator:
             if not item["physical_exit_confirmed"]:
                 raise ResourceOwnershipError("Prior invocation has not physically exited")
         for descriptor in (self._root / "jobs" / workflow_id).glob("*/description.json"):
-            if not (descriptor.parent / "exited.json").exists():
+            if not exit_receipt_persisted(descriptor.parent):
                 raise ResourceOwnershipError("Prior invocation exit receipt is not persisted")
 
 
@@ -322,6 +318,9 @@ class LegacyCoordinator:
         self.jobs.stop_token = stop
 
     def bind_task_state(self, read_status):
+        pass
+
+    def bind_storage_metadata(self, metadata):
         pass
 
     def active_workflows(self):
@@ -346,7 +345,7 @@ def validate_resume_resources(root, workflow_id):
         if any(not item["physical_exit_confirmed"] for item in resource_observations(root, workflow_id)):
             raise ResourceOwnershipError("Old execution attempt has not physically exited")
         for descriptor in directory.glob("*/description.json"):
-            if not (descriptor.parent / "exited.json").exists():
+            if not exit_receipt_persisted(descriptor.parent):
                 raise ResourceOwnershipError("Required execution exit receipt is not persisted")
     finally:
         lock.release()

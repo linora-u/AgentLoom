@@ -9,6 +9,7 @@ import psutil
 from filelock import FileLock, Timeout
 
 from .client import WORKFLOW_NAME, WORKFLOW_VERSION, TaskDescription
+from .diagnostics import attach_persistence_trace, detach_persistence_trace, storage_metadata
 from .files import atomic_json, read_json
 from .host import HostSpec
 from .os_job import AdmissionStopped, InvocationFailed, OwnedJobs, ResourceOwnershipError, process_alive
@@ -53,6 +54,7 @@ class DurableExecutor:
         stop = stop_token or Event()
         self.jobs.bind_stop(stop)
         self.jobs.bind_task_state(self.execution.status)
+        self.jobs.bind_storage_metadata(storage_metadata(self.execution.root, self.execution.database_url))
         root = self.execution.root
         lock = FileLock(root / "executor.lock")
         try:
@@ -60,6 +62,7 @@ class DurableExecutor:
         except Timeout as error:
             raise ResourceOwnershipError("Another local durable executor owns this namespace") from error
         launched = False
+        trace = None
         try:
             marker = root / "executor.json"
             if marker.exists() and process_alive(read_json(marker)):
@@ -93,6 +96,7 @@ class DurableExecutor:
                 "system_database_url": self.execution.database_url, "serializer": DBOSPortableJSONSerializer(),
                 "enable_otlp": False, "run_migrations": False,
                 "max_executor_threads": sum(worker.policy.concurrency for worker in self.workers.values())})
+            trace = attach_persistence_trace(root, self.execution.database_url)
             DBOS.listen_queues([worker.queue_name for worker in self.workers.values()])
             DBOS.launch()
             launched = True
@@ -118,4 +122,6 @@ class DurableExecutor:
                 while self.jobs.active_workflows():
                     time.sleep(0.05)
                 DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=30)
+            if trace is not None:
+                detach_persistence_trace(trace)
             lock.release()

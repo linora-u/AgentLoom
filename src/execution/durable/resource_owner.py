@@ -99,9 +99,18 @@ def restore_resource(job: Path):
     if descriptor.get("resource_schema") != 1:
         raise ResourceOwnershipError("Unsupported execution resource description")
     if (job / "resource-not-started.json").exists():
+        if read_json(job / "resource-not-started.json") != {"invocation_id": job.name, "not_started": True}:
+            raise ResourceOwnershipError("Unrecognized not-started proof; replacement is refused")
         return NotStartedResource(job)
     from agentloom.execution.managed_process import recover_owned_process
     return recover_owned_process(job / "resource")
+
+
+def exit_receipt_persisted(job: Path):
+    try:
+        return read_json(job / "exited.json").get("physical_exit_confirmed") is True
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def resource_observations(root: Path, workflow_id: str | None = None):
@@ -122,6 +131,10 @@ def resource_observations(root: Path, workflow_id: str | None = None):
         invocation_error = descriptor.parent / "invocation-failed.json"
         if invocation_error.exists():
             observation = {**observation, "invocation_error": read_json(invocation_error)}
-        observations.append({**observation, "invocation_id": value["invocation_id"],
+        persistence_error = descriptor.parent.parent / "persistence-error.json"
+        if persistence_error.exists():
+            observation = {**observation, "persistence_error": read_json(persistence_error)}
+        observations.append({**observation, "exit_receipt_persisted": exit_receipt_persisted(descriptor.parent),
+                             "invocation_id": value["invocation_id"],
                              "workflow_id": TaskDescription.from_dict(value["task"]).workflow_id})
     return observations
