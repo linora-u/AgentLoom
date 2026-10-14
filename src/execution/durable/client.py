@@ -164,10 +164,9 @@ class DurableApplication:
                 # publishing its owner handshake. Its parent closes the gate.
                 continue
             except Exception as error:
-                from .coordinator import _error_detail
+                from .diagnostics import record_cleanup_error
                 try:
-                    atomic_json(job / "cleanup-failed.json",
-                                _error_detail(error, "cancel_request", database=self.storage_status()["database"]))
+                    record_cleanup_error(job, error, "cancel_request", database=self.storage_status()["database"])
                 except OSError:
                     pass
 

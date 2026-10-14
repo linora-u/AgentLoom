@@ -255,7 +255,8 @@ def test_failed_dbos_terminal_commit_keeps_capacity_until_public_reconciliation(
             assert len(diagnosis["database"]["storage_target"]) == 64
             assert diagnosis["workflow_id"] == old.workflow_id
             assert diagnosis["pid"] == process.pid
-            assert execution.storage_status()["last_error"] == diagnosis
+            assert execution.storage_status()["last_error"]["workflow_id"] == old.workflow_id
+            assert execution.storage_status()["last_error"]["sqlite_errorcode"] == sqlite3.SQLITE_FULL
             assert "statement-secret" not in json.dumps(diagnosis)
             assert "credential-secret" not in json.dumps(diagnosis)
             assert execution.status(old.workflow_id).status == "PENDING"

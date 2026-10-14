@@ -17,6 +17,7 @@ from filelock import FileLock, Timeout
 
 from .client import TaskDescription, canonical_json
 from .diagnostics import error_detail as _error_detail
+from .diagnostics import record_cleanup_error
 from .files import atomic_json, read_json
 from .host import HostSpec
 from .os_job import AdmissionStopped, InvocationFailed, ResourceOwnershipError
@@ -113,14 +114,7 @@ class AttemptCoordinator:
             atomic_json(attempt.job / "revoked.json", {"business_authorization_revoked": True})
 
     def _record_error(self, job, error, phase):
-        try:
-            path = job / "cleanup-failed.json"
-            detail = _error_detail(error, phase, database=self._storage_metadata)
-            if path.exists():
-                detail = {**read_json(path), "latest_error": detail}
-            atomic_json(path, detail)
-        except OSError:
-            pass  # Diagnostic failure must not replace the original cause.
+        record_cleanup_error(job, error, phase, database=self._storage_metadata)
 
     def recover(self, *, observation_timeout=1.0):
         """Recover accepted scopes before starting a new DBOS consumer.
