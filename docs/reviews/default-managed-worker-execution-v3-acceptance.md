@@ -38,11 +38,25 @@ macOS：冻结 `e91c56c6` 的相关公开故障回归 66 项通过；其后的 P
 
 Linux `ssh dev`：`62dd0aeb` 标准安装 wheel 的公开矩阵为 93 项通过。另六项因测试夹具明确要求 source import，在相同模块源码 overlay 下通过；不是 99 项都在 wheel 下通过。最新 `7a4d6787` wheel 的 Pi／MCP 与内容错误 delta 11 项通过。现有隔离 Python 3.12.15／SQLite 3.53.1 保留，仅补装声明的 smol 可选依赖，没有升级既有包。
 
-`7a4d6787` 标准 wheel 为 `agentloom-1.0.1-py3-none-any.whl`，SHA-256 为 `840dfa99b25b64318ad64d37007855961c3a5be0ab7d500284d40902740093ef`，289 个 Python 模块与该冻结源码逐字一致。最终 CLI 合入 `07b93ba9` 后已重新核对全部 289 个模块；`src`、`pyproject.toml`、`uv.lock` 的 Git 对象不变，未重复构建或实跑无关业务。
+历史业务验收 `7a4d6787` 的标准 wheel 为 `agentloom-1.0.1-py3-none-any.whl`，SHA-256 为 `840dfa99b25b64318ad64d37007855961c3a5be0ab7d500284d40902740093ef`，289 个 Python 模块与该冻结源码逐字一致。最终 CLI 合入 `07b93ba9` 后已重新核对全部 289 个模块；`src`、`pyproject.toml`、`uv.lock` 的 Git 对象不变，未重复构建或实跑无关业务。
 
 最终 CLI 修复合入 `07b93ba9`，成功 stdout 保持单个 JSON，诊断实时输出到 stderr，失败时末行保持既有 error JSON，帮助输出保持 stdout。官方 retry 在真实 MCP 配置加载后的成功与输入校验失败、两种 help 共 4 项通过；完整 CLI layout 回归 43 项通过。最终 CLI delta 的 Standards 和 Spec 评审各为零发现。临时缓冲方案已撤回，没有新增 diagnostics 字段或修改业务错误分类。
 
-相对基线 `6e1a8a85`，生产 Python 改动 37 个文件，新增 2,011 行、删除 354 行；测试改动 20 个文件，新增 1,866 行、删除 108 行。旧 Node 桥与 owner 安装清单删除 7,315 行，移除其专用 Node wheel 依赖及安装接法。Python 适配量有所增加，DBOS 仍独自承担持久调度，未再实现 claim／lease／slot 内核。最终框架 wheel 为 875,290 字节，不包含 OpenClaw 运行资产。
+相对基线 `6e1a8a85`，最终候选 `9d1ba4cd` 的生产 Python 改动 38 个文件，新增 2,132 行、删除 370 行；测试改动 22 个文件，新增 2,281 行、删除 98 行；另有 7 个共享测试支持文件，新增 260 行、删除 12 行。计数包含私有 NewsAgent 代码，不包含文档和新闻 output。旧 Node 桥与 owner 安装清单删除 7,315 行，移除其专用 Node wheel 依赖及安装接法。Python 适配量有所增加，DBOS 仍独自承担持久调度，未再实现 claim／lease／slot 内核。最终框架 wheel 为 876,757 字节，不包含 OpenClaw 运行资产。
+
+## 最终 detached 与嵌套清理修复
+
+[public PR #130 的原始 CI](https://github.com/linora-u/AgentLoom/actions/runs/38567667500) 为 2 项失败、2,594 项通过、12 项跳过；三个安装 Application 检查通过。失败来自原有 native Bash 取消用例：仅观察进程组遗漏普通 detached 后代。公开 durable 及嵌套 Application 探针进一步确认，外层过早终止内层监护会产生错误的退出证明。
+
+修复冻结为 `96f2c852`，合入候选为 `9d1ba4cd`。现有 generation 经可信启动通道绑定并传播至 Pi、MCP 和工具；保存具体进程身份以跟踪 detached／reparented 后代。嵌套监护保留到内层清理完成，外层退出回执必须随后产生。任意环境变量和旧 instance token 不获得接管其他作用域的权限。两个原失败测试的函数体和装饰器保持原样。
+
+macOS／Linux 对同一冻结源码各运行 99 项公开回归，分别为 286.85 秒、341.45 秒。独立故障事实显示普通 detached、根先退出、顶层 Python SIGKILL 和嵌套退出均无遗留受管身份，观察发生在 recover 或测试保护清理之前。Spec 与 Standards 的源码复评均无剩余发现。
+
+macOS 上已脱离受管进程组且被 PID1 接管的调用者，如果只剩旧环境标记，不能启动新的独立 owner；在 guardian、模型和业务启动前拒绝，原已受管后代仍自动回收。保留真实 guardian 组成员资格的 reparented 调用者，以及 Linux subreaper 接管后仍有真实 ancestry 的调用者，均通过实际接纳测试。该边界不缩减普通 detached 后代清理合同。
+
+最终 `9d1ba4cd` wheel 的 SHA-256 为 `5c767656082d65f7bfadb1e82d3c3d5e9465343d0db21594f31cf03756520576`。289 个 Python 模块和 22 个打包资产逐字匹配冻结 Git archive，没有 OpenClaw 运行资产或专用 owner 依赖。Linux 在安装包下运行同一 99 项矩阵，全部通过。macOS 在安装包下先通过 96 项，另 3 项在补齐既有安装文档要求的项目根配置后复验通过；按 96＋3 记录，不称为单次 99 项安装矩阵。两端均从安装目标加载框架，未用源码 overlay 替代安装包。macOS 首次 Node ABI 不匹配及随后项目外启动缺少配置根的失败日志另存，不计作产品通过。
+
+最终 reader 从 `9d1ba4cd` 重新核验已封存 Aug18 的 96 份退出及必需框架回执，全部有效；76 个当前 workflow 保持 SUCCESS，288 个保存身份均已退出，无 pending 终态。业务、新闻、行情和配置指纹不变。最终资源清理修复不改变模型请求或业务规则，96 份历史 trace 均无 Bash 调用，因此没有为资源修复重新付费计算全日。实际付费执行仍属于 `62dd0aeb`／`7a4d6787`，不能称为最终提交从零重跑。
 
 ## 资料保留与边界
 
@@ -56,5 +70,9 @@ Linux `ssh dev`：`62dd0aeb` 标准安装 wheel 的公开矩阵为 93 项通过�
 - [macOS 公开矩阵](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/merger-e91c56c6-public.log)、[Linux 安装矩阵](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/linux-installed-wheel-public.log)、[Linux source CLI](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/linux-source-cli-public.log)、[最终 Linux MCP delta](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/linux-mcp-delta-7a4d6787-public.log)。
 - [最终 CLI 43 项](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/news-cli-final-json-regression.log)、[源码与发行包核对](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/merger-cli-final-result.json)。
 - [Spec 主评审](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/review-spec-7a4d6787.md)、[Standards 主评审](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/review-standards-7a4d6787.md)、[CLI Spec 评审](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/review-spec-cli-a40a99dc.md)、[CLI Standards 评审](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/review-standards-cli-a40a99dc.md)。
+
+- [最终源码与平台证据](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/final-96f2c852-detached-custody-handoff.md)、[最终 wheel 核对](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/merger-guardian-9d1ba4cd-wheel-inspection.json)、[封存回执复核](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/sealed-aug18-receipt-delta-audit-9d1ba4cd.json)。
+- [最终安装核验](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/merger-guardian-9d1ba4cd-final-result.json)、[main 交付及清理记录](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/delivery-main-final.json)。主分支交付以该记录和 PR 状态为准。
+- [最终 Spec 复评](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/review-spec-96f2c852.md)、[最终 Standards 复评](../../.agentloom/validation/default-managed-execution-v3-evidence-20261014/review-standards-96f2c852.md)、[OpenClaw 一手源码核对](../research/openclaw-detached-custody-source-only-20261014.md)。
 
 文稿核对保留所有计数、源码边界、错误因果和范围；只更新当前验收事实，没有将历史报告改写为新机制证据。中文机械扫描及 source／output 哈希的结果保存在同目录的交付文稿检查记录。

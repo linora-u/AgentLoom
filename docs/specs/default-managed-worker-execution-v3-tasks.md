@@ -37,5 +37,7 @@
 - #124–#128 的实现已合入 integration：默认 Python 资源监护、撤销原包安装、DBOS 授权及恢复、有限 map 和 News 统一执行层。DBOS 保持唯一持久调度器，旧 SDK 路线已移除。
 - #129 的本地验收完成：macOS／Linux 公开故障矩阵、真实 Pi／MCP／smol、完整 2025-08-18 DeepSeek v4.1／AnySearch、封存和正式计分均有实际证据。当前 76 个任务全部 SUCCESS，两轮 96 个作用域确认退出；18 个原始 output 文件哈希不变。
 - 最终 CLI 因果修复及 43 项回归通过，Spec 和 Standards 两轴复评均无剩余发现。初筛／精筛源码为 `62dd0aeb`，校验 retry／补充任务为 `7a4d6787`，CLI 合入为 `07b93ba9`；完整日期没有因 CLI 改动重新计算。
+- public PR #130 的原有 native Bash 取消用例在 CI 失败；源码 `96f2c852` 已修复普通 detached 及嵌套 guardian 的清理与权限传播，合入候选为 `9d1ba4cd`。同一冻结源码 macOS／Linux 各 99 项公开回归通过，两个原失败函数体和装饰器未改；源码 Spec／Standards 复评均无剩余发现。
+- 最终安装包包含 289 个 Python 模块和 22 个资产，与冻结源码逐字一致，不含 OpenClaw 运行资产。Linux 在安装包下运行同一 99 项矩阵，全部通过。macOS 在安装包下先通过 96 项，另 3 项在补齐既有安装文档要求的项目根配置后复验通过；按 96＋3 记录，不称为单次 99 项安装矩阵。两端均从安装目标加载框架，未用源码 overlay 替代安装包。macOS 首次 Node ABI 不匹配及随后项目外启动缺少配置根的失败日志另存，不计作产品通过。 最终 reader 复核 96 份已封存回执、76 个 SUCCESS workflow 及 288 个已退出身份；未重新付费计算历史业务。
 - [验收记录与证据索引](../reviews/default-managed-worker-execution-v3-acceptance.md) 按构建、入口和范围区分已有证据。历史 SQLite 522 仍是独立未定因事项。
 - [private PR #15](https://github.com/linora-u/AgentLoom-private/pull/15) 通过既有 public-sync 流程导出公开代码，四个必需 public 检查通过后协调两个 main；实际交付状态以 PR 和 Issues 为准。保留资料后删除本任务全部开发 worktree，保留同步状态分支。
