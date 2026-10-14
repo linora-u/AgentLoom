@@ -206,24 +206,26 @@ class DurableApplication:
         return self.resource_status()
 
     def _queue_contracts(self, workers):
+        from agentloom.app.application import _worker_path
+
         self._require_open()
         contracts = []
+        owner = self.application
         for path in workers:
-            worker = self.application.worker(path)
-            owner = self.application
-            policy = resolve_worker_execution(worker.identity,
+            identity, _ = _worker_path(owner.application_root, path)
+            policy = resolve_worker_execution(identity,
                 project=owner.project_config.raw.get("worker_execution"),
                 application=owner.application_config.get("worker_execution"))
-            name = "loom-queue-" + identity_digest([self.namespace, worker.identity])[:40]
+            name = "loom-queue-" + identity_digest([self.namespace, identity])[:40]
             queue = self.client.retrieve_queue(name)
             if queue is None:
                 continue
             declaration = (queue.application_name, queue.worker_concurrency, queue.partition_concurrency,
                            queue.partition_worker_concurrency, queue.limiter, queue.partition_limiter)
             if declaration != (self.namespace, policy.concurrency, None, None, None, None):
-                raise QueueDeclarationConflict(f"Persistent Worker policy conflicts: {worker.identity}")
+                raise QueueDeclarationConflict(f"Persistent Worker policy conflicts: {identity}")
             if queue.global_concurrency not in (None, policy.concurrency):
-                raise QueueDeclarationConflict(f"Persistent Worker policy conflicts: {worker.identity}")
+                raise QueueDeclarationConflict(f"Persistent Worker policy conflicts: {identity}")
             contracts.append((name, policy.concurrency, queue.global_concurrency))
         return contracts
 
