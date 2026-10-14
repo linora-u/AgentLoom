@@ -61,6 +61,7 @@ def build_builtin_runtime_registry(
 ) -> RuntimeRegistry:
     """Build the production registry for AgentLoom's built-in runtimes."""
 
+    smolagents_readiness = None
     if smolagents_factory is None:
 
         def build_smolagents(definition: RuntimeDefinition) -> AgentRuntime:
@@ -69,6 +70,17 @@ def build_builtin_runtime_registry(
             return SmolagentsRuntimeFactory()(definition)
 
         smolagents_factory = build_smolagents
+
+        def smolagents_readiness() -> None:
+            from importlib import import_module
+
+            try:
+                import_module("smolagents")
+            except ImportError as error:
+                raise RuntimeError(
+                    "The smol runtime is not installed. Install 'AgentLoom[smol]' "
+                    "or run uv sync --locked --extra smol in the checkout."
+                ) from error
 
     registry = RuntimeRegistry()
     from agentloom.runtimes.smolagents.metadata import (
@@ -79,6 +91,7 @@ def build_builtin_runtime_registry(
         "smolagents",
         capabilities=SMOLAGENTS_CAPABILITIES,
         factory=smolagents_factory,
+        readiness=smolagents_readiness,
     )
 
     from agentloom.runtimes.pi.metadata import CAPABILITIES as PI_CAPABILITIES
