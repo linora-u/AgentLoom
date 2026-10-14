@@ -26,6 +26,13 @@ _SCOPE: ContextVar[NativeProcessScope | None] = ContextVar("agentloom_native_res
 class ResourceCleanupError(RuntimeError):
     category = "infrastructure"
 
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = dict(detail or {})
+        for name in ("errno", "sqlite_errorcode", "sqlite_errorname"):
+            if name in self.detail:
+                setattr(self, name, self.detail[name])
+
 
 def validate_process_support():
     """Preflight without spawning resources, downloading or changing environment."""
@@ -66,6 +73,7 @@ class OwnedProcess:
         self._stopped = False
         self._owner_ready = self._ready = self._extinct = self._ended = False
         self._error = None
+        self._cleanup_request = None
         self._generation = uuid4().hex
         self._communication = None
         self._guardian = self._channel = self._reader = None
@@ -159,19 +167,27 @@ class OwnedProcess:
                             self.returncode = value["returncode"]
                         elif event == "extinct":
                             self._extinct = value["physical_exit_confirmed"] is True and value["generation"] == self._generation
-                        elif event in {"cleanup_error", "startup_error"}:
+                        elif event == "startup_error" or (event == "cleanup_error" and (
+                            self._cleanup_request is None or value["error"].get("request_id") == self._cleanup_request
+                        )):
                             self._error = value["error"]
                         self._condition.notify_all()
         except (OSError, ValueError, KeyError) as error:
             self._error = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure"}
         finally:
+            if self._extinct and self._guardian is not None:
+                try:
+                    self._guardian.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    self._error = {"message": "Native anchor retirement remains unconfirmed",
+                                   "error_type": "ResourceCleanupError", "category": "infrastructure"}
             with self._condition:
                 self._ended = True
                 self._condition.notify_all()
 
     def _raise_error(self):
         if self._error is not None:
-            raise ResourceCleanupError(self._error["message"])
+            raise ResourceCleanupError(self._error["message"], self._error)
         if self._ended and not self._extinct:
             raise ResourceCleanupError("Native resource owner ended without an exit receipt")
 
@@ -188,9 +204,11 @@ class OwnedProcess:
     def request_stop(self, sig="SIGKILL"):
         with self._condition:
             self._stopped = True
+            self._cleanup_request = uuid4().hex
+            self._error = None  # Prior failure remains in its original exception/receipt.
         with self._launch_lock:
             if not self._extinct:
-                self._send({"op": "stop", "signal": sig})
+                self._send({"op": "stop", "signal": sig, "request_id": self._cleanup_request})
 
     def observe(self):
         retired = self._guardian is None or self._guardian.poll() is not None
@@ -204,7 +222,7 @@ class OwnedProcess:
 
     def wait(self, timeout=None):
         with self._condition:
-            if not self._condition.wait_for(lambda: self.returncode is not None or self._ended, timeout):
+            if not self._condition.wait_for(lambda: self.returncode is not None or self._error or self._ended, timeout):
                 raise subprocess.TimeoutExpired(self.args, timeout)
             if self.returncode is None:
                 self._raise_error()
@@ -278,6 +296,7 @@ class OwnedProcess:
 class RecoveredProcess:
     def __init__(self, receipt_dir):
         self.receipt_dir = Path(receipt_dir)
+        self._cleanup_request = None
         self.description = json.loads((self.receipt_dir / "description.json").read_text())
         if self.description["version"] != 1:
             raise ResourceCleanupError("Unknown native resource description version")
@@ -302,7 +321,9 @@ class RecoveredProcess:
         with socket.socket(socket.AF_UNIX) as channel:
             channel.settimeout(1)
             channel.connect(self.description["endpoint"])
-            channel.sendall(json.dumps({"op": "stop", "generation": self.description["generation"]}).encode())
+            self._cleanup_request = uuid4().hex
+            channel.sendall(json.dumps({"op": "stop", "generation": self.description["generation"],
+                                       "request_id": self._cleanup_request}).encode() + b"\n")
 
     def wait_exited(self, timeout=None):
         deadline = None if timeout is None else monotonic() + timeout
@@ -310,8 +331,12 @@ class RecoveredProcess:
             observed = self.observe()
             if observed["physical_exit_confirmed"]:
                 return observed
-            if observed["status"] == "cleanup_unconfirmed":
-                raise ResourceCleanupError((observed["error"] or {}).get("message", "Native cleanup remains unconfirmed"))
+            detail = observed["error"] or {}
+            if observed["status"] == "cleanup_unconfirmed" and (
+                self._cleanup_request is None or not _alive(self.description["anchor"])
+                or detail.get("request_id") == self._cleanup_request
+            ):
+                raise ResourceCleanupError(detail.get("message", "Native cleanup remains unconfirmed"), detail)
             if deadline is not None and monotonic() >= deadline:
                 raise ResourceCleanupError("Native cleanup remains unconfirmed")
             sleep(.02)
