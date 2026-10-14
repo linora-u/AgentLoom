@@ -318,6 +318,8 @@ class RecoveredProcess:
 
 
 def launch_owned_process(argv, **options):
+    if options.pop("shell", False):
+        argv = ["/bin/sh", "-c", *([argv] if isinstance(argv, (str, bytes)) else argv)]
     if options.get("receipt_dir") is None:
         from agentloom.execution import get_current_run_context
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -238,9 +239,6 @@ def run_captured_process(
 ) -> CapturedProcessResult:
     """Run one process with disk-backed capture and bounded memory previews."""
 
-    run_token = uuid.uuid4().hex
-    process_env = dict(env)
-    process_env[_PROCESS_RUN_TOKEN_ENV] = run_token
     started = time.monotonic()
     with tempfile.TemporaryFile(mode="w+b") as stdin_stream, tempfile.TemporaryFile(
         mode="w+b"
@@ -249,41 +247,16 @@ def run_captured_process(
         # communicate can enforce its deadline. The complete payload is known.
         stdin_stream.write(stdin)
         stdin_stream.seek(0)
-        from agentloom.execution.resources import register_resource, unregister_resource
-        resource_key = f"captured-process:{run_token}"
-        process = None
-        cancelled = False
-        admission = Lock()
-
-        def close_process():
-            nonlocal cancelled
-            with admission:
-                cancelled = True
-                if process is not None and process.poll() is None:
-                    terminate_process_tree(process, run_token)
-
-        # Register before spawning. Cancellation either prevents admission or
-        # waits for this concrete handle and kills its entire owned process tree.
-        register_resource(resource_key, close_process)
+        process, close_process = spawn_registered_process(
+            command, shell=shell, cwd=cwd, env=env,
+            stdin=stdin_stream, stdout=stdout_stream, stderr=stderr_stream,
+        )
         try:
-            with admission:
-                if cancelled:
-                    raise InterruptedError("Execution resources are closed")
-                from agentloom.execution.process_scope import child_starts_new_session
-                process = subprocess.Popen(
-                    command, shell=shell, cwd=cwd, env=process_env,
-                    stdin=stdin_stream, stdout=stdout_stream, stderr=stderr_stream,
-                    start_new_session=os.name == "posix" and child_starts_new_session(),
-                )
             process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            close_process()
             raise CapturedProcessTimeout(f"process timed out after {timeout:g}s") from exc
-        except BaseException:
-            close_process()
-            raise
         finally:
-            unregister_resource(resource_key)
+            _close_preserving_error(close_process)
 
         stdout, stdout_bytes, stdout_truncated = _read_preview(
             stdout_stream,
@@ -322,29 +295,50 @@ def run_process_to_fds(
     capture streams. Timeout still guarantees complete process-tree teardown.
     """
 
-    run_token = uuid.uuid4().hex
-    process_env = dict(env)
-    process_env[_PROCESS_RUN_TOKEN_ENV] = run_token
-    from agentloom.execution.process_scope import child_starts_new_session
-    process = subprocess.Popen(
-        command,
-        shell=shell,
-        cwd=cwd,
-        env=process_env,
-        stdout=stdout_fd,
-        stderr=stderr_fd,
-        start_new_session=os.name == "posix" and child_starts_new_session(),
+    process, close_process = spawn_registered_process(
+        command, shell=shell, cwd=cwd, env=env, stdout=stdout_fd, stderr=stderr_fd,
     )
     try:
         return process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        terminate_process_tree(process, run_token)
         timeout_text = "without a limit" if timeout is None else f"after {timeout:g}s"
         raise CapturedProcessTimeout(f"process timed out {timeout_text}") from exc
-    except BaseException:
-        if process.poll() is None:
-            terminate_process_tree(process, run_token)
-        raise
+    finally:
+        _close_preserving_error(close_process)
+
+
+def _close_preserving_error(close):
+    original = sys.exception()
+    try:
+        close()
+    except BaseException as cleanup:
+        if original is None:
+            raise
+        if not isinstance(original, Exception):
+            original.managed_cleanup_errors = (*getattr(original, "managed_cleanup_errors", ()), cleanup)
+        else:
+            raise BaseExceptionGroup("Native execution and cleanup failed", [original, cleanup]) from None
+
+
+def run_registered_process(command, *, env=None, input=None, capture_output=False, timeout=None, check=False, **options):
+    """Popen-compatible capture through the same trusted resource admission."""
+    if input is not None:
+        if options.get("stdin") is not None:
+            raise ValueError("stdin and input arguments may not both be used")
+        options["stdin"] = subprocess.PIPE
+    if capture_output:
+        if options.get("stdout") is not None or options.get("stderr") is not None:
+            raise ValueError("stdout/stderr arguments may not be used with capture_output")
+        options.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process, close = spawn_registered_process(command, env=dict(os.environ) if env is None else env, **options)
+    try:
+        stdout, stderr = process.communicate(input, timeout=timeout)
+        returncode = process.returncode
+        if check and returncode:
+            raise subprocess.CalledProcessError(returncode, command, stdout, stderr)
+        return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+    finally:
+        _close_preserving_error(close)
 
 
 __all__ = [
