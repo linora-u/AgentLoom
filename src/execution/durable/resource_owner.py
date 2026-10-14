@@ -6,8 +6,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .files import read_json
+from .files import atomic_json, read_json
 from .os_job import LaunchdJobs, ResourceOwnershipError, process_alive
+
+
+def preflight_resources():
+    if sys.platform not in {"darwin", "linux"}:
+        raise ResourceOwnershipError("Managed durable execution requires macOS or Linux")
+    # Import/capability errors must occur before DBOS consumes any task.
+    from agentloom.execution.managed_process import launch_owned_process, recover_owned_process
+    if not callable(launch_owned_process) or not callable(recover_owned_process):
+        raise ResourceOwnershipError("Managed process implementation is unavailable")
 
 
 def launch_resource(job: Path):
@@ -46,6 +55,7 @@ class HistoricalResource:
         if self.descriptor.get("owner", "launchd") == "launchd":
             from .host import HostSpec
             LaunchdJobs(self.job.parents[2], HostSpec(**self.descriptor["host"]))._terminate(self.job)
+            atomic_json(self.job / "exited.json", {"physical_exit_confirmed": True})
             return
         raise ResourceOwnershipError("Old resource lacks confirmed exit; its original owner must drain it")
 
@@ -58,6 +68,8 @@ class HistoricalResource:
 def restore_resource(job: Path):
     descriptor = read_json(job / "description.json")
     if descriptor.get("owner") != "python":
+        if descriptor.get("owner", "launchd") not in {"launchd", "openclaw"}:
+            raise ResourceOwnershipError("Unknown original resource owner; migration is refused")
         return HistoricalResource(job, descriptor)
     if descriptor.get("resource_schema") != 1:
         raise ResourceOwnershipError("Unsupported execution resource description")

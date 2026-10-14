@@ -65,6 +65,7 @@ class DurableExecutor:
                 raise ResourceOwnershipError("Prior durable executor process has not exited")
             for worker in self.workers.values():
                 worker.verify_queue()
+            self.jobs.preflight()
             self.jobs.recover()
             if stop.is_set():
                 return

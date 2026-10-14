@@ -19,7 +19,7 @@ from .client import TaskDescription, canonical_json
 from .files import atomic_json, read_json
 from .host import HostSpec
 from .os_job import AdmissionStopped, InvocationFailed, ResourceOwnershipError
-from .resource_owner import launch_resource, resource_observations, restore_resource
+from .resource_owner import launch_resource, preflight_resources, resource_observations, restore_resource
 
 
 @dataclass
@@ -52,6 +52,9 @@ class AttemptCoordinator:
     def bind_stop(self, stop):
         self._external_stop = stop
 
+    def preflight(self):
+        preflight_resources()
+
     def active_workflows(self):
         with self._admission:
             return tuple(self._accepted)
@@ -66,6 +69,10 @@ class AttemptCoordinator:
             accepted = tuple(self._accepted.values())
         for attempt in accepted:
             attempt.cancel.set()
+            try:
+                atomic_json(attempt.job / "cancelled.json", {"invocation_id": attempt.job.name})
+            except OSError as error:
+                self._record_error(attempt.job, error, "close_admission")
 
     def _assert_current(self, attempt):
         if self.admission_stopped() or attempt.cancel.is_set():
@@ -148,6 +155,11 @@ class AttemptCoordinator:
                 attempt.resource = await asyncio.shield(startup)
             except Exception as error:
                 original = error
+        if attempt.resource is not None:
+            try:
+                await asyncio.to_thread(self._cancel, attempt)
+            except Exception as error:
+                self._record_error(attempt.job, error, "cancel")
         if authorization is not None:
             try:
                 await asyncio.shield(authorization)
@@ -220,6 +232,12 @@ class AttemptCoordinator:
         finally:
             if attempt is not None:
                 attempt.cancel.set()
+                # Close child dispatch before joining an authorizer whose
+                # release handshake may still be in flight.
+                try:
+                    atomic_json(attempt.job / "cancelled.json", {"invocation_id": attempt.job.name})
+                except OSError as error:
+                    self._record_error(attempt.job, error, "cancel")
                 cleanup = asyncio.create_task(self._drain(attempt, startup, authorization))
                 while not cleanup.done():
                     try:
@@ -253,6 +271,9 @@ class LegacyCoordinator:
 
     def active_workflows(self):
         return tuple(self.jobs.active)
+
+    def preflight(self):
+        pass
 
     def __getattr__(self, name):
         return getattr(self.jobs, name)

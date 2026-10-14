@@ -48,6 +48,20 @@ def test_stopped_namespace_upgrades_legacy_queue_without_losing_work(batch_proje
         assert execution.status(handle.workflow_id).status == "ENQUEUED"
 
 
+def test_unsupported_process_host_rejects_before_durable_consumption(batch_project, monkeypatch):
+    from agentloom.execution.durable.os_job import ResourceOwnershipError
+    root, application, _, _, _ = batch_project
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=root / "persistent") as execution:
+        handle = execution.worker("workflows/worker.yaml").submit(WorkItem("queued", {"value": 1}))
+        executor = execution.executor(["workflows/worker.yaml"])
+        with monkeypatch.context() as platform:
+            platform.setattr(sys, "platform", "unsupported")
+            with pytest.raises(ResourceOwnershipError, match="macOS or Linux"):
+                executor.run(idle_timeout=0.1)
+        assert execution.status(handle.workflow_id).status == "ENQUEUED"
+        assert execution.resource_status(handle.workflow_id) == []
+
+
 def test_durable_identity_input_snapshot_and_atomic_conflict(batch_project):
     root, application, _, probe, _ = batch_project
     namespace_root = root / "persistent"
