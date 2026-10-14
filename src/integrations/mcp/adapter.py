@@ -12,9 +12,10 @@ from typing import Any
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.tool_gateway import ToolBinding
 from jsonschema.validators import validator_for
-from mcp.types import CallToolResult, TextContent, Tool
 from mcpadapt.core import ToolAdapter
 from referencing import Registry
+
+from mcp.types import CallToolResult, TextContent, Tool
 
 
 def _visible_name(name: str) -> str:
@@ -33,9 +34,11 @@ class McpToolExecutionError(RuntimeError):
     kind = "mcp_error"
     stage = "tool_execution"
 
-    def __init__(self, message: str, *, retryable: bool = False) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, result: CallToolResult | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.result = (result.model_dump(mode="json", by_alias=True, exclude_none=True)
+                       if result is not None else None)
 
 
 def _mcp_error_text(result: CallToolResult) -> str:
@@ -50,7 +53,7 @@ def _mcp_error_text(result: CallToolResult) -> str:
 def _result_value(result: CallToolResult) -> Any:
     """Preserve structured data and every MCP content block without SDK types."""
     if result.isError:
-        raise McpToolExecutionError(_mcp_error_text(result))
+        raise McpToolExecutionError(_mcp_error_text(result), result=result)
     if result.structuredContent is not None:
         return result.structuredContent
     if len(result.content) == 1 and isinstance(result.content[0], TextContent):

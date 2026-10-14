@@ -32,18 +32,20 @@ import subprocess
 import sys
 import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 from agentloom.config import C
-from agentloom.execution.logging import get_logger
 from agentloom.execution import get_current_run_context
+from agentloom.execution.logging import get_logger
+from agentloom.execution.process import run_registered_process
+from agentloom.execution.subprocess_env import build_subprocess_env as _build_subprocess_env
 from agentloom.runtimes.smolagents.tools.shell.ansi_stripper import strip_ansi
 from agentloom.runtimes.smolagents.tools.shell.pipe_redirect import rearrange_pipe_command
 from agentloom.runtimes.smolagents.tools.shell.shell_session import ShellSession
 from agentloom.runtimes.smolagents.tools.shell.shell_snapshot import create_snapshot, remove_snapshot
 from agentloom.runtimes.smolagents.tools.shell.stall_watchdog import detect_stall_prompt
-from agentloom.execution.subprocess_env import build_subprocess_env as _build_subprocess_env
 from agentloom.runtimes.smolagents.tools.shell.tree_kill import SizeWatchdog, graceful_kill
 
 logger = get_logger(__name__)
@@ -139,7 +141,7 @@ def _is_executable(shell_path: str) -> bool:
         pass
 
     try:
-        subprocess.run(
+        run_registered_process(
             [shell_path, "--version"],
             timeout=2,
             stdout=subprocess.DEVNULL,

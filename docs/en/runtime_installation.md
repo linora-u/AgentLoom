@@ -17,9 +17,10 @@ An explicit `UV_PYTHON` overrides this selection. Choose a runtime profile:
   Go/Node tool runtimes. Shared Shell governance keeps tree-sitter/Bash in core.
 - `durable` adds the pinned DBOS 3.2.0 execution engine and the local executor
   lock. Add `--extra durable` to both `uv sync` and subsequent `uv run` commands
-  when using persistent Worker queues. The current OS adapter requires macOS.
+  when using persistent Worker queues. Local execution supports macOS and Linux
+  with SQLite; it does not require a system service or a separate database.
 
-The two profiles can coexist. `--all-groups` includes development/build groups;
+The profiles can coexist. `--all-groups` includes development/build groups;
 it does **not** select runtime extras.
 
 ## Run from a checkout
@@ -43,9 +44,9 @@ packages installed in that shared project environment. `AGENTLOOM_INSTALL_DIR` s
 custom root with its Python environment in `<root>/venv`. Workspace applications
 are installed separately with `uv sync --all-packages`; after changing from the
 installer's non-editable framework to an editable checkout, install Pi again
-with `.venv/bin/loom runtime install pi`. The download lives under
-`runtimes/pi/bridge/node_modules/` inside the installed
-package; editable development uses `src/runtimes/pi/bridge/node_modules/`.
+with `.venv/bin/loom runtime install pi`. The installed SDK and compiled bridge
+live at `<python-prefix>/share/pi/`; the shipped bridge source
+remains separate from the installed SDK and compiled assets.
 
 When selecting professional code tools in YAML, add `--extra code` to **both**
 `uv sync` and subsequent `uv run` commands; otherwise uv removes unused extras:
@@ -56,10 +57,8 @@ uv run --locked --no-dev --extra pi --extra code loom runtime install pi
 uv run --locked --no-dev --extra pi --extra code loom run path/to/application.yaml
 ```
 
-Select `agent_runtime: pi` in YAML. At the ticket 09/13 baseline, disable
-checkpoint (`checkpoint: {enabled: false}`), select `read` or `pi_read` for
-official reading, and select platform/professional tools explicitly. Writes,
-Shell and recovery depend on later runtime tickets.
+Select `agent_runtime: pi` in YAML and select platform/professional tools
+explicitly. Tool permissions and checkpoint policy remain Application settings.
 
 For existing smol YAML:
 
@@ -104,13 +103,37 @@ Do not use an editable install to validate a release.
 The Python package includes AgentLoom's bridge TypeScript, JSON schema, npm
 manifest/lock and professional tool query files. It contains no upstream Pi SDK,
 `node_modules`, compiled bridge or local install marker. `loom runtime install pi`
-downloads the fixed SDK **0.87.1** with `npm ci`, builds the bridge inside the
-installed `agentloom/runtimes/pi/bridge/` directory and validates its assets.
+downloads the fixed SDK **1.0.0** with `npm ci`, builds the bridge under
+`<python-prefix>/share/pi/` and validates its assets.
 The environment must be writable during this explicit installation step.
 
 Source, schema or npm lock changes invalidate the installation fingerprint.
 A missing or stale installation produces an actionable error before the SDK
 starts. Application execution never runs npm or downloads dependencies.
+
+## Managed Worker execution
+
+Ordinary Agent calls and finite `app.worker(path).map(items)` calls manage native
+Pi, MCP and tool resources by default, including when concurrency is one.
+Factories and trusted Python dependencies remain in the caller. Each map keeps
+its own concurrency limit; persistence is explicit through `app.durable()`.
+
+The resource owner uses the installed Python and psutil. It references OpenClaw
+source mechanisms and does not install, execute or package OpenClaw. The former
+`loom runtime install execution-owner` command returns a diagnostic error.
+No owner/plugin selection or launchd/systemd configuration is required.
+
+For durable execution, `execution.resource_status(workflow_id)` reports physical
+cleanup and required exit-receipt persistence separately. `execution.storage_status()`
+reports safe database metadata and the latest persistence error. A cancelled
+workflow can still own resources; use `execution.recover()` with the consumer
+stopped before resuming an attempt whose cleanup remains unconfirmed.
+
+Unix SQLite 3.51.1 has a confirmed upstream WAL connection-close deadlock.
+Persistent queue initialization rejects this library before accepting work.
+Use a verified environment with the upstream fix (SQLite 3.51.2 or another
+verified version). Python 3.12 remains supported; the check concerns SQLite.
+See [the reproduction and upstream fix](../research/sqlite-wal-close-deadlock-20261014.md).
 
 ## Reproduce the release acceptance
 

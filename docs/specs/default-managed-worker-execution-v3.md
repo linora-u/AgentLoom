@@ -1,10 +1,12 @@
 # 默认受管并发执行规格
 
-规格日期：2026-10-14。状态：ready-for-agent。
+规格日期：2026-10-14。状态：实施与本地验收完成；main 同步由 [private PR #15](https://github.com/linora-u/AgentLoom-private/pull/15) 协调。采用源码参考路线。
+
+[最终验收记录](../reviews/default-managed-worker-execution-v3-acceptance.md) 记录 macOS／Linux 公开故障矩阵、完整 2025-08-18 NewsAgent、两轮源码边界、官方计分、资源退出及最终 CLI 复评。下文的问题描述与已有原型证据保留其规格制定时的事实，不能代替该最终验收。
 
 本规格汇总有限 Worker 并发、持久执行、NewsAgent 接入及 OpenClaw 机制研究的最新决定。它替代早期方案中的自研持久调度内核、系统服务部署要求和用户选择进程 owner 的配置；既有业务规则、有限 Batch 合同和显式输出预算合同继续有效。
 
-本轮只生成规格。当前分支上的原型尚未提交、推送或合入；用户暂停代码修改的要求仍有效。ready-for-agent 表示规格已备齐，不表示本轮开始实施。
+用户已授权实施、完整验收后合入 main 并删除开发 worktree。最新约束优先：只参考 OpenClaw 源码，禁止安装、执行或打包其产品、SDK 及运行依赖闭包；不能通过重命名、内嵌分发包或变换启动路径继续运行。保留原有 AgentLoom 环境，默认采用已有 Python 和依赖；版本调整须有实际兼容性证据。
 
 ## Problem Statement
 
@@ -20,7 +22,7 @@
 
 ## Solution
 
-AgentLoom 默认装配一个受管执行模块。用户沿用现有并发数量配置和公开 Application 调用，不增加 `process_owner`、`openclaw` 或插件选择项。模块在内部隔离进程管理实现，参考并优先复用已核对的 OpenClaw 机制，避免再实现一套进程监护和退出判断。
+AgentLoom 默认装配一个受管执行模块。用户沿用现有并发数量配置和公开 Application 调用，不增加 `process_owner`、`openclaw` 或插件选择项。模块参考已核对的 OpenClaw 源码中资源所有权、父进程死亡通知、启动闸门及退出确认的原则，在已有 Python 资源管理边界内实现必要适配。删除原包接入、安装器和 Python／Node owner 桥，不引入新的调度平台。
 
 有限 map 与持久执行共享执行尝试的资源生命周期合同，保留各自的调度含义：有限 Batch 的容量属于一次 map；持久队列的容量属于稳定执行域。配置并发不会自动开启持久化。
 
@@ -28,7 +30,7 @@ DBOS 继续负责持久入队、阶段容量和 workflow 恢复。默认支持 m
 
 NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-day 流程保留初筛完成后自动提交精筛、随后校验和封存的行为；计分继续走既有正式入口。初筛、精筛、校验分别使用独立阶段队列，容量为 20／30／20，同一执行域内跨日期共享。
 
-顶层执行 Python 被强杀后，库的独立监护进程自动回收全部受管理任务后代，并在收尾后退出。替代尝试必须等旧本机资源退出确认完成后才能启动。清理未确认时，沿用 OpenClaw 的保留所有权、延后确认和控制请求报告机制，不能用超时制造退出成功。
+顶层执行 Python 被强杀后，独立监护进程自动回收全部受管理任务后代，并在收尾后退出。替代尝试必须等旧本机资源退出确认完成后才能启动。清理未确认时，借鉴 OpenClaw 源码中的保留所有权、延后确认和控制请求报告机制，不能用超时制造退出成功。
 
 ## User Stories
 
@@ -41,7 +43,7 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 7. As an Application author, I want existing trusted factories and dependencies preserved, so that adopting managed execution does not change ordinary Worker authoring.
 8. As an Application author, I want each attempt to have isolated mutable execution state, so that siblings and retries cannot contaminate one another.
 9. As a framework maintainer, I want a small internal process-management interface, so that core execution code does not depend on a concrete library's internals.
-10. As a framework maintainer, I want upstream process mechanisms reused, so that AgentLoom does not maintain another supervisor or process-tree cleanup implementation.
+10. As a framework maintainer, I want source-informed process ownership within the existing resource boundary, so that AgentLoom does not install OpenClaw or absorb its execution platform.
 11. As a framework maintainer, I want DBOS to remain the only durable scheduler, so that two sets of claims, retries and capacity accounting cannot disagree.
 12. As a local operator, I want macOS and Linux execution without system-service setup, so that installing the project is sufficient to use its local execution mode.
 13. As a local operator, I want SQLite persistence by default, so that durable execution does not require deploying another service.
@@ -57,7 +59,7 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 23. As an Application author, I want cancelled attempts unable to regain write authority, so that delayed startup cannot revive stale work.
 24. As an Application author, I want attempt and revision checks on business writes, so that late callbacks cannot overwrite newer results.
 25. As an operator, I want Pi, MCP, tools and their descendants managed together, so that root-process exit cannot leave task resources behind.
-26. As an operator, I want automatic descendant cleanup after the top execution Python is killed, so that cleanup does not depend on restarting the application.
+26. As an operator, I want automatic descendant cleanup after the top execution Python is killed, so that cleanup does not depend on restarting the application or installing OpenClaw.
 27. As an operator, I want cleanup uncertainty visible through control commands, so that I can distinguish a stop request from confirmed resource exit.
 28. As an operator, I want uncertain resources to retain their capacity, so that a replacement cannot overlap an unconfirmed old attempt.
 29. As an operator, I want recovery to respect the original resource owner, so that upgrading cannot misidentify or discard live resources.
@@ -73,7 +75,7 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 39. As a reviewer, I want macOS and Linux fault evidence, so that cross-platform support is demonstrated rather than inferred.
 40. As a NewsAgent reviewer, I want a complete real date using DeepSeek v4.1 and AnySearch, so that every business phase is exercised without trimming the sample.
 41. As a reviewer, I want existing prototype results distinguished from final acceptance, so that earlier green tests cannot be mistaken for validating later changes.
-42. As a maintainer, I want pinned upstream provenance and dependency costs documented, so that reuse remains reviewable and upgrades remain reproducible.
+42. As a maintainer, I want pinned source references and actual implementation costs documented, so that borrowed mechanisms remain reviewable without an upstream runtime dependency.
 43. As an operator, I want dependencies ready before tasks are accepted, so that runtime downloads or silent fallback cannot change execution guarantees.
 44. As an Application author, I want this introduced compatibly, so that I can use the default mechanism without waiting for a major version or rewriting public calls.
 
@@ -88,13 +90,13 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 
 ### 模块职责与上游复用
 
-5. **内置模块先行。** 进程管理按插件边界隔离，但首版由框架内置并默认装配。只有一个默认实现时，不新建通用插件发现平台；不要求用户安装 OpenClaw 产品、启动 Gateway 或选择其 Worker 平台。
+5. **内置模块先行。** 进程管理按插件边界隔离，但首版由框架内置并默认装配。只有一个默认实现时，不新建通用插件发现平台；禁止安装 OpenClaw 产品、SDK 或运行资产，不启动 Gateway 或选择其 Worker 平台。
 6. **框架与实现之间只保留一个主要边界。** 该边界提供执行域打开与恢复、执行尝试、停止与退出确认。返回的业务传递结果和资源退出事实相互独立。具体方法名在实施时按现有注入点收敛；核心执行器不读取插件的 PID 表、目录布局、Node IPC 或具体 active 集合。
 7. **统一装配。** Application composition 默认创建执行模块，启动、停止、查询及恢复复用同一入口。NewsAgent 不直接构造具体进程实现。既有 `jobs=` 仅作高级可信注入兼容入口，普通调用者无需使用。AgentRuntime／RuntimeRegistry 继续负责 Pi、smolagents 等 Agent Runtime，资源所有权不混入模型 Runtime 注册职责。
 8. **授权与业务协调留在正确层次。** 框架负责执行尝试身份、可信启动许可、取消和资源作用域。NewsAgent 负责业务 grant 的事务实现、业务完成回执和重放决策。进程管理模块不访问新闻业务表、不决定业务 retry，也不吸收完整阶段流程。现有混合的 OwnedJobs 职责必须据此拆分，而不是原样迁移到插件。
-9. **参考来源固定为 OpenClaw。** 复用已核对的父死亡关联、受管资源清理、启动闸门及退出观察机制，不再开放比较另一批执行库。优先使用能满足合同的公开接口；用户已允许固定版本复用必要内部原实现。不得自行重写其 relay、anchor 或进程树终止算法，也不引入完整 NodeWorkerSupervisor 的 journal、claim、capacity 和 workspace 平台。
-10. **选择接法须依据实际接入成本。** 已验证原型调用公开 process SDK；它不等同完整 OpenClaw Worker supervisor。最终默认模块可以沿用公开入口，或在更少接线且满足全部验收时复用必要内部入口。记录原始版本、commit、许可证、依赖闭包及必要桥接；不能把更换接口名称当作删减代码或依赖的证据。固定研究基线为 OpenClaw 2026.10.3；升级重新验收。
-11. **允许必要的跨语言生命周期关联。** 若保留 Python 宿主与 Node 库边界，适配只处理可信命令、取消、结果和宿主死亡通知。Python 宿主的控制连接断开必须能触发库清理；任务后代不能持有会阻止死亡通知的控制端。清理本身交给上游，不在桥内另建 supervisor。
+9. **参考来源固定为 OpenClaw 源码。** 借鉴已核对的父死亡关联、受管资源清理、启动闸门及退出观察原则，记录其源码位置及与实现的对应关系。最新用户要求撤销旧的“直接 SDK／内部运行模块复用”路线；不得下载运行资产、vendor 原包或通过改名继续执行。也不引入完整 NodeWorkerSupervisor 的 journal、claim、capacity 和 workspace 平台。
+10. **按实际总代码收敛实现。** 优先复用项目已有的 Python、psutil、资源注册和进程启动边界，只补齐独立监护及退出确认所需职责。原 Node owner 安装器、运行桥及专用 Node wheel 依赖须退出发行与 CI。记录源代码参考 commit、许可证、实际新增／删除代码和依赖；源码研究基线仍为 OpenClaw 2026.10.3，不能把原包局部探针算作新实现验收。
+11. **宿主死亡通知保持单一可信来源。** 独立监护观察可信宿主控制连接的关闭，负责资源范围收尾；任务后代不得持有阻止通知的控制端。使用现有 Python 环境，不为 owner 新增 Node 运行时；Pi 自身原有 Node 需求保持独立。监护不决定业务重试、队列容量或新闻状态。
 
 ### 持久队列与容量
 
@@ -108,8 +110,8 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 
 17. **先登记可取消尝试，再授予启动资格。** 沿用 OpenClaw 的 admission／start gate 顺序，在授权事务内、放行前及业务 dispatch 前复核当前尝试和取消事实。取消先关闭启动资格，再撤销业务写权并停止已创建资源。已登记且已取消的尝试不能由后到的 grant 或 running 更新重新激活。这个合同不扩展成对尚未登记的任意未来任务永久拒绝。
 18. **写入受尝试和 revision 约束。** 工具提交、业务完成、失败及 retry 必须核对当前执行授权。不能出现父进程撤销未存在的 grant 后记录撤销完成，子进程随后创建有效 grant 的窗口。对该静态风险先构造可控复现，再通过同一公开入口验证修复；不以增加一个文件标记代替事务合同。
-19. **管理完整本机资源范围。** Pi／Node、stdio MCP、工具子进程及孙进程都必须进入库管理的任务范围。作用域由可信宿主绑定，框架验证并传播；模型输入和任意环境变量不能接管别人的资源范围。只支持能满足该合同的 Runtime／工具配置；主动逃离管理范围的运行方式在业务开始前拒绝。
-20. **宿主强杀必须自动清理。** 验收强杀对象是顶层执行 Python。库可自行启动独立监护，监护存活期间完成全部受管后代清理，随后退出。过程不依赖 Python 的 finally、重启、recover 或测试侧清理。正常退出、根崩溃和关闭异常同样不能遗留任务后代。
+19. **管理完整本机资源范围。** Pi／Node、stdio MCP、工具子进程及孙进程都必须进入框架受管资源范围。作用域由可信宿主绑定，框架验证并传播；模型输入和任意环境变量不能接管别人的资源范围。只支持能满足该合同的 Runtime／工具配置；主动逃离管理范围的运行方式在业务开始前拒绝。
+20. **宿主强杀必须自动清理。** 验收强杀对象是顶层执行 Python。框架可以自行启动独立 Python 监护，监护存活期间完成全部受管后代清理，随后退出。过程不依赖宿主 Python 的 finally、重启、recover 或测试侧清理。正常退出、根崩溃和关闭异常同样不能遗留任务后代。
 21. **按上游机制处理清理未确认。** 保留资源所有权及原容量，保存原始清理失败，允许 status／stop／recover 报告未确认或返回当前观察结果，后台继续保留收尾责任。控制请求的有界观察与完整 drain／close 分开；不把观察超时写成成功，不承诺所有 close 都固定几秒完成，也不以无解释的无限文件轮询作为控制接口。
 22. **恢复后才允许替代。** 新消费前核对旧资源退出、旧授权和业务回执。确认业务已提交时协调执行状态，避免重复模型调用；未完成业务按已有恢复规则处理。只有旧管理范围确已退出且必需记录成功落盘，才能补位或 resume。资源退出回执必须能区分业务完成回执。
 23. **保存原有业务失败策略。** 自动重试和人工 retry 的边界、计数及部分结果清理规则继续由既有业务策略决定。过期尝试不能重新入队或重置新尝试次数。进程管理模块不增加自动重启、不静默调整输出预算，也不把所有 Provider 错误改成可重试。
@@ -126,9 +128,9 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 
 29. **运行前准备 trace。** 关联 Application、Run、Worker、工作项、revision、执行尝试及资源范围；记录接纳、授权、放行、取消、业务提交、清理和退出确认。保存源码／构建身份、依赖版本、非秘密有效配置、新闻输入与行情指纹、模型请求及搜索调用关联。公开日志不包含 Key 或完整认证头。
 30. **保留持久化原始故障。** SQLite 错误记录原始 exception chain、sqlite_errorcode／sqlite_errorname（驱动可提供时）、操作与事务阶段、数据库身份、进程身份、SQLite 版本及 journal 配置。未提供的字段明确记为未知，不能编造。提交失败不能被后续容量索引异常覆盖，必需回执写入失败必须通过公开入口显示为基础设施错误。历史 522 不因新路径通过而自动结案。
-31. **依赖在接纳任务前就绪。** 标准 pip／项目安装流程准备默认模块及所需执行依赖，不要求用户另行安装全局 Node 或运行 owner 选择命令，业务运行时不临时下载。缺依赖、平台不支持或接口版本不兼容时，在接纳前明确报错，不能悄悄退回较弱清理模式。默认本地运行不要求用户设置系统服务。原型使用 Node 和完整 OpenClaw 包；插件化不等于这部分体积已经消失，最终成本须实际记录。
+31. **环境改动保持最小。** 默认模块使用项目现有 Python 和依赖，标准安装和业务运行均不得安装 OpenClaw，或要求专用全局 Node／owner 安装命令。缺依赖、平台不支持时，在接纳前明确报错，不能悄悄退回较弱清理模式。默认本地运行不要求设置系统服务。只移除旧 owner 专用依赖，保留 DBOS、Pi 和其他既有组件；调整 Python 或依赖版本前须提供实际失败及兼容性证据。
 32. **兼容旧资源，不热替换活动 owner。** 资源描述保存实际实现身份、描述格式和必要上游版本。旧 launchd 资源由能识别它的兼容 Adapter 排空；缺少所需 Adapter 时保留诊断并拒绝启动替代，不能删除描述绕过检查。历史业务结果保持可读，已提交队列、工作项及回执身份不因模块拆分而改名。新执行默认走框架装配入口，旧 Adapter 只服务兼容。
-33. **当前开发周期即可交付。** 不需要等待 AgentLoom 下一大版本或 OpenClaw 新增公开接口。保持公开调用兼容，记录安装行为变化；删除公开接口或改变数据合同需单独安排迁移。交付评审比较适配代码、删除的重复职责、发行依赖及升级成本，不能只以模块数量判断简化程度。
+33. **当前开发周期交付并清理。** 不需要等待 AgentLoom 下一大版本或 OpenClaw 新增公开接口。保持公开调用兼容，撤掉 execution-owner 安装能力并说明旧接法退出；业务数据合同继续有效。完成全部验收与 review 后合入 main、同步公开版本，并删除本任务开发 worktree。交付评审比较实际代码、删除的重复职责和发行依赖，不能只以模块数量判断简化程度。
 
 ## Testing Decisions
 
@@ -164,8 +166,8 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 
 ### 完整真实日期验收
 
-5. 使用新默认机制完整运行一个有全部必要行情覆盖的真实日期，不裁剪新闻、候选或校验样本。当前已准备的 2025-09-02 是优先验收日期；若行情覆盖不满足计分要求，先记录缺口并选择可完整计分的真实日期，不能拿准备成功当作全日通过。
-6. 模型使用 DeepSeek v4.1，联网校验使用真实 AnySearch，阶段容量保持 20／30／20。先保存 trace、输入／行情／配置指纹、源码及构建身份，再执行正式 prepare、run-day、必要的官方 retry／recover、封存和计分入口。本轮写 Spec 不启动模型或搜索请求。
+5. 使用新默认机制从 2025-08-18 开始验证，跳过已有 output 的日期；原主目录的 output 不删除、不覆盖。完整运行有全部必要行情覆盖的真实日期，不裁剪新闻、候选或校验样本。若行情覆盖不满足计分要求，先按既有计分规则核对缺口，不能拿准备成功当作全日通过。
+6. 模型使用 DeepSeek v4.1，联网校验使用真实 AnySearch，阶段容量保持 20／30／20。先保存 trace、输入／行情／配置指纹、源码及构建身份，再执行正式 prepare、run-day、必要的官方 retry／recover、封存和计分入口。用户已授权实际模型和搜索验收。
 7. 可以按用户已授权范围调整本地输出预算，但必须核验服务端支持并记录数值、来源和生效请求；不改模型、Prompt、业务规则或全量输入来掩盖失败。恢复既有成功业务，失败与各轮配置记录保留，人工 retry 单独记录。
 8. 通过条件包括：所有原始准备输入有去向；初筛覆盖完整；精筛产出与候选查证匹配；必需独立校验及补充校验全部结束；当天完成封存；正式计分完成且行情来源可核验；当前业务 revision 的执行状态与业务回执一致；收尾确认没有遗留本机任务资源。失败日期只记录为失败，不以部分成功宣布验收通过。
 9. 本机并发、客户端在途请求和远端服务行为分别记录。新默认机制的全日证据必须绑定实际运行的构建；旧 launchd 全日结果、本地 HTTP fixture 和公开 SDK 局部探针都不能替代它。
@@ -184,13 +186,13 @@ NewsAgent 通过同一框架入口启动、停止及恢复执行。正式 run-da
 ## Out of Scope
 
 - 首版多机器执行、网络分区恢复、远程旧资源清理和分布式 exactly-once；本规格仅预留远程存储接口。
-- 顶层 Python 和库独立监护同时被强杀、机器掉电、主动逃离管理范围的任意第三方进程。约定的顶层 Python 强杀场景仍必须自动回收全部受管后代。
+- 顶层 Python 和独立监护同时被强杀、机器掉电、主动逃离管理范围的任意第三方进程。约定的顶层 Python 强杀场景仍必须自动回收全部受管后代。
 - 证明 Provider 已停止远端推理或计费。本机退出回执只证明本机受管资源退出。
 - Windows 支持、完整 OpenClaw Gateway／Worker 平台、完整 NodeWorkerSupervisor 的调度和业务协议。
-- 第二套自研持久队列、claim／lease／slot 内核、进程 supervisor、通用插件 marketplace 或用户选择 owner 的配置。
+- 第二套自研持久队列、claim／lease／slot 内核、完整通用进程平台、通用插件 marketplace 或用户选择 owner 的配置。借鉴源码补齐既有 Python 资源管理职责属于本次范围。
 - 改变新闻筛选、校验、行业合并、分组、计分、封存及既有业务重试规则；强制三个独立物理线程池。
 - 将输出预算修复重新设计为模型选型或配置校验平台；无证据关闭历史 SQLite 522／锁诊断问题。
-- 本轮产品代码修改、付费模型／搜索实跑、Git 历史改写、提交、推送或 main 合并。
+- 安装、执行、打包或重命名分发 OpenClaw 原包／SDK；为绕过安全拦截改换路径或启动方式；无证据升级 Python／依赖；Git 历史改写。
 
 ## Further Notes
 

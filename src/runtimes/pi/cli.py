@@ -15,16 +15,12 @@ def runtime() -> None:
 @runtime.command("install")
 @click.argument("runtime_id", type=click.Choice(["pi", "execution-owner"]))
 def runtime_install(runtime_id: str) -> None:
-    """Install locked dependencies for the selected runtime."""
+    """Install the Pi SDK; the historical execution-owner installer is disabled."""
 
     if runtime_id == "execution-owner":
-        try:
-            from agentloom.execution.durable.openclaw_install import install_openclaw
-            entry = install_openclaw()
-        except (ImportError, RuntimeError) as exc:
-            raise click.ClickException(str(exc)) from None
-        click.echo(f"OpenClaw process assets ready: {entry}")
-        return
+        from agentloom.execution.durable.openclaw_install import DISABLED_REASON
+
+        raise click.ClickException(DISABLED_REASON)
 
     from agentloom.runtimes.pi.install import install_pi
     from agentloom.runtimes.pi.metadata import SDK_VERSION

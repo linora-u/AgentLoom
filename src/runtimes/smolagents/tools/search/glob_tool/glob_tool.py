@@ -20,12 +20,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from agentloom.execution.logging import get_logger
+from agentloom.execution.process import run_registered_process
 from agentloom.execution.tool_governance.search import search_path_excluded
 from agentloom.runtimes.smolagents.tools.search.search_utils import (
-    get_search_exclude_patterns,
     get_python_exclude_dirs,
+    get_search_exclude_patterns,
 )
-
 
 logger = get_logger(__name__)
 
@@ -146,7 +146,7 @@ def _glob_with_ripgrep(pattern: str, search_dir: Path) -> List[str]:
     args.append(str(search_dir))
 
     try:
-        result = subprocess.run(
+        result = run_registered_process(
             args,
             capture_output=True,
             text=True,

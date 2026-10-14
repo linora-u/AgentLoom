@@ -1,13 +1,13 @@
 """Actual Application, Pi SDK bridge, MCP peer and tool processes; no paid model."""
 import json
 import os
-from pathlib import Path
 import shlex
-import subprocess
 import sys
-from contextvars import copy_context
-from threading import Thread
 import time
+from contextlib import nullcontext
+from contextvars import copy_context
+from pathlib import Path
+from threading import Thread
 from uuid import uuid4
 
 import psutil
@@ -26,9 +26,13 @@ def main():
     from agentloom.runtimes.pi.protocol import Handshake
     from agentloom.runtimes.pi.transport import PiTransport
     from mcp import StdioServerParameters
+
     from test_support.worker_batch import batch_project
 
     case, mode = Path(sys.argv[1]), sys.argv[2]
+    default_owner = mode.startswith("default-")
+    if default_owner:
+        mode = mode.removeprefix("default-")
     project = case / "project"
     project.mkdir()
     patch = pytest.MonkeyPatch()
@@ -110,13 +114,17 @@ def main():
                 evidence["tool_timeout_detected"] = True
             evidence["timeout_child"] = json.loads(marker.read_text())
         save_evidence()
+        if mode == "hang":
+            time.sleep(120)
         if mode == "crash":
             os._exit(17)
         return payload
 
     probe.behavior = behavior
     try:
-        with bind_managed_process_scope(), Application.open(application, project_root=root, file_logging=False) as app:
+        with (nullcontext() if default_owner else bind_managed_process_scope()), Application.open(
+            application, project_root=root, file_logging=False,
+        ) as app:
             result = app.worker("workflows/worker.yaml").invoke(WorkItem("managed", {"value": 1}))
             evidence["outcome_status"] = result.status
             evidence["outcome"] = result.to_dict()

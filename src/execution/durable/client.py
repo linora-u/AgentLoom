@@ -6,10 +6,10 @@ transaction API, with the original system database configuration unchanged.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
 import hashlib
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -141,12 +141,145 @@ class DurableApplication:
         """Request cancellation; completion is observed separately from this ACK."""
         if self.status(workflow_id) is None:
             raise ValueError("Task does not belong to this durable namespace")
-        self.client.cancel_workflow(workflow_id)
+        from filelock import FileLock
+
+        from .files import atomic_json
+        from .resource_owner import restore_resource
+        directory = self.root / "jobs" / workflow_id
+        directory.mkdir(parents=True, exist_ok=True)
+        resources = []
+        with FileLock(directory / "registration.lock"):
+            try:
+                for descriptor in directory.glob("*/description.json"):
+                    job = descriptor.parent
+                    atomic_json(job / "cancelled.json", {"invocation_id": job.name})
+                    resources.append(job)
+            finally:
+                self.client.cancel_workflow(workflow_id)
+        for job in resources:
+            try:
+                restore_resource(job).request_stop()
+            except FileNotFoundError:
+                # The already-cancelled registered launch may still be
+                # publishing its owner handshake. Its parent closes the gate.
+                continue
+            except Exception as error:
+                from .diagnostics import record_cleanup_error
+                try:
+                    record_cleanup_error(job, error, "cancel_request", database=self.storage_status()["database"])
+                except OSError:
+                    pass
+
+    def resource_status(self, workflow_id: str | None = None):
+        """Observe physical resources independently of DBOS's task status."""
+        self._require_open()
+        if workflow_id is not None and self.status(workflow_id) is None:
+            raise ValueError("Task does not belong to this durable namespace")
+        from .resource_owner import resource_observations
+        return resource_observations(self.root, workflow_id)
+
+    def storage_status(self):
+        """Safe database identity and last observed persistence error, if any."""
+        from .diagnostics import storage_metadata
+        from .files import read_json
+        self._require_open()
+        result = {"database": storage_metadata(self.root, self.database_url)}
+        error = self.root / "latest-persistence-error.json"
+        if error.exists():
+            result["last_error"] = read_json(error)
+        return result
 
     def executor(self, workers: Sequence[str], *, host=None, jobs=None):
         """Configure a dedicated local consumer from trusted Worker paths."""
         from .executor import DurableExecutor
         return DurableExecutor(self, workers, host=host, jobs=jobs)
+
+    def verify_terminal_completion(self):
+        """Confirm mandatory DBOS completions independently of native drain.
+
+        Recovery consumers may still start to reconcile PENDING workflows;
+        controllers use this check before claiming a clean stopped domain.
+        """
+        from .os_job import ResourceOwnershipError
+
+        self._require_open()
+        pending = self.client.list_workflows(application_name=self.namespace,
+            status=["PENDING"], load_input=False, load_output=False)
+        if pending:
+            raise ResourceOwnershipError(
+                "Mandatory DBOS terminal completion remains unconfirmed; inspect storage_status before recovery")
+
+    def _trusted_host(self, host):
+        from .host import HostSpec
+        app = self.application
+        return host or HostSpec("agentloom.execution.durable.host:application_host",
+            {"application": str(app.application_root), "project_root": str(app.project_root)})
+
+    def recover(self, *, host=None, observation_timeout=1.0):
+        """Drain original accepted resources before allowing another consumer."""
+        from agentloom.app.composition import build_durable_attempt_coordinator
+        from filelock import FileLock
+
+        from .files import read_json
+        from .os_job import ResourceOwnershipError, process_alive
+        self._require_open()
+        with FileLock(self.root / "executor.lock", timeout=0):
+            marker = self.root / "executor.json"
+            if marker.exists() and process_alive(read_json(marker)):
+                raise ResourceOwnershipError("Prior durable executor process has not exited")
+            coordinator = build_durable_attempt_coordinator(self.root, self._trusted_host(host))
+            coordinator.bind_storage_metadata(self.storage_status()["database"])
+            coordinator.recover(observation_timeout=observation_timeout)
+        return self.resource_status()
+
+    def _queue_contracts(self, workers):
+        from agentloom.app.application import _worker_path
+
+        self._require_open()
+        contracts = []
+        owner = self.application
+        for path in workers:
+            identity, _ = _worker_path(owner.application_root, path)
+            policy = resolve_worker_execution(identity,
+                project=owner.project_config.raw.get("worker_execution"),
+                application=owner.application_config.get("worker_execution"))
+            name = "loom-queue-" + identity_digest([self.namespace, identity])[:40]
+            queue = self.client.retrieve_queue(name)
+            if queue is None:
+                continue
+            declaration = (queue.application_name, queue.worker_concurrency, queue.partition_concurrency,
+                           queue.partition_worker_concurrency, queue.limiter, queue.partition_limiter)
+            if declaration != (self.namespace, policy.concurrency, None, None, None, None):
+                raise QueueDeclarationConflict(f"Persistent Worker policy conflicts: {identity}")
+            if queue.global_concurrency not in (None, policy.concurrency):
+                raise QueueDeclarationConflict(f"Persistent Worker policy conflicts: {identity}")
+            contracts.append((name, policy.concurrency, queue.global_concurrency))
+        return contracts
+
+    def queues_need_migration(self, workers):
+        """Read-only check; producers never rewrite live queue declarations."""
+        return any(global_limit is None for _, _, global_limit in self._queue_contracts(workers))
+
+    def migrate_queues(self, workers, *, host=None):
+        """Upgrade only matching legacy declarations with the consumer stopped."""
+        from agentloom.app.composition import build_durable_attempt_coordinator
+        from filelock import FileLock
+
+        from .files import read_json
+        from .os_job import ResourceOwnershipError, process_alive
+        self._require_open()
+        with FileLock(self.root / "executor.lock", timeout=0):
+            marker = self.root / "executor.json"
+            if marker.exists() and process_alive(read_json(marker)):
+                raise ResourceOwnershipError("Cannot migrate queues while their executor remains alive")
+            contracts = self._queue_contracts(workers)
+            coordinator = build_durable_attempt_coordinator(self.root, self._trusted_host(host))
+            coordinator.bind_storage_metadata(self.storage_status()["database"])
+            coordinator.recover()
+            for name, limit, global_limit in contracts:
+                if global_limit is None:
+                    self.client.register_queue(name, worker_concurrency=limit, global_concurrency=limit,
+                                               application_name=self.namespace, on_conflict="always_update")
 
     def resume(self, workflow_id: str):
         """Resume a terminal task only after its old OS invocation drains.
@@ -155,8 +288,7 @@ class DurableApplication:
         and always retain the original stage queue rather than DBOS's default
         internal queue.
         """
-        from filelock import FileLock, Timeout
-        from .os_job import ResourceOwnershipError, job_exited
+        from .coordinator import validate_resume_resources
         row = self.status(workflow_id)
         if row is None or row.input is None:
             # status normally omits input; fetch the public immutable payload.
@@ -173,20 +305,7 @@ class DurableApplication:
             return self.client.retrieve_workflow(workflow_id)
         if row.status not in {"CANCELLED", "ERROR", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"}:
             raise ValueError("Only a terminal durable task may be resumed")
-        directory = self.root / "jobs" / workflow_id
-        directory.mkdir(parents=True, exist_ok=True)
-        lock = FileLock(directory / "scope.lock")
-        try:
-            lock.acquire(timeout=0)
-        except Timeout as error:
-            raise ResourceOwnershipError("Old OS invocation has not drained") from error
-        try:
-            for descriptor in directory.glob("*/description.json"):
-                job = descriptor.parent
-                if not (job / "exited.json").exists() or ((job / "identity.json").exists() and not job_exited(job)):
-                    raise ResourceOwnershipError("Old OS invocation has not physically exited")
-        finally:
-            lock.release()
+        validate_resume_resources(self.root, workflow_id)
         if row.status == "CANCELLED":
             return self.client.resume_workflow(workflow_id, queue_name=worker.queue_name)
         # DBOS resume is a no-op for recorded ERROR. Its public terminal-only
@@ -206,6 +325,7 @@ class DurableWorker:
             application=owner.application_config.get("worker_execution"))
         self.queue_name = "loom-queue-" + identity_digest([execution.namespace, worker.identity])[:40]
         queue = execution.client.register_queue(self.queue_name, worker_concurrency=self.policy.concurrency,
+            global_concurrency=self.policy.concurrency,
             application_name=execution.namespace, on_conflict="never_update")
         self.verify_queue(queue)
 
@@ -214,7 +334,7 @@ class DurableWorker:
         if queue is None or (queue.application_name, queue.worker_concurrency, queue.global_concurrency,
                              queue.partition_concurrency, queue.partition_worker_concurrency, queue.limiter,
                              queue.partition_limiter) != (self.execution.namespace, self.policy.concurrency,
-                                                          None, None, None, None, None):
+                                                          self.policy.concurrency, None, None, None, None):
             raise QueueDeclarationConflict(f"Persistent Worker policy conflicts: {self.worker.identity}")
 
     def description(self, item: WorkItem, revision="1") -> TaskDescription:
@@ -232,7 +352,8 @@ class DurableWorker:
         The next public read validates that winner, then inserts only missing
         tasks. Each collision adds a known existing ID; no task is claimed here.
         """
-        from dbos import WorkflowSerializationFormat, error as dbos_error
+        from dbos import WorkflowSerializationFormat
+        from dbos import error as dbos_error
         from sqlalchemy import create_engine
 
         self.execution._require_open()

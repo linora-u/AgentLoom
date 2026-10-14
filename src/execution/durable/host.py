@@ -1,11 +1,12 @@
 """Trusted host configuration, never selected by durable task input."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 import importlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from .authorization import assert_current_attempt as assert_current_attempt
 from .client import TaskDescription, canonical_json
 
 

@@ -1,0 +1,372 @@
+"""Default durable Application behavior, including the trusted startup gate."""
+import errno
+import json
+import os
+import signal
+import sqlite3
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from threading import Event, Thread
+
+import pytest
+from agentloom.app import Application
+from agentloom.execution.concurrency import WorkItem
+
+from test_support.worker_batch import batch_project as _batch_project
+
+batch_project = _batch_project
+
+
+def wait_for(predicate, process=None, timeout=20):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        if process is not None and process.poll() is not None:
+            raise AssertionError(f"Consumer exited {process.returncode}; inspect consumer.log")
+        time.sleep(0.02)
+    raise TimeoutError("Public durable behavior did not arrive; inspect preserved case logs")
+
+
+def events(case):
+    path = case / "events.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+@contextmanager
+def consumer(root, application, namespace, case, *, replay=False, waiter_threads=None,
+             exit_write_fault=None, exit_write_target="resource"):
+    environment = os.environ.copy()
+    if waiter_threads is not None:
+        environment["AGENTLOOM_TEST_ASYNCIO_THREADS"] = str(waiter_threads)
+    if exit_write_fault is not None:
+        transport = case / "filesystem-fault"
+        transport.mkdir()
+        # Inject the OS persistence boundary; execution still uses the actual
+        # default guardian and Application entry, never a successful fake owner.
+        (transport / "sitecustomize.py").write_text(
+            "import os,errno\nfrom pathlib import Path\n_original=os.replace\n"
+            f"_fault=Path({str(exit_write_fault)!r})\n_root=Path({str(namespace)!r}).resolve()\n"
+            f"_target={exit_write_target!r}\n"
+            "def replace(source,target,*args,**kwargs):\n"
+            "    path=Path(target)\n"
+            "    selected=(path.parent.name=='resource') if _target=='resource' else (path.parent.name!='resource')\n"
+            "    if _fault.exists() and path.name=='exited.json' and selected and path.resolve().is_relative_to(_root):\n"
+            "        raise OSError(errno.EIO,'injected native exit receipt write failure')\n"
+            "    return _original(source,target,*args,**kwargs)\n"
+            "os.replace=replace\n")
+        environment["PYTHONPATH"] = str(transport) + os.pathsep + environment.get("PYTHONPATH", "")
+    with (case / "consumer.log").open("w") as log:
+        process = subprocess.Popen([sys.executable, "-m", "test_support.durable_host", str(root), str(application),
+            str(namespace), str(case), "replay" if replay else "no-replay"],
+            cwd=Path(__file__).resolve().parents[2], stdout=log, stderr=log, env=environment)
+        try:
+            wait_for(lambda: (namespace / "ready.json").exists()
+                     and json.loads((namespace / "ready.json").read_text())["pid"] == process.pid, process)
+            yield process
+        finally:
+            # Safety release comes after assertions about automatic behavior.
+            (case / "release-authorization").touch()
+            if exit_write_fault is not None:
+                exit_write_fault.unlink(missing_ok=True)
+            for identity in ("old", "held"):
+                (case / f"release-{identity}").touch()
+            for native in case.glob("native-*.json"):
+                (case / f"release-{native.stem.removeprefix('native-')}").touch()
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+                try:
+                    process.wait(timeout=20)
+                except subprocess.TimeoutExpired as error:
+                    process.kill()
+                    process.wait(timeout=5)
+                    raise AssertionError("Default executor failed to drain accepted scopes") from error
+
+
+def test_default_executor_authorizes_before_dispatch_and_confirms_resource_exit(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        handle = execution.worker("workflows/worker.yaml").submit(WorkItem("one", {"value": 1}))
+        with consumer(root, application, namespace, case) as process:
+            wait_for(lambda: execution.status(handle.workflow_id).status == "SUCCESS", process)
+            assert handle.get_result()["status"] == "success"
+            order = [event["event"] for event in events(case)]
+            assert order.index("authorization_committed") < order.index("runtime_started")
+            assert execution.resource_status(handle.workflow_id)[0]["physical_exit_confirmed"]
+
+
+def test_cancel_during_authorization_prevents_dispatch_and_retains_capacity(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        old = worker.submit(WorkItem("old", {"value": 1, "action": "authorization-held"}))
+        with consumer(root, application, namespace, case) as process:
+            wait_for(lambda: any(event["event"] == "authorize_entered" for event in events(case)), process)
+            execution.cancel(old.workflow_id)
+            replacement = worker.submit(WorkItem("replacement", {"value": 2}))
+            assert execution.status(old.workflow_id).status == "CANCELLED"
+            assert not execution.resource_status(old.workflow_id)[0]["physical_exit_confirmed"]
+            time.sleep(0.2)
+            assert not any(event["event"] == "runtime_started" for event in events(case))
+            (case / "release-authorization").touch()
+            wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", process)
+            assert not any(event["event"] in {"authorization_committed", "runtime_started"}
+                           and event["item_id"] == "old" for event in events(case))
+            assert execution.resource_status(old.workflow_id)[0]["physical_exit_confirmed"]
+
+
+def test_required_framework_exit_record_failure_is_visible_and_keeps_capacity(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    fault = case / "block-framework-exit-write"
+    fault.touch()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        old = worker.submit(WorkItem("old", {"value": 1}))
+        with consumer(root, application, namespace, case, exit_write_fault=fault, exit_write_target="framework") as process:
+            wait_for(lambda: bool(execution.resource_status(old.workflow_id)) and
+                     execution.resource_status(old.workflow_id)[0].get("cleanup_error", {}).get("errno") == errno.EIO, process)
+            observation = execution.resource_status(old.workflow_id)[0]
+            assert observation["physical_exit_confirmed"]
+            assert not observation["exit_receipt_persisted"]
+            assert observation["cleanup_error"]["exception_chain"][0]["errno"] == errno.EIO
+            execution.cancel(old.workflow_id)
+            with pytest.raises(RuntimeError, match="has not drained"):
+                execution.resume(old.workflow_id)
+            replacement = worker.submit(WorkItem("replacement", {"value": 2}))
+            time.sleep(0.2)
+            assert not any(event["event"] == "runtime_started" and event["item_id"] == "replacement"
+                           for event in events(case))
+            fault.unlink()
+            wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", process)
+            assert execution.resource_status(old.workflow_id)[0]["exit_receipt_persisted"]
+
+
+def test_business_commit_survives_crashed_ack_without_another_dispatch(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        handle = execution.worker("workflows/worker.yaml").submit(
+            WorkItem("committed", {"value": 1, "action": "commit-crash"}))
+        with consumer(root, application, namespace, case, replay=True) as process:
+            wait_for(lambda: execution.status(handle.workflow_id).status == "ERROR", process)
+            assert execution.resource_status(handle.workflow_id)[0]["physical_exit_confirmed"]
+            execution.resume(handle.workflow_id)
+            wait_for(lambda: execution.status(handle.workflow_id).status == "SUCCESS", process)
+            assert handle.get_result()["status"] == "success"
+            assert len([event for event in events(case) if event["event"] == "runtime_started"]) == 1
+
+
+def test_fast_attempt_refills_while_slow_siblings_outnumber_wait_threads(batch_project):
+    root, application, _, _, write = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    write(application / "config/system.yaml", {"worker_execution": {"defaults": {"concurrency": 3}}})
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        slow = worker.submit_many([WorkItem(f"slow-{index}", {"value": index, "action": "held"}) for index in range(2)])
+        with consumer(root, application, namespace, case, waiter_threads=2) as process:
+            wait_for(lambda: len([event for event in events(case) if event["event"] == "cleanup_entered"]) == 2, process)
+            quick = worker.submit(WorkItem("quick", {"value": 3}))
+            wait_for(lambda: execution.status(quick.workflow_id).status == "SUCCESS", process, timeout=12)
+            replacement = worker.submit(WorkItem("replacement", {"value": 4}))
+            wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", process, timeout=12)
+            assert all(execution.status(handle.workflow_id).status == "PENDING" for handle in slow)
+            assert all(not execution.resource_status(handle.workflow_id)[0]["physical_exit_confirmed"] for handle in slow)
+
+
+def test_executor_sigkill_cleans_scope_before_recovery_or_replacement(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        old = worker.submit(WorkItem("old", {"value": 1, "action": "held"}))
+        with consumer(root, application, namespace, case) as first:
+            wait_for(lambda: any(event["event"] == "cleanup_entered" for event in events(case)), first)
+            first.kill()
+            first.wait(timeout=5)
+            # No recover(), new executor or test protection cleanup before this
+            # observed certificate: only the surviving Python guardian acts.
+            wait_for(lambda: execution.resource_status(old.workflow_id)[0]["physical_exit_confirmed"])
+            new = worker.submit(WorkItem("new", {"value": 2}))
+            with consumer(root, application, namespace, case) as replacement:
+                wait_for(lambda: execution.status(new.workflow_id).status == "SUCCESS", replacement)
+                wait_for(lambda: execution.status(old.workflow_id).status == "ERROR", replacement)
+                assert len([event for event in events(case) if event["event"] == "runtime_started"
+                            and event["item_id"] == "old"]) == 1
+
+
+def test_unconfirmed_exit_write_is_visible_and_retains_cancelled_capacity(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    fault = case / "block-native-exit-write"
+    fault.touch()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        old = worker.submit(WorkItem("old", {"value": 1}))
+        with consumer(root, application, namespace, case, exit_write_fault=fault) as process:
+            wait_for(lambda: bool(execution.resource_status(old.workflow_id)) and
+                     "injected native exit receipt write failure" in
+                     (execution.resource_status(old.workflow_id)[0].get("error") or {}).get("message", ""), process)
+            observation = execution.resource_status(old.workflow_id)[0]
+            assert not observation["physical_exit_confirmed"]
+            assert "injected native exit receipt write failure" in observation["error"]["message"]
+            started = time.monotonic()
+            execution.cancel(old.workflow_id)
+            assert time.monotonic() - started < 2
+            replacement = worker.submit(WorkItem("replacement", {"value": 2}))
+            time.sleep(0.2)
+            assert execution.status(old.workflow_id).status == "CANCELLED"
+            assert not any(event["event"] == "runtime_started" and event["item_id"] == "replacement"
+                           for event in events(case))
+            fault.unlink()
+            wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", process)
+            assert execution.resource_status(old.workflow_id)[0]["physical_exit_confirmed"]
+
+
+def test_failed_dbos_terminal_commit_keeps_capacity_until_public_reconciliation(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    fault = case / "block-terminal-write"
+    fault.touch()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        old = worker.submit(WorkItem("old", {"value": 1, "action": "terminal-persistence-failure"}))
+        with consumer(root, application, namespace, case) as process:
+            wait_for(lambda: any(event["event"] == "terminal_write_failed" for event in events(case)), process)
+            wait_for(lambda: execution.resource_status(old.workflow_id)[0].get("persistence_error"), process)
+            diagnosis = execution.resource_status(old.workflow_id)[0]["persistence_error"]
+            assert diagnosis["sqlite_errorcode"] == sqlite3.SQLITE_FULL
+            assert diagnosis["sqlite_errorname"] == "SQLITE_FULL"
+            assert any(item.get("sqlite_errorcode") == sqlite3.SQLITE_FULL for item in diagnosis["exception_chain"])
+            assert diagnosis["database"]["sqlite_version"] == sqlite3.sqlite_version
+            assert diagnosis["database"]["journal_mode"] in {"wal", "delete"}
+            assert len(diagnosis["database"]["storage_target"]) == 64
+            assert diagnosis["workflow_id"] == old.workflow_id
+            assert diagnosis["pid"] == process.pid
+            assert execution.storage_status()["last_error"]["workflow_id"] == old.workflow_id
+            assert execution.storage_status()["last_error"]["sqlite_errorcode"] == sqlite3.SQLITE_FULL
+            assert "statement-secret" not in json.dumps(diagnosis)
+            assert "credential-secret" not in json.dumps(diagnosis)
+            assert execution.status(old.workflow_id).status == "PENDING"
+            assert execution.resource_status(old.workflow_id)[0]["physical_exit_confirmed"]
+            replacement = worker.submit(WorkItem("replacement", {"value": 2}))
+            time.sleep(0.2)
+            assert not any(event["event"] == "runtime_started" and event["item_id"] == "replacement"
+                           for event in events(case))
+            fault.unlink()
+            execution.cancel(old.workflow_id)
+            execution.resume(old.workflow_id)
+            wait_for(lambda: execution.status(old.workflow_id).status == "SUCCESS", process)
+            wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", process)
+            assert len([event for event in events(case) if event["event"] == "runtime_started"
+                        and event["item_id"] == "old"]) == 1
+
+
+def test_executor_stop_reports_unpersisted_terminal_and_later_recovery_is_clean(batch_project):
+    root, application, _, _, _ = batch_project
+    namespace, case = root / "durable", root / "case"
+    case.mkdir()
+    fault = case / "block-terminal-write"
+    fault.touch()
+    with Application.open(application, project_root=root, file_logging=False) as app, app.durable(root=namespace) as execution:
+        worker = execution.worker("workflows/worker.yaml")
+        old = worker.submit(WorkItem("old", {"value": 1, "action": "terminal-persistence-failure"}))
+        with consumer(root, application, namespace, case) as process:
+            wait_for(lambda: bool(execution.resource_status(old.workflow_id)) and
+                     execution.resource_status(old.workflow_id)[0].get("persistence_error"), process)
+            replacement = worker.submit(WorkItem("replacement", {"value": 2}))
+            process.send_signal(signal.SIGTERM)
+            process.wait(timeout=12)
+            assert process.returncode != 0, "A missing mandatory terminal record was reported as a clean executor stop"
+            assert "terminal completion remains unconfirmed" in (case / "consumer.log").read_text()
+            assert execution.status(old.workflow_id).status == "PENDING"
+            assert not any(event["event"] == "runtime_started" and event["item_id"] == "replacement"
+                           for event in events(case))
+        fault.unlink()
+        execution.cancel(old.workflow_id)
+        execution.resume(old.workflow_id)
+        with consumer(root, application, namespace, case) as recovered:
+            wait_for(lambda: execution.status(old.workflow_id).status == "SUCCESS", recovered)
+            wait_for(lambda: execution.status(replacement.workflow_id).status == "SUCCESS", recovered)
+            assert len([event for event in events(case) if event["event"] == "runtime_started"
+                        and event["item_id"] == "old"]) == 1
+        assert recovered.returncode == 0
+        assert execution.storage_status()["last_error"]["sqlite_errorcode"] == sqlite3.SQLITE_FULL
+
+
+def test_public_recover_bounds_legacy_exit_observation_without_releasing_live_ownership(batch_project, monkeypatch):
+    from agentloom.execution.durable import HostSpec
+    from agentloom.execution.durable.os_job import ResourceOwnershipError
+
+    root, application, _, _, _ = batch_project
+    original_run = subprocess.run
+    bootout = Event()
+
+    def launchctl_ack(command, *args, **kwargs):
+        if command[0] == "/bin/launchctl":
+            bootout.set()
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return original_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", launchctl_ack)  # OS service control boundary only.
+    native = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(120)"], start_new_session=True)
+    errors, observations, control = [], [], None
+    try:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            with app.durable(root=root / "durable") as execution:
+                worker = execution.worker("workflows/worker.yaml")
+                item = WorkItem("legacy", {"value": 1})
+                task = worker.description(item)
+                handle = worker.submit(item)
+                host = HostSpec("agentloom.execution.durable.host:application_host",
+                                {"application": str(application), "project_root": str(root)})
+                job = execution.root / "jobs" / handle.workflow_id / "old-launchd"
+                job.mkdir(parents=True)
+                (job / "description.json").write_text(json.dumps({"owner": "launchd", "label": "test-old-resource",
+                    "host": host.to_dict(), "invocation_id": job.name, "task": task.to_dict()}))
+                import psutil
+
+                (job / "identity.json").write_text(json.dumps({"pid": native.pid,
+                    "creation": psutil.Process(native.pid).create_time(), "group": os.getpgid(native.pid)}))
+
+                def recover():
+                    try:
+                        observations.extend(execution.recover(observation_timeout=.1))
+                    except ResourceOwnershipError as error:
+                        errors.append(error)
+
+                control = Thread(target=recover)
+                control.start()
+                control.join(timeout=1)
+                assert not control.is_alive(), "Public recovery blocked beyond its observation budget"
+                assert errors and not observations
+                assert native.poll() is None
+                assert not execution.resource_status(handle.workflow_id)[0]["physical_exit_confirmed"]
+                assert (job / "description.json").exists() and not (job / "exited.json").exists()
+                if sys.platform == "darwin":
+                    assert bootout.is_set(), "The original adapter still owns legacy stop responsibility"
+                    native.kill()
+                    native.wait(timeout=5)
+                    assert execution.recover(observation_timeout=.1)[0]["physical_exit_confirmed"]
+                else:
+                    assert "legacy launchd" in str(errors[0].__cause__)
+    finally:
+        # Release the real legacy scope only after bounded-control assertions.
+        if native.poll() is None:
+            native.kill()
+            native.wait(timeout=5)
+        if control is not None:
+            control.join(timeout=5)

@@ -37,6 +37,31 @@ class FixtureHost:
     def revoke(self, task, invocation_id):
         emit(self.root, "revoke", item_id=task.item.id, invocation_id=invocation_id)
 
+    def authorize(self, task, invocation_id, assert_current):
+        emit(self.root, "authorize_entered", item_id=task.item.id, invocation_id=invocation_id)
+        if task.item.mutable_input().get("action") == "terminal-persistence-failure":
+            import sqlite3
+
+            from sqlalchemy import event
+            from sqlalchemy.engine import Engine
+            from sqlalchemy.exc import OperationalError
+            def fail_terminal(connection, cursor, statement, parameters, context, executemany):
+                values = parameters.values() if isinstance(parameters, dict) else parameters
+                if ((self.root / "block-terminal-write").exists()
+                        and statement.lstrip().upper().startswith("UPDATE ")
+                        and ("SUCCESS" in values or "ERROR" in values)):
+                    error = sqlite3.OperationalError("injected DBOS terminal persistence failure")
+                    error.sqlite_errorcode = sqlite3.SQLITE_FULL
+                    error.sqlite_errorname = "SQLITE_FULL"
+                    emit(self.root, "terminal_write_failed", sqlite_errorcode=error.sqlite_errorcode)
+                    raise OperationalError("UPDATE statement-secret", {"api_key": "credential-secret"}, error) from error
+            event.listen(Engine, "before_cursor_execute", fail_terminal)
+        if task.item.mutable_input().get("action") == "authorization-held":
+            while not (self.root / "release-authorization").exists():
+                time.sleep(0.01)
+        assert_current()
+        emit(self.root, "authorization_committed", item_id=task.item.id, invocation_id=invocation_id)
+
     def invoke(self, task, invocation_id):
         project = self.root / invocation_id
         project.mkdir()
@@ -48,6 +73,40 @@ class FixtureHost:
 
         def behavior(payload):
             emit(self.root, "runtime_started", item_id=task.item.id, invocation_id=invocation_id)
+            if action == "captured-nested-timeout":
+                from agentloom.execution.process import CapturedProcessTimeout, run_captured_process
+
+                try:
+                    run_captured_process([sys.executable, value["value"]["entry"]],
+                        cwd=str(root), env=dict(os.environ), stdin=b"", timeout=8,
+                        stdout_limit=1024, stderr_limit=1024, shell=False)
+                except CapturedProcessTimeout:
+                    emit(self.root, "captured_nested_timeout", item_id=task.item.id)
+                    return payload
+                raise AssertionError("Long nested Application did not reach its actual capture timeout")
+            if action in {"detached-captured", "detached-mcp"}:
+                from agentloom.execution.process import run_captured_process
+                from agentloom.integrations.mcp.client import AgentLoomMCPClient
+                from mcp import StdioServerParameters
+
+                peer = Path(__file__).with_name("detached_resource_peer.py")
+                marker = self.root / f"detached-{task.item.id}.json"
+                # Deliberately minimal/forged tool-input environment. Only the
+                # verified scope, rather than these supplied markers, may own
+                # the actual transport and its ordinary detached descendant.
+                environment = value["value"].get("env", {})
+                if action == "detached-captured":
+                    run_captured_process([sys.executable, str(peer), str(marker), "captured"],
+                        cwd=str(root), env=environment, stdin=b"", timeout=90,
+                        stdout_limit=1024, stderr_limit=1024, shell=False)
+                else:
+                    client = AgentLoomMCPClient(StdioServerParameters(
+                        command=sys.executable, args=[str(peer), str(marker), "mcp"], env=environment,
+                    ))
+                    register_resource("detached-mcp", client.disconnect)
+                    tool = next(tool for tool in client.get_tools() if tool.definition.name == "spawn")
+                    assert tool.forward()["answer"] == 42
+                    time.sleep(90)
             if action in {"failure", "crash", "held"}:
                 child = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(120)"], start_new_session=False)
                 atomic_json(self.root / f"native-{task.item.id}.json", {"pid": child.pid,
@@ -98,6 +157,17 @@ def main():
     host = HostSpec("test_support.durable_host:fixture_host", {"case": str(case)},
                     allow_replay=sys.argv[5] == "replay", max_attempts=1)
     patch = pytest.MonkeyPatch()
+    if os.environ.get("AGENTLOOM_TEST_ASYNCIO_THREADS"):
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        count = int(os.environ["AGENTLOOM_TEST_ASYNCIO_THREADS"])
+        configure = asyncio.BaseEventLoop.set_default_executor
+        executors = {}
+        def bounded_loop(loop, executor):
+            if loop not in executors:
+                executors[loop] = ThreadPoolExecutor(max_workers=count)
+            return configure(loop, executors[loop])
+        patch.setattr(asyncio.BaseEventLoop, "set_default_executor", bounded_loop)
     fixture = batch_project.__wrapped__(project, patch)
     next(fixture)  # Install this trusted fixture Runtime before preflight.
     try:
@@ -106,11 +176,6 @@ def main():
             if os.environ.get("AGENTLOOM_TEST_PROCESS_OWNER") == "launchd":
                 from agentloom.execution.durable.os_job import LaunchdJobs
                 jobs = LaunchdJobs(execution.root, host)
-            elif os.environ.get("AGENTLOOM_TEST_PROCESS_OWNER") == "openclaw":
-                from agentloom.execution.durable.openclaw_job import OpenClawJobs
-                jobs = OpenClawJobs(execution.root, host,
-                    runtime_root=Path(os.environ["AGENTLOOM_TEST_OPENCLAW_RUNTIME"]),
-                    node=os.environ["AGENTLOOM_TEST_OPENCLAW_NODE"])
             execution.executor(["workflows/worker.yaml"], host=host, jobs=jobs).run(stop_token=stop)
     finally:
         try:

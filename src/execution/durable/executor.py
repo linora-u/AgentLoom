@@ -9,6 +9,7 @@ import psutil
 from filelock import FileLock, Timeout
 
 from .client import WORKFLOW_NAME, WORKFLOW_VERSION, TaskDescription
+from .diagnostics import attach_persistence_trace, detach_persistence_trace, storage_metadata
 from .files import atomic_json, read_json
 from .host import HostSpec
 from .os_job import AdmissionStopped, InvocationFailed, OwnedJobs, ResourceOwnershipError, process_alive
@@ -31,11 +32,9 @@ class DurableExecutor:
         app = execution.application
         self.host = host or HostSpec("agentloom.execution.durable.host:application_host",
             {"application": str(app.application_root), "project_root": str(app.project_root)})
-        if jobs is None:
-            from .openclaw_job import OpenClawJobs
-            jobs = OpenClawJobs(execution.root, self.host)
-        self.jobs = jobs
-        if self.jobs.root != execution.root or self.jobs.host_spec != self.host:
+        from agentloom.app.composition import build_durable_attempt_coordinator
+        self.jobs = build_durable_attempt_coordinator(execution.root, self.host, jobs=jobs)
+        if not self.jobs.belongs_to(execution.root, self.host):
             raise ValueError("Process owner must belong to this execution root and trusted host")
         self._used = False
 
@@ -53,7 +52,9 @@ class DurableExecutor:
             raise RuntimeError("A durable executor requires a fresh dedicated process")
         self._used = True
         stop = stop_token or Event()
-        self.jobs.stop_token = stop
+        self.jobs.bind_stop(stop)
+        self.jobs.bind_task_state(self.execution.status)
+        self.jobs.bind_storage_metadata(storage_metadata(self.execution.root, self.execution.database_url))
         root = self.execution.root
         lock = FileLock(root / "executor.lock")
         try:
@@ -61,12 +62,16 @@ class DurableExecutor:
         except Timeout as error:
             raise ResourceOwnershipError("Another local durable executor owns this namespace") from error
         launched = False
+        trace = None
         try:
             marker = root / "executor.json"
             if marker.exists() and process_alive(read_json(marker)):
                 raise ResourceOwnershipError("Prior durable executor process has not exited")
             for worker in self.workers.values():
                 worker.verify_queue()
+            self.jobs.preflight()
+            for worker in self.workers.values():
+                worker.worker.preflight_runtime()
             self.jobs.recover()
             if stop.is_set():
                 return
@@ -93,6 +98,7 @@ class DurableExecutor:
                 "system_database_url": self.execution.database_url, "serializer": DBOSPortableJSONSerializer(),
                 "enable_otlp": False, "run_migrations": False,
                 "max_executor_threads": sum(worker.policy.concurrency for worker in self.workers.values())})
+            trace = attach_persistence_trace(root, self.execution.database_url)
             DBOS.listen_queues([worker.queue_name for worker in self.workers.values()])
             DBOS.launch()
             launched = True
@@ -104,18 +110,24 @@ class DurableExecutor:
                     continue
                 rows = self.execution.client.list_workflows(application_name=self.execution.namespace,
                     status=["ENQUEUED", "PENDING"], load_input=False, load_output=False)
-                idle = not rows and not self.jobs.active
+                idle = not rows and not self.jobs.active_workflows()
                 idle_since = (idle_since or time.monotonic()) if idle else None
                 if idle_since is not None and time.monotonic() - idle_since >= idle_timeout:
                     break
         finally:
-            self.jobs.stop_admission()
-            if launched:
-                for workflow_id in list(self.jobs.active):
-                    self.execution.client.cancel_workflow(workflow_id)
-                # The public preemptible async step awaits its cleanup. Status
-                # may already be CANCELLED while this concrete scope is alive.
-                while self.jobs.active:
-                    time.sleep(0.05)
-                DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=30)
-            lock.release()
+            try:
+                self.jobs.stop_admission()
+                if launched:
+                    for workflow_id in self.jobs.active_workflows():
+                        self.execution.client.cancel_workflow(workflow_id)
+                    # The public preemptible async step awaits its cleanup.
+                    # CANCELLED does not certify physical drain. Likewise,
+                    # destroy() does not certify its terminal record committed.
+                    while self.jobs.active_workflows():
+                        time.sleep(0.05)
+                    DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=30)
+                    self.execution.verify_terminal_completion()
+            finally:
+                if trace is not None:
+                    detach_persistence_trace(trace)
+                lock.release()
