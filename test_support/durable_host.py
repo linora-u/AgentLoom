@@ -39,6 +39,23 @@ class FixtureHost:
 
     def authorize(self, task, invocation_id, assert_current):
         emit(self.root, "authorize_entered", item_id=task.item.id, invocation_id=invocation_id)
+        if task.item.mutable_input().get("action") == "terminal-persistence-failure":
+            import sqlite3
+
+            from sqlalchemy import event
+            from sqlalchemy.engine import Engine
+            from sqlalchemy.exc import OperationalError
+            def fail_terminal(connection, cursor, statement, parameters, context, executemany):
+                values = parameters.values() if isinstance(parameters, dict) else parameters
+                if ((self.root / "block-terminal-write").exists()
+                        and statement.lstrip().upper().startswith("UPDATE ")
+                        and ("SUCCESS" in values or "ERROR" in values)):
+                    error = sqlite3.OperationalError("injected DBOS terminal persistence failure")
+                    error.sqlite_errorcode = sqlite3.SQLITE_FULL
+                    error.sqlite_errorname = "SQLITE_FULL"
+                    emit(self.root, "terminal_write_failed", sqlite_errorcode=error.sqlite_errorcode)
+                    raise OperationalError("UPDATE statement-secret", {"api_key": "credential-secret"}, error) from error
+            event.listen(Engine, "before_cursor_execute", fail_terminal)
         if task.item.mutable_input().get("action") == "authorization-held":
             while not (self.root / "release-authorization").exists():
                 time.sleep(0.01)

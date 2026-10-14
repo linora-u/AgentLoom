@@ -166,7 +166,8 @@ class DurableApplication:
             except Exception as error:
                 from .coordinator import _error_detail
                 try:
-                    atomic_json(job / "cleanup-failed.json", _error_detail(error, "cancel_request"))
+                    atomic_json(job / "cleanup-failed.json",
+                                _error_detail(error, "cancel_request", database=self.storage_status()["database"]))
                 except OSError:
                     pass
 
@@ -177,6 +178,17 @@ class DurableApplication:
             raise ValueError("Task does not belong to this durable namespace")
         from .resource_owner import resource_observations
         return resource_observations(self.root, workflow_id)
+
+    def storage_status(self):
+        """Safe database identity and last observed persistence error, if any."""
+        from .diagnostics import storage_metadata
+        from .files import read_json
+        self._require_open()
+        result = {"database": storage_metadata(self.root, self.database_url)}
+        error = self.root / "latest-persistence-error.json"
+        if error.exists():
+            result["last_error"] = read_json(error)
+        return result
 
     def executor(self, workers: Sequence[str], *, host=None, jobs=None):
         """Configure a dedicated local consumer from trusted Worker paths."""
@@ -202,6 +214,7 @@ class DurableApplication:
             if marker.exists() and process_alive(read_json(marker)):
                 raise ResourceOwnershipError("Prior durable executor process has not exited")
             coordinator = build_durable_attempt_coordinator(self.root, self._trusted_host(host))
+            coordinator.bind_storage_metadata(self.storage_status()["database"])
             coordinator.recover(observation_timeout=observation_timeout)
         return self.resource_status()
 
@@ -245,6 +258,7 @@ class DurableApplication:
                 raise ResourceOwnershipError("Cannot migrate queues while their executor remains alive")
             contracts = self._queue_contracts(workers)
             coordinator = build_durable_attempt_coordinator(self.root, self._trusted_host(host))
+            coordinator.bind_storage_metadata(self.storage_status()["database"])
             coordinator.recover()
             for name, limit, global_limit in contracts:
                 if global_limit is None:
