@@ -52,6 +52,7 @@ class DurableExecutor:
         self._used = True
         stop = stop_token or Event()
         self.jobs.bind_stop(stop)
+        self.jobs.bind_task_state(self.execution.status)
         root = self.execution.root
         lock = FileLock(root / "executor.lock")
         try:
@@ -65,6 +66,7 @@ class DurableExecutor:
                 raise ResourceOwnershipError("Prior durable executor process has not exited")
             for worker in self.workers.values():
                 worker.verify_queue()
+            self.jobs.preflight()
             self.jobs.recover()
             if stop.is_set():
                 return

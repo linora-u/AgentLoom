@@ -37,6 +37,14 @@ class FixtureHost:
     def revoke(self, task, invocation_id):
         emit(self.root, "revoke", item_id=task.item.id, invocation_id=invocation_id)
 
+    def authorize(self, task, invocation_id, assert_current):
+        emit(self.root, "authorize_entered", item_id=task.item.id, invocation_id=invocation_id)
+        if task.item.mutable_input().get("action") == "authorization-held":
+            while not (self.root / "release-authorization").exists():
+                time.sleep(0.01)
+        assert_current()
+        emit(self.root, "authorization_committed", item_id=task.item.id, invocation_id=invocation_id)
+
     def invoke(self, task, invocation_id):
         project = self.root / invocation_id
         project.mkdir()
@@ -106,11 +114,6 @@ def main():
             if os.environ.get("AGENTLOOM_TEST_PROCESS_OWNER") == "launchd":
                 from agentloom.execution.durable.os_job import LaunchdJobs
                 jobs = LaunchdJobs(execution.root, host)
-            elif os.environ.get("AGENTLOOM_TEST_PROCESS_OWNER") == "openclaw":
-                from agentloom.execution.durable.openclaw_job import OpenClawJobs
-                jobs = OpenClawJobs(execution.root, host,
-                    runtime_root=Path(os.environ["AGENTLOOM_TEST_OPENCLAW_RUNTIME"]),
-                    node=os.environ["AGENTLOOM_TEST_OPENCLAW_NODE"])
             execution.executor(["workflows/worker.yaml"], host=host, jobs=jobs).run(stop_token=stop)
     finally:
         try:
