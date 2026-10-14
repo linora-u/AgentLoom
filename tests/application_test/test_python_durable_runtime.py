@@ -1,6 +1,5 @@
-"""Real Pi + stdio MCP through the public durable executor and SDK Adapter."""
+"""Real Pi + stdio MCP through the default public durable executor."""
 import json
-import os
 import signal
 import subprocess
 import sys
@@ -16,8 +15,8 @@ from agentloom.execution.durable.os_job import process_alive
 from tests.acceptance.worker_batch_support import TOKENS, model_program, port_open, prepare
 from tests.application_test.mixed_runtime_support import model_service
 
-pytestmark = pytest.mark.skipif(not os.environ.get("AGENTLOOM_TEST_OPENCLAW_RUNTIME"),
-                               reason="requires the pinned OpenClaw SDK assets")
+pytestmark = pytest.mark.skipif(sys.platform not in {"darwin", "linux"},
+                               reason="managed local execution requires macOS or Linux")
 
 
 def wait_for(predicate, timeout=35):
@@ -76,14 +75,10 @@ def test_real_pi_and_mcp_task_scope_exits_automatically(tmp_path, fault):
                         consumer.send_signal(signal.SIGTERM)
                         consumer.wait(timeout=35)
                     wait_for(lambda: all(not process_alive(value) for value in identities))
-                    guardians = list((namespace / "jobs").glob("*/*/guardian.json"))
-                    assert len(guardians) == 1
-                    wait_for(lambda: all(not process_alive(json.loads(path.read_text())) for path in guardians))
+                    wait_for(lambda: len(execution.resource_status(handle.workflow_id)) == 1
+                             and execution.resource_status(handle.workflow_id)[0]["physical_exit_confirmed"])
                     assert all(not port_open(row["port"]) for row in rows(tmp_path / "physical-resources.jsonl"))
                     assert requests and all(request["model"] == "worker" for request in requests)
-                    receipts = list((namespace / "jobs").glob("*/*/exited.json"))
-                    assert len(receipts) == 1
-                    assert json.loads(receipts[0].read_text())["physical_exit_confirmed"] is True
                 finally:
                     # Test safety cleanup is after the asserted automatic drain.
                     if consumer.poll() is None:
