@@ -9,12 +9,13 @@ from types import TracebackType
 from typing import Any
 
 import anyio
-from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
 from agentloom.execution.tool_gateway import ToolBinding
+from agentloom.integrations.mcp.adapter import AgentLoomMCPAdapter
 from anyio.from_thread import start_blocking_portal
+from mcpadapt.core import mcptools
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.types import CallToolResult
-from mcpadapt.core import mcptools
 
 
 class _MCPConnection:
@@ -60,8 +61,11 @@ class _MCPConnection:
             await self._serve_transport()
 
     async def _serve_transport(self) -> None:
+        from agentloom.execution.managed_process import native_owner_active
         from agentloom.execution.process_scope import managed_process_group
-        if isinstance(self._parameters, StdioServerParameters) and managed_process_group() is not None:
+        if isinstance(self._parameters, StdioServerParameters) and (
+            managed_process_group() is not None or native_owner_active()
+        ):
             from agentloom.integrations.mcp.managed_stdio import managed_stdio_tools
             transport = managed_stdio_tools(self._parameters, self._tool_timeout)
         else:

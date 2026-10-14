@@ -71,14 +71,19 @@ class PiTransport:
         self._closing = False
         self._directory = TemporaryDirectory(prefix="agentloom-pi-")
         env.update(HOME=self._directory.name, XDG_CONFIG_HOME=self._directory.name, TMPDIR=self._directory.name)
+        from agentloom.execution.managed_process import native_owner_active
+        from agentloom.execution.process import spawn_registered_process
         from agentloom.execution.process_scope import child_starts_new_session
         self._separate_process_group = child_starts_new_session()
+        self._native_close = None
         try:
-            self.process = subprocess.Popen(
-                [node, str(entry), self._directory.name, str(pi_auth_path)], stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
-                start_new_session=self._separate_process_group, cwd=self._directory.name,
-            )
+            command = [node, str(entry), self._directory.name, str(pi_auth_path)]
+            options = dict(stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           env=env, cwd=self._directory.name)
+            if native_owner_active():
+                self.process, self._native_close = spawn_registered_process(command, **options)
+            else:
+                self.process = subprocess.Popen(command, start_new_session=self._separate_process_group, **options)
         except OSError:
             self._directory.cleanup()
             raise AgentRuntimeError("Cannot start Pi bridge", category="configuration") from None
@@ -254,6 +259,10 @@ class PiTransport:
     def _terminate(self):
         with self._termination_lock:
             if not self._terminated:
+                if self._native_close is not None:
+                    self._native_close()
+                    self._terminated = True
+                    return
                 # SDK bash starts its own sessions. The per-instance inherited
                 # marker also finds ordinary detached/reparented descendants.
                 if self._owns_native_shell:

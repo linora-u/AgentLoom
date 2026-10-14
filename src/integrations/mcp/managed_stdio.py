@@ -1,16 +1,20 @@
-"""MCP stdio byte transport for an OS-owned Application process group.
+"""MCP stdio byte transport for a managed Application invocation.
 
 Uses public AnyIO streams/processes and MCP ClientSession/JSONRPC types. The
 ordinary MCP SDK transport starts a new session and terminates that group;
 it cannot be reused for children sharing the Application's group.
 """
+import logging
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from datetime import timedelta
-import logging
-import sys
+from functools import partial
 
 import anyio
+from anyio.abc import ByteReceiveStream, ByteSendStream
 from anyio.streams.text import TextReceiveStream
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment
 from mcp.shared.message import SessionMessage
@@ -19,17 +23,89 @@ from mcp.types import JSONRPCMessage
 logger = logging.getLogger(__name__)
 
 
+class _NativeReceive(ByteReceiveStream):
+    def __init__(self, stream):
+        self.stream = stream
+
+    async def receive(self, max_bytes=65536):
+        try:
+            value = await anyio.to_thread.run_sync(self.stream.read, max_bytes)
+        except (OSError, ValueError) as error:
+            raise anyio.BrokenResourceError from error
+        if not value:
+            raise anyio.EndOfStream
+        return value
+
+    async def aclose(self):
+        await anyio.to_thread.run_sync(self.stream.close)
+
+
+class _NativeSend(ByteSendStream):
+    def __init__(self, stream):
+        self.stream = stream
+
+    async def send(self, item):
+        def write_all():
+            remaining = memoryview(item)
+            while remaining:
+                count = self.stream.write(remaining)
+                if not count:
+                    raise anyio.BrokenResourceError
+                remaining = remaining[count:]
+
+        try:
+            await anyio.to_thread.run_sync(write_all)
+        except (OSError, ValueError) as error:
+            raise anyio.BrokenResourceError from error
+
+    async def aclose(self):
+        await anyio.to_thread.run_sync(self.stream.close)
+
+
+class _NativeProcess:
+    """Public AnyIO byte streams around the common synchronous resource owner."""
+
+    def __init__(self, process):
+        self.process = process
+        self.stdin = _NativeSend(process.stdin)
+        self.stdout = _NativeReceive(process.stdout)
+
+    async def wait(self):
+        # Cancellable polling avoids abandoning a thread blocked in wait().
+        while self.process.poll() is None:
+            await anyio.sleep(.02)
+        return self.process.returncode
+
+    def terminate(self):
+        self.process.terminate()
+
+    def kill(self):
+        self.process.kill()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        with anyio.CancelScope(shield=True):
+            await anyio.to_thread.run_sync(self.process.close)
+
+
 @asynccontextmanager
 async def managed_stdio_tools(server: StdioServerParameters, timeout):
     """Connect/discover through ClientSession while preserving task ownership."""
     incoming, read = anyio.create_memory_object_stream(0)
     write, outgoing = anyio.create_memory_object_stream(0)
     try:
-        process = await anyio.open_process(
-            [server.command, *server.args],
-            env={**get_default_environment(), **(server.env or {})},
-            cwd=server.cwd, stderr=sys.stderr, start_new_session=False,
-        )
+        from agentloom.execution.managed_process import launch_owned_process, native_owner_active
+
+        command = [server.command, *server.args]
+        options = dict(env={**get_default_environment(), **(server.env or {})}, cwd=server.cwd, stderr=sys.stderr)
+        if native_owner_active():
+            process = _NativeProcess(await anyio.to_thread.run_sync(partial(
+                launch_owned_process, command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0, **options,
+            )))
+        else:
+            process = await anyio.open_process(command, start_new_session=False, **options)
     except BaseException:
         with anyio.CancelScope(shield=True):
             for stream in (incoming, read, write, outgoing):

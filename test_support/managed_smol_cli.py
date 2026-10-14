@@ -1,10 +1,11 @@
 """Formal smol CLI fixture; only the ModelTurnBinding uses a local provider."""
 import json
 import os
-from pathlib import Path
 import shlex
 import sys
 import time
+from contextlib import nullcontext
+from pathlib import Path
 
 import psutil
 import yaml
@@ -12,16 +13,19 @@ import yaml
 
 def main():
     from agentloom.__main__ import main as loom_main
+    from agentloom.app import runner
     from agentloom.config.config import bind_config, load_project_config
     from agentloom.execution import get_current_run_context
     from agentloom.execution.model_binding import ModelTurnBinding
     from agentloom.execution.model_protocol import FunctionCallItem, ModelTurnResult, ModelUsage
     from agentloom.execution.process_scope import bind_managed_process_scope
     from agentloom.integrations.litellm import model_binding
-    from agentloom.app import runner
     from agentloom.runtimes.smolagents.tools.shell.background_task import BackgroundTaskRegistry
 
     root, mode = Path(sys.argv[1]), sys.argv[2]
+    default_owner = mode.startswith("default-")
+    if default_owner:
+        mode = mode.removeprefix("default-")
     config = root / "config"
     config.mkdir()
     (config / "system.yaml").write_text(yaml.safe_dump({
@@ -121,7 +125,7 @@ def main():
         max_tokens=4096, context_window=32768, max_output_tokens=4096, input_token_limit=28672, requests_per_minute=60)
     model_binding.resolve_litellm_model_turn_binding = lambda *_args, **_kwargs: binding
     try:
-        with bind_managed_process_scope(), bind_config(load_project_config(root)):
+        with (nullcontext() if default_owner else bind_managed_process_scope()), bind_config(load_project_config(root)):
             loom_main(["run", str(app), "--no-file-log", "--output-format", "jsonl"])
     finally:
         if marker.exists():

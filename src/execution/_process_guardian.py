@@ -60,6 +60,7 @@ class Guardian:
         self.listener = None
         self.temporary = None
         self.known_members = set()
+        self.cleanup_request = None
 
     def send(self, value):
         if not self.parent_lost:
@@ -153,7 +154,9 @@ class Guardian:
         for descriptor in (0, 1, 2):
             os.close(descriptor)
 
-    def stop(self, sig="SIGKILL"):
+    def stop(self, sig="SIGKILL", request_id=None):
+        if request_id is not None:
+            self.cleanup_request = request_id
         self.stopping = True  # Synchronous gate revocation precedes cleanup.
         self.cleanup_requested = True
         self.cleanup_at = time.monotonic()
@@ -183,10 +186,17 @@ class Guardian:
                 pass
 
     def failure(self, error, event="cleanup_error"):
-        detail = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure"}
+        detail = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure",
+                  "request_id": self.cleanup_request,
+                  **{name: getattr(error, name) for name in ("errno", "sqlite_errorcode", "sqlite_errorname")
+                     if getattr(error, name, None) is not None}}
         if self.receipt_dir is not None:
             try:
-                atomic_json(self.receipt_dir / "cleanup-error.json", detail)
+                path = self.receipt_dir / "cleanup-error.json"
+                if path.exists():
+                    previous = json.loads(path.read_text())
+                    detail["first_error"] = previous.get("first_error", previous)
+                atomic_json(path, detail)
             except OSError:
                 pass  # Never mistake failed diagnostic storage for physical exit.
         self.send({"event": event, "error": detail})
@@ -214,9 +224,15 @@ class Guardian:
                     client, _ = self.listener.accept()
                     with client:
                         client.settimeout(1)
-                        message = json.loads(client.recv(4096))
-                        if message == {"op": "stop", "generation": self.description["generation"]}:
-                            self.stop()
+                        try:
+                            with client.makefile("rb") as stream:
+                                frame = stream.readline(4097)
+                            message = json.loads(frame) if len(frame) <= 4096 and frame.endswith(b"\n") else None
+                        except (ValueError, OSError):
+                            continue  # An invalid recovery request cannot retire this owner.
+                        if (isinstance(message, dict) and message.get("op") == "stop"
+                                and message.get("generation") == self.description["generation"]):
+                            self.stop(request_id=message.get("request_id"))
                     continue
                 chunk = self.channel.recv(65536)
                 if not chunk:
@@ -235,7 +251,7 @@ class Guardian:
                             elif message["op"] == "release":
                                 self.release()
                             elif message["op"] == "stop":
-                                self.stop(message.get("signal", "SIGKILL"))
+                                self.stop(message.get("signal", "SIGKILL"), message.get("request_id"))
                         except Exception as error:
                             self.failure(error, "startup_error")
                             self.stop()
@@ -243,7 +259,7 @@ class Guardian:
                 self.reap()
                 if self.cleanup_requested and time.monotonic() >= self.cleanup_at:
                     self.cleanup()
-                if self.command is not None and (self.process is not None or self.stopping) and self.confirm_exit():
+                if self.command is not None and self.cleanup_requested and self.confirm_exit():
                     return
                 if self.command is None and self.parent_lost:
                     return  # No native command descriptor was admitted.
