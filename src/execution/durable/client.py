@@ -194,6 +194,21 @@ class DurableApplication:
         from .executor import DurableExecutor
         return DurableExecutor(self, workers, host=host, jobs=jobs)
 
+    def verify_terminal_completion(self):
+        """Confirm mandatory DBOS completions independently of native drain.
+
+        Recovery consumers may still start to reconcile PENDING workflows;
+        controllers use this check before claiming a clean stopped domain.
+        """
+        from .os_job import ResourceOwnershipError
+
+        self._require_open()
+        pending = self.client.list_workflows(application_name=self.namespace,
+            status=["PENDING"], load_input=False, load_output=False)
+        if pending:
+            raise ResourceOwnershipError(
+                "Mandatory DBOS terminal completion remains unconfirmed; inspect storage_status before recovery")
+
     def _trusted_host(self, host):
         from .host import HostSpec
         app = self.application

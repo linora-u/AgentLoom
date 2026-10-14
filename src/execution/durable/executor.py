@@ -124,11 +124,7 @@ class DurableExecutor:
                     while self.jobs.active_workflows():
                         time.sleep(0.05)
                     DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=30)
-                    pending = self.execution.client.list_workflows(application_name=self.execution.namespace,
-                        status=["PENDING"], load_input=False, load_output=False)
-                    if pending:
-                        raise ResourceOwnershipError(
-                            "Mandatory DBOS terminal completion remains unconfirmed; inspect storage_status before recovery")
+                    self.execution.verify_terminal_completion()
             finally:
                 if trace is not None:
                     detach_persistence_trace(trace)
