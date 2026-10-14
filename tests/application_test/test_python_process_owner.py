@@ -6,7 +6,9 @@ import socket
 import subprocess
 import sys
 import time
+from contextvars import copy_context
 from pathlib import Path
+from threading import Event, Thread
 
 import psutil
 import pytest
@@ -60,11 +62,12 @@ def _safety(host, identities):
                 pass
 
 
-def test_default_map_reclaims_native_tree_after_top_python_sigkill(tmp_path):
+@pytest.mark.parametrize("backend", ["registered", "captured", "fds"])
+def test_default_map_reclaims_native_tree_after_top_python_sigkill(tmp_path, backend):
     root = Path(__file__).resolve().parents[2]
     identities = []
     with (tmp_path / "host.log").open("wb") as log:
-        host = subprocess.Popen([sys.executable, "-m", "test_support.python_owner_host", str(tmp_path), "kill"],
+        host = subprocess.Popen([sys.executable, "-m", "test_support.python_owner_host", str(tmp_path), backend],
                                 cwd=root, stdout=log, stderr=log)
         try:
             marker = _marker(tmp_path / "native.json", host, identities)
@@ -117,3 +120,117 @@ def test_native_start_failure_preserves_os_cause_without_unconfirmed_cleanup(bat
     outcome = receipt.outcomes[0]
     assert outcome.status == "failed" and outcome.error.error_type == "FileNotFoundError"
     assert outcome.cleanup_errors == (), "No process existed; cleanup uncertainty was fabricated"
+
+
+@pytest.mark.parametrize("text", [False, True])
+def test_default_map_preserves_native_stdio_root_result_and_root_first_cleanup(batch_project, text):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.process import spawn_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    payload = "中文 stdin\n" * 20000
+    identities = []
+    command = """
+import json,os,signal,subprocess,sys
+import psutil
+child = subprocess.Popen([sys.executable,'-c',
+ 'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(120)'])
+print(json.dumps({'pid':os.getpid(),'child_pid':child.pid,
+ 'child_creation':psutil.Process(child.pid).create_time()}), flush=True)
+data=sys.stdin.buffer.read()
+sys.stdout.buffer.write(data);sys.stdout.buffer.flush()
+sys.stderr.buffer.write(b'actual native stderr');sys.stderr.buffer.flush()
+sys.exit(7)
+"""
+
+    def behavior(_payload):
+        process, _close = spawn_registered_process(
+            [sys.executable, "-c", command], env=dict(os.environ), text=text,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        output, error = process.communicate(payload if text else payload.encode(), timeout=10)
+        if not text:
+            output, error = output.decode(), error.decode()
+        marker, data = output.split("\n", 1)
+        marker = json.loads(marker)
+        identities.append({"pid": marker["child_pid"], "creation": marker["child_creation"]})
+        assert process.pid == marker["pid"], "The public handle must identify the native root"
+        assert process.returncode == 7, "The native exit code must not be replaced by the guardian's code"
+        assert data == payload and error == "actual native stderr"
+        return {"code": process.returncode, "size": len(data)}
+
+    probe.behavior = behavior
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        receipt = app.worker("workflows/worker.yaml").map([WorkItem("stdio", {"value": 1})])
+    assert receipt.outcomes[0].status == "success", receipt.to_dict()
+    assert identities and not any(_alive(identity) for identity in identities)
+
+
+def test_cancel_during_real_bootstrap_construction_never_dispatches_native_command(batch_project, monkeypatch):
+    from agentloom.app import Application
+    from agentloom.execution import managed_process
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.resources import close_run_resources
+
+    root, application, _worker, probe, _write = batch_project
+    marker = root / "native-must-not-start"
+    startup, release = Event(), Event()
+    handles, bootstraps, failures = [], [], []
+    original_popen, original_admit = subprocess.Popen, managed_process.NativeProcessScope.admit
+
+    def admit(scope, process):
+        original_admit(scope, process)
+        handles.append(process)
+
+    def popen(argv, *args, **options):
+        process = original_popen(argv, *args, **options)
+        if len(argv) > 1 and str(argv[1]).endswith("_process_guardian.py"):
+            bootstraps.append({"pid": process.pid, "creation": psutil.Process(process.pid).create_time()})
+            startup.set()
+            assert release.wait(timeout=10)
+        return process
+
+    monkeypatch.setattr(managed_process.NativeProcessScope, "admit", admit)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+    def behavior(_payload):
+        context = copy_context()
+
+        def cancel():
+            assert startup.wait(timeout=10)
+            try:
+                context.run(close_run_resources)
+            except BaseException as error:
+                failures.append(error)
+
+        def allow_bootstrap():
+            assert startup.wait(timeout=10)
+            deadline = time.monotonic() + 5
+            # The private flag is only a fault-injection barrier. Acceptance
+            # observes the public outcome and whether the command ever ran.
+            while not handles[0]._stopped and time.monotonic() < deadline:
+                time.sleep(.005)
+            release.set()
+
+        closer, releaser = Thread(target=cancel), Thread(target=allow_bootstrap)
+        closer.start()
+        releaser.start()
+        try:
+            managed_process.launch_owned_process(
+                [sys.executable, "-c", f"from pathlib import Path;Path({str(marker)!r}).touch()"],
+                env=dict(os.environ), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        finally:
+            release.set()
+            closer.join(timeout=10)
+            releaser.join(timeout=10)
+            assert not closer.is_alive() and not releaser.is_alive()
+
+    probe.behavior = behavior
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        receipt = app.worker("workflows/worker.yaml").map([WorkItem("startup", {"value": 1})])
+    assert receipt.outcomes[0].status == "failed", receipt.to_dict()
+    assert receipt.outcomes[0].error.error_type == "InterruptedError", receipt.to_dict()
+    assert not marker.exists() and not any(_alive(identity) for identity in bootstraps)
+    assert not failures, failures
