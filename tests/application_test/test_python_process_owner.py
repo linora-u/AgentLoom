@@ -399,3 +399,190 @@ def test_native_root_result_survives_its_receipt_write_failure_and_retry(batch_p
         for identity in anchors:
             if _alive(identity):
                 psutil.Process(identity["pid"]).kill()
+
+
+@pytest.mark.parametrize("retry_from", ["live", "recovered"])
+def test_application_exposes_current_cleanup_error_from_both_stop_callers(batch_project, monkeypatch, retry_from):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.managed_process import ResourceCleanupError, recover_owned_process
+    from agentloom.execution.process import spawn_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    fault, gate, paused = (root / name for name in ("block-exit-write", "hold-select", "select-paused"))
+    fault.touch()
+    injection = root / "filesystem-fault"
+    injection.mkdir()
+    # Real guardian, command, sockets and os.replace. Only the filesystem fault
+    # and select boundary are controlled, so both STOPs share a readiness batch.
+    (injection / "sitecustomize.py").write_text(
+        "import errno,os,select,time\nfrom pathlib import Path\n"
+        "_replace=os.replace\n_select=select.select\n"
+        f"_fault=Path({str(fault)!r})\n_gate=Path({str(gate)!r})\n_paused=Path({str(paused)!r})\n"
+        "def replace(source,target,*args,**kwargs):\n"
+        "    if _fault.exists() and Path(target).name=='exited.json':\n"
+        "        raise OSError(errno.EIO,'native exit receipt write failure')\n"
+        "    return _replace(source,target,*args,**kwargs)\n"
+        "os.replace=replace\n"
+        "def ready(read,write,error,timeout=None):\n"
+        "    if len(read)==2 and _gate.exists():\n"
+        "        _paused.touch()\n"
+        "        while _gate.exists(): time.sleep(.005)\n"
+        "    return _select(read,write,error,timeout)\n"
+        "select.select=ready\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(injection) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    resources, anchors = [], []
+    queued, failures = Event(), []
+    original_sendall = socket.socket.sendall
+
+    def sendall(channel, data, *args, **kwargs):
+        result = original_sendall(channel, data, *args, **kwargs)
+        message = json.loads(data)
+        if message.get("op") == "stop" and message.get("generation"):
+            queued.set()  # The recovery frame actually reached its real socket.
+        return result
+
+    monkeypatch.setattr(socket.socket, "sendall", sendall)
+
+    def wait(predicate):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(.01)
+        raise AssertionError("Native cleanup observation watchdog")
+
+    def behavior(_payload):
+        process, _close = spawn_registered_process(
+            [sys.executable, "-c", "import time,sys;time.sleep(.15);sys.exit(7)"], env=dict(os.environ),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        directory = process.receipt_dir
+        resources.append(directory)
+        anchors.append(json.loads((directory / "description.json").read_text())["anchor"])
+        wait(lambda: process.observe()["status"] == "cleanup_unconfirmed")
+        first_error = process.observe()["error"]
+        assert first_error["errno"] == 5 and process.wait(timeout=5) == 7
+        recovery = recover_owned_process(directory)
+
+        def stop_recovered():
+            try:
+                recovery.request_stop()
+            except BaseException as error:
+                failures.append(error)
+
+        gate.touch()
+        wait(paused.exists)
+        process.request_stop()
+        stopper = Thread(target=stop_recovered)
+        stopper.start()
+        try:
+            assert queued.wait(timeout=5)
+        finally:
+            gate.unlink(missing_ok=True)
+            stopper.join(timeout=5)
+        assert not stopper.is_alive() and not failures, failures
+        error_path = directory / "cleanup-error.json"
+        wait(lambda: json.loads(error_path.read_text()).get("request_id") is not None)
+        current_error = json.loads(error_path.read_text())
+        wait(lambda: process.observe()["error"] == current_error)
+        assert current_error["errno"] == 5 and current_error["first_error"] == first_error
+        assert process.observe()["status"] == "cleanup_unconfirmed"
+        assert not process.observe()["physical_exit_confirmed"] and _alive(anchors[-1])
+        with pytest.raises(ResourceCleanupError) as caught:
+            recovery.wait_exited(timeout=1)
+        assert caught.value.errno == 5, "Recovery must expose the current guardian error's original errno"
+        fault.unlink()
+        target = process if retry_from == "live" else recovery
+        target.request_stop()
+        assert target.wait_exited(timeout=5)["physical_exit_confirmed"]
+        return {"actual_root_code": process.returncode, "cleanup_errno": current_error["errno"]}
+
+    probe.behavior = behavior
+    try:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            receipt = app.worker("workflows/worker.yaml").map([WorkItem("two-callers", {"value": 1})])
+        assert receipt.outcomes[0].status == "success", receipt.to_dict()
+        assert all(json.loads((directory / "exited.json").read_text())["physical_exit_confirmed"] for directory in resources)
+        assert not any(_alive(identity) for identity in anchors)
+    finally:
+        gate.unlink(missing_ok=True)
+        fault.unlink(missing_ok=True)
+        for directory in resources:
+            try:
+                recovery = recover_owned_process(directory)
+                recovery.request_stop()
+                recovery.wait_exited(timeout=5)
+            except ResourceCleanupError:
+                pass  # Safety is never acceptance evidence.
+        for identity in anchors:
+            if _alive(identity):
+                psutil.Process(identity["pid"]).kill()
+
+
+@pytest.mark.parametrize("later_caller", ["live", "recovered"])
+def test_application_recovered_wait_preserves_current_error_from_a_later_caller(batch_project, later_caller):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.managed_process import ResourceCleanupError, recover_owned_process
+    from agentloom.execution.process import spawn_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    resources, anchors = [], []
+
+    def behavior(_payload):
+        process, _close = spawn_registered_process(
+            [sys.executable, "-c", "import time;time.sleep(120)"], env=dict(os.environ),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        directory = process.receipt_dir
+        resources.append(directory)
+        anchors.append(json.loads((directory / "description.json").read_text())["anchor"])
+        obstruction = directory / "exited.json"
+        obstruction.mkdir()
+        recovery = recover_owned_process(directory)
+
+        def wait_for_error(previous_request=None):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                error = recovery.observe()["error"]
+                if error is not None and error["request_id"] != previous_request:
+                    return error
+                time.sleep(.01)
+            raise AssertionError("Native cleanup error watchdog")
+
+        try:
+            recovery.request_stop()
+            first_error = wait_for_error()
+            other = process if later_caller == "live" else recover_owned_process(directory)
+            other.request_stop()
+            current_error = wait_for_error(first_error["request_id"])
+            with pytest.raises(ResourceCleanupError) as caught:
+                recovery.wait_exited(timeout=1)
+            assert caught.value.detail == current_error, "A later same-scope error is authoritative for every caller"
+            assert isinstance(caught.value.errno, int)
+            assert not recovery.observe()["physical_exit_confirmed"] and _alive(anchors[-1])
+        finally:
+            obstruction.rmdir()
+        recovery.request_stop()
+        assert recovery.wait_exited(timeout=5)["physical_exit_confirmed"]
+        return {"current_errno": current_error["errno"]}
+
+    probe.behavior = behavior
+    try:
+        with Application.open(application, project_root=root, file_logging=False) as app:
+            receipt = app.worker("workflows/worker.yaml").map([WorkItem("recovered-callers", {"value": 1})])
+        assert receipt.outcomes[0].status == "success", receipt.to_dict()
+        assert not any(_alive(identity) for identity in anchors)
+    finally:
+        for directory in resources:
+            try:
+                recovery = recover_owned_process(directory)
+                recovery.request_stop()
+                recovery.wait_exited(timeout=5)
+            except ResourceCleanupError:
+                pass
+        for identity in anchors:
+            if _alive(identity):
+                psutil.Process(identity["pid"]).kill()

@@ -73,7 +73,9 @@ class OwnedProcess:
         self._stopped = False
         self._owner_ready = self._ready = self._extinct = self._ended = False
         self._error = None
+        self._error_event = None
         self._cleanup_request = None
+        self._cleanup_sequence = None
         self._generation = uuid4().hex
         self._communication = None
         self._guardian = self._channel = self._reader = None
@@ -167,10 +169,20 @@ class OwnedProcess:
                             self.returncode = value["returncode"]
                         elif event == "extinct":
                             self._extinct = value["physical_exit_confirmed"] is True and value["generation"] == self._generation
+                        elif event == "cleanup_started":
+                            # The guardian, rather than the requesting caller,
+                            # orders retries for this one native scope.
+                            self._cleanup_sequence = value["cleanup_sequence"]
+                            if value["request_id"] == self._cleanup_request:
+                                self._cleanup_request = None
+                            if self._cleanup_request is None and self._error_event == "cleanup_error":
+                                self._error = None
                         elif event == "startup_error" or (event == "cleanup_error" and (
-                            self._cleanup_request is None or value["error"].get("request_id") == self._cleanup_request
+                            self._cleanup_request is None
+                            and value["error"]["cleanup_sequence"] == self._cleanup_sequence
                         )):
                             self._error = value["error"]
+                            self._error_event = event
                         self._condition.notify_all()
         except (OSError, ValueError, KeyError) as error:
             self._error = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure"}
@@ -202,13 +214,15 @@ class OwnedProcess:
             self._raise_error()
 
     def request_stop(self, sig="SIGKILL"):
+        request_id = uuid4().hex
         with self._condition:
             self._stopped = True
-            self._cleanup_request = uuid4().hex
-            self._error = None  # Prior failure remains in its original exception/receipt.
         with self._launch_lock:
             if not self._extinct:
-                self._send({"op": "stop", "signal": sig, "request_id": self._cleanup_request})
+                with self._condition:
+                    self._cleanup_request = request_id
+                    self._error = None  # Prior failure remains in its original exception/receipt.
+                self._send({"op": "stop", "signal": sig, "request_id": request_id})
 
     def observe(self):
         retired = self._guardian is None or self._guardian.poll() is not None
@@ -297,15 +311,17 @@ class RecoveredProcess:
     def __init__(self, receipt_dir):
         self.receipt_dir = Path(receipt_dir)
         self._cleanup_request = None
+        self._cleanup_sequence = None
+        self._stop_lock = Lock()
         self.description = json.loads((self.receipt_dir / "description.json").read_text())
-        if self.description["version"] != 1:
+        if self.description["version"] not in {1, 2}:
             raise ResourceCleanupError("Unknown native resource description version")
 
     def observe(self):
         proof = self.receipt_dir / "exited.json"
         error_path = self.receipt_dir / "cleanup-error.json"
         error = json.loads(error_path.read_text()) if error_path.exists() else None
-        confirmed = (proof.exists() and json.loads(proof.read_text()) == {
+        confirmed = (proof.is_file() and json.loads(proof.read_text()) == {
             "physical_exit_confirmed": True, "generation": self.description["generation"]}
             and not _alive(self.description["anchor"]))
         root_path = self.receipt_dir / "root-result.json"
@@ -314,16 +330,39 @@ class RecoveredProcess:
                 "error": error, "root_result": json.loads(root_path.read_text()) if root_path.exists() else None}
 
     def request_stop(self):
+        with self._stop_lock:
+            self._request_stop()
+
+    def _request_stop(self):
         if self.observe()["physical_exit_confirmed"]:
             return
+        if self.description["version"] != 2:
+            raise ResourceCleanupError("Native resource owner does not support acknowledged cleanup")
         if not _alive(self.description["anchor"]):
             raise ResourceCleanupError("Native anchor was lost without an exit certificate")
-        with socket.socket(socket.AF_UNIX) as channel:
-            channel.settimeout(1)
-            channel.connect(self.description["endpoint"])
-            self._cleanup_request = uuid4().hex
-            channel.sendall(json.dumps({"op": "stop", "generation": self.description["generation"],
-                                       "request_id": self._cleanup_request}).encode() + b"\n")
+        request_id = uuid4().hex
+        self._cleanup_request, self._cleanup_sequence = request_id, None
+        try:
+            with socket.socket(socket.AF_UNIX) as channel:
+                channel.settimeout(1)
+                channel.connect(self.description["endpoint"])
+                channel.sendall(json.dumps({"op": "stop", "generation": self.description["generation"],
+                                           "request_id": request_id}).encode() + b"\n")
+                with channel.makefile("rb") as stream:
+                    frame = stream.readline(4097)
+                acknowledgement = json.loads(frame) if len(frame) <= 4096 and frame.endswith(b"\n") else None
+                if (not isinstance(acknowledgement, dict) or acknowledgement.get("event") != "cleanup_started"
+                        or acknowledgement.get("request_id") != request_id
+                        or acknowledgement.get("generation") != self.description["generation"]
+                        or type(acknowledgement.get("cleanup_sequence")) is not int
+                        or acknowledgement["cleanup_sequence"] < 1):
+                    raise ResourceCleanupError("Native cleanup acknowledgement remains unconfirmed")
+                self._cleanup_sequence = acknowledgement["cleanup_sequence"]
+        except (OSError, ValueError) as error:
+            detail = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure"}
+            if getattr(error, "errno", None) is not None:
+                detail["errno"] = error.errno
+            raise ResourceCleanupError("Native cleanup acknowledgement remains unconfirmed", detail) from error
 
     def wait_exited(self, timeout=None):
         deadline = None if timeout is None else monotonic() + timeout
@@ -332,9 +371,12 @@ class RecoveredProcess:
             if observed["physical_exit_confirmed"]:
                 return observed
             detail = observed["error"] or {}
+            # Ignore failures before our accepted retry, but retain the current
+            # scope failure even when another caller initiated its latest STOP.
             if observed["status"] == "cleanup_unconfirmed" and (
                 self._cleanup_request is None or not _alive(self.description["anchor"])
-                or detail.get("request_id") == self._cleanup_request
+                or (self._cleanup_sequence is not None
+                    and detail.get("cleanup_sequence", -1) >= self._cleanup_sequence)
             ):
                 raise ResourceCleanupError(detail.get("message", "Native cleanup remains unconfirmed"), detail)
             if deadline is not None and monotonic() >= deadline:
