@@ -118,7 +118,6 @@ agentloom = "src"
 
 [tool.setuptools.package-data]
 agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm",
-    "execution/durable/*.mjs", "execution/durable/owner_assets/*.json",
     "runtimes/pi/bridge-v*.schema.json", "runtimes/pi/bridge/*.json", "runtimes/pi/bridge/*.ts",
     "runtimes/pi/bridge/PI-LICENSE.txt"]
 

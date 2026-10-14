@@ -2,8 +2,8 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 
 def atomic_json(path: Path, value) -> None:
@@ -45,6 +45,15 @@ def initialize_namespace(root: Path, database_url: str) -> None:
         raise ValueError("Storage target must use the URL host/port/database; target query overrides are unsupported")
     database = url.database
     if url.get_backend_name() == "sqlite":
+        import sqlite3
+        import sys
+
+        # SQLite 3.51.2 fixes the Unix WAL close lock-order inversion present
+        # in 3.51.1. Refuse the known unsafe library before DBOS opens a queue.
+        # https://www.sqlite.org/releaselog/3_51_2.html
+        if sys.platform in {"darwin", "linux"} and sqlite3.sqlite_version_info == (3, 51, 1):
+            raise RuntimeError("SQLite 3.51.1 has a known Unix WAL close deadlock; "
+                               "use an environment with SQLite 3.51.2 or another verified library")
         if not database or database == ":memory:":
             raise ValueError("durable SQLite storage requires a persistent file")
         database = str(Path(database).expanduser().resolve())

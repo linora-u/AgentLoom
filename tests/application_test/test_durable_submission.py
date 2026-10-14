@@ -16,6 +16,21 @@ from test_support.worker_batch import batch_project as _batch_project
 batch_project = _batch_project
 
 
+def test_known_sqlite_wal_deadlock_is_rejected_before_queue_storage(batch_project, monkeypatch):
+    import sqlite3
+
+    root, application, _, probe, _ = batch_project
+    namespace = root / "persistent"
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        with monkeypatch.context() as library:
+            library.setattr(sqlite3, "sqlite_version_info", (3, 51, 1))
+            with pytest.raises(RuntimeError, match="SQLite 3.51.1.*WAL.*3.51.2"):
+                app.durable(root=namespace)
+    assert not (namespace / "system.sqlite").exists()
+    assert not (namespace / "namespace.json").exists()
+    assert probe.starts == []
+
+
 def test_durable_queue_keeps_persisted_and_live_capacity_equal(batch_project):
     root, application, _, _, write = batch_project
     write(application / "config/system.yaml", {"worker_execution": {"defaults": {"concurrency": 2}}})
