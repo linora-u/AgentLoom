@@ -25,11 +25,13 @@ def main():
         time.sleep(0.02)
     descriptor = read_json(job / "description.json")
     task = TaskDescription.from_dict(descriptor["task"])
-    host = HostSpec(**descriptor["host"]).build()
     from agentloom.execution.process_scope import bind_managed_process_scope
 
     try:
         with bind_managed_process_scope():
+            # Factory imports/construction are part of the isolated invocation,
+            # including any Runtime/tool transport they initialize.
+            host = HostSpec(**descriptor["host"]).build()
             result = host.invoke(task, descriptor["invocation_id"])
         atomic_json(job / "result.json", {"result": result})
     except BaseException as error:

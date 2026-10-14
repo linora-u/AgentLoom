@@ -1,6 +1,7 @@
 """Public DBOS executor with real Application/processes on the current OS."""
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import signal
 import subprocess
@@ -17,7 +18,9 @@ from agentloom.execution.durable.os_job import ResourceOwnershipError
 from test_support.worker_batch import batch_project as _batch_project
 
 batch_project = _batch_project
-pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="launchd product adapter requires macOS")
+PROCESS_OWNER = os.environ.get("AGENTLOOM_TEST_PROCESS_OWNER", "openclaw")
+pytestmark = pytest.mark.skipif(sys.platform != "darwin" and PROCESS_OWNER == "launchd",
+                               reason="launchd product adapter requires macOS")
 
 
 def wait_for(predicate, process=None, timeout=25):
@@ -55,8 +58,16 @@ def consumer(root, application, namespace, case, *, replay=False):
                     process.wait(timeout=5)
                     raise AssertionError("Consumer failed to drain on stop")
             # Independent safety cleanup of exact OS resources, preserving logs.
-            LaunchdJobs(namespace, HostSpec("test_support.durable_host:fixture_host", {"case": str(case)},
-                allow_replay=replay)).recover()
+            spec = HostSpec("test_support.durable_host:fixture_host", {"case": str(case)}, allow_replay=replay)
+            if PROCESS_OWNER == "openclaw":
+                from agentloom.execution.durable.openclaw_job import OpenClawJobs
+                runtime = os.environ.get("AGENTLOOM_TEST_OPENCLAW_RUNTIME")
+                jobs = OpenClawJobs(namespace, spec,
+                    runtime_root=Path(runtime) if runtime else None,
+                    node=os.environ.get("AGENTLOOM_TEST_OPENCLAW_NODE"))
+            else:
+                jobs = LaunchdJobs(namespace, spec)
+            jobs.recover()
 
 
 def test_public_executor_completes_real_application_without_model(batch_project):
@@ -128,7 +139,13 @@ def test_executor_sigkill_reaps_old_scope_before_upstream_recovery(batch_project
             native = json.loads((case / "native-old.json").read_text())
             first.kill()
             first.wait(timeout=5)
-            assert process_alive(native), "fault did not leave an old OS-owned invocation"
+            if PROCESS_OWNER == "openclaw":
+                # No new executor or test-side recovery may do this cleanup.
+                wait_for(lambda: not process_alive(native))
+                wait_for(lambda: all(not process_alive(json.loads(path.read_text()))
+                                    for path in (namespace / "jobs").glob("*/*/guardian.json")))
+            else:
+                assert process_alive(native), "fault did not leave an old OS-owned invocation"
             new = worker.submit(WorkItem("new", {"value": 2}))
             with consumer(root, application, namespace, case) as replacement:
                 wait_for(lambda: execution.status(new.workflow_id).status == "SUCCESS", replacement)

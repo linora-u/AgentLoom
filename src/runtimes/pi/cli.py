@@ -1,4 +1,4 @@
-"""CLI commands for installing and inspecting the Pi runtime adapter."""
+"""CLI commands for installing and inspecting runtime assets."""
 
 from __future__ import annotations
 
@@ -13,9 +13,18 @@ def runtime() -> None:
 
 
 @runtime.command("install")
-@click.argument("runtime_id", type=click.Choice(["pi"]))
+@click.argument("runtime_id", type=click.Choice(["pi", "execution-owner"]))
 def runtime_install(runtime_id: str) -> None:
-    """Download locked dependencies and build the Pi runtime."""
+    """Install locked dependencies for the selected runtime."""
+
+    if runtime_id == "execution-owner":
+        try:
+            from agentloom.execution.durable.openclaw_install import install_openclaw
+            entry = install_openclaw()
+        except (ImportError, RuntimeError) as exc:
+            raise click.ClickException(str(exc)) from None
+        click.echo(f"OpenClaw process assets ready: {entry}")
+        return
 
     from agentloom.runtimes.pi.install import install_pi
     from agentloom.runtimes.pi.metadata import SDK_VERSION

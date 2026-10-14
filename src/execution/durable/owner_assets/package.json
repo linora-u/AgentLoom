@@ -1,0 +1,8 @@
+{
+  "name": "agentloom-openclaw-process-owner",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "openclaw": "2026.10.3"
+  }
+}

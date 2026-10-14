@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import os
-from threading import Event
 import time
+from threading import Event
 
-from filelock import FileLock, Timeout
 import psutil
+from filelock import FileLock, Timeout
 
-from .client import TaskDescription, WORKFLOW_NAME, WORKFLOW_VERSION
+from .client import WORKFLOW_NAME, WORKFLOW_VERSION, TaskDescription
 from .files import atomic_json, read_json
 from .host import HostSpec
-from .os_job import AdmissionStopped, InvocationFailed, LaunchdJobs, ResourceOwnershipError, process_alive
+from .os_job import AdmissionStopped, InvocationFailed, OwnedJobs, ResourceOwnershipError, process_alive
 
 
 class DurableExecutor:
@@ -22,7 +22,7 @@ class DurableExecutor:
     released file lock or DBOS.destroy(). The host's retry decision is explicit;
     Runtime error metadata alone never authorizes generic replay.
     """
-    def __init__(self, execution, workers, *, host: HostSpec | None = None):
+    def __init__(self, execution, workers, *, host: HostSpec | None = None, jobs: OwnedJobs | None = None):
         execution._require_open()
         self.execution = execution
         self.workers = {worker.worker.identity: worker for worker in (execution.worker(path) for path in workers)}
@@ -31,7 +31,12 @@ class DurableExecutor:
         app = execution.application
         self.host = host or HostSpec("agentloom.execution.durable.host:application_host",
             {"application": str(app.application_root), "project_root": str(app.project_root)})
-        self.jobs = LaunchdJobs(execution.root, self.host)
+        if jobs is None:
+            from .openclaw_job import OpenClawJobs
+            jobs = OpenClawJobs(execution.root, self.host)
+        self.jobs = jobs
+        if self.jobs.root != execution.root or self.jobs.host_spec != self.host:
+            raise ValueError("Process owner must belong to this execution root and trusted host")
         self._used = False
 
     def run(self, *, stop_token: Event | None = None, idle_timeout: float | None = None):
@@ -41,7 +46,8 @@ class DurableExecutor:
         for concrete Application scopes. It does not report DBOS status or
         destroy() as physical drain. Unprocessed queue items stay durable.
         """
-        from dbos import DBOS, DBOSPortableJSONSerializer, WorkflowSerializationFormat, error as dbos_error
+        from dbos import DBOS, DBOSPortableJSONSerializer, WorkflowSerializationFormat
+        from dbos import error as dbos_error
 
         if self._used:
             raise RuntimeError("A durable executor requires a fresh dedicated process")
