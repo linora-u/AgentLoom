@@ -1,0 +1,91 @@
+{
+  "worker_capacities": {
+    "validation": 20,
+    "conflict": 5
+  },
+  "different_queue_names": true,
+  "held_conflicts": 5,
+  "sixth_waited": true,
+  "ordinary_completed_while_conflicts_held": true,
+  "resource_exit_receipts": [
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792052485298831000-7f01089334174918999d701acdbdce3d",
+      "workflow_id": "loom-206183e36fc3801500463b72961e39c9b9969cacce95eca7cfca2b3c6fc37468"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792052486283467000-7133326e88d04be2867a5d100527f543",
+      "workflow_id": "loom-635cc6c07f8c990d19930c8ebcd7c86f874f7a274522912915563e20b427069f"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792052485288605000-7bbcd02697fa4275bf13a3c89cf19d23",
+      "workflow_id": "loom-721a8c90ab7a14501c20303c6943cbda9c81d14809ece6b673bc09835f4154a9"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792052487285464000-e2013fe1100d4f40a14a9f499c52dbb2",
+      "workflow_id": "loom-77c5372ec5d52f9df8713a63f6aebe1984122c2dc0ca9f255d3f8a695324ae2b"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792052485274446000-1716eb733f8d4f028f6424a15d7c3572",
+      "workflow_id": "loom-885d5ed8ce6bdde35e570f482b84b05a50b5822111e816da721e6cbbc120bb9d"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792052485282066000-69e8f860cc0a4608ad75208f635b1730",
+      "workflow_id": "loom-926a157b2aff0845322947d70a382bc6e49c3b93e2edf9298d43a9a45f280b69"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792052485272092000-d9f0a976b0a244dcaef0f49a4c2b8a78",
+      "workflow_id": "loom-9f2a0b01f069ef621d1c545eafc2e58fee9cee937cc51e3d1288ae1c82a697aa"
+    }
+  ],
+  "all_seven_successful": true,
+  "model_calls": 0
+}

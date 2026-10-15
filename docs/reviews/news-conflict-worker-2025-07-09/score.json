@@ -1,0 +1,46 @@
+{
+  "day": "2025-07-09",
+  "hold_days": 3,
+  "sell_at": "open",
+  "entry_date": "2025-07-10",
+  "exit_date": "2025-07-15",
+  "news_records": 6071,
+  "initial_batches": 20,
+  "total_batches": 20,
+  "first_pass_selected_records": 1616,
+  "selected_records": 1616,
+  "total_event_etf_rows": 55,
+  "outcome_contract": "three_value_outcome_v1",
+  "outcome_counts": {
+    "命中": 12,
+    "弱命中": 27,
+    "未命中": 16
+  },
+  "outcome_score": 0.4636363636363636,
+  "scored_signals": 55,
+  "scoring_complete": true,
+  "market_reference": {
+    "etf_code": "510300.SH",
+    "return": 0.009147095179233622
+  },
+  "excluded": {},
+  "limits": {
+    "negative": "-0.015",
+    "positive": "0.02"
+  },
+  "directions": [
+    {
+      "direction": "利好",
+      "samples": 43,
+      "mean_return": 0.01432666320423261,
+      "max_price_drawdown": 0.016220600162206
+    },
+    {
+      "direction": "利空",
+      "samples": 12,
+      "mean_return": 0.004571104304497995,
+      "max_price_drawdown": 0.026397515527950312
+    }
+  ],
+  "price_copy_sha256": "13e2bfb249d9d94dff6ea8a84521b43bcaac00ec40b26f06561db5b36c121b6d"
+}

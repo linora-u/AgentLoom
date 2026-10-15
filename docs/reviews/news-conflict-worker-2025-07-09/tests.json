@@ -1,0 +1,36 @@
+{
+  "unique_relevant_tests": 114,
+  "all_current_tests_passed": true,
+  "initial_batch_run": {
+    "passed": 50,
+    "failed": 4,
+    "notes": "Old three-workflow fixture assertions and three-queue capacity assertions; corrected to four roles, rerun below."
+  },
+  "regression_run": {
+    "passed": 63,
+    "failed": 0
+  },
+  "final_smoke": {
+    "passed": 23,
+    "failed": 0
+  },
+  "updated_queue_cli_test": {
+    "passed": 2,
+    "failed": 0
+  },
+  "deduplicated_collection": "114 tests; the three updated workflow fixture failures are covered by the 11 passing contract tests; the updated queue assertion is covered by two passing pool tests.",
+  "static_F_checks": "passed",
+  "seams": [
+    "Application/NewsHost through real submission and finalize tools with controlled external model/queue transport",
+    "public Store enqueue, retry and task retrieval",
+    "real DBOS client and OS process executor for queue capacity and independence",
+    "real NewsAgent CLI test with empty fixture input; no model"
+  ],
+  "probe": {
+    "conflict_held": 5,
+    "sixth_waited": true,
+    "ordinary_completed_while_conflicts_held": true,
+    "resource_exit_receipts": 7,
+    "model_calls": 0
+  }
+}

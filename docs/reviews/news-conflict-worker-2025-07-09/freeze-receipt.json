@@ -1,0 +1,13 @@
+{
+  "frozen_before_price_scoring": true,
+  "created_at": "2026-10-15T08:50:27.569258+00:00",
+  "method_fingerprint": "06d07fd897ea827b51d2e162298bbf00b4b9af14b62ae83c0ba3b9d6b4cbf69d",
+  "formal_list_sha256": "571b3f9f3ee09b2c4e9ff63d272a6676bc7947aa37977438d9ba909f87362b90",
+  "prediction_files": {
+    "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-conflict-worker-2025-07-09-v1/results/2025-07-09.jsonl": "f9252144981e56cc35a74dfdeb0fb6163c72b6b4a0d60fd939c628d444715bda",
+    "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-conflict-worker-2025-07-09-v1/results/reviews/2025-07-09.json": "5b28c53e466482a01b90f7b6a0dc4c01848af4915c4fbb9d1bc50b16d7d7978d"
+  },
+  "entry_dates": [
+    "2025-07-10"
+  ]
+}

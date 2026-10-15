@@ -1,0 +1,36 @@
+{
+  "docs/reviews/news-conflict-worker-2025-07-09-20261015.md": {
+    "counts": {
+      "numbered_headings": 0,
+      "b2": 0,
+      "empty_commentary": 0,
+      "halfwidth_punctuation": 0,
+      "em_dash": 0
+    },
+    "matches": {
+      "numbered_headings": [],
+      "b2": [],
+      "empty_commentary": [],
+      "halfwidth_punctuation": [],
+      "em_dash": []
+    },
+    "exemptions": "Inline code and Markdown link targets; preserve exact protocol fields, filenames and URLs."
+  },
+  "applications/news_agent/agent/冲突校验.md": {
+    "counts": {
+      "numbered_headings": 0,
+      "b2": 0,
+      "empty_commentary": 0,
+      "halfwidth_punctuation": 0,
+      "em_dash": 0
+    },
+    "matches": {
+      "numbered_headings": [],
+      "b2": [],
+      "empty_commentary": [],
+      "halfwidth_punctuation": [],
+      "em_dash": []
+    },
+    "exemptions": "Inline code and Markdown link targets; preserve exact protocol fields, filenames and URLs."
+  }
+}
