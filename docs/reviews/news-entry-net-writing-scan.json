@@ -1,0 +1,12 @@
+{
+  "file": "docs/reviews/news-entry-net-2025-07-08-20261015.md",
+  "matches": {
+    "numbered_headings": [],
+    "contrast": [],
+    "empty_claims": [],
+    "chinese_ascii_punctuation": [],
+    "em_dash": []
+  },
+  "facts_checked": "counts, scoring, execution order, prediction freeze and report repair lineage",
+  "exemptions": []
+}

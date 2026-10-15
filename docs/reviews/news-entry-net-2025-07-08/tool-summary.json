@@ -1,0 +1,67 @@
+[
+  {
+    "name": "mcp__AnySearch__get_sub_domains",
+    "status": "completed",
+    "count": 32
+  },
+  {
+    "name": "read",
+    "status": "error",
+    "count": 70
+  },
+  {
+    "name": "mcp__AnySearch__extract",
+    "status": "error",
+    "count": 58
+  },
+  {
+    "name": "read",
+    "status": "completed",
+    "count": 415
+  },
+  {
+    "name": "submit_news_validations",
+    "status": "completed",
+    "count": 62
+  },
+  {
+    "name": "mcp__AnySearch__search",
+    "status": "completed",
+    "count": 145
+  },
+  {
+    "name": "finalize_news_validation",
+    "status": "completed",
+    "count": 29
+  },
+  {
+    "name": "mcp__AnySearch__batch_search",
+    "status": "completed",
+    "count": 49
+  },
+  {
+    "name": "finalize_news_screening",
+    "status": "completed",
+    "count": 31
+  },
+  {
+    "name": "submit_news_candidates",
+    "status": "completed",
+    "count": 128
+  },
+  {
+    "name": "loom_retrieve_context",
+    "status": "completed",
+    "count": 25
+  },
+  {
+    "name": "submit_initial_classifications",
+    "status": "completed",
+    "count": 93
+  },
+  {
+    "name": "finalize_initial_screening",
+    "status": "completed",
+    "count": 20
+  }
+]

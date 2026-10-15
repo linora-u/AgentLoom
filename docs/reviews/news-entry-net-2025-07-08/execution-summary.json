@@ -1,0 +1,1166 @@
+{
+  "collected_at": "2026-10-15T07:38:36.159234+00:00",
+  "status": {
+    "root": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1",
+    "day": "2025-07-08",
+    "stages": {
+      "initial": {
+        "pending": 0,
+        "running": 0,
+        "completed": 20,
+        "failed": 0
+      },
+      "refined": {
+        "pending": 0,
+        "running": 0,
+        "completed": 30,
+        "failed": 0
+      },
+      "validation": {
+        "pending": 0,
+        "running": 0,
+        "completed": 29,
+        "failed": 0
+      }
+    },
+    "failed_tasks": [],
+    "queue": {
+      "completed": 536
+    },
+    "days": [
+      {
+        "day": "2025-07-08",
+        "screening_complete": 1,
+        "sealed": 1,
+        "created": 1792048541.861256,
+        "screened": 1792049261.539957,
+        "finished": 1792049865.5908868,
+        "initial_submitted": true,
+        "initial_complete": true,
+        "refined_submitted": true,
+        "refined_complete": true
+      }
+    ],
+    "submissions": [
+      {
+        "day": "2025-07-08",
+        "stage": "initial",
+        "task_ids": [
+          "2025-07-08-initial-0001",
+          "2025-07-08-initial-0002",
+          "2025-07-08-initial-0003",
+          "2025-07-08-initial-0004",
+          "2025-07-08-initial-0005",
+          "2025-07-08-initial-0006",
+          "2025-07-08-initial-0007",
+          "2025-07-08-initial-0008",
+          "2025-07-08-initial-0009",
+          "2025-07-08-initial-0010",
+          "2025-07-08-initial-0011",
+          "2025-07-08-initial-0012",
+          "2025-07-08-initial-0013",
+          "2025-07-08-initial-0014",
+          "2025-07-08-initial-0015",
+          "2025-07-08-initial-0016",
+          "2025-07-08-initial-0017",
+          "2025-07-08-initial-0018",
+          "2025-07-08-initial-0019",
+          "2025-07-08-initial-0020"
+        ],
+        "created": 1792048541.8999228,
+        "completed": 1792048844.088622,
+        "error": null
+      },
+      {
+        "day": "2025-07-08",
+        "stage": "refined",
+        "task_ids": [
+          "2025-07-08-refined-0001",
+          "2025-07-08-refined-0002",
+          "2025-07-08-refined-0003",
+          "2025-07-08-refined-0004",
+          "2025-07-08-refined-0005",
+          "2025-07-08-refined-0006",
+          "2025-07-08-refined-0007",
+          "2025-07-08-refined-0008",
+          "2025-07-08-refined-0009",
+          "2025-07-08-refined-0010",
+          "2025-07-08-refined-0011",
+          "2025-07-08-refined-0012",
+          "2025-07-08-refined-0013",
+          "2025-07-08-refined-0014",
+          "2025-07-08-refined-0015",
+          "2025-07-08-refined-0016",
+          "2025-07-08-refined-0017",
+          "2025-07-08-refined-0018",
+          "2025-07-08-refined-0019",
+          "2025-07-08-refined-0020",
+          "2025-07-08-refined-0021",
+          "2025-07-08-refined-0022",
+          "2025-07-08-refined-0023",
+          "2025-07-08-refined-0024",
+          "2025-07-08-refined-0025",
+          "2025-07-08-refined-0026",
+          "2025-07-08-refined-0027",
+          "2025-07-08-refined-0028",
+          "2025-07-08-refined-0029",
+          "2025-07-08-refined-0030"
+        ],
+        "created": 1792048846.876748,
+        "completed": 1792049261.539944,
+        "error": null
+      }
+    ]
+  },
+  "executor": [
+    {
+      "root": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1",
+      "pid": 81137,
+      "process_created": 1792048539.664168,
+      "instance": "cbd8b4995ffa4272b6c5e12f32242deb",
+      "python": "/Users/bytedance/code/AgentLoom-private/.venv/bin/python",
+      "prices": "/Users/bytedance/code/AgentLoom-private/applications/news_agent/data/etf_dk_merge",
+      "candidates": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1/etf_candidates.txt",
+      "config": "/Users/bytedance/code/AgentLoom-private/applications/news_agent/config/settings.yaml",
+      "status": "stopped",
+      "capacities": {
+        "initial": 20,
+        "refined": 30,
+        "validation": 20
+      },
+      "stage": "initial",
+      "concurrency": 20,
+      "scope": "shared_executor"
+    },
+    {
+      "root": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1",
+      "pid": 81137,
+      "process_created": 1792048539.664168,
+      "instance": "cbd8b4995ffa4272b6c5e12f32242deb",
+      "python": "/Users/bytedance/code/AgentLoom-private/.venv/bin/python",
+      "prices": "/Users/bytedance/code/AgentLoom-private/applications/news_agent/data/etf_dk_merge",
+      "candidates": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1/etf_candidates.txt",
+      "config": "/Users/bytedance/code/AgentLoom-private/applications/news_agent/config/settings.yaml",
+      "status": "stopped",
+      "capacities": {
+        "initial": 20,
+        "refined": 30,
+        "validation": 20
+      },
+      "stage": "refined",
+      "concurrency": 30,
+      "scope": "shared_executor"
+    },
+    {
+      "root": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1",
+      "pid": 81137,
+      "process_created": 1792048539.664168,
+      "instance": "cbd8b4995ffa4272b6c5e12f32242deb",
+      "python": "/Users/bytedance/code/AgentLoom-private/.venv/bin/python",
+      "prices": "/Users/bytedance/code/AgentLoom-private/applications/news_agent/data/etf_dk_merge",
+      "candidates": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1/etf_candidates.txt",
+      "config": "/Users/bytedance/code/AgentLoom-private/applications/news_agent/config/settings.yaml",
+      "status": "stopped",
+      "capacities": {
+        "initial": 20,
+        "refined": 30,
+        "validation": 20
+      },
+      "stage": "validation",
+      "concurrency": 20,
+      "scope": "shared_executor"
+    }
+  ],
+  "storage": {
+    "database": {
+      "backend": "sqlite",
+      "storage_target": "d34daf9818d8ba0377817b5eb2501eb260b559748be8a9e2c9b596d0c5dbc5aa",
+      "sqlite_version": "3.53.1",
+      "journal_mode": "delete"
+    }
+  },
+  "refined_input_records": 1638,
+  "candidate_counts": {
+    "ordinary": 527,
+    "industry_net": 9
+  },
+  "check_ordering": {
+    "last_ordinary_check_completed_at": 1792049705.318421,
+    "first_conflict_check_created_at": 1792049706.015766,
+    "conflicts_created_after_all_ordinary_checks": true
+  },
+  "trace_event_counts": {
+    "model_request": 1758,
+    "hook_decision": 1236,
+    "model_response": 879,
+    "tool": 1157,
+    "agent_end": 79,
+    "task_item_end": 79,
+    "agent_start": 79
+  },
+  "public_manifest": {
+    "day": "2025-07-08",
+    "status": "completed",
+    "generation": 364,
+    "updated_at": "2026-10-15T15:37:45+08:00",
+    "counts": {
+      "初筛/通过.jsonl": 1638,
+      "初筛/不通过.jsonl": 3786,
+      "精筛/利好.jsonl": 322,
+      "精筛/利空.jsonl": 44,
+      "精筛/中性.jsonl": 1273,
+      "校验/利好.jsonl": 241,
+      "校验/利空.jsonl": 42,
+      "校验/中性.jsonl": 102
+    },
+    "files": {
+      "初筛/通过.jsonl": "255e2db360379487302f4d6e6cf8a0b2cfc4664f6b7b5435672b9e01b3b35165",
+      "初筛/不通过.jsonl": "7e5086bca42ee2b9c0a3da8f959f4b7f0176395c424db55ac9526dac00b341e3",
+      "精筛/利好.jsonl": "efa1f27bcc57d9ef98d55b9b5087a337a463d62bb4d3f3fcf0652c107a76a047",
+      "精筛/利空.jsonl": "93ca520ad0ce400327d132365739d2596707e30a6adf7ab20b5fdb35f77a61d4",
+      "精筛/中性.jsonl": "a88266156fd7f5bc42b18b348cf61700fd10a21deb56d8849b0d2f5435a3e878",
+      "校验/利好.jsonl": "1b6a0e6938828c5587e95f4542b96f39adcdbc7bd9d8e05780dfb4be0bb39793",
+      "校验/利空.jsonl": "4f6dd1ea26e42d4d0d35480a41a24841db507172b84885a5bdf186e633f72224",
+      "校验/中性.jsonl": "5d1bbb11f95d8ac517997a5f950c199e3c2187b0983e707ed32123ba554d6e83"
+    },
+    "errors": [],
+    "screening_complete": true,
+    "sealed": true,
+    "source_created": 1792048541.861256,
+    "source_run": "/Users/bytedance/code/AgentLoom-private/.agentloom/validation/news-entry-net-2025-07-08-v1",
+    "stages": {
+      "initial": {
+        "pending": 0,
+        "running": 0,
+        "completed": 20,
+        "failed": 0
+      },
+      "refined": {
+        "pending": 0,
+        "running": 0,
+        "completed": 30,
+        "failed": 0
+      },
+      "validation": {
+        "pending": 0,
+        "running": 0,
+        "completed": 29,
+        "failed": 0
+      }
+    },
+    "inputs": {
+      "days/2025-07-08/batch-0001.txt": "b8493bc5a56cb5900030ea1b7d9c55ef21d667f19f94ff593d96fe6e02537419",
+      "days/2025-07-08/batch-0002.txt": "58bf0368a749a4cbb925a7f174f7c8f58a686d522062c52dfe4a2a06c742b93b",
+      "days/2025-07-08/batch-0003.txt": "5edbf257b4bbb598a2494554c623865ca6edcd7d1aae83dab1372be1ba6feb42",
+      "days/2025-07-08/batch-0004.txt": "d331d17a5e9ace320e502796a0a822dfe84d70bb8c4d10662b50a77a3f25f465",
+      "days/2025-07-08/batch-0005.txt": "7ae314f93ad6da6154bd95d54a05c94b25eade17e25bf63b3a935d4500f73379",
+      "days/2025-07-08/batch-0006.txt": "5d7c6a65874d1a32ebe070fa8dd6040f13ef07d138648052940c5fde5695859c",
+      "days/2025-07-08/batch-0007.txt": "342041bf7433e1d1de73f531b4d7f3b5b671e3963e97b58f03d31b58afd14b54",
+      "days/2025-07-08/batch-0008.txt": "2184fcd529812c0c7fe3ff9879e256acdbd968fa0a3e5eac57fc6e0f23e720f2",
+      "days/2025-07-08/batch-0009.txt": "87d526785beed58d6afef6932b3925a52a0d21d466b92edad37fa3f6f9a8a631",
+      "days/2025-07-08/batch-0010.txt": "d4588550653cd0c604f03a8ef5708c86a5cc919e5352e93a1dab103e5f934dda",
+      "days/2025-07-08/batch-0011.txt": "0057cd1960585d7db9fbfe997da14b4d33240c4a9c7fc80d767c59508be01295",
+      "days/2025-07-08/batch-0012.txt": "003915290f0a28848fa0d73435bcf636608d1bae5dff9ef117583e9557fd2eff",
+      "days/2025-07-08/batch-0013.txt": "cd43740d8b143a613a0f16ad9ab67a748d82887d839a5076176d5f537023edfc",
+      "days/2025-07-08/batch-0014.txt": "d4b55b4582e70ee86322d83894f942b9773f0bded654d025d884154eb90cc608",
+      "days/2025-07-08/batch-0015.txt": "fa9ce4b6b7ea32a9b192c72f08ab464d8999252d7c86ef036bb232673e45a493",
+      "days/2025-07-08/batch-0016.txt": "835643f9160dfa7ef4eb7fa97e715648787711e5d2cfd64e1b59065bb0552575",
+      "days/2025-07-08/batch-0017.txt": "186dde744f78bd4b29c7606e182b73645cb40aed73e293f6b262db8f4d3e2c62",
+      "days/2025-07-08/batch-0018.txt": "f0fd6aaf7eae324749b38a549ae4364673c9863317e56bd961e557d0c9166f4c",
+      "days/2025-07-08/batch-0019.txt": "137021530bdc911ec5d89ad1bee137837c3f8091f08aae71c8cd77fbc595e8c0",
+      "days/2025-07-08/batch-0020.txt": "37b2f7b670ffae43b25d2dd2b4c33c08e736dd445e8d9c7f082cba537fdf7297",
+      "days/2025-07-08/manifest.json": "650dba7e0f14af6948ad7c2a668165828de3ca93edfc781b7e0fa84e74be7681",
+      "days/2025-07-08/records.jsonl": "0c1299e177e960445cc63c0464e6e586d93556033be444ac72e96301f111e5a4"
+    }
+  },
+  "public_files_verified": {
+    "初筛/通过.jsonl": true,
+    "初筛/不通过.jsonl": true,
+    "精筛/利好.jsonl": true,
+    "精筛/利空.jsonl": true,
+    "精筛/中性.jsonl": true,
+    "校验/利好.jsonl": true,
+    "校验/利空.jsonl": true,
+    "校验/中性.jsonl": true
+  },
+  "invocations": 79,
+  "all_resources_exited": true,
+  "resource_receipts": [
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264739990000-b9e977bbba3f4c8a98a7636fcd33534f",
+      "workflow_id": "loom-0193fb780f2a1e120227d8d1478cfb5cf35e28b677fcff8ef586591d56001c76"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849050299000-42f9e6c0d52b41848fcb6fa736f4e7ab",
+      "workflow_id": "loom-04bc9fbedf7628f28b70ec34ca01d95c1e654a44acac17cf79652f7cd63d935a"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264502843000-134b0fa03731447b91fda3e4dd75ecec",
+      "workflow_id": "loom-08de37dfa56e033542f784e157b2ed51e2b5ea4cacba6fef917c7e3f17829915"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264923257000-6ddf9734d6584b088a9f38e5b8ced6d1",
+      "workflow_id": "loom-0cc67c461016708eb1dd762021072a9875f15b47fd7af575555fed604b0aa75f"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848955133000-4657995471814d20ad60e16e2f18c633",
+      "workflow_id": "loom-14077569daea37f48f56ca24b2fc7d19c7994411d6dda172e4a59e00299950b1"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048544311639000-1a6c6600a47a477ea22d9e2dc143b88d",
+      "workflow_id": "loom-151b557fe0f6a374e445eeaf5b51ab2ee41aa28402df908b9d6abd5e43f9c2c0"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707411955000-9444721f454b4e4ab7cbf99088d227cf",
+      "workflow_id": "loom-165ce43d590eae13eeda292e1bf78666e9eba51f66a6fefde06f0f6a51af34d9"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849837974000-1ccd4890bb0348a8adad33c98272bee3",
+      "workflow_id": "loom-19ae3b92dbeeb066921f6e8018e92cc463f3a8edc7df667ef51213c15a288987"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848850586000-ebb15c79d55b42318014e54e66f17ff7",
+      "workflow_id": "loom-1f2e2a3fe5c1c233c6dad5bd92fd886b1855026b10c6cf0d2a3d899c9eaa490e"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849032094000-056e5507426e4692be293e632c2e58d5",
+      "workflow_id": "loom-227204384820d4abcd4c59aba625298e8b423bbe1350025efb6e2c8b899477d3"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848866490000-b3a71c854f7e49908a5ab9564d717fee",
+      "workflow_id": "loom-26ee5234ca0a7fa5845d9f0f81626c8e643c2acdfd20884ec83aefcedf1022ca"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264143245000-af1cd75917184dc3b5dd4e43009d288d",
+      "workflow_id": "loom-27c6c23a7fb59a5c1eae67ec9e37b0dd10b5678d728e2551acf58152aac02110"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543812905000-88f4f6174f5a45bca0a44b5026349daa",
+      "workflow_id": "loom-29fa7e28436a8854842cc0c624df29a4f06414f344f312c67dabba019c820703"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707443149000-0eb7ab4e55fa44eca04bc2686f495208",
+      "workflow_id": "loom-2ea2de1b50fba22b8ff9012297035bbc3b13319252e61fa5c7b7a86379b5b843"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264590919000-908fc661cb884464a076d4eef84fb647",
+      "workflow_id": "loom-2edfc4824b3f45a1711eb3a75275d4397ae8fb659179acb14d795868c1ad77b2"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048544480000000-4f861886b6404eb7a74f9d78c0de6eb1",
+      "workflow_id": "loom-3682ca8545541fbb840ada6aee33e4330b9243e4cde9a81cba727831e16f795f"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849707848000-0baad7e949564fca9926b5295c6b5fb0",
+      "workflow_id": "loom-3ab334dd5be4a4fba08af809a74d0f52df7ca951c85330fcc74726f661b9e0b0"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264108454000-c13f199148fb4dd2bcd88bdb8f2dd56b",
+      "workflow_id": "loom-457d289a5f4491cc328b2cce6040c059cb232d6fbcb415d54b3cc659defde840"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048544200114000-0f4bdfdad3f14cd182b20d4476e78cde",
+      "workflow_id": "loom-4a3c7d4fc3c740866f183668526c8219863cc253f7a7e35d14fbe55e005cd047"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849285215000-444e186f30dd4baf9a735e131077c26e",
+      "workflow_id": "loom-52a1bfbac9febd7ec40fd8dd9272a776427c528d6af145cb9647b89f4c45dd18"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848846796000-fed7acf6c11c4d9a99ad8a614c3edc61",
+      "workflow_id": "loom-56fefe763f82c5dfe7e5aed828259ddb215c83e4b3b72718f8ad794bc00578b1"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543747403000-7f60818ff80b4f8ebb6eb6dcacdb750f",
+      "workflow_id": "loom-5a0e6739152084b3de8905cf0fc4d593aadb5aa9ac24a6e1cdcd74844e470e4f"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707395936000-766af452fdae48599f5f7d64f3ea70f5",
+      "workflow_id": "loom-663ca330934f0eb48f48246f92f0b9ffb740294a86b1e397b78acde1590c4fae"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849009189000-2c8747e3fcdc457284256171515e594b",
+      "workflow_id": "loom-6b5437bb7ce3b09315db6ab17c117ea8a5665368c05db18454f5da45e8224e97"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543658825000-cd57f5c556dc47a3a9068c9c10f09b0a",
+      "workflow_id": "loom-6ef6597c541f9cdb2f5f15f916724d7e193da83b16b57b94ca0012e7207f3ece"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848844589000-8c5056e361c74f49aa9c442b33ff2971",
+      "workflow_id": "loom-718c8f6c20a834173d80e06bfc7a8f534562de6080b4790fe5f0994ac635dcbd"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264400451000-ae810bf4299446698041b60b159354a3",
+      "workflow_id": "loom-72463db7afd479947c5f1486417c77254699f4ab8ed6d8bc26af5033c534a563"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264731565000-f2a1a50c6eba420eafbc7a288f03ca76",
+      "workflow_id": "loom-72f8b78c4c0b36c71f7ff3848dab6a4523c9f9ad0147465022f81feb1d12e6cc"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264063730000-ada434db6b7f4543a465fb34a4c62971",
+      "workflow_id": "loom-7befc14ebaeb8f23dbd0726ed6450cb6086ed2da09e3eff3e18e829e97715755"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707397881000-642bfe37bb544bb89ca04e30c4108ad4",
+      "workflow_id": "loom-800e86396916940611287c8f10b58214d83afd837fc8a26654eea50eb079de66"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848897503000-ca8fe78c69384f6ca3c73bb38712a7b0",
+      "workflow_id": "loom-8262b1b39c6de923e865cace824d0c82dc552affd46d3886c5ee39b9e16c2cbe"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849003193000-0f8992aa770f433e84235dfb4d4d9095",
+      "workflow_id": "loom-83e75c91ce27b130d35e45803e5b10e84ca139f4a6699c2fde3d7ae47962c53a"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849062365000-c2a55e274c394f1cb561566bd3c90c20",
+      "workflow_id": "loom-86d62949e4123e47f4f6cf35def71c47d33520892ca989450fa2214c4a5e29bf"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849622957000-625d7c20ede045e29a6587f8723f5e79",
+      "workflow_id": "loom-86ed77f48ccb41eac9aa42a32ba537438f32ad2db173f26684ec3a3c64d52d58"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048544393704000-002eb92f394843a29b5317fc51404694",
+      "workflow_id": "loom-879c61f5100142e9ced77a940834b3f35f3e4bb2a0af351dc3e2503f0efa5c2f"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543894507000-9b24a1b3cb2e4dce8fd2385a6c2c2db6",
+      "workflow_id": "loom-8a02b884f470a81614387a4e7294fcf81b775b3298b30c518a78ab098be07945"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848944028000-631fedec5fd74fe7a32f5045de75a2b9",
+      "workflow_id": "loom-8c3c1575adaf78c401f220d0e69328cce51bc2483f5bf37a98b600231c56df6f"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707456767000-f95dc86be35640e4911b756cfea8bffe",
+      "workflow_id": "loom-8c6c5343cb38004c5fccd3815689b2b9b06da4a893d1b2c129dd617a3f0cea40"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848828112000-15db418e80584dd784cc4266d9ac1f58",
+      "workflow_id": "loom-8e0de9efce1ba191c76ad558b50a223eaf41bbd97624bb85f507a2affbb72c21"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848911446000-0661de7232ed4d57a9b42436438a7e4d",
+      "workflow_id": "loom-8f3ff1987ce49b78978fe91d5d62751e90bebf24c728cd482ceb2637e7e2271c"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264391903000-838b5bb10e5a44989d3488821d52ce3b",
+      "workflow_id": "loom-9598aa73a8648ca8feee9cf3e6911bbc0ca418b9ae63dc2630419b54470d3d80"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543734256000-92136c2de63342b9ac035a1cc62acf42",
+      "workflow_id": "loom-9627ba78110d9992a98309207835be82a7d4bc204a73624507207d02517374ac"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264152310000-1345e5489f834f1bb233a739a2dbab10",
+      "workflow_id": "loom-970cb735e4a67b99ff25a6ef4fa7911c9286d0b0411a184b3840031c3eeb6872"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848920417000-1bcc9f80369242f8a40c712a7615a162",
+      "workflow_id": "loom-9b246aa0ef96cf133f86296418f9302fd048b1e1e28364e28f978690a456c1ff"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707381544000-e4d47137d78a485fb3c03beaf430d388",
+      "workflow_id": "loom-9cb51b3db135b962b94f679db31e6394e46c945b9da737b1e0078a6de649f97c"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848834182000-b9ba422c1baf4686980f25881cc185be",
+      "workflow_id": "loom-a17ea686c5dffbb7c7d701f415997e4f299021d3069cea327424e30910ff8180"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849440524000-baeb6f69842e41409eac8b37e00a862e",
+      "workflow_id": "loom-a71680b4c958fb70637c59934f19f56f3ea75bc7cf6eea0402dbd87b7d8a7a69"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849126966000-be8f2ba3746f4ccfa9889cfec4da554d",
+      "workflow_id": "loom-ac01525b8472bcf1c993f5df96dfc6c60a916e38cc7981d560f8b51e64ef8107"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264905964000-80563bfbb2a04d5b80c6c760ebfffe90",
+      "workflow_id": "loom-b174c14747a464263028a947aad923707f1eca2af013e6f8330cc5fe89bfed86"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543725322000-708ab8d6f40a42d4bf194669f7eeb65b",
+      "workflow_id": "loom-b29b8e22fbcb83ea212d49f40a4cf95b61acea251add6e070b1d2ebaafc69562"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543677030000-fdc6244f29054168b200e322ff1f75dd",
+      "workflow_id": "loom-b402c03bc8db93d23165fe72ba3cc482cb47a33202a82800bd5c8c26ea11ecd5"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849749382000-be23772085f94b78a917849d0406f927",
+      "workflow_id": "loom-b58f72af2ab0a5c05ca1809e6ba8937544ad23030eb0735ee9fa62d537527a26"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849298889000-eee20b73589e4d318b653417d5f05dbb",
+      "workflow_id": "loom-b5936916532623663a30c015b65c74d6dad322fdf841ea3a8111eca529fb32e4"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543672085000-7d3bd52037c24251b03b364f3b06c008",
+      "workflow_id": "loom-b8af0e72c444f2e722c099618a8ac2127851e3ea63c383fa631e65fbbca52d76"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707401283000-e9a3238928514259b5afecc7c69e6768",
+      "workflow_id": "loom-bea3edc8c9ccd6f47454bd2a21da9b99dc6acc4c0fcf14ddafa980baf409c6a3"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707385643000-7f27557d74b24af49db6a8b262d73309",
+      "workflow_id": "loom-c16b4f59f1d23b5e7934fa7dba55ce1723ede80ecd61e865ba6805af8b86c6db"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264510814000-9086c6fffd2b40be9574a326c433ec30",
+      "workflow_id": "loom-c20ed0dfd13f20e6e03a95e6945c151f3b3ffc9c313d6d16981a4f18503748bd"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543819096000-134e4d52c86b408aad37e7c1e271283d",
+      "workflow_id": "loom-c27e7e0413c7b7c2faa07306b2bf1d28cd098955af8be1fa33697d6dfc94444b"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264843280000-2488f2ff90c94757afe84d3c13b0a8c0",
+      "workflow_id": "loom-ca802bbd3ee8f80563374d1cab5933b6a85b32a7366435d8eb6ed924b8108639"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264256596000-c7cee761b7b64d72b863a893f3705568",
+      "workflow_id": "loom-ccffa79ad862d10090b4322949dcf3d9137072182a85dc0b79397e520dc9cb14"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048544145855000-d1d4d803d5fb4eb883ff2fe1dc97fbf4",
+      "workflow_id": "loom-cdc1efbcbaf2883dee4da0b1f5175bdab19c2ca021640158c6c8a105277c5012"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849100908000-272dd39e69a543c389dd994c74ec3671",
+      "workflow_id": "loom-d2fd26bc55fbd47e59c8cc0d1bb975022e72aa231fa92308929c1b77acf2c83d"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264337182000-43281806d73c4482aff32bdee8006de5",
+      "workflow_id": "loom-dc0fded8f8976ef99c6dba61db6add1c09939aaa6bedabb61e943c868b3a63d7"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048544063906000-231554275a054467803ce9654059cabb",
+      "workflow_id": "loom-e3601d723d4821388973e7a8ad681a5d1ef26ad950a641d8f5809e6e70a60e9d"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543652091000-1e693a2a4da3418395c15c219446acf5",
+      "workflow_id": "loom-e53d3f981144395cef5db5926f61fb5020b4fdc49b83645f0bb04dcbc19131c0"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849109064000-be62148adadb4d508434e5735c46e28e",
+      "workflow_id": "loom-e8305acc1b5908f42cb72ad036c77b9d8d4108eba4d7a3b8bb4382ab25aa3cb6"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848901359000-cc58709cf4974f7b96c13f4b0d8f9c2d",
+      "workflow_id": "loom-e9605fbae6952b3693acf3fa47c009bd9a930d65868b6a684d786fbdf16f3c65"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264322070000-efaab3b3583f434aaa214bc44a8fd8de",
+      "workflow_id": "loom-ec75b07283575ea40d2c9e31d11c89ed6233ea04ec7e8fd5a26d9bebf5199d2a"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264524011000-0eae4d1b05e3493aa6cbe86a15246b3f",
+      "workflow_id": "loom-ede4f9646a3d47df79862921d34361e74c1cc4f72ed9feb554c3166b3213b208"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543808000000-ed49c3488c2147ec9b320f9908e05634",
+      "workflow_id": "loom-edf8cae0e7ddcb4e8d8f316499e5b4551b852982e6fa6f88a6f81ebfec7f0d27"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849374816000-e4ba33f43f8e441e800008ffa7f65af7",
+      "workflow_id": "loom-eef763e08014b7218dd57e1913666396c0544269a37af06345d478dd13451d72"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264760022000-68478d76fc72456c948717e5604a26b4",
+      "workflow_id": "loom-efbffd7d63d5d9ccec9afd890f058d9e0ab5c19d77930a2217714b274213a833"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049707446368000-58f645449334481da6b91f54f3bb5b5d",
+      "workflow_id": "loom-f2acd25cd2b29da6986d7797df6b50e90b233fb8fb579ae4e013d70fc0fce48d"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048848959134000-4a0e8014898a46b7b9cba72645d68b09",
+      "workflow_id": "loom-f63c0b84eaa63630643cde7dbf61b7bd42e2ffc8f532e31b0b03bfec2c0e3008"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048544122054000-da69fe94907845398ad1b81c6cb03c64",
+      "workflow_id": "loom-f87a89059f27fe11aceb061d4b0b015411cbd06e6c657fa801080ac91a51d118"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543752178000-cf7089d0a6264a6f9e4567e12f768d2d",
+      "workflow_id": "loom-fa3e4f984e5f61353be91849c31bf34af71efa24abe4f2fa49387f4f1f0e925e"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048849596001000-4624560e2a574e4eba01e71d0584dddf",
+      "workflow_id": "loom-fc40b519fec7d08bfecbc3cab57462df2c2212f25301110ca07be3325bbd7def"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792048543882900000-6fbef3b8e15946f8867cc1b1a39f1a48",
+      "workflow_id": "loom-fda985c6a221d9ca509e23c8d3312328ca5afd4da81dae06f12331eab28c0b3f"
+    },
+    {
+      "status": "exited",
+      "physical_exit_confirmed": true,
+      "error": null,
+      "root_result": {
+        "returncode": 0
+      },
+      "exit_receipt_persisted": true,
+      "invocation_id": "01792049264235547000-8f620ba9e83e47f88938a4c325cc97fd",
+      "workflow_id": "loom-ffda47206a1075dfdd8611324643e26ef03c11384372ad85a7a13b74f8aeac95"
+    }
+  ],
+  "review_status": "reviewed",
+  "reviewed_failure_cases": 53,
+  "tool_errors": {
+    "native_read": 70,
+    "anysearch_extract_schema": 58
+  },
+  "chain_seconds": 1323.729630947113
+}
