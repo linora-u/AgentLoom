@@ -1,0 +1,80 @@
+{
+  "frozen_before_model_execution": true,
+  "started_at": "2026-10-15T07:15:37.182572+00:00",
+  "day": "2025-07-08",
+  "entry_date": "2025-07-09",
+  "date_selection": "July 1..7 have prior substantive reviews; no July 8 output, review or evaluation receipt found.",
+  "raw_records": 6922,
+  "prepared_records": 5424,
+  "initial_batches": 20,
+  "input_sha256": "0c1299e177e960445cc63c0464e6e586d93556033be444ac72e96301f111e5a4",
+  "method_fingerprint": "8ec8c8ccb0de4090737a67396b7e4858084446edfdaf6808a0433a00bc263d05",
+  "model_profile": "deepseek_v4_1",
+  "provider_output_budget": 65536,
+  "search": "configured AnySearch MCP with existing key failover",
+  "concurrency": {
+    "initial": 20,
+    "refined": 30,
+    "validation": 20
+  },
+  "input_batch_token_limit": {
+    "initial": 350000,
+    "refined": 350000
+  },
+  "hold_days": 3,
+  "sell_at": "open",
+  "thresholds": {
+    "positive": "0.02",
+    "negative": "-0.015"
+  },
+  "comparison": "Common full initial/refined/ordinary validation and daily net receipts; vary only the final merge.",
+  "baseline_policy": "previous formal merge of mapping_signals with bearish priority",
+  "new_policy": "completed validated entry_session signals; no evaluator model calls",
+  "comparison_measures": [
+    "outcome_score",
+    "hit_count",
+    "weak_hit_count",
+    "miss_count",
+    "signal_count",
+    "retained_original_hits",
+    "signed_return_diagnostic"
+  ],
+  "publication_root": "/Users/bytedance/code/AgentLoom-private/applications/news_agent/data/output",
+  "other_public_manifests": {
+    "2025-08-08/manifest.json": "1e866ebb981ceb588f381c434e8e9a41771d2727ec809bb8c59216c757a84cd8",
+    "2025-08-30/manifest.json": "b9c3fb8828d9f56b8f510958034a870d9f9d112910591191d1ea082db6c0df20",
+    "2025-08-06/manifest.json": "615ee24466fac358642a5f63b17f2463a1a240d9756c4900e7037fbb2f1cdd33",
+    "2025-08-01/manifest.json": "a522c25cd103706af4a8b4a65792417af7b3acbae3563367fb407b38e3b0c827",
+    "2025-08-07/manifest.json": "f45ac93956dc2c9bebf60a9accd8487dba3d2043e7751e1bbe074433c11b7538",
+    "2025-08-31/manifest.json": "655a94cd8ff8cdd8310e9bc9bd25b184c82d296114f5ca2e5432c4df9d21cd8d",
+    "2025-08-09/manifest.json": "44b454ae7d04e178761a3bec6ccd58a94e97eb03ed00a514c7693c8235c5ffe1",
+    "2025-08-14/manifest.json": "72b070cf39a6a314c3fadb06b0b1559cda010bc6866304d6aef7e0e8bf957eb0",
+    "2025-08-13/manifest.json": "4683c18779265acbfe7864683dd26ffbfaecc287d98c033a1c4b0917a7930e5c",
+    "2025-08-25/manifest.json": "cd7c1d28ff2fe9dc29a0770fd67f5fbe9151af90121fe7421f677cbe2c70a594",
+    "2025-08-22/manifest.json": "9f739f26630ddf48ed39d235c236f3fa7d49910c3c0235d885cdb7d07c5ae82e",
+    "2025-08-23/manifest.json": "536962dd1b66c73de5e9bdd930a795e4c33f4e6644786bd8a23a54e025e08fd1",
+    "2025-08-24/manifest.json": "4dc85c4c2707e475cfd799ce43d0bee170b8a137c71ebdc1999b160d97c0b013",
+    "2025-08-12/manifest.json": "2996aa48b79f0e431e9bcd2d7e28fb8fd03ca8f94af73facd02807d91e69f577",
+    "2025-08-15/manifest.json": "a4970cf0f1c0ebd110f9c030cafe2be524d3c11cc0febb85531bc387e553539f",
+    "2025-08-02/manifest.json": "980e8a15955171cfad3cfeae21a8c1fbccbee0c33f68472977980faa5eadba13",
+    "2025-08-05/manifest.json": "4c47c6a471bd45ee95e0a2ed7b609cca1e657e953c492e32ff24bafbfb5e4e21",
+    "2025-08-04/manifest.json": "b5f9814afd7a4386d96ec507e92789fc50158934bdad3536a7554597ecdb5e37",
+    "2025-08-03/manifest.json": "0e3e08ad3c693c7263955498a5cb48f5e44ba172a055a2146916bef774631569",
+    "2025-08-10/manifest.json": "e5e9fa36a160eecdd7130950549f72c5e615ac5947fd83300fddc4658e331666",
+    "2025-08-17/manifest.json": "b6ec464405769e264615fd3e03adba7c9c00b96b5aefa8e94d9f27c185919cd9",
+    "2025-08-28/manifest.json": "f9dabbc538f142a468a4b575d3fc9ab41077f1ef24bae77f28a5803f3d67f296",
+    "2025-08-21/manifest.json": "89879035634a4e97c92af07fe87a8a85d9e6ce89c6fdc155318442c3ed7cc7af",
+    "2025-08-26/manifest.json": "4366ba6598287a11fc54bda4afed6537596f60986910c5d6dab70a4bb76836b7",
+    "2025-08-19/manifest.json": "6e744b396f0ffa68a69fb90d00bd601bb20d6e193f6c24068c0d16a9d25a189c",
+    "2025-08-27/manifest.json": "f6b7642bf67f40d0caafc68c0ed4b0abc78b301eb49803b99a459644442a0fcf",
+    "2025-08-18/manifest.json": "7c200226d42324e3bd3cce3b8e533da5203fde0ab9ed1638f5765cd9913994cc",
+    "2025-08-20/manifest.json": "e47762168a3da5b57c3f6f167199f6fd84d2265e8b3df7d55393ccdef6dd3f86",
+    "2025-08-16/manifest.json": "7bc7b6de9be17871b92d3eb5257153751f3d097e9ff8d3a0dfbd25ec0227c1da",
+    "2025-08-29/manifest.json": "a27522030a38ed5af6adf4981c42d5c3ee56051a8f99297599d7e1affa21f911",
+    "2025-08-11/manifest.json": "3743497762e482f3d536a31fb7fe169b218671964f72f8f3d9e6f08eecf91c27"
+  },
+  "limitations": [
+    "One historical day cannot establish generalizable gains.",
+    "Legacy control shares the upstream decisions to isolate this change, rather than rerunning stochastic models."
+  ]
+}
