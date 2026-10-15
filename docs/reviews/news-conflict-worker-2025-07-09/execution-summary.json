@@ -1,0 +1,54 @@
+{
+  "day": "2025-07-09",
+  "finished_at": "2026-10-15T08:51:25.097810+00:00",
+  "all_tasks_completed": true,
+  "task_counts": {
+    "initial": 20,
+    "refined": 30,
+    "validation": 20,
+    "conflict": 1
+  },
+  "ordinary_candidates": 508,
+  "conflict_items": 16,
+  "conflict_batches": 1,
+  "conflict_input_tokens": [
+    155982
+  ],
+  "capacities": {
+    "initial": 20,
+    "refined": 30,
+    "validation": 20,
+    "conflict": 5
+  },
+  "invocations": 71,
+  "all_resource_exit_receipts_confirmed": true,
+  "executor_stopped": true,
+  "method_and_input_hashes_unchanged": true,
+  "prior_public_files_unchanged": true,
+  "prior_public_dates": 32,
+  "ordinary_completed_before_conflicts_created": true,
+  "seconds": 1485.0876150131226,
+  "conflict_prompt_checks": [
+    {
+      "run_id": "run_20261015T084445572956Z_23884908ff1c",
+      "dedicated_prompt_in_request": true,
+      "skill_read_observed": true
+    }
+  ],
+  "timing_count": 71,
+  "usage_complete": true,
+  "model_requests": 719,
+  "input_tokens": 43732427,
+  "output_tokens": 1975783,
+  "tool_error_count": 115,
+  "public_manifest_counts": {
+    "初筛/通过.jsonl": 1616,
+    "初筛/不通过.jsonl": 4455,
+    "精筛/利好.jsonl": 309,
+    "精筛/利空.jsonl": 80,
+    "精筛/中性.jsonl": 1229,
+    "校验/利好.jsonl": 241,
+    "校验/利空.jsonl": 75,
+    "校验/中性.jsonl": 104
+  }
+}

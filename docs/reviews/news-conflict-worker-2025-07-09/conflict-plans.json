@@ -1,0 +1,133 @@
+[
+  {
+    "id": "validation-1821d87332d244409f8a792952e00138",
+    "worker": "workflows/conflict.yaml",
+    "items": 16,
+    "input_tokens": 155982,
+    "max_tokens": 350000,
+    "spec": {
+      "batching": {
+        "concurrency": 5,
+        "input_tokens": 155982,
+        "max_input_tokens": 350000,
+        "strategy": "token_budget",
+        "target_news": 16
+      },
+      "execution_worker": "workflows/conflict.yaml",
+      "items": [
+        {
+          "candidate_ids": [
+            "d91ef401658260364efea92439893bdc35d667ec84cc826bd3fd93111fe6ef9c"
+          ],
+          "number": 1,
+          "record_id": "N20250709-32211e856484ecfd235f7616"
+        },
+        {
+          "candidate_ids": [
+            "c63800b155caec1155c3c88e49bbddc5e0cdaad3682c2281f168ae0172fa3ab6"
+          ],
+          "number": 2,
+          "record_id": "N20250709-6826fb3b7f0f46936b7969ce"
+        },
+        {
+          "candidate_ids": [
+            "1cbd3fb77210362f2a8712c7cf3022e4485d1929d391fd180b6b460f045f42af"
+          ],
+          "number": 3,
+          "record_id": "N20250709-0cfc1d093a6d05f19db001a1"
+        },
+        {
+          "candidate_ids": [
+            "6f00277ad37bb7f9ee37725089a640ced75a1dbc1dc4a130d777d0f019cdd8b3"
+          ],
+          "number": 4,
+          "record_id": "N20250709-089797833c752b6a3a32be50"
+        },
+        {
+          "candidate_ids": [
+            "2132f22168ecb07c5cd70342f65418fd838cfcb4d7c2a6dc7de462d7761b1246"
+          ],
+          "number": 5,
+          "record_id": "N20250709-1decc7762f727e0937fb4736"
+        },
+        {
+          "candidate_ids": [
+            "ab1baadb568f46ba67af1612ad932e5b984e8de6bcae616fd7a3ceef1e63820e"
+          ],
+          "number": 6,
+          "record_id": "N20250709-05f20bdec1e390e206a2d9b9"
+        },
+        {
+          "candidate_ids": [
+            "6ca3ea2bf7165934cc98e2bb8809afe401714ac81a81e1e97bf824eb78cfddb1"
+          ],
+          "number": 7,
+          "record_id": "N20250709-228181caaf0d9130c6186e89"
+        },
+        {
+          "candidate_ids": [
+            "d73904c4b906201c278741cacad465232f0be64a316b29c138f9d7c64f839329"
+          ],
+          "number": 8,
+          "record_id": "N20250709-33c966335774193d9b6a34a2"
+        },
+        {
+          "candidate_ids": [
+            "24eec687955064e5243f69617377ec589bbee17ebacaea547c313e06db5b83f4"
+          ],
+          "number": 9,
+          "record_id": "N20250709-215b0b92c19645dc1a73be42"
+        },
+        {
+          "candidate_ids": [
+            "227e541a36bfa1dc54e96b6a2c03d5e696a1fac447a351f585b7e0ef69b5c717"
+          ],
+          "number": 10,
+          "record_id": "N20250709-05f20bdec1e390e206a2d9b9"
+        },
+        {
+          "candidate_ids": [
+            "68370acda7400ec51b22c44b14701fb2d6e1a3ff13e64bf708566648e656dceb"
+          ],
+          "number": 11,
+          "record_id": "N20250709-947e1c8d3006db2c3e147e48"
+        },
+        {
+          "candidate_ids": [
+            "2a99cac04ff885ccc37b949e6e41a4085dcab3be78c43b293c286c6fa2726bac"
+          ],
+          "number": 12,
+          "record_id": "N20250709-2f73b889417f8c4764baf787"
+        },
+        {
+          "candidate_ids": [
+            "9091b9f6601babc3445458c76db67b8b1e79aa70c025ab9707d9a9e80002158a"
+          ],
+          "number": 13,
+          "record_id": "N20250709-009f0aa9bdc7ab54af67d8a5"
+        },
+        {
+          "candidate_ids": [
+            "8fa6b94c95332b737d9db30dae04fc393dfa4c24637906d8e61e6d241b2cea8b"
+          ],
+          "number": 14,
+          "record_id": "N20250709-74cf2687e30f38e1a22d1a7e"
+        },
+        {
+          "candidate_ids": [
+            "973014dc9e6a23cd64c6eeb782ab85f017cc022d5154bd337e4f742f7675ddad"
+          ],
+          "number": 15,
+          "record_id": "N20250709-2c0eeaf5bb6ce78d3cfcb5cb"
+        },
+        {
+          "candidate_ids": [
+            "491f726c46347389ce0ddc4a5ca3acc76e9a6ec41f29d45ad965db908ad156b0"
+          ],
+          "number": 16,
+          "record_id": "N20250709-25cbddc2e51592f0521a1e7f"
+        }
+      ]
+    }
+  }
+]

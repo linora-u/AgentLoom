@@ -1,0 +1,9 @@
+{
+  "first_audit_error": "included derived coverage.json in immutable input list",
+  "derived_status_path": "days/2025-07-09/coverage.json",
+  "before": "9530875f0ae977cf88eda1eb0bd03ba47065ef191ed8db7d39a385c8f2f3a888",
+  "after": "e722a5b416b86796fdf231d324798e0843760e1c5956c999e7b5286d3c5b5877",
+  "evidence": "processing/results.py writes initial/refined progress; evaluation/replay.py excludes coverage.json from copied inputs.",
+  "all_other_prepared_files_unchanged": true,
+  "business_tasks_rerun": false
+}
