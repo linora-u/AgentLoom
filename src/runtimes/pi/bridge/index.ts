@@ -246,6 +246,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     }
     if (subscription && searchMode !== "off") {
       projected.tools = [...(projected.tools || []), {type: "web_search"}];
+      projected.include = [...new Set([...(projected.include || []), "web_search_call.action.sources"])];
       if (searchMode === "required") projected.tool_choice = {type: "web_search"};
     }
     if (p.output_contract) {
