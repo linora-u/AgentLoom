@@ -1,0 +1,65 @@
+# Tushare 盘前采集与分析验收记录
+
+日期：2026-10-16。对应 [Spec](../specs/news-agent-tushare-preopen-spec.md) 与[任务图](../specs/news-agent-tushare-preopen-tasks.md)。
+
+## 真实接口与正文
+
+使用新 `news_agent.tushare.sync_news`，按 `2025-05-12` 目标交易日采集
+`2025-05-09 15:00` 至 `2025-05-12 09:30` 的窗口。仅日期记录采用起始交易日整日纳入规则。
+本地读取现有合法 Token 后仅通过进程环境变量注入，给采集器传入不存在的本地配置路径，验证环境变量独立运行。
+没有输出或另存凭据，保持 HTTPS、默认代理和 TLS 校验。
+
+| 类别 | 实际保存原始记录 |
+| --- | ---: |
+| 新闻快讯 | 1,917 |
+| 长篇新闻 | 919 |
+| 新闻联播文字稿 | 35 |
+| 国家政策库 | 1 |
+| 央行货币政策报告 | 1 |
+| 合计 | 2,873 |
+
+共 20 个接口请求，其中快讯 6 个、长篇 9 个、联播 3 个，政策和货币报告各 1 个；
+条数饱和触发的分窗实际执行。回执 `complete=true`，没有已知请求缺口。
+同原始日同标题合并 750 条后，准备了 2,123 条记录、24 个输入批次。
+央行 PDF 为 58 页，实际提取文本 43,730 字符，保存 PDF、文本、哈希及版本依据。
+回执和原始产物的凭据字节扫描通过。
+
+快讯第一财经和长篇财联社在这一窗口返回空结果；其余已选来源取得非空内容。
+成功空结果不能证明来源在现实世界没有新闻，也不能据此宣称数据商完整或无延迟。
+PDF 仅标记为本次下载版本，未宣称历史首次可获取时间。
+本次真实新闻没有发往模型做全量分析；三阶段业务链路使用下述确定性测试验证。
+
+## 确定性功能验证
+
+测试使用真实 XSHG 日历、真实 Parquet/PDF、业务持久化及受控 Worker；只替换外部 HTTP 与模型执行边界。
+
+| 验收项 | 主要测试边界 |
+| --- | --- |
+| T1、T2 | `test_preopen_cli`：指定截止或交易日，采集至封存，再按目标日入场评估 |
+| T3 | `test_news_window`：无 Token、周末、调休、长假、跨年及超范围拒绝 |
+| T4、T5 | `test_preopen_preparation`、`test_token_batches`：日期型整日、来源/时间前置、跨日标题及空标题 |
+| T6、T8 | `test_tushare_collection`：显式正文 fields、来源映射、分窗、饱和缺口、边界技术去重 |
+| T7 | `test_tushare_collection`、`test_preopen_preparation`：PDF 下载解析、原始日期关联、坏文档隔离 |
+| T9、T10 | `test_preopen_cli`：部分来源失败仍封存；空结果与全部失败区分，零输入不启动模型 |
+| T11 | `test_temporal_integrity`、`test_preopen_preparation`：三阶段一致 cutoff、拒绝截止后证据、原始时间及修订防护 |
+| T12 | `test_preopen_preparation`：缓存版本、已提交输入冻结、旧产物拒覆盖 |
+| T13 | `test_baseline_flow`、`test_baseline_prices`、`test_period`、`test_replay`：目标日直接入场、缺行情不伪造休市、交易日批量口径 |
+| T14 | `test_preopen_preparation`、`test_preopen_cli`：普通“广告”业务标题保留，语义判断交由 Agent |
+| T15 | `test_news_credentials`、`test_preopen_cli`：环境变量优先、文件兜底、无本地文件和脱敏 |
+
+实现分支及合并交叉测试均通过；公开 CLI 新增 10 项测试已通过。
+完整新闻回归、旧 CLI 夹具更新以及最终修复的结果在收尾时补齐。
+
+## 依赖、打包及审查
+
+- 新闻 wheel 成功构建，包含 `news_agent.tushare` 三文件及来源配置，声明开源日历、HTTP、PDF 依赖。
+- wheel 不含 `model.local.yaml`、`.mcp.anysearch.json` 或 `tushare.local.yaml`。
+- Pi 环境及应用模型配置 26 项测试通过；安装契约测试在补齐其声明的 `smol` 可选运行时后通过，共 27 项。
+- Standards 轴审查：0 项发现。
+- Spec 轴审查：发现 PDF 回执版本绑定和来源配置范围两项；独立修复与回归进行中。
+
+## 验证边界
+
+已验证本机程序的环境变量注入及真实接口访问；未在 Codex Cloud 创建环境或执行云端任务。
+本次没有 push、发布远程 PR、改官方 Tushare skill 或接入飞书通知。
+锁定 `exchange_calendars==4.13.2` 的 XSHG 当前覆盖至 2026-12-31，越界明确报错。
