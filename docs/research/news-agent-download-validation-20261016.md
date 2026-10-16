@@ -49,3 +49,7 @@ PDF 哈希：6c456ec683bb622c61eafbad95da6125739f739a0432e31156f61dbdbaea7fb2。
 真实数据和准备输入保留在主工作目录的 applications/news_agent/data/validation/news-download-20261016-1df2522a/，属于忽略的本地数据，不随提交上传。真实凭据仅从本地忽略配置读取；环境变量独立注入、优先级及脱敏由自动测试覆盖。暂存的私密配置未加入提交，wheel 中不包含 tushare.local.yaml、model.local.yaml 或 .mcp.anysearch.json。
 
 模型阶段的工程验证复用受控 Worker 和真实持久化文件，本次未执行真实模型整日策略，也未部署 Codex Cloud。云端跨任务恢复需要持久化原始库、进度和运行目录。
+
+## 主分支集成
+
+合并提交 b9cc1f77。合并后在原 main 工作目录使用其独立环境执行下载、清理、盘前 CLI 和同日编排互斥共二十项关键集成检查，20 passed。最终提交及重新构建的 wheel 再次扫描，未发现真实凭据，未包含本地私密配置文件。
