@@ -2,7 +2,7 @@
 
 日期：2026-10-16
 
-状态：规格已整理；业务实现和功能验证尚未开始。
+状态：业务实现已合入本地集成分支；完整回归及最终审查进行中。验收记录见同目录任务图。
 
 本规格汇总本次讨论的业务要求，覆盖新采集能力及原有分析、校验、评估链路的配套整改。
 
@@ -244,7 +244,7 @@
 
 实现后在已有合法凭据和权限的环境中，对五类接口及报告文档执行小范围冒烟，确认字段、来源参数、条数行为和实际传输可用。记录验证范围及权限缺口，不把有限调用当作完整覆盖或延迟保证。常规回归保持离线可重复，不因真实网络或模型波动而失败。
 
-采集功能及上述工作流测试尚未实现。2026-10-16 已使用本地配置中的 Token 完成基础接口和五类资讯接口的小范围权限验证，详见[接口冒烟验证记录](../research/tushare-api-smoke-20261016.md)；该验证不等于采集与分析功能验收，也不表示应用已实现本地配置读取或环境变量注入。
+实现前的 Token 与接口权限验证详见[接口冒烟验证记录](../research/tushare-api-smoke-20261016.md)。实现后的采集、工作流及完整回归验证另行记录，不能用前期权限验证代替功能验收。
 
 ## Out of Scope
 
@@ -266,7 +266,7 @@
 - Tushare 不提供逐源延迟与全量完整性保证。历史数据可能有延迟录入、后修订正文或重新导出的报告；保存时间与版本依据并保留现有校验，不制造不存在的历史可用时间。
 - 开源日历已用 `exchange_calendars` 4.13.2 本地验证，许可证为 Apache-2.0；该版本 `XSHG` 的声明日期上界为 2026-12-31，不能据此推算 2027 年节假日。后续实现需检查实际库版本的覆盖边界，并在需要时更新依赖。参考[开源项目](https://github.com/gerrymanoim/exchange_calendars)及[PyPI](https://pypi.org/project/exchange-calendars/)。
 - 2026-10-16 本机已实测官方 REST 地址 `https://api.waditu.com` 可在正常 TLS 校验下成功返回本次接口数据。该事实只覆盖本机验证，不自动证明 SDK 默认传输或云端网络环境具有相同表现。
-- 本规格保存在项目内，供后续实现与验收使用；本次没有发布外部 Issue，也不表示业务代码已经实现。
-- 本地凭据位置约定为新闻应用配置目录下的 `tushare.local.yaml`，字段为 `token`；参见[无密钥配置模板](../../applications/news_agent/config/tushare.example.yaml)。空本地配置、Git 忽略及打包排除可以先准备，实际配置读取在采集功能实现时接入。
+- 本规格保存在项目内，作为实现与验收依据；没有发布外部 Issue。
+- 本地凭据位置为新闻应用配置目录下的 `tushare.local.yaml`，字段为 `token`；参见[无密钥配置模板](../../applications/news_agent/config/tushare.example.yaml)。环境变量 `TUSHARE_TOKEN` 非空时优先，无本地文件时也可采集。
 - [前期讨论与只读调查汇总](news-agent-tushare-ingestion.md)保留为背景记录；本规格作为后续实现的统一口径。
 - 官方接口资料：[新闻快讯](https://tushare.pro/wctapi/documents/143.md)、[长篇新闻](https://tushare.pro/wctapi/documents/195.md)、[新闻联播](https://tushare.pro/wctapi/documents/154.md)、[国家政策库](https://tushare.pro/wctapi/documents/406.md)、[央行报告](https://tushare.pro/wctapi/documents/465.md)。
