@@ -36,6 +36,7 @@ _SCRUB_EXACT: frozenset[str] = frozenset(
         "COHERE_API_KEY",
         "MISTRAL_API_KEY",
         "DEEPSEEK_API_KEY",
+        "NEWS_LLM_API_KEY",
         "HUGGING_FACE_HUB_TOKEN",
         "HF_TOKEN",
         # Cloud provider secrets
@@ -65,6 +66,7 @@ _SCRUB_EXACT: frozenset[str] = frozenset(
 _SCRUB_PREFIXES: tuple[str, ...] = (
     "ANTHROPIC_FOUNDRY_",
     "GOOGLE_CLOUD_",
+    "ANYSEARCH_AUTH_",
 )
 
 # ---------------------------------------------------------------------------
