@@ -284,8 +284,15 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             assert business_calls == 4
             (app / "workflows/worker.yaml").write_text("invalid: [")
             (app / "prompts/business.md").write_text("LIVE-MUTATION")
+            (root / "config/system.yaml").write_text("invalid: [")
+            import yaml
+            changed_models = yaml.safe_load((root / "config/model.yaml").read_text())
+            for name, model in changed_models["model"].items():
+                if isinstance(model, dict):
+                    model["base_url"] = "http://127.0.0.1:9/v1"
+            write_yaml(root / "config/model.yaml", changed_models)
             stop.clear()
-            result = run_application(request, policy=policy, state_root=tmp_path / "experiments",
+            result = run_application(request, state_root=tmp_path / "experiments",
                 environment=environment, resume_id=result.experiment_id, stop_token=stop)
             assert requests_by_role.count("business") == business_calls
         if stopper is not None:
@@ -363,10 +370,11 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             assert all(json.loads(path.read_text())["result"]["partition"] == "development-a" for path in evaluations)
         assert "fixture-key" not in "\n".join(p.read_text() for p in state.rglob("input.json"))
         fact.write_text("LIVE INPUT MUTATION")
+        (root / "config/system.yaml").write_text("invalid: [")
+        (root / "config/model.yaml").write_text("invalid: [")
         calls = len(requests)
         recovered = run_application(
             request,
-            policy=policy,
             state_root=tmp_path / "experiments",
             resume_id=result.experiment_id,
             environment=environment,

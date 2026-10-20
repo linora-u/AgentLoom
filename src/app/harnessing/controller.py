@@ -625,6 +625,15 @@ class ImprovementController:
         if set(self.credentials) - set(self.base.manifest.get("credential_refs", ())):
             raise ValueError("Trusted credentials exceed the frozen capability references")
 
+    def _capture_models(self, project_root, application_root):
+        from agentloom.config.config import load_project_config
+
+        with self._private_bindings():
+            config = load_project_config(project_root)
+            catalog = config.llm.overlay_from_yaml(application_root / "config/model.yaml")
+            catalog = catalog.patch_from_yaml(application_root / "config/model.local.yaml")
+        self.model_config = catalog.model_dump(mode="json")
+
     def prepare(self):
         from .snapshot import snapshot_application, load_bundle
         from .isolation import preflight_isolation
@@ -637,7 +646,6 @@ class ImprovementController:
             load_driver(self.policy.feedback.evaluator)
         self.store.immutable("request.json", self.request)
         self.store.immutable("policy.json", _policy_dict(self.policy))
-        self._freeze_models()
         base_record = self.store.read("base.json")
         if base_record:
             self.base = load_bundle(Path(base_record["root"]))
@@ -645,8 +653,15 @@ class ImprovementController:
             # Original preflight may inspect live source/business inputs.
             # Recovery validates archived configuration via _validate below;
             # only private capability references are rebound from live files.
+            self._restore_credentials()
+            if self.model_config is None:
+                self._capture_models(self.base.project_root, self.base.application_root)
+            self._freeze_models()
         else:
             self.driver.preflight(self.request, self.policy)
+            if self.model_config is None:
+                self._capture_models(self.request.project_root, self.request.application_root)
+            self._freeze_models()
             resources = getattr(self.driver, "editable_resources", lambda request: {})(self.request)
             self.base = snapshot_application(
                 self.request.project_root,
@@ -658,7 +673,7 @@ class ImprovementController:
                 model_config=self.public_models,
             )
             self.store.immutable("base.json", self.base.to_dict())
-        self._restore_credentials()
+            self._restore_credentials()
         prepared = self.store.read("prepared.json")
         if prepared:
             self.invocation = PreparedInvocation.from_dict(prepared)
@@ -694,6 +709,17 @@ class ImprovementController:
 
         with self._private_bindings():
             preflight_roles(self.base, self.policy)
+        if self.library is None:
+            from .library import HarnessLibrary
+            from agentloom.config.config import UnifiedConfig, bind_config, load_project_config
+
+            # Resource/default settings are frozen. The memory store remains
+            # the original trusted project's store, outside all Trial copies.
+            with self._private_bindings():
+                config = load_project_config(self.base.project_root)
+            config = UnifiedConfig(config.raw, self.request.project_root, config.llm)
+            with bind_config(config):
+                self.library = HarnessLibrary(self.request.application_id, agent_config=config.raw)
         view = self.store.read("library-view.json")
         if view is None:
             feedback, partition = self.policy.feedback.mode, self.policy.feedback.partition or ""
@@ -714,10 +740,22 @@ class ImprovementController:
         self.library_view, self.memory_snapshot = tuple(view["entries"]), view["memory_snapshot"]
 
     def run(self):
-        self.prepare()
         old = self.store.read("result.json")
         if old and old["status"] == "completed":
+            from .snapshot import load_bundle
+
+            self.store.immutable("request.json", self.request)
+            self.store.immutable("policy.json", _policy_dict(self.policy))
+            load_bundle(Path(self.store.read("base.json")["root"]))
+            invocation = PreparedInvocation.from_dict(self.store.read("prepared.json"))
+            _verify_inputs(invocation, self.store.root / "inputs")
+            if old["task_snapshot_id"] != invocation.task_snapshot_id:
+                raise ValueError("Completed result belongs to another frozen task")
+            selected = self.store.root / "bundles" / old["selected_candidate_id"].split(":", 1)[1]
+            if load_bundle(selected).candidate_id != old["selected_candidate_id"]:
+                raise ValueError("Completed result candidate identity changed")
             return ApplicationExecutionResult.from_dict(old)
+        self.prepare()
         from agentloom.runtimes.pi.credentials import bind_pi_credentials, capture_pi_credentials
 
         with bind_pi_credentials(capture_pi_credentials(self.model_config)):
@@ -869,13 +907,6 @@ def run_application(
         if not callable(ordinary):
             raise ValueError("Application driver requires an ordinary execution entry")
         return ordinary(request, events=events, stop_token=stop_token, resume_id=resume_id)
-    if model_config is None:
-        from agentloom.config.config import load_project_config
-
-        config = load_project_config(request.project_root)
-        catalog = config.llm.overlay_from_yaml(request.application_root / "config/model.yaml")
-        catalog = catalog.patch_from_yaml(request.application_root / "config/model.local.yaml")
-        model_config = catalog.model_dump(mode="json")
     if state_root is None:
         from agentloom.config.config import load_project_config
         from agentloom.execution.context import resolve_runtime_home
@@ -885,13 +916,6 @@ def run_application(
     store = ExperimentStore(Path(state_root) / experiment_id)
     try:
         with store.lock():
-            if library is None:
-                from .library import HarnessLibrary
-                from agentloom.config.config import bind_config, load_project_config
-
-                config = load_project_config(request.project_root)
-                with bind_config(config):
-                    library = HarnessLibrary(request.application_id, agent_config=config.raw)
             return ImprovementController(
                 request,
                 policy,
