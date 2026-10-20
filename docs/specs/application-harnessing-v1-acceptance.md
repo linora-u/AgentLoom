@@ -20,6 +20,8 @@ Local verification uses the exact project Python 3.14.8 pin, uv 0.13.3, Node 22.
 | Authentication and CLI behavior | 22 passed in 9.24s |
 | Native process ownership and actual nested delegation | 25 passed in 22.31s |
 | Real shared news CLI rebuild, stopped-business ACK recovery and ordinary CLI behavior | 12 passed in 38.21s; recovery made no additional model requests |
+| Follow-up response-privacy guard: public/ordinary Application boundaries and rebuilt SDK auth/trace | 50 passed in 115.75s; 26 passed in 8.12s |
+| Complete news tasks after response-privacy hardening | 4 passed in 75.99s; controlled fixtures, no new paid pilot |
 
 Groups overlap and are not summed. Public CI additionally runs the full public suite, memory campaigns and three clean installation profiles (`pi`, `pi-code`, `smol`) through the existing repository-sync merge gate. The profile checks build isolated non-editable installations from source distributions. Exact CI status is attached to the delivery PR.
 
@@ -39,7 +41,17 @@ Controlled HTTP fixtures replace model or external responses while exercising re
 
 Standards and Spec reviews were completed independently. All confirmed findings were fixed, including frozen recovery, stop admission before publication, dotenv/MCP argument privacy and guardian-owned OAuth refresh. Incremental reviews checked subsequent real-runtime fixes without weakening original Host identity or replaying completed business to repair an ACK.
 
+## Follow-up response privacy
+
+CodeQL identified a real reachable defect: a provider or MCP server could echo its own bound authentication value in otherwise valid generated content. Anonymous credential transport did not prevent that returned value from entering traces or candidates. The fix rejects known in-memory bound credentials in provider responses/errors, tool results and MCP discovery before their first runtime, SDK session or candidate write. Standard JSON-encoded content and arbitrary generated keys are checked; rejected executed tools retain uncertain-effect receipts and failed model invocations retain safe measured usage with incomplete flags. No new policy option was introduced, and ordinary execution without a Harness private scope remains unchanged.
+
+This follow-up uses local controlled HTTP/MCP and the matching rebuilt Pi SDK, not another paid pilot. The final seven Pi provider/MCP/native-output cases passed in 124.46s. A preceding fourteen-case run had thirteen passes and one test-marker failure caused by temporary HOME cleanup; the corrected seven-case Pi subset includes that native-output case. The earlier smol provider/MCP and discovery cases were already green; these results are not represented as a new fourteen-case full-run pass. Independent fixed-revision Spec probes confirmed safe provider adoption, preserved failed usage, physical exit and zero bound values in decompressed trace payloads; private MCP discovery failed before any model request. Exact-head remote CI and CodeQL remain required.
+
+Independent Standards and Spec follow-up reviews of this fixed revision completed with no new findings. These local reviews do not substitute for the updated head's remote checks.
+
 ## Real application acceptance
+
+The real request below belongs to its earlier frozen revision, before the response-privacy hardening above. Its original evidence is preserved; it was not rerun or resumed under the new source to claim a new paid acceptance.
 
 A real `parallel`, `k=1`, `contrastive` request completed without experiment errors. All four complete business Trials passed acceptance, sealed their business state and confirmed cleanup. General, domain, compose and reflection each completed on the real provider; the single accepted final was adopted directly, as required for `k=1`.
 
