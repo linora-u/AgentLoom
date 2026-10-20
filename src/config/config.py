@@ -44,6 +44,30 @@ MODEL_CONFIG_NAME = "model.yaml"
 LOCAL_MODEL_CONFIG_NAME = "model.local.yaml"
 _CAMPAIGN_LLM_CONFIG_FD_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD"
 _MAX_CAMPAIGN_LLM_CONFIG_BYTES = 1024 * 1024
+_HARNESS_MODEL_CONFIG: ContextVar[LLMConfig | None] = ContextVar("agentloom_harness_private_model_config", default=None)
+
+
+def current_harness_model_config() -> dict | None:
+    """Export a private catalog only to a trusted anonymous child transport."""
+    catalog = _HARNESS_MODEL_CONFIG.get()
+    return None if catalog is None else catalog.model_dump(mode="json")
+
+
+@contextmanager
+def bind_harness_model_config(raw: Mapping[str, Any] | None):
+    """Bind the trusted child's already-consumed anonymous configuration pipe.
+
+    The effective model catalog remains in memory. Candidate files contain
+    references only and must never replace these values with credential markers.
+    """
+    catalog = None
+    if raw is not None:
+        catalog = LLMConfig.model_validate(dict(raw)) if "models" in raw else LLMConfig.from_dict(dict(raw))
+    token = _HARNESS_MODEL_CONFIG.set(catalog)
+    try:
+        yield
+    finally:
+        _HARNESS_MODEL_CONFIG.reset(token)
 APP_CONFIG_RELATIVE_PATH = Path("config") / SYSTEM_CONFIG_NAME
 _PROJECT_NAME = "AgentLoom"
 _WORKFLOW_OVERLAY_KEYS = {
@@ -120,6 +144,9 @@ def _load_llm_config(path: Path) -> LLMConfig:
     credential-bearing payload is consumed exactly once and the descriptor is
     closed before any tool or provider subprocess can inherit it.
     """
+    bound_harness = _HARNESS_MODEL_CONFIG.get()
+    if bound_harness is not None:
+        return bound_harness.model_copy(deep=True)
     fd_value = ""
     if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") == "1":
         fd_value = str(os.environ.pop(_CAMPAIGN_LLM_CONFIG_FD_ENV, "") or "")
@@ -422,7 +449,7 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
     config = UnifiedConfig(merged, agent_root=agent_root, llm_config=llm_config)
     # Programmatic configs and the credential-pipe campaign are explicit
     # overrides. Only unchanged disk-loaded bases may be refreshed for a Run.
-    if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") != "1":
+    if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") != "1" and _HARNESS_MODEL_CONFIG.get() is None:
         config._loaded_raw = deepcopy(config.raw)
         config._loaded_llm = config.llm.model_dump()
     return config
@@ -549,6 +576,11 @@ def extract_workflow_overlay(
     *,
     source_name: str = "workflow config",
 ) -> dict[str, Any]:
+    if "harnessing" in config_map:
+        raise ValueError(
+            f"harnessing is not configurable in Agent YAML ({source_name}); "
+            "use Application config/system.yaml"
+        )
     if "redaction" in config_map:
         raise ValueError(
             f"redaction is not configurable in Agent YAML ({source_name}); "
@@ -605,7 +637,7 @@ def build_effective_agent_config_snapshot(
         except ValueError:
             pass  # Programmatic Agents without an Application use project models.
         else:
-            if model_root != base.agent_root:
+            if model_root != base.agent_root and _HARNESS_MODEL_CONFIG.get() is None:
                 llm_config = base.llm.overlay_from_yaml(model_root / "config" / MODEL_CONFIG_NAME)
                 llm_config = llm_config.patch_from_yaml(
                     model_root / "config" / LOCAL_MODEL_CONFIG_NAME
@@ -615,6 +647,13 @@ def build_effective_agent_config_snapshot(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
     )
     base_data = deepcopy(base.raw)
+    from agentloom.app.harnessing.policy import resolve_harnessing_policy, validate_harnessing_source
+
+    if "harnessing" in base_data:
+        validate_harnessing_source(
+            base_data["harnessing"], scope="project", source=str(base.agent_root / "config" / SYSTEM_CONFIG_NAME)
+        )
+    app_system_yaml: dict[str, Any] = {}
     layered_builder.apply_mapping("base_config", normalize_config_paths(base_data, base.agent_root))
     layers.append(
         ConfigLayerSnapshot(
@@ -673,6 +712,10 @@ def build_effective_agent_config_snapshot(
                         app_system_yaml,
                         source_name=str(app_config_path),
                     )
+                    if "harnessing" in app_system_yaml:
+                        validate_harnessing_source(
+                            app_system_yaml["harnessing"], scope="application", source=str(app_config_path)
+                        )
                     layered_builder.apply_mapping(
                         str(app_config_path), normalize_config_paths(app_system_yaml, agent_layer_root)
                     )
@@ -710,6 +753,12 @@ def build_effective_agent_config_snapshot(
                 )
             )
     merged = layered_builder.build()
+    if "harnessing" in base_data or "harnessing" in app_system_yaml:
+        merged["harnessing"] = resolve_harnessing_policy(
+            base_data, app_system_yaml,
+            project_source=str(base.agent_root / "config" / SYSTEM_CONFIG_NAME),
+            application_source=str(agent_layer_root / APP_CONFIG_RELATIVE_PATH),
+        ).model_dump(mode="json", exclude_unset=True)
     normalized = RootSettings.model_validate(merged).model_dump(exclude_unset=True)
     merged.update(normalized)
     normalize_tool_access_control_section(merged, base.agent_root)

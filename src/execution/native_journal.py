@@ -28,6 +28,7 @@ from agentloom.execution.native_tools import (
 from agentloom.execution.storage import SecureDirectory
 from agentloom.execution.tool_protocol import ToolCallRecord
 from agentloom.execution.context import RuntimeContext, validate_runtime_owned_path
+from agentloom.execution.durability_scope import current_durability_boundary
 
 
 def snapshot(value: Any) -> Any:
@@ -112,12 +113,18 @@ class NativeCallJournal:
             # atomic_write fsyncs each snapshot and its containing directory.
             # Also persist newly created ancestor entries; otherwise a reboot
             # could lose the whole journal despite a successful file fsync.
-            for parent in directory.resolve(strict=True).parents:
+            resolved = directory.resolve(strict=True)
+            boundary = current_durability_boundary()
+            if boundary is not None and not resolved.is_relative_to(boundary):
+                raise ValueError("Native journal is outside its trusted Trial durability root")
+            for parent in resolved.parents:
                 fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
                 try:
                     os.fsync(fd)
                 finally:
                     os.close(fd)
+                if parent == boundary:
+                    break
         except BaseException:
             self._storage.close()
             raise

@@ -21,7 +21,7 @@ NATIVE_SCOPE_GENERATION_ENV = "AGENTLOOM_NATIVE_SCOPE_GENERATION"
 
 
 @contextmanager
-def bind_managed_process_scope():
+def bind_managed_process_scope(*, guardian_entry: Path | None = None):
     """Bind one isolated process leader, before opening its Application.
 
     This is trusted host code, never a task-input option. A caller in an
@@ -43,7 +43,7 @@ def bind_managed_process_scope():
         anchor, child = identity["anchor"], identity["child"]
         generation = identity.get("generation")
         parent = psutil.Process(anchor["pid"])
-        entry = str(Path(__file__).with_name("_process_guardian.py").resolve())
+        entry = str((guardian_entry or Path(__file__).with_name("_process_guardian.py")).resolve())
         command = parent.cmdline()
         if (child["pid"] != os.getpid() or child["creation"] != psutil.Process().create_time()
                 or os.getppid() != anchor["pid"] or os.getpgrp() != anchor["group"]

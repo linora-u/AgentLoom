@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from importlib.metadata import PackageNotFoundError, version
 from threading import RLock
 from typing import Any
+from uuid import uuid4
 
 from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
@@ -23,7 +24,12 @@ from agentloom.execution.agent_runtime import (
 )
 from agentloom.execution.logging import get_logger
 from agentloom.execution.model_binding import ModelTurnBinding
-from agentloom.execution.model_protocol import ModelOutputTruncated, ModelProtocolError, ModelTurnResult
+from agentloom.execution.model_protocol import (
+    ModelOutputTruncated,
+    ModelProtocolError,
+    ModelResponseRejected,
+    ModelTurnResult,
+)
 from agentloom.execution.tool_gateway import ToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord
 from agentloom.runtimes.smolagents.checkpoint_codec import (
@@ -180,6 +186,7 @@ class SmolagentsRuntimeAdapter:
         native_runtime: Any,
         *,
         model_binding: ModelTurnBinding,
+        instance_id: str | None = None,
         checkpoint_sink: Any | None = None,
         tool_gateway: ToolGateway | None = None,
         output_contract: OutputContract | None = None,
@@ -191,6 +198,8 @@ class SmolagentsRuntimeAdapter:
         self._todo_provider = TodoStateProvider()
         self._native_runtime = native_runtime
         self._model_binding = model_binding
+        self._instance_id = instance_id
+        self._attempt_context = ContextVar(f"agentloom_smol_attempt_{id(self)}", default=None)
         self._tool_gateway = tool_gateway
         self._output_contract = output_contract
         self._default_checkpoint_sink = checkpoint_sink
@@ -290,12 +299,22 @@ class SmolagentsRuntimeAdapter:
         details: dict[str, JSONValue] | None = None,
     ) -> RuntimeEvent:
         request = self._request_context.get()
+        from agentloom.execution.trace import capture_explicit_execution_context
+        execution = capture_explicit_execution_context()
+        identities = {
+            "instance_id": self._instance_id or execution.agent_id,
+            "hook_run_id": execution.local_run_id, "local_run_id": execution.local_run_id,
+            "root_run_id": execution.root_run_id,
+            "attempt_id": self._attempt_context.get(),
+            "sequence": len(self._event_context.get() or ()),
+            "root_agent": execution.local_run_id == execution.root_run_id,
+        }
         return RuntimeEvent(
             kind=kind,
             application_id=request.application_id if request is not None else None,
             task_id=request.task_id if request is not None else None,
             run_id=request.run_id if request is not None else None,
-            details=details or {},
+            details={**(details or {}), **identities},
         )
 
     def _emit_event(
@@ -325,6 +344,9 @@ class SmolagentsRuntimeAdapter:
         for record in records:
             if not isinstance(record, ToolCallRecord):
                 continue
+            if record.error is not None and record.error.kind == "credential_echo":
+                native = getattr(self._native_runtime, "_agent", self._native_runtime)
+                native.interrupt()
             self._emit_event(
                 "tool",
                 details={
@@ -335,10 +357,12 @@ class SmolagentsRuntimeAdapter:
                 },
             )
 
-    def _observe_model_turn(self, turn: ModelTurnResult | ModelOutputTruncated) -> None:
+    def _observe_model_turn(self, turn: ModelTurnResult | ModelOutputTruncated | ModelResponseRejected) -> None:
         if isinstance(turn, ModelOutputTruncated):
             details = {"phase": "truncated", "raw_reason": turn.raw_reason,
                        "output_budget": turn.output_budget}
+        elif isinstance(turn, ModelResponseRejected):
+            details = {"phase": "rejected"}
         else:
             details = {"phase": "completed", "item_count": len(turn.items), "response_id": turn.response_id}
         self._emit_event("model", details=details)
@@ -360,6 +384,9 @@ class SmolagentsRuntimeAdapter:
                 "total_tokens": usage.total_tokens,
                 "cached_input_tokens": usage.cached_input_tokens,
                 "reasoning_tokens": usage.reasoning_tokens,
+                "usage_complete": bool(prior.get("usage_complete", True)) and (
+                    {"prompt_tokens", "completion_tokens", "total_tokens"}.issubset(turn.usage.details)
+                    or {"input_tokens", "output_tokens", "total_tokens"}.issubset(turn.usage.details)),
             },
         )
 
@@ -449,6 +476,7 @@ class SmolagentsRuntimeAdapter:
         events: list[RuntimeEvent] = []
         request_token = self._request_context.set(request)
         event_token = self._event_context.set(events)
+        attempt_token = self._attempt_context.set(uuid4().hex)
         try:
             unsupported = request.requirements.unsupported_by(
                 self.capabilities
@@ -487,14 +515,27 @@ class SmolagentsRuntimeAdapter:
             checkpoint_token = self._checkpoint_sink_context.set(checkpoint_sink)
             native = getattr(self._native_runtime, "_agent", self._native_runtime)
             observe_turns = getattr(getattr(native, "model", None), "observe_turns", None)
+            rejected_turns = []
+            def observe(turn):
+                self._observe_model_turn(turn)
+                if isinstance(turn, ModelResponseRejected):
+                    rejected_turns.append(turn)
+                    native.interrupt()
             model_observer = (
-                observe_turns(self._observe_model_turn)
+                observe_turns(observe)
                 if callable(observe_turns)
                 else nullcontext()
             )
             try:
                 with model_observer:
-                    native_result = self._native_runtime.run(**run_kwargs)
+                    try:
+                        native_result = self._native_runtime.run(**run_kwargs)
+                    except Exception:
+                        if rejected_turns:
+                            raise rejected_turns[0] from None
+                        raise
+                    if rejected_turns:
+                        raise rejected_turns[0] from None
             finally:
                 self._checkpoint_sink_context.reset(checkpoint_token)
             if (
@@ -534,6 +575,8 @@ class SmolagentsRuntimeAdapter:
                     "total_tokens": usage.total_tokens,
                     "cached_input_tokens": usage.cached_input_tokens,
                     "reasoning_tokens": usage.reasoning_tokens,
+                    "usage_complete": bool(reported.get("usage_complete", False))
+                        if callable(observe_turns) and reported is not None else False,
                 },
             )
             self._emit_event(
@@ -564,6 +607,7 @@ class SmolagentsRuntimeAdapter:
             )
             raise error from error.cause
         finally:
+            self._attempt_context.reset(attempt_token)
             self._event_context.reset(event_token)
             self._request_context.reset(request_token)
 

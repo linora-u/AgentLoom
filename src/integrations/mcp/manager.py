@@ -11,10 +11,10 @@ from __future__ import annotations
 from typing import Any
 
 from agentloom.execution.logging import get_logger
+from agentloom.execution.tool_gateway import ToolBinding
 from agentloom.integrations.mcp.client import AgentLoomMCPClient as MCPClient
 from agentloom.integrations.mcp.config import McpServerConfig, McpSettings, to_mcp_client_params
 from agentloom.integrations.mcp.tool_wrapper import wrap_mcp_tools
-from agentloom.execution.tool_gateway import ToolBinding
 
 logger = get_logger(__name__)
 
@@ -78,6 +78,10 @@ class McpManager:
                 "client_session_timeout_seconds": float(self._settings.tool_timeout),
             })
             tools = client.get_tools()
+            from agentloom.execution.model_privacy import reject_private_content
+            reject_private_content([{"name": tool.definition.name,
+                "description": tool.definition.description, "parameters": tool.definition.parameters}
+                for tool in tools])
             self._clients[cfg.name] = client
             self._raw_tools[cfg.name] = list(tools)
             self._errors.pop(cfg.name, None)
@@ -89,9 +93,15 @@ class McpManager:
                 try:
                     client.disconnect()
                 except Exception as close_error:
+                    from agentloom.execution.model_privacy import contains_private_content
+                    if contains_private_content(str(close_error)):
+                        close_error = RuntimeError("MCP close failed after private response rejection")
                     logger.warning("[MCP] Error closing failed connection '%s': %s", cfg.name, close_error)
             if not isinstance(exc, Exception):
                 raise
+            from agentloom.execution.model_privacy import BoundCredentialEcho, contains_private_content
+            if contains_private_content(str(exc)):
+                exc = BoundCredentialEcho("MCP discovery contained a bound credential")
             logger.warning("[MCP] Failed to connect to '%s': %s", cfg.name, exc)
             self._errors[cfg.name] = str(exc)
 

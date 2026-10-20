@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, type ExtensionFactory, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { BridgeToolCoordinator, type BridgeInvoke, type Identity, type Obj } from "./tool-coordinator.js";
 
-export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, identity: Identity, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void, persistence: SessionPersistence) {
+export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, identity: Identity, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void, persistence: SessionPersistence, containsPrivate?: (value: unknown) => boolean) {
   const context = new BridgeToolCoordinator({manifest, cwd, invoke, identity, canUseTools, serialTools,
     persistence});
   const tools: ToolDefinition<any, any>[] = manifest.map(entry => {
@@ -26,6 +26,7 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
               throw new Error("Platform receipt identity mismatch");
           } catch (error) {failRun(); throw error;}
           const record = completed.record;
+          if (record.error?.kind === "credential_echo") failRun();
           if (record.status !== "completed") throw new Error(record.model_content || "AgentLoom tool failed");
           return {content: [{type: "text" as const, text: typeof completed.model_output === "string" ? completed.model_output : JSON.stringify(completed.model_output)}],
             details: {agentloom: record}};
@@ -51,20 +52,27 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
         const grant = dispatched.authorization;
         let committed = false;
         try {
-          const captured = capturedExecutor(entry.visible_name, cwd, args);
+          const captured = capturedExecutor(entry.visible_name, cwd, args, containsPrivate);
           let result: unknown;
           let error: Obj | null = null;
           try {
             if (signal?.aborted) throw new Error("Interrupted");
-            result = await captured.tool.execute(callId, args, signal, onUpdate, ctx);
+            result = await captured.tool.execute(callId, args, signal, update => {
+              if (!containsPrivate?.(update)) onUpdate?.(update);
+            }, ctx);
             if ((result as Obj | undefined)?.isError === true)
               error = {kind: "NativeToolError", message: "Pi native tool reported an error", stage: "tool_execution", retryable: false};
           } catch {
             error = {kind: "NativeToolError", message: "Pi native tool execution failed", stage: "tool_execution", retryable: false};
           }
-          const uncertain = captured.isUncertain() || Boolean(signal?.aborted);
+          let uncertain = captured.isUncertain() || Boolean(signal?.aborted);
           if (uncertain && !error) error = {kind: "NativeToolError", message: "Pi native execution outcome is uncertain", stage: "tool_execution", retryable: false};
           const capture = await captured.save(grant, result, agentDir);
+          if (captured.isPrivateRejected()) {
+            uncertain = true;
+            error = {kind: "credential_echo", message: "Tool response contained a bound credential",
+              stage: "output_validation", retryable: false};
+          }
           const settled = await invoke({method: "tool_settle", capture, outcome: {identity: grant.identity,
             authorization_id: grant.authorization_id, status: uncertain ? "uncertain" : error ? "error" : "completed",
             output: null, error}});

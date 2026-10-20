@@ -29,11 +29,13 @@ def launch_resource(job: Path):
 
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(str(Path(path or ".").resolve()) for path in sys.path)
-    with (job / "stdout.log").open("wb") as stdout, (job / "stderr.log").open("wb") as stderr:
+    from agentloom.config.private_bindings import forward_harness_bindings
+    with forward_harness_bindings() as (private_env, private_fds), (job / "stdout.log").open("wb") as stdout, (job / "stderr.log").open("wb") as stderr:
+        environment.update(private_env)
         return launch_owned_process(
             [sys.executable, "-m", "agentloom.execution.durable.job_entry", str(job)],
             env=environment, cwd=str(Path.cwd()), stdin=subprocess.DEVNULL,
-            stdout=stdout, stderr=stderr, receipt_dir=job / "resource", gated=True,
+            stdout=stdout, stderr=stderr, receipt_dir=job / "resource", gated=True, pass_fds=private_fds,
         )
 
 

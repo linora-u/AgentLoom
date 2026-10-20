@@ -78,6 +78,15 @@ class Guardian:
         # Retain exact psutil identities after detachment, reparenting or
         # termination: an unreadable zombie environment is not proof of exit.
         members = {pid: process for pid, process in self.known_members.items() if process.is_running()}
+        # Linux subreaping retains custody even when a tool detaches, clears
+        # every environment marker and its original parent exits immediately.
+        # Observe real ancestry outside the restricted Host, not from tools.
+        for process in psutil.Process().children(recursive=True):
+            try:
+                process.create_time()
+                members[process.pid] = process
+            except psutil.NoSuchProcess:
+                pass
         # Only our framework-generated generation is delegated to this scope;
         # a public PGID in an unrelated process's environment is not authority.
         if self.command is not None:
@@ -141,7 +150,11 @@ class Guardian:
                             "parent": command["parent"]}
         if self.receipt_dir is not None:
             self.receipt_dir.mkdir(parents=True, exist_ok=True)
-            self.temporary = tempfile.TemporaryDirectory(prefix="agentloom-process-")
+            # The trusted owner lives outside a Trial's filesystem policy.
+            # Trial TMPDIRs can be arbitrarily deep, while sockaddr_un has a
+            # small fixed path limit. Keep the private recovery endpoint short
+            # without granting tools any additional filesystem access.
+            self.temporary = tempfile.TemporaryDirectory(prefix="agentloom-process-", dir="/tmp")
             endpoint = str(Path(self.temporary.name) / "control.sock")
             self.listener = socket.socket(socket.AF_UNIX)
             self.listener.bind(endpoint)
@@ -165,13 +178,15 @@ class Guardian:
             env["AGENTLOOM_MANAGED_PROCESS_GROUP"] = str(os.getpgrp())
             env[NATIVE_SCOPE_GENERATION_ENV] = self.command["generation"]
             self.process = subprocess.Popen(self.command["argv"], env=env, cwd=self.command.get("cwd"),
-                                            stdin=0, stdout=1, stderr=2, pass_fds=(read,), close_fds=True)
+                                            stdin=0, stdout=1, stderr=2, pass_fds=(read, *self.command.get("pass_fds", ())), close_fds=True)
             identity = {"pid": self.process.pid, "creation": psutil.Process(self.process.pid).create_time()}
             os.write(write, json.dumps({"anchor": self.description["anchor"], "child": identity,
                                         "generation": self.command["generation"]}).encode())
         finally:
             os.close(read)
             os.close(write)
+            for descriptor in self.command.get("pass_fds", ()):
+                os.close(descriptor)
         self.send({"event": "ready", **identity})
         # Only the real command owns the caller's stdio. The independent
         # control channel remains alive even when output is not being consumed.

@@ -1371,7 +1371,12 @@ class AgentLoomToolGateway:
                 from agentloom.execution.tool_protocol import ToolPolicyBlockedError
                 raise ToolPolicyBlockedError("Tool Gateway closed during setup")
             raw_result = binding.forward(**call_kwargs)
+            from agentloom.execution.model_privacy import reject_private_content
+            reject_private_content(raw_result)
         except Exception as tool_error:
+            from agentloom.execution.model_privacy import BoundCredentialEcho, contains_private_error
+            if contains_private_error(tool_error):
+                tool_error = BoundCredentialEcho("Tool response contained a bound credential")
             failed = ToolCallRecord.from_exception(
                 call_id=call_id,
                 tool_name=tool_name,
@@ -1381,6 +1386,9 @@ class AgentLoomToolGateway:
                 started_at=started_at,
                 ended_at=time.time(),
             )
+            if isinstance(tool_error, BoundCredentialEcho):
+                from dataclasses import replace
+                failed = replace(failed, metadata={"effect_uncertain": True})
             self._record(hook_run, failed)
             if failed.status == "error":
                 _dispatch_tool_failure(
@@ -1413,7 +1421,11 @@ class AgentLoomToolGateway:
                     raw_result,
                     binding.output_type,
                 )
+                reject_private_content(raw_result)
             except Exception as output_error:
+                from agentloom.execution.model_privacy import BoundCredentialEcho, contains_private_error
+                if contains_private_error(output_error):
+                    output_error = BoundCredentialEcho("Tool response contained a bound credential")
                 failed = ToolCallRecord.failed(
                     call_id=call_id,
                     tool_name=tool_name,
@@ -1423,6 +1435,9 @@ class AgentLoomToolGateway:
                     started_at=started_at,
                     ended_at=time.time(),
                 )
+                if isinstance(output_error, BoundCredentialEcho):
+                    from dataclasses import replace
+                    failed = replace(failed, metadata={"effect_uncertain": True})
                 self._record(hook_run, failed)
                 _dispatch_tool_failure(
                     hook_run,

@@ -157,7 +157,13 @@ def create_shell_hook_executor(
                 stderr_limit=HOOK_STDERR_PREVIEW_MAX_BYTES,
             )
         except CapturedProcessTimeout as exc:
-            raise ShellHookExecutionError(f"Shell Hook {spec.hook_id!r} timed out after {spec.timeout:g}s") from exc
+            error = ShellHookExecutionError(f"Shell Hook {spec.hook_id!r} timed out after {spec.timeout:g}s")
+            if exc.cleanup_scope == "outer_host":
+                error.category = "uncertain"
+                error.retryable = False
+                error.physical_exit_confirmed = False
+                error.cleanup_scope = "outer_host"
+            raise error from exc
         except OSError as exc:
             raise ShellHookExecutionError(f"Shell Hook {spec.hook_id!r} failed to start: {exc}") from exc
 
@@ -173,6 +179,8 @@ def create_shell_hook_executor(
             "duration_seconds": captured.duration_seconds,
             "stdout_bytes": captured.stdout_bytes,
             "stderr_bytes": captured.stderr_bytes,
+            "cleanup_scope": captured.cleanup_scope,
+            "physical_exit_confirmed": captured.physical_exit_confirmed,
         }
         if stderr:
             transport["stderr"] = stderr

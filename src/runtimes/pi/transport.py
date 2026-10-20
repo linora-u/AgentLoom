@@ -77,13 +77,19 @@ class PiTransport:
         self._separate_process_group = child_starts_new_session()
         self._native_close = None
         try:
-            command = [node, str(entry), self._directory.name, str(pi_auth_path)]
-            options = dict(stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                           env=env, cwd=self._directory.name)
-            if native_owner_active():
-                self.process, self._native_close = spawn_registered_process(command, **options)
-            else:
-                self.process = subprocess.Popen(command, start_new_session=self._separate_process_group, **options)
+            from agentloom.runtimes.pi.credentials import pi_credential_descriptor
+            with pi_credential_descriptor() as auth_fd:
+                command = [node, str(entry), self._directory.name,
+                           str(pi_auth_path) if auth_fd is None else "",
+                           str(auth_fd) if auth_fd is not None else ""]
+                options = dict(stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               env=env, cwd=self._directory.name)
+                if auth_fd is not None:
+                    options["pass_fds"] = (auth_fd,)
+                if native_owner_active():
+                    self.process, self._native_close = spawn_registered_process(command, **options)
+                else:
+                    self.process = subprocess.Popen(command, start_new_session=self._separate_process_group, **options)
         except OSError:
             self._directory.cleanup()
             raise AgentRuntimeError("Cannot start Pi bridge", category="configuration") from None

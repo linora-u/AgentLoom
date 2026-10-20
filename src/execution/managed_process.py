@@ -58,12 +58,17 @@ class OwnedProcess:
     """Root-process observations plus independent resource cleanup confirmation."""
 
     def __init__(self, argv, *, env, cwd=None, stdin=None, stdout=None, stderr=None,
-                 text=False, encoding=None, errors=None, receipt_dir=None, gated=False, bufsize=-1):
+                 text=False, encoding=None, errors=None, receipt_dir=None, gated=False, bufsize=-1, pass_fds=()):
         if sys.platform not in {"darwin", "linux"}:
             raise RuntimeError("Managed native execution requires macOS or Linux")
         if isinstance(argv, (str, bytes)) or not argv:
             raise TypeError("Managed native command requires nonempty argv")
         self.args = [os.fsdecode(arg) for arg in argv]
+        inherited_fds = tuple(int(fd) for fd in pass_fds)
+        if any(fd < 3 for fd in inherited_fds):
+            raise ValueError("Private child descriptors must not replace stdio")
+        for fd in inherited_fds:
+            os.fstat(fd)
         self.pid = self.returncode = None
         self.receipt_dir = Path(receipt_dir) if receipt_dir is not None else None
         self._condition = Condition()
@@ -97,7 +102,7 @@ class OwnedProcess:
                         [sys.executable, str(Path(__file__).with_name("_process_guardian.py")),
                          str(remote.fileno()), self._generation],
                         stdin=stdin, stdout=stdout, stderr=stderr, text=text, encoding=encoding, errors=errors,
-                        env=guardian_env, bufsize=bufsize, pass_fds=(remote.fileno(),),
+                        env=guardian_env, bufsize=bufsize, pass_fds=(remote.fileno(), *inherited_fds),
                         close_fds=True, start_new_session=True,
                     )
                 finally:
@@ -108,7 +113,7 @@ class OwnedProcess:
                 # Registration is always closed-gate. Even an ungated caller
                 # gets a separate release after its owner handshake completes.
                 self._send({"op": "start", "argv": self.args, "env": dict(env), "cwd": os.fspath(cwd) if cwd else None,
-                            "generation": self._generation, "gated": True,
+                            "generation": self._generation, "gated": True, "pass_fds": inherited_fds,
                             "receipt_dir": str(self.receipt_dir) if self.receipt_dir else None,
                             "parent": {"pid": os.getpid(), "creation": psutil.Process().create_time()}})
                 if self._stopped:
@@ -326,12 +331,13 @@ class RecoveredProcess:
         proof = self.receipt_dir / "exited.json"
         error_path = self.receipt_dir / "cleanup-error.json"
         error = json.loads(error_path.read_text()) if error_path.exists() else None
+        anchor_alive = _alive(self.description["anchor"])
         confirmed = (proof.is_file() and json.loads(proof.read_text()) == {
             "physical_exit_confirmed": True, "generation": self.description["generation"]}
-            and not _alive(self.description["anchor"]))
+            and not anchor_alive)
         root_path = self.receipt_dir / "root-result.json"
-        return {"status": "exited" if confirmed else "cleanup_unconfirmed" if error or not _alive(
-                self.description["anchor"]) else "running", "physical_exit_confirmed": confirmed,
+        return {"status": "exited" if confirmed else "cleanup_unconfirmed" if error or not anchor_alive
+                else "running", "physical_exit_confirmed": confirmed,
                 "error": error, "root_result": json.loads(root_path.read_text()) if root_path.exists() else None}
 
     def request_stop(self):
@@ -344,6 +350,8 @@ class RecoveredProcess:
         if self.description["version"] != 2:
             raise ResourceCleanupError("Native resource owner does not support acknowledged cleanup")
         if not _alive(self.description["anchor"]):
+            if self.observe()["physical_exit_confirmed"]:
+                return
             raise ResourceCleanupError("Native anchor was lost without an exit certificate")
         request_id = uuid4().hex
         self._cleanup_request, self._cleanup_sequence = request_id, None
@@ -364,6 +372,8 @@ class RecoveredProcess:
                     raise ResourceCleanupError("Native cleanup acknowledgement remains unconfirmed")
                 self._cleanup_sequence = acknowledgement["cleanup_sequence"]
         except (OSError, ValueError) as error:
+            if self.observe()["physical_exit_confirmed"]:
+                return
             detail = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure"}
             if getattr(error, "errno", None) is not None:
                 detail["errno"] = error.errno
@@ -375,11 +385,19 @@ class RecoveredProcess:
             observed = self.observe()
             if observed["physical_exit_confirmed"]:
                 return observed
+            anchor_lost = not _alive(self.description["anchor"])
+            if anchor_lost:
+                # The owner writes its certificate before retiring. It may
+                # have done both after the first filesystem observation;
+                # recheck that final fact before reporting an older error.
+                observed = self.observe()
+                if observed["physical_exit_confirmed"]:
+                    return observed
             detail = observed["error"] or {}
             # Ignore failures before our accepted retry, but retain the current
             # scope failure even when another caller initiated its latest STOP.
             if observed["status"] == "cleanup_unconfirmed" and (
-                self._cleanup_request is None or not _alive(self.description["anchor"])
+                self._cleanup_request is None or anchor_lost
                 or (self._cleanup_sequence is not None
                     and detail.get("cleanup_sequence", -1) >= self._cleanup_sequence)
             ):

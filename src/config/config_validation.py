@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 
 class BoolParser:
@@ -428,6 +428,20 @@ class RootSettings(BaseModel):
     hooks: dict[str, Any] = Field(default_factory=dict)
     skills: SkillsSettings = Field(default_factory=SkillsSettings)
     worker_execution: WorkerExecutionSettings = Field(default_factory=WorkerExecutionSettings)
+    harnessing: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("harnessing", mode="before")
+    @classmethod
+    def _validate_harnessing_source(cls, value: Any, info: ValidationInfo) -> Any:
+        # Keep configuration loading independent of importing Application at
+        # module initialization. Complete policy resolution belongs to the
+        # Application boundary, after project defaults have been composed.
+        from agentloom.app.harnessing.policy import validate_harnessing_source
+
+        validate_harnessing_source(
+            value, scope="application", source=(info.context or {}).get("source", "system configuration")
+        )
+        return value
 
 
 def raise_project_key_error(source: str) -> ValueError:
@@ -472,7 +486,7 @@ def validate_system_snapshot(snapshot: dict[str, Any], source: str) -> None:
             f"Unsupported key 'tools_mapping' in {source}. "
             "Skills no longer declare or map tool authority."
         )
-    RootSettings.model_validate(snapshot)
+    RootSettings.model_validate(snapshot, context={"source": source})
 
 
 def normalize_tool_access_control_section(raw: dict[str, Any], agent_root: Path) -> None:

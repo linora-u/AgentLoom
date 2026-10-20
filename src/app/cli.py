@@ -46,7 +46,7 @@ def _run_event_payload(event: Any) -> dict[str, object]:
         "occurred_at": occurred_at.isoformat(),
         "run": _run_info_payload(event.run),
     }
-    for field in ("output", "answer_present", "error", "phase", "goal"):
+    for field in ("output", "answer_present", "error", "phase", "goal", "harnessing"):
         value = getattr(event, field, None)
         if field == "output" and event.event == "run.completed":
             payload[field] = value
@@ -54,7 +54,11 @@ def _run_event_payload(event: Any) -> dict[str, object]:
             if event.event == "run.completed" and value is not None:
                 payload[field] = value
         elif value is not None:
-            payload[field] = dict(value) if field == "goal" else value
+            if field == "harnessing":
+                from agentloom.app.harnessing.models import json_value
+                payload[field] = json_value(value)
+            else:
+                payload[field] = dict(value) if field == "goal" else value
     return payload
 
 
@@ -214,6 +218,8 @@ Examples:
     help="Disable this run's file log (configuration is used by default).",
 )
 @click.option("--resume", "resume_task_id", default=None, help="Resume from a checkpoint task ID.")
+@click.option("--resume-experiment", "harness_resume_id", default=None,
+              help="Resume an enabled Application's existing harness experiment ID.")
 @click.option(
     "--output-format",
     type=click.Choice(("text", "json", "jsonl"), case_sensitive=False),
@@ -232,8 +238,12 @@ def run(
     resume_task_id: str | None,
     output_format: str,
     require_valid_supervisor_target: bool,
+    harness_resume_id: str | None = None,
 ) -> None:
     """Run a supervisor agent from a YAML configuration."""
+    if resume_task_id is not None and harness_resume_id is not None:
+        raise click.UsageError("--resume and --resume-experiment are mutually exclusive")
+    harness_options = {"harness_resume_id": harness_resume_id} if harness_resume_id is not None else {}
 
     emitted_events: set[str] = set()
     event_stream: TextIO | None = None
@@ -262,16 +272,20 @@ def run(
 
                 def emit_event(event: Any) -> None:
                     assert event_stream is not None
+                    experiment = getattr(event, "harnessing", None)
+                    if output_format == "json" and experiment is not None and not experiment.get("selected"):
+                        return
                     if output_format == "jsonl" or event.event != "run.started":
                         _emit_jsonl_record(_run_event_payload(event), event_stream)
                     emitted_events.add(event.event)
 
-                execute_app(
+                completed = execute_app(
                     yaml_path,
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
                     event_sink=emit_event,
                     require_valid_supervisor_target=require_valid_supervisor_target,
+                    **harness_options,
                 )
             else:
                 completed = execute_app(
@@ -279,6 +293,7 @@ def run(
                     file_logging=False if no_file_log else None,
                     resume_task_id=resume_task_id,
                     require_valid_supervisor_target=require_valid_supervisor_target,
+                    **harness_options,
                 )
                 rendered_output = (
                     completed.output
@@ -293,6 +308,10 @@ def run(
                 completed_goal = getattr(completed, "goal", None)
                 if isinstance(completed_goal, Mapping):
                     click.echo(_goal_text(completed_goal))
+                experiment = getattr(completed, "harnessing", None)
+                if experiment is not None:
+                    click.echo(f"Experiment: {experiment.experiment_id} ({experiment.status}); "
+                               f"selected Trial: {experiment.selected_trial_id}", err=True)
         except KeyboardInterrupt as exc:
             if not emitted_events:
                 emit_rejected(exc, message="interrupted before run started")
@@ -307,6 +326,15 @@ def run(
                 )
             raise click.exceptions.Exit(130) from exc
         except Exception as exc:
+            from agentloom.app.harnessing.supervisor import HarnessingApplicationError
+            if isinstance(exc, HarnessingApplicationError):
+                experiment = exc.result
+                if event_stream is not None:
+                    _emit_jsonl_record({"schema_version": 1,
+                        "event": "experiment.stopped" if experiment.status == "stopped" else "experiment.failed",
+                        "harnessing": experiment.to_dict()}, event_stream)
+                click.echo(f"\n{exc}. Resume with --resume-experiment {experiment.experiment_id}", err=True)
+                raise click.exceptions.Exit(130 if experiment.status == "stopped" else 1) from exc
             retryable = _has_transient_provider_error(exc)
             if not emitted_events:
                 emit_rejected(exc, retryable=retryable)
@@ -316,6 +344,9 @@ def run(
             emit_rejected(exc, message="nested process exit")
             click.echo("\n Execution failed: nested process exit", err=True)
             raise click.exceptions.Exit(1) from exc
+        experiment = getattr(completed, "harnessing", None)
+        if experiment is not None and experiment.status != "completed":
+            raise click.exceptions.Exit(130 if experiment.status == "stopped" else 1)
 
 
 _CREATE_EPILOG = """\

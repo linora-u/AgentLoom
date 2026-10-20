@@ -172,6 +172,7 @@ class SmolagentsRuntimeFactory:
             return SmolagentsRuntimeAdapter(
                 native_runtime,
                 model_binding=definition.model,
+                instance_id=definition.instance_id,
                 tool_gateway=gateway,
                 output_contract=definition.output_contract,
             )

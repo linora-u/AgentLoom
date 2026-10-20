@@ -1,0 +1,21 @@
+name: harness_select
+agent_runtime: smolagents
+description: Select one already executed and accepted composed final.
+task: Compare every supplied anonymized final with the original task and choose exactly one available ID.
+tools: []
+toolsets: []
+default_toolsets: []
+self_learning: {enabled: false}
+input_schema:
+  type: object
+  properties:
+    evidence: {type: object}
+  required: [evidence]
+  additionalProperties: false
+output_schema:
+  type: object
+  properties:
+    chosen_id: {type: string}
+    reason: {type: string}
+  required: [chosen_id, reason]
+  additionalProperties: false

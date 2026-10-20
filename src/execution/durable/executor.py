@@ -45,12 +45,14 @@ class DurableExecutor:
         for concrete Application scopes. It does not report DBOS status or
         destroy() as physical drain. Unprocessed queue items stay durable.
         """
+        from agentloom.config.private_bindings import capture_harness_bindings
         from dbos import DBOS, DBOSPortableJSONSerializer, WorkflowSerializationFormat
         from dbos import error as dbos_error
 
         if self._used:
             raise RuntimeError("A durable executor requires a fresh dedicated process")
         self._used = True
+        bind_private = capture_harness_bindings()
         stop = stop_token or Event()
         self.jobs.bind_stop(stop)
         self.jobs.bind_task_state(self.execution.status)
@@ -83,11 +85,12 @@ class DurableExecutor:
                 if task.namespace != self.execution.namespace or task.worker not in self.workers or task.workflow_id != DBOS.workflow_id:
                     raise ValueError("Task is outside the trusted executor registration")
                 async def invoke_owned(task):
-                    try:
-                        return await self.jobs.invoke(task)
-                    except AdmissionStopped as error:
-                        await self.execution.client.cancel_workflow_async(task.workflow_id)
-                        raise dbos_error.DBOSWorkflowCancelledError(task.workflow_id) from error
+                    with bind_private():
+                        try:
+                            return await self.jobs.invoke(task)
+                        except AdmissionStopped as error:
+                            await self.execution.client.cancel_workflow_async(task.workflow_id)
+                            raise dbos_error.DBOSWorkflowCancelledError(task.workflow_id) from error
 
                 return await DBOS.run_step_async({"name": "os_owned_application_v1", "preemptible": True,
                     "retries_allowed": self.host.allow_replay, "max_attempts": self.host.max_attempts,

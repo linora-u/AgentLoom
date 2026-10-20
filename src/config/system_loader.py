@@ -76,6 +76,10 @@ def load_project_system_config(
     # Validate project scope before an Application can override these values.
     if "worker_execution" in system_yaml:
         validate_worker_execution(system_yaml["worker_execution"], scope="project")
+    if "harnessing" in system_yaml:
+        from agentloom.app.harnessing.policy import validate_harnessing_source
+
+        validate_harnessing_source(system_yaml["harnessing"], scope="project", source=str(system_path))
     layered_builder = LayeredConfigBuilder(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(
             snapshot,

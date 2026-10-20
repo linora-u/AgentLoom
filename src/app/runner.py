@@ -221,16 +221,60 @@ def execute_app(
     event_sink: RunEventSink | None = None,
     trace_exporter: TraceExporter | None = None,
     require_valid_supervisor_target: bool = False,
+    harness_resume_id: str | None = None,
+    stop_token: Any = None,
 ) -> ApplicationRunResult:
     """Execute against current configuration, pinned for the lifetime of the Run."""
+    return _execute_invocation(yaml_path, resume_task_id, file_logging,
+        event_sink=event_sink, trace_exporter=trace_exporter,
+        require_valid_supervisor_target=require_valid_supervisor_target,
+        harness_resume_id=harness_resume_id, stop_token=stop_token)
+
+
+def _execute_app_once(yaml_path, resume_task_id=None, file_logging=None, *,
+                      event_sink=None, trace_exporter=None,
+                      require_valid_supervisor_target=False):
+    """Use the existing complete lifecycle without starting another experiment."""
+    return _execute_invocation(yaml_path, resume_task_id, file_logging,
+        event_sink=event_sink, trace_exporter=trace_exporter,
+        require_valid_supervisor_target=require_valid_supervisor_target,
+        dispatch_harnessing=False)
+
+
+def _execute_invocation(yaml_path, resume_task_id=None, file_logging=None, *,
+                        event_sink=None, trace_exporter=None,
+                        require_valid_supervisor_target=False,
+                        harness_resume_id=None, stop_token=None,
+                        dispatch_harnessing=True):
     try:
+        from agentloom.app.harnessing.binding import trial_config
+
         invocation_config = fresh_invocation_config(get_config())
+        invocation_config = trial_config(invocation_config)
     except BaseException as exc:
         _emit_preflight_rejection(event_sink, exc)
         raise
     from agentloom.execution.trace import ExplicitExecutionContext
     root_context = ExplicitExecutionContext(None, None, None, None, None, None, None, None, None, None)
     with bind_config(invocation_config), ApplicationRunLifecycle.isolate_root_services(root_context):
+        from agentloom.app.harnessing.models import current_trial_context
+        if dispatch_harnessing and current_trial_context() is None:
+            from agentloom.app.harnessing.supervisor import dispatch_supervisor
+            from agentloom.app.harnessing.supervisor import HarnessingApplicationError
+            try:
+                dispatched = dispatch_supervisor(
+                    yaml_path, resume_task_id=resume_task_id,
+                    file_logging=file_logging, event_sink=event_sink,
+                    trace_exporter=trace_exporter,
+                    harness_resume_id=harness_resume_id, stop_token=stop_token,
+                )
+            except HarnessingApplicationError:
+                raise
+            except BaseException as exc:
+                _emit_preflight_rejection(event_sink, exc)
+                raise
+            if dispatched is not None:
+                return dispatched
         return _execute_app(
             yaml_path,
             resume_task_id,
@@ -631,6 +675,9 @@ def _execute_app(
         if run_attempt_lease is not None:
             lifecycle.release_run_lease(run_attempt_lease)
             run_attempt_lease = None
+        runtime_context.update_manifest(
+            cleanup_complete=True, answer_present=lifecycle.answer_present,
+        )
     except BaseException as caught:
         terminal_error = caught
         if run_attempt_lease is not None:

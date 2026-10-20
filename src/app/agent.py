@@ -342,6 +342,17 @@ class BaseAgent(ABC):
     ) -> list[str | None]:
         if not tasks:
             return tasks
+        from agentloom.app.harnessing.models import current_trial_context
+
+        trial = current_trial_context()
+        if trial is not None:
+            # Every root/child reads the controller-frozen view. Do this before
+            # constructing a MemoryStore, including when that view is empty.
+            snapshot = require_root_run_state().get_or_create_memory_snapshot(lambda: trial.memory_snapshot)
+            if not snapshot:
+                return tasks
+            first = tasks[0]
+            return [snapshot if first is None else f"{snapshot}\n\n{first}", *tasks[1:]]
         root_state = None
         try:
             from agentloom.self_learning.paths import self_learning_enabled

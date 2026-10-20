@@ -124,9 +124,15 @@ def _traced_transport(
     try:
         with bind_model_trace_turn(turn_id), policy_scope:
             response = _as_dict(transport(**request), context=response_context)
+            from agentloom.execution.model_privacy import reject_private_response
+            reject_private_response(response, model=request.get("model"))
     except Exception as error:
+        from agentloom.execution.model_privacy import rejection_usage, safe_provider_error
+        safe_error = safe_provider_error(error)
         if recorder is not None and turn_id is not None:
-            recorder.record_model_response(turn_id, runtime="smolagents", error=error)
+            recorder.record_model_response(turn_id, rejection_usage(safe_error), runtime="smolagents", error=safe_error)
+        if safe_error is not error:
+            raise safe_error from None
         raise
     if recorder is not None and turn_id is not None:
         recorder.record_model_response(turn_id, response, runtime="smolagents")

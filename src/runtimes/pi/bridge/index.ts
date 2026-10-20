@@ -1,13 +1,15 @@
 /** One SDK session per managed process. stdout is exclusively protocol JSONL. */
 import { createInterface } from "node:readline";
 import { createServer } from "node:net";
-import { readFileSync } from "node:fs";
+import { closeSync, readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { configureModel, type SearchEvidence } from "./model.js";
 import { providerError } from "./errors.js";
+import { credentialGuard } from "./privacy.js";
+import { memoryCredentials } from "./credentials.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
 import { restoreSession, SessionPersistence } from "./checkpoint.js";
@@ -26,6 +28,9 @@ const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as strin
 const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: true, subagents: true, goal: true, stop_hooks: true, structured_output: true};
 const agentDir = process.argv[2];
 const piAuthPath = process.argv[3];
+const privateAuthFd = process.argv[4];
+const privateAuth = privateAuthFd ? JSON.parse(readFileSync(Number(privateAuthFd), "utf8")) : undefined;
+if (privateAuthFd) closeSync(Number(privateAuthFd));
 let instance: string | undefined;
 let session: AgentSession | undefined;
 let persistence: SessionPersistence | undefined;
@@ -125,12 +130,14 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   nativeIncomplete = false;
   outputCorrection = false;
   const s = p.model.settings;
+  const privacy = credentialGuard(p.additional_args?.bound_private_values);
   const codex = p.model.protocol === "openai_codex_responses";
   const chatgpt = p.model.protocol === "openai_chatgpt_responses";
   const subscription = codex || chatgpt;
-  if (subscription && !piAuthPath) throw new Error("Pi ChatGPT credential path is unavailable");
+  if (subscription && !piAuthPath && privateAuth === undefined) throw new Error("Pi ChatGPT credential path is unavailable");
   const runtime = await ModelRuntime.create({
-    authPath: subscription ? piAuthPath : join(agentDir, "auth.json"),
+    ...(privateAuth !== undefined ? {credentials: memoryCredentials(privateAuth, privacy.remember)} :
+      {authPath: subscription ? piAuthPath : join(agentDir, "auth.json")}),
     modelsPath: null, refreshOnCreate: false,
   });
   const api = codex ? "openai-codex-responses" :
@@ -155,7 +162,11 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   }
   const model = runtime.getModel(providerId, modelId);
   if (!model) throw new Error(`Pi ${codex ? "Codex model" : chatgpt ? "ChatGPT model" : "model"} ${modelId} is unavailable`);
-  if (codex) await ensureCodexLogin(runtime, model, event);
+  if (codex && privateAuth !== undefined) {
+    const auth = await runtime.getAuth(model, {signal: current?.abort.signal});
+    if (auth?.source !== "OAuth") throw new Error("Bound Pi subscription credential is unavailable");
+  }
+  else if (codex) await ensureCodexLogin(runtime, model, event);
   else if (subscription) {
     let auth;
     try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
@@ -184,7 +195,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   const identity = (callId: string, nativeParentId?: string | null) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
-  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence, privacy.enabled ? privacy.contains : undefined);
   const extra = s.extra_completion_params || {};
   const searchMode = subscription ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
@@ -217,7 +228,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
   }, agentDir, invoke, {codex, chatgpt},
   (identity, attempt, result) => reportSearch?.(identity, attempt, result),
-  (identity, attempt, tier) => reportTier?.(identity, attempt, tier));
+  (identity, attempt, tier) => reportTier?.(identity, attempt, tier), privacy.contains);
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};

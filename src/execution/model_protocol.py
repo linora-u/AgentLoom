@@ -38,6 +38,17 @@ class ModelOutputTruncated(ModelProtocolError):
         self.output_budget = dict(output_budget)
 
 
+class ModelResponseRejected(ModelProtocolError):
+    """A provider echoed a bound credential; only safe usage may be retained."""
+
+    category = "provider"
+    retryable = False
+
+    def __init__(self, usage: ModelUsage):
+        super().__init__("Model response contained a bound credential")
+        self.usage = usage
+
+
 def _frozen_mapping(value: Mapping[str, Any], *, field_name: str) -> Mapping[str, Any]:
     try:
         normalized = json.loads(json.dumps(dict(value), ensure_ascii=False))

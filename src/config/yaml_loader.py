@@ -51,4 +51,6 @@ UniqueKeySafeLoader.add_constructor(
 def load_unique_yaml(stream: Any) -> Any:
     """Load YAML safely while rejecting every duplicate mapping key."""
 
-    return yaml.load(stream, Loader=UniqueKeySafeLoader)
+    from .private_bindings import resolve_bound_credentials
+
+    return resolve_bound_credentials(yaml.load(stream, Loader=UniqueKeySafeLoader))

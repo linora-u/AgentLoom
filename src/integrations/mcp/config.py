@@ -86,6 +86,8 @@ def load_mcp_json(path: Path) -> dict:
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
 
+    from agentloom.config.private_bindings import resolve_bound_credentials
+    data = resolve_bound_credentials(data)
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object in {path}, got {type(data).__name__}")
 

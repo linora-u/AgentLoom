@@ -8,7 +8,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
 from agentloom.execution.model_binding import ModelTurnBinding
 from agentloom.execution.model_protocol import (
     MODEL_ITEMS_RAW_KEY,
@@ -19,6 +18,7 @@ from agentloom.execution.model_protocol import (
     ModelItem,
     ModelOutputTruncated,
     ModelProtocolError,
+    ModelResponseRejected,
     ModelTurnResult,
     ReasoningItem,
     ToolDefinition,
@@ -26,6 +26,8 @@ from agentloom.execution.model_protocol import (
     model_item_to_dict,
 )
 from agentloom.execution.tool_protocol import TOOL_CALL_RAW_KEY, TOOL_RESULT_RAW_KEY, ToolCallRecord
+from agentloom.runtimes.smolagents.error_recovery import RUNTIME_FEEDBACK_RAW_KEY
+
 from smolagents.models import (
     ChatMessage,
     ChatMessageToolCall,
@@ -213,7 +215,7 @@ class SmolagentsModelTurnBridge(Model):
             default=None,
         )
         self._turn_observer: ContextVar[
-            Callable[[ModelTurnResult | ModelOutputTruncated], None] | None
+            Callable[[ModelTurnResult | ModelOutputTruncated | ModelResponseRejected], None] | None
         ] = ContextVar(
             f"agentloom_bridge_turn_observer_{id(self)}",
             default=None,
@@ -238,7 +240,7 @@ class SmolagentsModelTurnBridge(Model):
     @contextmanager
     def observe_turns(
         self,
-        observer: Callable[[ModelTurnResult | ModelOutputTruncated], None],
+        observer: Callable[[ModelTurnResult | ModelOutputTruncated | ModelResponseRejected], None],
     ) -> Iterator[None]:
         """Observe canonical model turns for the enclosing runtime run only."""
 
@@ -297,7 +299,7 @@ class SmolagentsModelTurnBridge(Model):
                 tools=tuple(_tool_definition(tool) for tool in tools_to_call_from or ()),
                 options=options,
             )
-        except ModelOutputTruncated as error:
+        except (ModelOutputTruncated, ModelResponseRejected) as error:
             # The Provider has already reported usage. Preserve that evidence
             # even though this response cannot become a successful model turn.
             if turn_observer is not None:

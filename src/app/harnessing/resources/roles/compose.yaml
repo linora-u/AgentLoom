@@ -1,0 +1,29 @@
+name: harness_compose
+agent_runtime: smolagents
+description: Compose a coherent complete Application harness from executed probes.
+task: Compare the supplied execution evidence and return one consistent resource edit set.
+tools: []
+toolsets: []
+default_toolsets: []
+self_learning: {enabled: false}
+input_schema:
+  type: object
+  properties:
+    evidence: {type: object}
+  required: [evidence]
+  additionalProperties: false
+output_schema:
+  type: object
+  properties:
+    edits:
+      type: array
+      items:
+        type: object
+        properties:
+          path: {type: string}
+          content: {type: [string, 'null']}
+        required: [path, content]
+        additionalProperties: false
+    rationale: {type: string}
+  required: [edits, rationale]
+  additionalProperties: false
