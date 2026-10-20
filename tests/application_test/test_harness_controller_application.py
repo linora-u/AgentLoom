@@ -72,6 +72,11 @@ class Driver:
         value = {'decision_id': decision_id, 'selected': selected.trial_id, 'output': selected.to_dict()['output']}
         target.write_text(json.dumps(value))
         return value
+
+class Evaluator:
+    def evaluate(self, invocation, receipt, partition):
+        return {'partition': partition, 'value': len(receipt.output.get('fact', '')),
+                'explanation': 'DEV-CONFIGURED-SCORE', 'usage': []}
 """
 
 
@@ -79,6 +84,7 @@ class Driver:
     "mode,k,runtime,custom_roles,crash_after_completion,scenario",
     [
         ("parallel", 1, "smolagents", False, False, "normal"),
+        ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
@@ -122,6 +128,10 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             result["chosen_id"] = "BASE"
         if scenario == "invalid_edits" and role in {"general", "domain", "compose"}:
             result["edits"] = {"applications/mixed/driver.py": "forbidden fixed business code change"}
+        if role != "business":
+            assert "HIDDEN-CANARY" not in json.dumps(request)
+            if scenario == "development_score":
+                assert "DEV-CONFIGURED-SCORE" in json.dumps(request)
         requests_by_role.append(role)
         return (
             finish(request, result)
@@ -195,7 +205,14 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 "reject_final": scenario == "final_rejected",
             },
         )
-        policy = HarnessingPolicy.model_validate({"enabled": True, "recursion": {"mode": mode, "k": k}, "roles": roles})
+        values = {"enabled": True, "recursion": {"mode": mode, "k": k}, "roles": roles}
+        if scenario == "development_score":
+            values["feedback"] = {
+                "mode": "development_score",
+                "partition": "development-a",
+                "evaluator": "applications.mixed.driver:Evaluator",
+            }
+        policy = HarnessingPolicy.model_validate(values)
         environment = {"PATH": "/home/lin/.nvm/versions/node/v22.23.3/bin:" + os.defpath}
         result = run_application(request, policy=policy, state_root=tmp_path / "experiments", environment=environment)
         if crash_after_completion:
@@ -235,6 +252,10 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert result.usage["total_tokens"] > 0
         state = tmp_path / "experiments" / result.experiment_id
         assert (state / "stages/publication.json").exists()
+        if scenario == "development_score":
+            evaluations = list((state / "stages").glob("evaluation.*.json"))
+            assert len(evaluations) == 4 * k
+            assert all(json.loads(path.read_text())["result"]["partition"] == "development-a" for path in evaluations)
         assert "fixture-key" not in "\n".join(p.read_text() for p in state.rglob("input.json"))
         fact.write_text("LIVE INPUT MUTATION")
         calls = len(requests)

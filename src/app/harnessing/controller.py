@@ -12,6 +12,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from contextlib import contextmanager
+from contextvars import copy_context
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -97,6 +98,12 @@ def _copy_inputs(paths, root: Path, *, hidden_paths=()):
             logical_root = f"input-{index}"
             destination = root / logical_root
             files = sorted(source.rglob("*")) if source.is_dir() else [source]
+
+            def signature(path):
+                item = path.lstat()
+                return (item.st_dev, item.st_ino, item.st_mode, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+
+            initial = {path: signature(path) for path in dict.fromkeys([source, *files])}
             if source.is_dir():
                 storage.ensure_dir(logical_root)
             for path in files:
@@ -121,6 +128,9 @@ def _copy_inputs(paths, root: Path, *, hidden_paths=()):
                     raise ValueError("Input source changed while freezing the task")
                 storage.atomic_write(relative, copied)
                 manifest[relative.as_posix()] = hashlib.sha256(copied).hexdigest()
+            after_paths = [source, *sorted(source.rglob("*"))] if source.is_dir() else [source]
+            if {path: signature(path) for path in after_paths} != initial:
+                raise ValueError("Input tree changed while freezing the complete task")
             replacements.append((source, destination))
     return manifest, replacements
 
@@ -450,8 +460,11 @@ class ImprovementController:
         return current
 
     def _independent(self, functions):
-        with ThreadPoolExecutor(max_workers=min(2, len(functions))) as pool:
-            return list(pool.map(lambda function: function(), functions))
+        # Trusted in-memory credential capabilities must cross controller
+        # worker threads before each H2 anonymous child pipe is constructed.
+        jobs = [(copy_context(), function) for function in functions]
+        with ThreadPoolExecutor(max_workers=min(2, len(jobs))) as pool:
+            return list(pool.map(lambda job: job[0].run(job[1]), jobs))
 
     def _parallel(self, base, k):
         common = self._evidence(base)
@@ -698,6 +711,12 @@ class ImprovementController:
         old = self.store.read("result.json")
         if old and old["status"] == "completed":
             return ApplicationExecutionResult.from_dict(old)
+        from agentloom.runtimes.pi.credentials import bind_pi_credentials, capture_pi_credentials
+
+        with bind_pi_credentials(capture_pi_credentials(self.model_config)):
+            return self._run_prepared()
+
+    def _run_prepared(self):
         selected, delivery, reason, library_result = None, {}, "", {}
         status = "failed"
         try:
