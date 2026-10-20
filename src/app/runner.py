@@ -77,7 +77,7 @@ from agentloom.execution.trace_export import TraceExporter
 _TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
 
 
-def _run_info(runtime_context: Any, log_path: Path | None) -> RunInfo:
+def _run_info(runtime_context: Any, log_path: Path | None, *, trace_mode: str = "full") -> RunInfo:
     """Build the immutable public view of an internal RuntimeContext."""
 
     return RunInfo(
@@ -87,7 +87,7 @@ def _run_info(runtime_context: Any, log_path: Path | None) -> RunInfo:
         run_dir=runtime_context.run_dir.absolute(),
         manifest_path=runtime_context.manifest_path.absolute(),
         log_path=log_path.absolute() if log_path is not None else None,
-        trace_dir=runtime_context.trace_dir.absolute(),
+        trace_dir=runtime_context.trace_dir.absolute() if trace_mode == "full" else None,
     )
 
 
@@ -336,7 +336,11 @@ def _execute_app(
             task_id=task_id,
             run_id=run_id,
         )
-        public_run = _run_info(runtime_context, None)
+        public_run = _run_info(
+            runtime_context,
+            None,
+            trace_mode=str(effective_config.get("runtime", {}).get("trace", {}).get("mode", "full")),
+        )
     except BaseException as exc:
         _emit_preflight_rejection(event_sink, exc)
         raise
@@ -383,6 +387,12 @@ def _execute_app(
 
         with lifecycle.bind_services(runtime_context, effective_config, file_logging=file_logging, trace_exporter=trace_exporter) as services:
             recorder, logger_backend = services.recorder, services.logger_backend
+            runtime_context.update_manifest(
+                trace={
+                    "mode": services.trace_mode,
+                    "persisted": services.trace_mode == "full",
+                }
+            )
             from agentloom.execution.observability import RunTrace
             console = getattr(logger_backend, "console", None)
             final_answer_presented = console is not None and bool(
@@ -393,11 +403,19 @@ def _execute_app(
             public_run = _run_info(
                 runtime_context,
                 _configured_run_log_path(runtime_context, logger_backend),
+                trace_mode=services.trace_mode,
             )
             emit_started()
 
-            app = Application(project_config=get_config(), application_root=application_root, application_config=application_config,
-                runtime_context=runtime_context, lifecycle=lifecycle, logger=logger_backend)
+            app = Application(
+                project_config=get_config(),
+                application_root=application_root,
+                application_config=application_config,
+                runtime_context=runtime_context,
+                lifecycle=lifecycle,
+                trace_mode=services.trace_mode,
+                logger=logger_backend,
+            )
             with app.bind():
                 log = get_logger(logger_backend, __name__)
                 try:

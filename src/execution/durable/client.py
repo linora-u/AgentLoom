@@ -342,15 +342,25 @@ class DurableWorker:
             raise TypeError("Durable submission requires a WorkItem")
         return TaskDescription(self.execution.namespace, self.worker.identity, item, revision)
 
-    def submit(self, item: WorkItem, *, revision="1"):
-        return self.submit_many([item], revision=revision)[0]
+    def submit(self, item: WorkItem, *, revision="1", resume_terminal=False):
+        return self.submit_many(
+            [item], revision=revision, resume_terminal=resume_terminal
+        )[0]
 
-    def submit_many(self, items: Sequence[WorkItem] | WorkPlan, *, revision="1"):
+    def submit_many(
+        self,
+        items: Sequence[WorkItem] | WorkPlan,
+        *,
+        revision="1",
+        resume_terminal=False,
+    ):
         """Atomically submit a finite plan, preserving existing equal tasks.
 
         A concurrent duplicate rejects the entire attempted insert transaction.
         The next public read validates that winner, then inserts only missing
         tasks. Each collision adds a known existing ID; no task is claimed here.
+        Callers reconciling an already accepted business plan may explicitly
+        resume equal terminal tasks after their native resources have drained.
         """
         from dbos import WorkflowSerializationFormat
         from dbos import error as dbos_error
@@ -372,13 +382,25 @@ class DurableWorker:
             for _ in range(len(descriptions) + 1):
                 existing = client.list_workflows(workflow_ids=list(expected), load_input=True, load_output=False)
                 present = set()
+                terminal = set()
                 for row in existing:
                     inputs = row.input
-                    if (row.application_name != self.execution.namespace or row.queue_name != self.queue_name
+                    terminal_without_queue = (
+                        row.queue_name is None
+                        and row.status in {"CANCELLED", "ERROR", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"}
+                    )
+                    if (row.application_name != self.execution.namespace
+                            or (row.queue_name != self.queue_name and not terminal_without_queue)
                             or row.name != WORKFLOW_NAME or inputs is None or inputs["kwargs"]
                             or len(inputs["args"]) != 1 or canonical_json(inputs["args"][0]) != canonical_json(expected[row.workflow_id])):
                         raise TaskInputConflict("Durable identity already has a different input")
                     present.add(row.workflow_id)
+                    if resume_terminal and row.status == "SUCCESS":
+                        raise TaskInputConflict(
+                            "Durable task already succeeded; reconcile the caller's completion receipt"
+                        )
+                    if row.status in {"CANCELLED", "ERROR", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"}:
+                        terminal.add(row.workflow_id)
                 # Existing immutable tasks use their original contract. A
                 # changed current schema must not hide a completed result.
                 # Validate every new item before any insertion in this batch.
@@ -398,7 +420,14 @@ class DurableWorker:
                                 "serialization_type": WorkflowSerializationFormat.PORTABLE,
                                 "attributes": {"worker_policy": self.policy.to_dict()},
                             }, task.to_dict())
-                    return [client.retrieve_workflow(task.workflow_id) for task in descriptions]
+                    handles = {
+                        task.workflow_id: client.retrieve_workflow(task.workflow_id)
+                        for task in descriptions
+                    }
+                    if resume_terminal:
+                        for workflow_id in terminal:
+                            handles[workflow_id] = self.execution.resume(workflow_id)
+                    return [handles[task.workflow_id] for task in descriptions]
                 except dbos_error.DBOSWorkflowIDInUseError:
                     continue
             raise RuntimeError("Concurrent durable identity changes prevented atomic submission")

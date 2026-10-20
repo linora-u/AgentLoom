@@ -152,6 +152,7 @@ class Application:
         application_config: Mapping,
         runtime_context: Any,
         lifecycle: ApplicationRunLifecycle,
+        trace_mode: str,
         logger: Any = None,
     ):
         self.project_config = deepcopy(project_config)
@@ -160,6 +161,7 @@ class Application:
         self.application_config = deepcopy(dict(application_config))
         self.runtime_context = runtime_context
         self.lifecycle = lifecycle
+        self.trace_mode = trace_mode
         self.logger = logger
         self._condition = Condition()
         self._state = "open"
@@ -202,7 +204,7 @@ class Application:
             run_dir=context.run_dir.absolute(),
             manifest_path=context.manifest_path.absolute(),
             log_path=context.log_path.absolute() if context.log_path.exists() else None,
-            trace_dir=context.trace_dir.absolute(),
+            trace_dir=context.trace_dir.absolute() if self.trace_mode == "full" else None,
         )
 
     def _require_open(self) -> None:
@@ -241,14 +243,35 @@ class Application:
             if interruption is not None:
                 raise interruption
 
-    def worker(self, path: str | Path) -> BoundWorker:
+    def worker(
+        self,
+        path: str | Path,
+        *,
+        definition_loader: Callable[[Path], dict[str, object]] | None = None,
+    ) -> BoundWorker:
+        """Bind one Worker after an optional trusted pre-freeze definition choice.
+
+        The loader runs only for a new binding and must return the complete
+        prepared definition for the requested canonical source path. Framework
+        inspection, snapshots, validation and revision identities still apply.
+        """
         with self._condition:
             self._require_open()
             identity = _worker_identity(path)
             if identity not in self._bindings:
                 identity, target = _worker_path(self.application_root, identity)
                 with bind_config(self.project_config):
-                    parsed = load_prepared_agent_definition(target, project_root=self.project_root)
+                    parsed = (
+                        definition_loader(target)
+                        if definition_loader is not None
+                        else load_prepared_agent_definition(
+                            target, project_root=self.project_root
+                        )
+                    )
+                    if not isinstance(parsed, dict):
+                        raise TypeError(
+                            "Worker definition loader must return a prepared mapping"
+                        )
                     inspection = inspect_application_definition(
                         self.project_root,
                         str(target),
@@ -338,6 +361,12 @@ class Application:
         app = None
         try:
             with bind_config(base), lifecycle.bind_services(context, effective, file_logging=file_logging) as services:
+                context.update_manifest(
+                    trace={
+                        "mode": services.trace_mode,
+                        "persisted": services.trace_mode == "full",
+                    }
+                )
                 with lifecycle.isolate_root_services(
                     ExplicitExecutionContext(
                         task_id=context.task_id,
@@ -391,6 +420,7 @@ class Application:
                             application_config=app_config,
                             runtime_context=context,
                             lifecycle=lifecycle,
+                            trace_mode=services.trace_mode,
                             logger=services.logger_backend,
                         )
                         engine_scope.enter_context(ensure_task_context_engine(effective))

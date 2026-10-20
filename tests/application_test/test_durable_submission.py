@@ -108,6 +108,23 @@ def test_durable_identity_input_snapshot_and_atomic_conflict(batch_project):
     assert not probe.starts and not probe.closed
 
 
+def test_equal_cancelled_identity_can_be_inspected_before_public_resume(batch_project):
+    root, application, _, _, _ = batch_project
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        with app.durable(root=root / "persistent") as execution:
+            worker = execution.worker("workflows/worker.yaml")
+            item = WorkItem("cancelled", {"value": 1})
+            handle = worker.submit(item)
+            execution.cancel(handle.workflow_id)
+            assert execution.status(handle.workflow_id).status == "CANCELLED"
+            repeated = worker.submit(item)
+            assert repeated.workflow_id == handle.workflow_id
+            assert execution.status(handle.workflow_id).status == "CANCELLED"
+            resumed = worker.submit(item, resume_terminal=True)
+            assert resumed.workflow_id == handle.workflow_id
+            assert execution.status(handle.workflow_id).status == "ENQUEUED"
+
+
 def test_durable_policy_conflicts_and_root_isolation(batch_project):
     root, application, _, _, write = batch_project
     write(application / "config/system.yaml", {"worker_execution": {"workers": {"workflows/worker.yaml": {"concurrency": 2}}}})

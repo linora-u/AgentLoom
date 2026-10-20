@@ -336,6 +336,7 @@ shell_settings:
 | 参数 | 类型 | 默认值 | 必选 | 说明 |
 |------|------|--------|------|------|
 | `runtime.root_dir` | `str` | `".agentloom"` | ❌ 否 | 框架运行时唯一根目录；相对路径从项目根解析，也支持绝对路径 |
+| `runtime.trace.mode` | `"full"` \| `"off"` | `"full"` | ❌ 否 | `full` 持久保存完整 Trace；`off` 只在当前 Run 的系统临时目录保存 ContextRef 与中间证据，Run 退出立即删除 |
 | `runtime.successful_run_retention_days` | `int` | `7` | ❌ 否 | 成功 run 目录保留天数 |
 | `runtime.failed_run_retention_days` | `int` | `30` | ❌ 否 | 失败/中断 run 目录保留天数 |
 | `runtime.artifact_retention_days` | `int` | `3` | ❌ 否 | 已保留 run 内原始 `artifacts/` 的保留天数 |
@@ -373,6 +374,12 @@ loom run applications/<app>/workflows/<agent>.yaml --no-file-log
 自动清理最多按配置间隔执行一次；`loom clean-runtime` 可显式应用同一策略。它只删除符合条件的 run 目录或其中的 raw artifacts，永不遍历 checkpoints、workspaces、self-learning 状态或 Application 自有 output 目录。
 
 Agent 的持久 recall 使用 `.agentloom/workspaces/agents/<application_id>/<agent_path>/`。当前任务的 Todo 使用 canonical checkpoint 内的 `todos.json`。持久 Schedule 与调度服务状态使用 `.agentloom/schedules/`。所有框架运行状态消费者都遵循同一个 `runtime.root_dir`；Application 自有 output 目录保持独立。
+
+`runtime.trace.mode: off` 关闭模型请求、响应、Tool payload 与步骤 Trace 的长期持久化。
+运行中的大 Tool 结果仍写入任务级系统临时目录，供 `ContextRef` 分页读取；Run 作用域退出后，
+该临时目录无论成功、失败或中断都会删除。DBOS 状态、checkpoint、进程退出回执、Run manifest
+和 Application 自有 output 不属于 Trace，不受此开关影响。Manifest 中的 `trace.mode` 和
+`trace.persisted` 记录本次 Run 的实际策略。
 
 验证真实 attempt 时必须读取 `manifest.json` 及其引用的日志、审计与产物，不能只看退出码。
 
