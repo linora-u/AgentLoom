@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from importlib.metadata import PackageNotFoundError, version
 from threading import RLock
 from typing import Any
+from uuid import uuid4
 
 from agentloom.execution.agent_runtime import (
     AgentRuntimeError,
@@ -180,6 +181,7 @@ class SmolagentsRuntimeAdapter:
         native_runtime: Any,
         *,
         model_binding: ModelTurnBinding,
+        instance_id: str | None = None,
         checkpoint_sink: Any | None = None,
         tool_gateway: ToolGateway | None = None,
         output_contract: OutputContract | None = None,
@@ -191,6 +193,8 @@ class SmolagentsRuntimeAdapter:
         self._todo_provider = TodoStateProvider()
         self._native_runtime = native_runtime
         self._model_binding = model_binding
+        self._instance_id = instance_id
+        self._attempt_context = ContextVar(f"agentloom_smol_attempt_{id(self)}", default=None)
         self._tool_gateway = tool_gateway
         self._output_contract = output_contract
         self._default_checkpoint_sink = checkpoint_sink
@@ -290,12 +294,22 @@ class SmolagentsRuntimeAdapter:
         details: dict[str, JSONValue] | None = None,
     ) -> RuntimeEvent:
         request = self._request_context.get()
+        from agentloom.execution.trace import capture_explicit_execution_context
+        execution = capture_explicit_execution_context()
+        identities = {
+            "instance_id": self._instance_id or execution.agent_id,
+            "hook_run_id": execution.local_run_id, "local_run_id": execution.local_run_id,
+            "root_run_id": execution.root_run_id,
+            "attempt_id": self._attempt_context.get(),
+            "sequence": len(self._event_context.get() or ()),
+            "root_agent": execution.local_run_id == execution.root_run_id,
+        }
         return RuntimeEvent(
             kind=kind,
             application_id=request.application_id if request is not None else None,
             task_id=request.task_id if request is not None else None,
             run_id=request.run_id if request is not None else None,
-            details=details or {},
+            details={**(details or {}), **identities},
         )
 
     def _emit_event(
@@ -360,6 +374,9 @@ class SmolagentsRuntimeAdapter:
                 "total_tokens": usage.total_tokens,
                 "cached_input_tokens": usage.cached_input_tokens,
                 "reasoning_tokens": usage.reasoning_tokens,
+                "usage_complete": bool(prior.get("usage_complete", True)) and (
+                    {"prompt_tokens", "completion_tokens", "total_tokens"}.issubset(turn.usage.details)
+                    or {"input_tokens", "output_tokens", "total_tokens"}.issubset(turn.usage.details)),
             },
         )
 
@@ -449,6 +466,7 @@ class SmolagentsRuntimeAdapter:
         events: list[RuntimeEvent] = []
         request_token = self._request_context.set(request)
         event_token = self._event_context.set(events)
+        attempt_token = self._attempt_context.set(uuid4().hex)
         try:
             unsupported = request.requirements.unsupported_by(
                 self.capabilities
@@ -534,6 +552,8 @@ class SmolagentsRuntimeAdapter:
                     "total_tokens": usage.total_tokens,
                     "cached_input_tokens": usage.cached_input_tokens,
                     "reasoning_tokens": usage.reasoning_tokens,
+                    "usage_complete": bool(reported.get("usage_complete", False))
+                        if callable(observe_turns) and reported is not None else False,
                 },
             )
             self._emit_event(
@@ -564,6 +584,7 @@ class SmolagentsRuntimeAdapter:
             )
             raise error from error.cause
         finally:
+            self._attempt_context.reset(attempt_token)
             self._event_context.reset(event_token)
             self._request_context.reset(request_token)
 

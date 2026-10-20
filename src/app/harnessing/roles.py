@@ -26,6 +26,7 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
     from agentloom.execution.concurrency import WorkItem
     from agentloom.execution.trace.task_context import bind_root_run, require_root_run_state
     from .snapshot import load_bundle
+    from .usage import read_run_usage
 
     archived = load_bundle(Path(bundle["root"]))
     trial = TrialContext.from_dict(context)
@@ -49,6 +50,7 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
                 definition = YamlAgentFactory._prepare_agent_config(definition)
                 outcome = app._invoke_definition(definition, item, 0)
             receipt = outcome.to_dict()
+            receipt["usage_observations"] = [item.to_dict() for item in read_run_usage(app.run.run_dir)]
             receipt["run"] = {
                 "application_id": app.run.application_id,
                 "task_id": app.run.task_id,

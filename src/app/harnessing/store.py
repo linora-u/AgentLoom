@@ -96,7 +96,7 @@ class ExperimentStore:
                     if previous is not None and current < previous:
                         inconsistent = True
                     merged[field] = max(previous or 0, current)
-            merged.update(sequence=sequence, complete=bool(old.get("complete") or item.get("complete")) and not inconsistent,
+            merged.update(sequence=sequence, complete=bool(item.get("complete")) and not inconsistent,
                 inconsistent=inconsistent)
             if item.get("duration_seconds") is not None:
                 merged["duration_seconds"] = max(old.get("duration_seconds") or 0, item["duration_seconds"])

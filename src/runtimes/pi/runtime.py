@@ -106,6 +106,7 @@ class PiRuntime:
             raise AgentRuntimeError("Unsupported Pi request capabilities: " + ", ".join(missing),
                                     category="unsupported_capability")
         events = []
+        runtime_attempt_id = uuid4().hex
         usage = RuntimeUsage()
         definition = self.definition
         selection = definition.model_selection
@@ -126,6 +127,8 @@ class PiRuntime:
             event = RuntimeEvent(kind=kind, application_id=request.application_id, task_id=request.task_id,
                                  run_id=request.run_id, details={**details,
                                      "instance_id": self.transport.instance_id, "hook_run_id": execution.local_run_id,
+                                     "local_run_id": execution.local_run_id, "attempt_id": runtime_attempt_id,
+                                     "sequence": len(events),
                                      "root_run_id": execution.root_run_id,
                                      "root_agent": execution.local_run_id == execution.root_run_id})
             events.append(event)
