@@ -58,12 +58,17 @@ class OwnedProcess:
     """Root-process observations plus independent resource cleanup confirmation."""
 
     def __init__(self, argv, *, env, cwd=None, stdin=None, stdout=None, stderr=None,
-                 text=False, encoding=None, errors=None, receipt_dir=None, gated=False, bufsize=-1):
+                 text=False, encoding=None, errors=None, receipt_dir=None, gated=False, bufsize=-1, pass_fds=()):
         if sys.platform not in {"darwin", "linux"}:
             raise RuntimeError("Managed native execution requires macOS or Linux")
         if isinstance(argv, (str, bytes)) or not argv:
             raise TypeError("Managed native command requires nonempty argv")
         self.args = [os.fsdecode(arg) for arg in argv]
+        inherited_fds = tuple(int(fd) for fd in pass_fds)
+        if any(fd < 3 for fd in inherited_fds):
+            raise ValueError("Private child descriptors must not replace stdio")
+        for fd in inherited_fds:
+            os.fstat(fd)
         self.pid = self.returncode = None
         self.receipt_dir = Path(receipt_dir) if receipt_dir is not None else None
         self._condition = Condition()
@@ -97,7 +102,7 @@ class OwnedProcess:
                         [sys.executable, str(Path(__file__).with_name("_process_guardian.py")),
                          str(remote.fileno()), self._generation],
                         stdin=stdin, stdout=stdout, stderr=stderr, text=text, encoding=encoding, errors=errors,
-                        env=guardian_env, bufsize=bufsize, pass_fds=(remote.fileno(),),
+                        env=guardian_env, bufsize=bufsize, pass_fds=(remote.fileno(), *inherited_fds),
                         close_fds=True, start_new_session=True,
                     )
                 finally:
@@ -108,7 +113,7 @@ class OwnedProcess:
                 # Registration is always closed-gate. Even an ungated caller
                 # gets a separate release after its owner handshake completes.
                 self._send({"op": "start", "argv": self.args, "env": dict(env), "cwd": os.fspath(cwd) if cwd else None,
-                            "generation": self._generation, "gated": True,
+                            "generation": self._generation, "gated": True, "pass_fds": inherited_fds,
                             "receipt_dir": str(self.receipt_dir) if self.receipt_dir else None,
                             "parent": {"pid": os.getpid(), "creation": psutil.Process().create_time()}})
                 if self._stopped:

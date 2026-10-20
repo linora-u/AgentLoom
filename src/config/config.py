@@ -47,6 +47,12 @@ _MAX_CAMPAIGN_LLM_CONFIG_BYTES = 1024 * 1024
 _HARNESS_MODEL_CONFIG: ContextVar[LLMConfig | None] = ContextVar("agentloom_harness_private_model_config", default=None)
 
 
+def current_harness_model_config() -> dict | None:
+    """Export a private catalog only to a trusted anonymous child transport."""
+    catalog = _HARNESS_MODEL_CONFIG.get()
+    return None if catalog is None else catalog.model_dump(mode="json")
+
+
 @contextmanager
 def bind_harness_model_config(raw: Mapping[str, Any] | None):
     """Bind the trusted child's already-consumed anonymous configuration pipe.

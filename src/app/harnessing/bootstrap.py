@@ -42,7 +42,13 @@ def main():
         sys.modules[module_spec.name] = isolation
         module_spec.loader.exec_module(isolation)
         spec = isolation.IsolationSpec(**descriptor["isolation"])
-        isolation.enforce_isolation(spec)
+        if descriptor["execution_boundary"] == "trial":
+            isolation.enforce_isolation(spec)
+        elif descriptor["execution_boundary"] == "managed_host":
+            if descriptor["factory"] != "agentloom.app.harnessing.controller:execute_trial" or descriptor["payload"].get("driver") != "news_agent.runtime.harnessing:NewsApplicationDriver":
+                raise ValueError("Unrecognized trusted managed Host driver")
+        else:
+            raise ValueError("Unrecognized trusted execution boundary")
         try:
             from agentloom.config.config import bind_harness_model_config
             from agentloom.config.private_bindings import bind_harness_credentials

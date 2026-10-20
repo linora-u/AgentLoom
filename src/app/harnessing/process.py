@@ -5,7 +5,6 @@ import dataclasses
 import hashlib
 import json
 import os
-import site
 import subprocess
 import sys
 import threading
@@ -13,8 +12,9 @@ import time
 from uuid import uuid4
 from pathlib import Path
 from typing import Mapping, Sequence
+from urllib.parse import urlsplit
 
-from .isolation import IsolationSpec, preflight_isolation
+from .isolation import preflight_isolation, trial_spec
 from .snapshot import CandidateBundle
 
 
@@ -44,17 +44,6 @@ def _context_dict(context):
     return {key: str(item) if isinstance(item, Path) else item for key, item in value.items()}
 
 
-def _runtime_paths() -> tuple[Path, ...]:
-    # Grant interpreter/runtime installations, never their containing HOME or
-    # checkout. No broad /proc or /tmp grant; the guardian observes externally.
-    roots = {Path(sys.base_prefix).resolve(), Path(sys.prefix).resolve()}
-    roots.update(Path(path).resolve() for path in site.getsitepackages())
-    roots.update(Path(path).resolve() for path in sys.path if path and Path(path).name in {"site-packages", "dist-packages"})
-    roots.update(Path(path).resolve() for path in ("/usr", "/lib", "/lib64", "/bin") if Path(path).exists())
-    roots.update(Path(path).resolve() for path in ("/etc/ssl", "/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/dev/null", "/dev/urandom", "/dev/random") if Path(path).exists())
-    return tuple(sorted(path for path in roots if path.exists()))
-
-
 def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None, credentials: Mapping | None = None) -> dict:
     """Execute ``factory(payload, bundle_descriptor, context_descriptor)`` once.
 
@@ -62,6 +51,21 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
     consumed/closed before factory import. It never enters identity or disk.
     Repeated calls with a completed identical operation reuse its result.
     """
+    return _execute(bundle, context, factory, payload, stop=stop, timeout=timeout, read_paths=read_paths, denied_paths=denied_paths, environment=environment, model_config=model_config, credentials=credentials, boundary="trial")
+
+
+def execute_trusted_orchestration(bundle, context, factory, payload, **options):
+    """Fixed news orchestration whose actual Agents run in isolated Hosts.
+
+    This internal seam is not selectable in YAML. It cannot run roles or an
+    arbitrary driver; every NewsHost must install the frozen mandatory policy.
+    """
+    if factory != "agentloom.app.harnessing.controller:execute_trial" or payload.get("driver") != "news_agent.runtime.harnessing:NewsApplicationDriver":
+        raise ValueError("Trusted orchestration is restricted to the built-in managed news driver")
+    return _execute(bundle, context, factory, payload, boundary="managed_host", **options)
+
+
+def _execute(bundle, context, factory, payload, *, stop=None, timeout=None, read_paths=(), denied_paths=(), environment=None, model_config=None, credentials=None, boundary):
     from agentloom.execution.managed_process import launch_owned_process, recover_owned_process
 
     preflight_isolation()
@@ -70,6 +74,15 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
         raise ValueError("Private capability binding was not declared by this candidate")
     if not isinstance(factory, str) or ":" not in factory or any(part.startswith("_") for part in factory.split(":")):
         raise ValueError("Isolated factory must be an importable public module:function")
+    for key, value in (environment or {}).items():
+        if key not in {"PATH", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"}:
+            raise ValueError("Unsupported inherited Harness environment capability: " + key)
+        # Environment forms part of the public execution identity. A proxy
+        # credential must use a private capability, never a persisted URL.
+        if key.endswith("_PROXY") and key != "NO_PROXY":
+            url = urlsplit(value)
+            if url.username is not None or url.password is not None or url.query or url.fragment:
+                raise ValueError("Credential-bearing proxy URLs cannot be archived by Harness")
     descriptor = _context_dict(context)
     if descriptor["candidate_id"] != bundle.candidate_id:
         raise ValueError("Trial candidate identity differs from bundle")
@@ -83,7 +96,7 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
         (root / name).mkdir(exist_ok=True)
     job = root / "process"
     job.mkdir(exist_ok=True)
-    input_value = {"schema_version": 1, "factory": factory, "payload": dict(payload), "bundle": bundle.to_dict(), "context": descriptor,
+    input_value = {"schema_version": 1, "factory": factory, "payload": dict(payload), "bundle": bundle.to_dict(), "context": descriptor, "execution_boundary": boundary,
                    "read_paths": sorted(str(Path(path).resolve()) for path in read_paths),
                    "denied_paths": sorted(str(Path(path).resolve()) for path in denied_paths), "environment": dict(environment or {})}
     identity = hashlib.sha256(_json(input_value).encode()).hexdigest()
@@ -117,13 +130,7 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
         attempt.mkdir()
         # Requested access is part of the trusted driver contract. It cannot be
         # changed by candidate YAML or arbitrary include_paths in a tool policy.
-        reads = (*_runtime_paths(), bundle.root, *map(Path, read_paths))
-        writes = tuple(root / name for name in ("workspace", "runtime", "business", "output", "sessions", "tmp", "home"))
-        for hidden in denied_paths:
-            hidden = Path(hidden).resolve()
-            if any(hidden.is_relative_to(Path(grant).resolve()) or Path(grant).resolve().is_relative_to(hidden) for grant in (*reads, *writes)):
-                raise ValueError("A Trial resource grant overlaps hidden evaluation data")
-        spec = IsolationSpec(tuple(reads), writes, (root,))
+        spec = trial_spec(bundle.root, descriptor, read_paths=read_paths, denied_paths=denied_paths, environment=environment)
         import agentloom.execution.managed_process as managed_module
         guardian_entry = Path(managed_module.__file__).with_name("_process_guardian.py").resolve()
         expected_guardian = bundle.manifest["files"]["python/agentloom/execution/_process_guardian.py"]["hash"]

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from importlib.metadata import distributions
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 import yaml
 
@@ -50,6 +51,18 @@ def _secret_key(key: str) -> bool:
 
 
 def _sanitize(value: Any, source: str, refs: list[str], pointer: str = "", credentials: MutableMapping | None = None) -> Any:
+    if isinstance(value, str) and "://" in value:
+        try:
+            parsed = urlsplit(value)
+            private_url = parsed.username is not None or parsed.password is not None or any(_secret_key(key) for key, _ in parse_qsl(parsed.query))
+        except ValueError:
+            private_url = False
+        if private_url:
+            ref = source + "#" + pointer
+            refs.append(ref)
+            if credentials is not None:
+                credentials[ref] = value
+            return "harness-credential-ref:" + ref
     if isinstance(value, Mapping):
         result = {}
         for key, item in value.items():
@@ -225,10 +238,13 @@ def _commit(staging: Path, destination: Path, application: str, *, credential_re
                 if len(files) >= _MAX_FILES or total > _MAX_BYTES:
                     raise ValueError("Candidate dependency closure exceeds bounded snapshot limits")
                 files[path.relative_to(staging).as_posix()] = {"hash": _digest(payload), "bytes": len(payload), "executable": bool(path.stat().st_mode & stat.S_IXUSR)}
+    # Only file-backed capabilities are restored from source#JSONpointer. The
+    # effective catalog has its own trusted in-memory binding and must not
+    # manufacture non-file references for a later controller recovery.
     refs = list(credential_refs)
     manifest = {"schema_version": 1, "application": application, "files": files,
-                "effective_config": _sanitize(effective_config or {}, "effective_config", refs),
-                "model_config": _sanitize(model_config or {}, "model_config", refs),
+                "effective_config": _sanitize(effective_config or {}, "effective_config", []),
+                "model_config": _sanitize(model_config or {}, "model_config", []),
                 "credential_refs": sorted(set(refs)), "environment": list(environment), "editable_resources": dict(editable_resources or {})}
     identity = _digest(_json(manifest))
     final = destination / identity.split(":", 1)[1]

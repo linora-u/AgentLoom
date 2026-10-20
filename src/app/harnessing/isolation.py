@@ -10,11 +10,47 @@ import ctypes.util
 import errno
 import os
 import platform
+import shutil
+import site
 import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+
+
+def runtime_paths(environment=None) -> tuple[Path, ...]:
+    """Read exact trusted installations, without opening a HOME or checkout."""
+    roots = {Path(sys.base_prefix).resolve(), Path(sys.prefix).resolve()}
+    roots.update(Path(path).resolve() for path in site.getsitepackages())
+    roots.update(Path(path).resolve() for path in sys.path if path and Path(path).name in {"site-packages", "dist-packages"})
+    roots.update(Path(path).resolve() for path in ("/usr", "/lib", "/lib64", "/bin") if Path(path).exists())
+    roots.update(Path(path).resolve() for path in ("/etc/ssl", "/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/dev/null", "/dev/urandom", "/dev/random") if Path(path).exists())
+    # Pi selects Node from PATH, skipping older installations. Grant only each
+    # concrete executable that the trusted PATH can select, never PATH roots.
+    for directory in os.get_exec_path(dict(environment or {})):
+        node = shutil.which("node", path=directory)
+        if node:
+            roots.add(Path(node).resolve())
+    sdk = Path(sys.prefix) / "share" / "pi"
+    if sdk.exists():
+        roots.add(sdk.resolve(strict=True))
+    return tuple(sorted(path for path in roots if path.exists()))
+
+
+def trial_spec(bundle_root, context, *, read_paths=(), denied_paths=(), environment=None):
+    root = Path(context["root"]).resolve(strict=True)
+    if root in {Path("/"), Path.home().resolve()}:
+        raise ValueError("Trial cannot grant a user root or HOME")
+    writes = tuple(root / name for name in ("workspace", "runtime", "business", "output", "sessions", "tmp", "home"))
+    for directory in writes:
+        directory.mkdir(exist_ok=True)
+    reads = (*runtime_paths(environment), Path(bundle_root).resolve(strict=True), *map(Path, read_paths))
+    for hidden in denied_paths:
+        hidden = Path(hidden).resolve()
+        if any(hidden.is_relative_to(Path(grant).resolve()) or Path(grant).resolve().is_relative_to(hidden) for grant in (*reads, *writes)):
+            raise ValueError("A Trial resource grant overlaps hidden evaluation data")
+    return IsolationSpec(tuple(reads), writes, (root,))
 
 
 class IsolationUnavailable(RuntimeError):

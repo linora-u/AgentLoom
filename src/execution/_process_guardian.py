@@ -165,13 +165,15 @@ class Guardian:
             env["AGENTLOOM_MANAGED_PROCESS_GROUP"] = str(os.getpgrp())
             env[NATIVE_SCOPE_GENERATION_ENV] = self.command["generation"]
             self.process = subprocess.Popen(self.command["argv"], env=env, cwd=self.command.get("cwd"),
-                                            stdin=0, stdout=1, stderr=2, pass_fds=(read,), close_fds=True)
+                                            stdin=0, stdout=1, stderr=2, pass_fds=(read, *self.command.get("pass_fds", ())), close_fds=True)
             identity = {"pid": self.process.pid, "creation": psutil.Process(self.process.pid).create_time()}
             os.write(write, json.dumps({"anchor": self.description["anchor"], "child": identity,
                                         "generation": self.command["generation"]}).encode())
         finally:
             os.close(read)
             os.close(write)
+            for descriptor in self.command.get("pass_fds", ()):
+                os.close(descriptor)
         self.send({"event": "ready", **identity})
         # Only the real command owns the caller's stdio. The independent
         # control channel remains alive even when output is not being consumed.

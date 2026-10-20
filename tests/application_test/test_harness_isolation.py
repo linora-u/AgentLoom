@@ -180,6 +180,7 @@ async def mcp_probe(payload, bundle, context):
     assert all("mcp-private-canary" not in path.read_text() for path in (context.root / "process").rglob("*.json"))
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Harness preflight deliberately rejects unvalidated backends")
 def test_original_guardian_digest_must_match_snapshot(project, tmp_path, monkeypatch):
     import agentloom.execution.managed_process as managed
     root, app = project
@@ -227,3 +228,84 @@ def controlled_stop(payload, bundle, context):
     assert json.loads((context.root / "process/attempts/000001/cleanup.json").read_text())["physical_exit_confirmed"]
     assert execute_isolated(bundle, context, "applications.sample.operations:controlled_stop", {}, timeout=10) == {"recovered": True}
     assert len(list((context.root / "process/attempts").iterdir())) == 2
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Real managed Host kernel enforcement and anonymous forwarding")
+def test_managed_host_enforces_before_factory_and_consumes_forwarded_capabilities(project, tmp_path, monkeypatch):
+    from agentloom.config.config import bind_harness_model_config
+    from agentloom.config.private_bindings import bind_harness_credentials, forward_harness_bindings
+    from agentloom.execution.managed_process import launch_owned_process
+    from agentloom.execution.durable.client import TaskDescription
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.durable.files import atomic_json
+    root, app = project
+    hidden = tmp_path / "held-out.json"
+    hidden.write_text("hidden evaluation")
+    (app / "operations.py").write_text('''
+import os, subprocess
+from pathlib import Path
+class Host:
+    def __init__(self, options):
+        self.options = options
+        # Construction itself must already be restricted.
+        try:
+            Path(options['hidden']).read_text()
+            self.hidden = 'UNEXPECTED_ALLOW'
+        except PermissionError:
+            self.hidden = 'denied'
+    def invoke(self, task, invocation_id):
+        from agentloom.config.config import load_project_config
+        from agentloom.config.private_bindings import resolve_bound_credentials
+        from agentloom.execution.durable.authorization import assert_current_attempt
+        assert_current_attempt()
+        try:
+            Path(self.options['job'], 'authorized.json').write_text('{}')
+            control = 'UNEXPECTED_ALLOW'
+        except PermissionError:
+            control = 'denied'
+        env = subprocess.run(['/usr/bin/env'], capture_output=True, text=True).stdout
+        return {'hidden':self.hidden, 'control':control,
+                'model':load_project_config(Path(self.options['project_root'])).llm.models['test'].api_key == 'model-private',
+                'tool':resolve_bound_credentials('harness-credential-ref:fixture#/token') == 'tool-private',
+                'private_fd_visible': 'AGENTLOOM_HARNESS_PRIVATE_FD' in env,
+                'secret_visible': 'model-private' in env or 'tool-private' in env}
+def host(options):
+    return Host(options)
+''')
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    # The trusted news outer process imports the archived framework. Select
+    # that identical guardian entry here while keeping ownership in pytest.
+    import agentloom.execution.managed_process as managed
+    monkeypatch.setattr(managed, "__file__", str(bundle.root / "python/agentloom/execution/managed_process.py"))
+    context = Context(tmp_path / "trial", bundle.candidate_id)
+    context.root.mkdir()
+    job = context.root / "control-execution/jobs/workflow/attempt"
+    job.mkdir(parents=True)
+    descriptor = {"invocation_id": "attempt", "task": TaskDescription("agentloom-fixture", "worker.yaml", WorkItem("task", {}), "revision").to_dict(),
+                  "host": {"factory": "applications.sample.operations:host", "options": {"project_root": str(bundle.project_root), "hidden": str(hidden), "job": str(job),
+                    "harness_isolation": {"bundle": bundle.to_dict(), "context": {**context.__dict__, "root": str(context.root)}, "read_paths": [], "denied_paths": [str(hidden)]}}}}
+    atomic_json(job / "description.json", descriptor)
+    atomic_json(job / "authorized.json", {"invocation_id": "attempt"})
+    env = {"PATH": os.defpath, "HOME": str(context.root / "home"), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1", "PYTHONPATH": os.pathsep.join((str(bundle.root / "python"), str(bundle.project_root)))}
+    models = {"model": {"test": {"model": "test", "adapter": "openai_chat", "api_key": "model-private"}}}
+    with bind_harness_credentials({"fixture#/token": "tool-private"}), bind_harness_model_config(models), forward_harness_bindings() as (private_env, private_fds), (job / "stdout.log").open("wb") as stdout, (job / "stderr.log").open("wb") as stderr:
+        env.update(private_env)
+        owner = launch_owned_process([sys.executable, "-B", "-m", "agentloom.execution.durable.job_entry", str(job)], env=env, cwd=bundle.project_root, stdout=stdout, stderr=stderr, pass_fds=private_fds, receipt_dir=job / "resource", gated=True)
+    try:
+        owner.release()
+        assert owner.wait(timeout=15) == 0, (job / "stderr.log").read_text()
+        assert owner.wait_exited(timeout=10)["physical_exit_confirmed"]
+    finally:
+        owner.close()
+    assert json.loads((job / "result.json").read_text())["result"] == {"hidden": "denied", "control": "denied", "model": True, "tool": True, "private_fd_visible": False, "secret_visible": False}
+    assert all("model-private" not in path.read_text() and "tool-private" not in path.read_text() for path in job.rglob("*.json"))
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Harness preflight rejects unvalidated OS backends first")
+def test_proxy_credentials_rejected_before_any_public_archive(project, tmp_path):
+    root, app = project
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    context = Context(tmp_path / "trial", bundle.candidate_id)
+    with pytest.raises(ValueError, match="proxy"):
+        execute_isolated(bundle, context, "applications.sample.operations:probe", {}, environment={"HTTPS_PROXY": "http://user:password@127.0.0.1:8080"})
+    assert not context.root.exists()
