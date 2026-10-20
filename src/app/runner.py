@@ -224,7 +224,10 @@ def execute_app(
 ) -> ApplicationRunResult:
     """Execute against current configuration, pinned for the lifetime of the Run."""
     try:
+        from agentloom.app.harnessing.binding import trial_config
+
         invocation_config = fresh_invocation_config(get_config())
+        invocation_config = trial_config(invocation_config)
     except BaseException as exc:
         _emit_preflight_rejection(event_sink, exc)
         raise

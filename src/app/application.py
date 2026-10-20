@@ -357,7 +357,10 @@ class Application:
         file_logging: bool | None = None,
     ) -> Iterator[Application]:
         """Shared standalone lifecycle; legacy adapters supply their captured owner identity."""
+        from agentloom.app.harnessing.binding import trial_config
+
         base = project_config or fresh_invocation_config(get_config())
+        base = trial_config(base)
         root = Path(base.agent_root).resolve()
         application = Path(application_root).resolve()
         app_config, effective = _system_settings(base, application, application_config)
