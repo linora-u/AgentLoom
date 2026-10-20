@@ -4,17 +4,23 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 from threading import Event, Thread
 from time import monotonic, sleep
-from pathlib import Path
 
 import pytest
-
 from agentloom.app.harnessing.controller import run_application
 from agentloom.app.harnessing.isolation import IsolationUnavailable, preflight_isolation
 from agentloom.app.harnessing.models import ApplicationRequest
 from agentloom.app.harnessing.policy import HarnessingPolicy
-from tests.application_test.mixed_runtime_support import finish, model_service, project, write_yaml
+
+from tests.application_test.mixed_runtime_support import (
+    assert_closed_output_schema,
+    finish,
+    model_service,
+    project,
+    write_yaml,
+)
 
 
 @pytest.fixture
@@ -108,6 +114,7 @@ class Evaluator:
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
+        ("parallel", 1, "pi", True, False, "duplicate_edits"),
         ("parallel", 1, "smolagents", False, False, "unsafe_tools"),
         ("parallel", 1, "smolagents", False, False, "registry_tools"),
         ("parallel", 1, "smolagents", False, True, "normal"),
@@ -128,6 +135,11 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     requests_by_role = []
 
     def program(request):
+        if custom_roles and runtime == "pi" and request["model"] == "supervisor":
+            contract = request["response_format"]["json_schema"]
+            assert contract["strict"] is True
+
+            assert_closed_output_schema(contract["schema"])
         system = str(request["messages"][0]["content"])
         if request["model"] == "worker":
             assert all(tool["function"]["name"] != "expose_private" for tool in request.get("tools", []))
@@ -141,19 +153,27 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             result, role = {"chosen_id": "C1", "reason": "Uses the required frozen fact."}, "select"
         elif "Compose one coherent complete Application" in system:
             result, role = {
-                "edits": {"applications/mixed/prompts/business.md": "COMPOSED"},
+                "edits": [{"path": "applications/mixed/prompts/business.md", "content": "COMPOSED"}],
                 "rationale": "Retain fixed fact and compose inspected probes.",
             }, "compose"
         elif "domain-specific working methods" in system:
-            result, role = {"edits": {}, "rationale": "No supported domain edit."}, "domain"
+            result, role = {"edits": [], "rationale": "No supported domain edit."}, "domain"
         elif "general problem-solving" in system:
-            result, role = {"edits": {}, "rationale": "No supported general edit."}, "general"
+            result, role = {"edits": [], "rationale": "No supported general edit."}, "general"
         else:
             raise AssertionError(system[:300])
         if scenario == "selector_invalid" and role == "select":
             result["chosen_id"] = "BASE"
         if scenario == "invalid_edits" and role in {"general", "domain", "compose"}:
-            result["edits"] = {"applications/mixed/driver.py": "forbidden fixed business code change"}
+            result["edits"] = [{"path": "applications/mixed/driver.py", "content": "forbidden fixed business code change"}]
+        if scenario == "duplicate_edits" and role in {"general", "domain", "compose"}:
+            result["edits"] = [{"path": "applications/mixed/prompts/business.md", "content": text}
+                               for text in ("AMBIGUOUS-FIRST", "AMBIGUOUS-LAST")]
+        if scenario == "normal" and mode == "parallel" and role == "compose":
+            result["edits"].extend([
+                {"path": "applications/mixed/prompts/added.md", "content": "NEW RESOURCE"},
+                {"path": "applications/mixed/prompts/obsolete.md", "content": None},
+            ])
         if scenario in {"unsafe_tools", "registry_tools"} and role in {"general", "domain", "compose"}:
             import yaml
 
@@ -167,7 +187,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 worker["tools"] = [{"name": "expose_private", "module": module, "function": function}]
             elif role == "compose":
                 worker["tools"] = [{"name": "read_file"}]
-            result["edits"] = {"applications/mixed/workflows/worker.yaml": yaml.safe_dump(worker)}
+            result["edits"] = [{"path": "applications/mixed/workflows/worker.yaml", "content": yaml.safe_dump(worker)}]
         if role != "business":
             assert "HIDDEN-CANARY" not in json.dumps(request)
             if scenario == "development_score":
@@ -186,6 +206,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         (app / "driver.py").write_text(DRIVER)
         (app / "prompts").mkdir()
         (app / "prompts/business.md").write_text("BASE")
+        (app / "prompts/obsolete.md").write_text("UNUSED RESOURCE")
         write_yaml(
             app / "workflows/worker.yaml",
             {
@@ -287,7 +308,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             (root / "config/system.yaml").write_text("invalid: [")
             import yaml
             changed_models = yaml.safe_load((root / "config/model.yaml").read_text())
-            for name, model in changed_models["model"].items():
+            for model in changed_models["model"].values():
                 if isinstance(model, dict):
                     model["base_url"] = "http://127.0.0.1:9/v1"
             write_yaml(root / "config/model.yaml", changed_models)
@@ -340,11 +361,11 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert result.selected_trial_id.startswith("final")
         assert result.output == {
             "fact": "FACT-123",
-            "variant": "BASE" if scenario in {"invalid_edits", "unsafe_tools", "registry_tools"} else "COMPOSED",
+            "variant": "BASE" if scenario in {"invalid_edits", "duplicate_edits", "unsafe_tools", "registry_tools"} else "COMPOSED",
         }
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
         assert requests_by_role.count("business") == 4 * k + (scenario == "stop_and_resume")
-        edits = 2 * k if scenario in {"invalid_edits", "unsafe_tools"} else k
+        edits = 2 * k if scenario in {"invalid_edits", "duplicate_edits", "unsafe_tools"} else k
         assert requests_by_role.count("general") == requests_by_role.count("domain") == edits
         assert requests_by_role.count("compose") == edits
         assert requests_by_role.count("select") == (k > 1)
@@ -358,6 +379,17 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
         assert (state / "stages/publication.json").exists()
+        if scenario == "normal" and mode == "parallel":
+            candidate = json.loads((state / "stages/candidate.final1.json").read_text())["result"]
+            prompts = Path(candidate["root"]) / "project/applications/mixed/prompts"
+            assert (prompts / "business.md").read_text() == "COMPOSED"
+            assert (prompts / "added.md").read_text() == "NEW RESOURCE"
+            assert not (prompts / "obsolete.md").exists()
+        if scenario == "duplicate_edits":
+            for label in ("general1", "domain1", "final1"):
+                candidate = json.loads((state / f"stages/candidate.{label}.json").read_text())["result"]
+                assert candidate["inherited"]
+                assert "each path only once" in candidate["error"]
         if scenario == "unsafe_tools":
             for label in ("general1", "domain1", "final1"):
                 candidate = json.loads((state / f"stages/candidate.{label}.json").read_text())["result"]

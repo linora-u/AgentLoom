@@ -23,6 +23,20 @@ class ProviderFailure(NamedTuple):
     message: str
 
 
+def assert_closed_output_schema(schema: dict) -> None:
+    """Provider strict objects require a closed, fully required property set."""
+    if schema.get('type') == 'object':
+        assert schema.get('additionalProperties') is False
+        assert set(schema.get('required', [])) == set(schema.get('properties', {}))
+    for value in schema.values():
+        if isinstance(value, dict):
+            assert_closed_output_schema(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    assert_closed_output_schema(item)
+
+
 @contextmanager
 def model_service(
     program: Callable[

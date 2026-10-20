@@ -17,9 +17,14 @@ output_schema:
   type: object
   properties:
     edits:
-      type: object
-      additionalProperties:
-        type: [string, 'null']
+      type: array
+      items:
+        type: object
+        properties:
+          path: {type: string}
+          content: {type: [string, 'null']}
+        required: [path, content]
+        additionalProperties: false
     rationale: {type: string}
   required: [edits, rationale]
   additionalProperties: false

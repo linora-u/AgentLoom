@@ -3,9 +3,9 @@ import json
 
 import pytest
 import yaml
-
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
+
 from tests.application_test.mixed_runtime_support import finish, model_service, project, tool_messages, write_yaml
 
 
@@ -22,12 +22,12 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
         if "Extract only supported reusable experiences" in system:
             value, role = {"experiences": []}, "reflect"
         elif "Compose one coherent complete Application" in system:
-            value, role = {"edits": {"applications/mixed/prompts/root.md": "COMPOSED-ROOT"},
+            value, role = {"edits": [{"path": "applications/mixed/prompts/root.md", "content": "COMPOSED-ROOT"}],
                            "rationale": "Use the independent evidence."}, "compose"
         elif "domain-specific working methods" in system:
-            value, role = {"edits": {}, "rationale": "No further changes."}, "domain"
+            value, role = {"edits": [], "rationale": "No further changes."}, "domain"
         elif "general problem-solving" in system:
-            value, role = {"edits": {}, "rationale": "No further changes."}, "general"
+            value, role = {"edits": [], "rationale": "No further changes."}, "general"
         elif request["model"] == "worker":
             counts.append("worker")
             return finish(request, "INDEPENDENT-EVIDENCE")
@@ -85,8 +85,8 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             assert recovered.run == result.run
             assert len(requests) == calls
             definition.unlink()
-            from click.testing import CliRunner
             from agentloom.app.cli import run
+            from click.testing import CliRunner
             command = CliRunner().invoke(run, [str(definition), "--no-file-log",
                 "--resume-experiment", result.harnessing.experiment_id, "--output-format", "json"])
             assert command.exit_code == 0, command.output

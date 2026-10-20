@@ -14,17 +14,28 @@ def validate_role_output(role: str, value):
     from agentloom.execution.agent_runtime import OutputContract
 
     schema = yaml.safe_load((_RESOURCE_ROOT / f"{role}.yaml").read_text())["output_schema"]
-    return OutputContract(name=f"harness_{role}", schema=schema).validate(json_value(value))
+    output = OutputContract(name=f"harness_{role}", schema=schema).validate(json_value(value))
+    if role in {"general", "domain", "compose"}:
+        # The model wire contract has closed objects for strict structured
+        # output. Keep the existing snapshot edit mapping inside the controller.
+        changes = {}
+        for edit in output["edits"]:
+            if edit["path"] in changes:
+                raise ValueError("Role edits must contain each path only once")
+            changes[edit["path"]] = edit["content"]
+        output["edits"] = changes
+    return output
 
 
 def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
     """Trusted child-process factory; normal YAML, Runtime and cleanup paths apply."""
     import yaml
     from agentloom.app import Application
-    from agentloom.config.config import bind_config, load_project_config
     from agentloom.app.factory import YamlAgentFactory
+    from agentloom.config.config import bind_config, load_project_config
     from agentloom.execution.concurrency import WorkItem
     from agentloom.execution.trace.task_context import bind_root_run, require_root_run_state
+
     from .snapshot import load_bundle
     from .usage import read_run_usage
 

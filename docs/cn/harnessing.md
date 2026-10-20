@@ -26,6 +26,16 @@ harnessing:
 
 这些是 AgentLoom 的配置契约。通用改进、领域改进、Probe、Compose、有限递归、final 选择和反思借鉴 Harness²；开发评分、Application 配置与多 Agent 执行适配由 AgentLoom 提供。`k` 控制探索规模；选择、反思、评价和重试另计用量，现有单次调用超时和输出限制继续有效。
 
+自定义角色使用与内置角色相同的输入输出契约：输入为包含 `evidence` 的对象；五种角色的输出如下。
+
+| 角色 | 输出 |
+| --- | --- |
+| `general`、`domain`、`compose` | `{"edits": [{"path": "applications/example/prompts/task.md", "content": "完整的新文件内容"}], "rationale": "依据执行证据说明修改原因"}` |
+| `select` | `{"chosen_id": "C1", "reason": "选择理由"}`；ID 必须来自给定 final 池。 |
+| `reflect` | `{"experiences": [{"trigger": "触发条件", "symptom": "现象", "action": "行动", "verification": "验证证据", "evidence_refs": ["给定证据引用"]}]}`；证据不足时返回空数组。 |
+
+`edits` 必须是数组；每项只包含 `path`、`content`，路径是项目内规范相对路径且不能重复。`content` 为完整 UTF-8 文本，`null` 表示删除允许删除的已有资源；不修改时使用 `edits: []`。框架先校验角色输出，再转换为内部文件修改映射，继续执行原有资源权限、凭据和整应用校验。所有输出对象都声明固定字段、完整 `required` 与 `additionalProperties: false`，符合 [OpenAI 严格结构化输出的对象约束](https://developers.openai.com/api/docs/guides/structured-outputs)；自定义 YAML 应复用对应内置角色的 `output_schema`。不接受旧的动态路径字典格式。
+
 ## 执行与恢复
 
 普通 Supervisor 入口会读取应用开关：
