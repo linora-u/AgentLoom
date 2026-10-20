@@ -6,12 +6,12 @@ as an API credential or reopening live source configuration.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-from contextlib import contextmanager
-from contextvars import ContextVar
-from copy import deepcopy
 import json
 import os
+from collections.abc import Mapping
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
+from copy import deepcopy
 from typing import Any
 
 _VALUES: ContextVar[Mapping[str, Any] | None] = ContextVar("agentloom_harness_private_capabilities", default=None)
@@ -27,6 +27,40 @@ def bind_harness_credentials(values: Mapping[str, Any]):
         yield
     finally:
         _VALUES.reset(token)
+
+
+def capture_harness_bindings():
+    """Capture only private capabilities for callbacks in a trusted executor.
+
+    DBOS owns its callback threads and does not inherit the caller's context.
+    Each invocation gets a fresh binding scope, including across cancellation;
+    unrelated trace, resource and Application contexts are not transplanted.
+    The captured values stay in memory and never enter a HostSpec or task.
+    """
+    values = _VALUES.get()
+    if values is None:
+        return nullcontext
+    credentials = deepcopy(dict(values))
+    from agentloom.runtimes.pi.credentials import bind_pi_credentials, current_pi_credentials
+
+    from .config import bind_harness_model_config, current_harness_model_config
+    model_config, pi_credentials = current_harness_model_config(), current_pi_credentials()
+
+    @contextmanager
+    def bind():
+        with bind_harness_credentials(credentials), bind_harness_model_config(deepcopy(model_config)), bind_pi_credentials(pi_credentials):
+            yield
+
+    return bind
+
+
+def require_harness_bindings():
+    """Refuse a missing private transport before an isolated Host can import."""
+    from agentloom.runtimes.pi.credentials import current_pi_credentials
+
+    from .config import current_harness_model_config
+    if _VALUES.get() is None or current_harness_model_config() is None or current_pi_credentials() is None:
+        raise ValueError("Isolated Harness execution requires its trusted private bindings")
 
 
 def resolve_bound_credentials(value: Any) -> Any:
@@ -57,9 +91,11 @@ def forward_harness_bindings():
     if values is None:
         yield {}, ()
         return
-    from .config import current_harness_model_config
-    from agentloom.runtimes.pi.credentials import current_pi_credentials
     import fcntl
+
+    from agentloom.runtimes.pi.credentials import current_pi_credentials
+
+    from .config import current_harness_model_config
     payload = json.dumps({"credentials": dict(values), "model_config": current_harness_model_config(), "pi_credentials": current_pi_credentials()}, allow_nan=False).encode()
     if len(payload) > _MAX_BYTES:
         raise ValueError("Private Harness transport exceeds its bounded capacity")
@@ -95,7 +131,8 @@ def consume_harness_bindings():
     if len(raw) > _MAX_BYTES:
         raise ValueError("Private Harness transport exceeds its bounded capacity")
     private = json.loads(raw)
-    from .config import bind_harness_model_config
     from agentloom.runtimes.pi.credentials import bind_pi_credentials
+
+    from .config import bind_harness_model_config
     with bind_harness_credentials(private["credentials"]), bind_harness_model_config(private["model_config"]), bind_pi_credentials(private.get("pi_credentials")):
         yield

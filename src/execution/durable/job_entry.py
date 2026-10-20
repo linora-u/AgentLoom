@@ -1,9 +1,9 @@
 """One OS-owned invocation. Identity handshake precedes all host/Runtime code."""
 from __future__ import annotations
 
-import os
 import importlib.util
 import json
+import os
 import sys
 import time
 import traceback
@@ -18,6 +18,8 @@ from .host import HostSpec, exception_outcomes
 
 
 def _install_harness_boundary(value, job):
+    from agentloom.config.private_bindings import require_harness_bindings
+    require_harness_bindings()
     # Load the trusted frozen support directly; importing agentloom.app before
     # the policy would initialize application machinery outside the boundary.
     modules = {}
@@ -61,11 +63,11 @@ def main():
         time.sleep(0.02)
     descriptor = read_json(job / "description.json")
     task = TaskDescription.from_dict(descriptor["task"])
+    from agentloom.config.private_bindings import consume_harness_bindings
+    from agentloom.execution.durability_scope import bind_durability_boundary
     from agentloom.execution.process_scope import bind_managed_process_scope
 
     from .authorization import assert_current_attempt, bind_attempt_authorization
-    from agentloom.config.private_bindings import consume_harness_bindings
-    from agentloom.execution.durability_scope import bind_durability_boundary
 
     boundary = descriptor["host"]["options"].get("harness_isolation")
     # Only this trusted interpreter owns the receipt FD; all exec tools close
