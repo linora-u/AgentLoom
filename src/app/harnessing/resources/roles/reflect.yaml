@@ -1,0 +1,34 @@
+name: harness_reflect
+agent_runtime: smolagents
+description: Distill supported experiences after complete Application adoption.
+task: Use the selected configuration and actual execution evidence to return supported experiences or an empty list.
+tools: []
+toolsets: []
+default_toolsets: []
+self_learning: {enabled: false}
+input_schema:
+  type: object
+  properties:
+    evidence: {type: object}
+  required: [evidence]
+  additionalProperties: false
+output_schema:
+  type: object
+  properties:
+    experiences:
+      type: array
+      items:
+        type: object
+        properties:
+          trigger: {type: string}
+          symptom: {type: string}
+          action: {type: string}
+          verification: {type: string}
+          evidence_refs:
+            type: array
+            items: {type: string}
+            minItems: 1
+        required: [trigger, symptom, action, verification, evidence_refs]
+        additionalProperties: false
+  required: [experiences]
+  additionalProperties: false
