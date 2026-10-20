@@ -242,6 +242,12 @@ class ImprovementController:
         try:
             return execute(bundle, context, factory, json_value(payload), **options)
         except BaseException as error:
+            # H2 returns/raises only after its owner closes. Salvage persisted
+            # observations even if the process died before a driver receipt.
+            from .usage import read_run_usage
+
+            for manifest in sorted(context.runtime_root.glob("runs/**/manifest.json")):
+                self._usage(read_run_usage(manifest.parent))
             # Operation-level unknowns are not fabricated zero-token model
             # invocations. They survive retries alongside any measured calls.
             with self._mutex:

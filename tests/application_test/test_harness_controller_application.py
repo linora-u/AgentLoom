@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+from threading import Event, Thread
+from time import monotonic, sleep
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,7 @@ from pathlib import Path
 from agentloom.app import Application
 from agentloom.execution.concurrency import WorkItem
 from agentloom.app.harnessing.models import PreparedInvocation, ExecutionReceipt, UsageObservation
+from agentloom.app.harnessing.usage import read_run_usage
 
 class Driver:
     def preflight(self, request, policy):
@@ -62,10 +65,15 @@ class Driver:
             accepted=outcome.status == 'success' and output.get('fact') == 'FACT-123' and not (
                 invocation.request.driver_options.get('reject_final') and context.trial_id.startswith('final')),
             acceptance={'hidden': hidden, 'fixed_fact': fact}, runs=(run,),
-            usage=(UsageObservation(outcome.invocation_id, **{k:outcome.usage.get(k)
-                for k in ('input_tokens','output_tokens','total_tokens')}, complete=False),),
+            usage=read_run_usage(Path(run['manifest_path']).parent),
             cleanup_complete=not outcome.cleanup_errors)
         context.business_root.mkdir(exist_ok=True)
+        marker = context.business_root / 'before-receipt'
+        if invocation.request.driver_options.get('stop_before_receipt') and context.trial_id == 'base1' and not marker.exists():
+            import time
+            marker.write_text('business done, receipt not published')
+            while True:
+                time.sleep(.01)
         (context.business_root / 'receipt.json').write_text(json.dumps(receipt.to_dict()))
         if invocation.request.driver_options.get('crash_after_completion') and context.trial_id == 'base1':
             import os
@@ -93,6 +101,7 @@ class Evaluator:
     "mode,k,runtime,custom_roles,crash_after_completion,scenario",
     [
         ("parallel", 1, "smolagents", False, False, "normal"),
+        ("parallel", 1, "smolagents", False, False, "stop_and_resume"),
         ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
@@ -213,6 +222,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 "delivery": str(tmp_path / "delivery.json"),
                 "crash_after_completion": crash_after_completion,
                 "reject_final": scenario == "final_rejected",
+                "stop_before_receipt": scenario == "stop_and_resume",
             },
         )
         values = {"enabled": True, "recursion": {"mode": mode, "k": k}, "roles": roles}
@@ -224,7 +234,41 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             }
         policy = HarnessingPolicy.model_validate(values)
         environment = {"PATH": os.environ.get("PATH", os.defpath)}
-        result = run_application(request, policy=policy, state_root=tmp_path / "experiments", environment=environment)
+        stop = Event()
+        stopper = None
+        if scenario == "stop_and_resume":
+
+            def stop_after_actual_business():
+                deadline = monotonic() + 30
+                while monotonic() < deadline:
+                    if list((tmp_path / "experiments").glob("*/trials/base1/business/before-receipt")):
+                        stop.set()
+                        return
+                    sleep(0.01)
+
+            stopper = Thread(target=stop_after_actual_business, daemon=True)
+            stopper.start()
+        result = run_application(
+            request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop
+        )
+        if stopper is not None:
+            stopper.join(timeout=1)
+            assert not stopper.is_alive()
+            assert result.status == "stopped", result.to_dict()
+            assert result.usage["total_tokens"] == 70
+            assert result.usage["unmeasured_operations"]
+            state = tmp_path / "experiments" / result.experiment_id
+            cleanup = next((state / "trials/base1/process/attempts").glob("*/cleanup.json"))
+            assert json.loads(cleanup.read_text())["physical_exit_confirmed"]
+            stop.clear()
+            result = run_application(
+                request,
+                policy=policy,
+                state_root=tmp_path / "experiments",
+                resume_id=result.experiment_id,
+                environment=environment,
+                stop_token=stop,
+            )
         if crash_after_completion:
             assert result.status == "failed"
             assert result.usage["unmeasured_operations"]
@@ -252,13 +296,15 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert result.selected_trial_id.startswith("final")
         assert result.output == {"fact": "FACT-123", "variant": "BASE" if scenario == "invalid_edits" else "COMPOSED"}
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
-        assert requests_by_role.count("business") == 4 * k
+        assert requests_by_role.count("business") == 4 * k + (scenario == "stop_and_resume")
         edits = 2 * k if scenario == "invalid_edits" else k
         assert requests_by_role.count("general") == requests_by_role.count("domain") == edits
         assert requests_by_role.count("compose") == edits
         assert requests_by_role.count("select") == (k > 1)
         assert requests_by_role.count("reflect") == 1
-        assert not result.usage["complete"]
+        assert result.usage["complete"] == (
+            runtime == "smolagents" and not crash_after_completion and scenario != "stop_and_resume"
+        )
         assert result.usage["total_tokens"] == 70 * len(requests)
         for role_receipt in result.roles:
             observed = role_receipt["receipt"]["usage_observations"]
