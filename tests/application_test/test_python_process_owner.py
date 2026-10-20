@@ -221,6 +221,35 @@ def test_application_native_owner_uses_short_private_endpoint_with_deep_trial_tm
         assert not Path(descriptor["endpoint"]).exists()
 
 
+def test_public_harness_refresh_reclaims_helper_tree_after_parent_sigkill(tmp_path):
+    from agentloom.app.harnessing.isolation import IsolationUnavailable, preflight_isolation
+
+    try:
+        preflight_isolation()
+    except IsolationUnavailable as error:
+        pytest.skip(str(error))
+    identities = []
+    with (tmp_path / "host.log").open("wb") as log:
+        host = subprocess.Popen([sys.executable, "-m", "test_support.harness_oauth_owner_host", str(tmp_path)],
+            cwd=Path(__file__).resolve().parents[2], stdout=log, stderr=log)
+        try:
+            marker = _marker(tmp_path / "refresh.json", host, identities)
+            identities.extend([{"pid": marker["pid"], "creation": marker["creation"]},
+                {"pid": marker["child_pid"], "creation": marker["child_creation"]}])
+            assert _alive(identities[-1])
+            # The real public controller reached credential capture before
+            # admitting a business Trial; this helper is still owned.
+            assert not list((tmp_path / "experiments").rglob("trials/*/process/input.json"))
+            os.kill(host.pid, signal.SIGKILL)
+            host.wait(timeout=5)
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and any(_alive(item) for item in identities):
+                time.sleep(.02)
+            assert [item for item in identities if _alive(item)] == []
+        finally:
+            _safety(host, identities)
+
+
 def test_native_start_failure_preserves_os_cause_without_unconfirmed_cleanup(batch_project, monkeypatch):
     from agentloom.app import Application
     from agentloom.execution.concurrency import WorkItem

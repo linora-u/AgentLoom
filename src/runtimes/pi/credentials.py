@@ -101,10 +101,16 @@ for (const provider of JSON.parse(process.argv[3])) {
 }
 """
         try:
-            refreshed = subprocess.run([node, "--input-type=module", "-e", script,
-                package.as_uri(), str(path), json.dumps(sorted(providers))],
-                env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, timeout=45, check=False)
+            from agentloom.execution.managed_process import launch_owned_process
+
+            # Refresh retains parent authority, but it is still a native
+            # Application operation. The independent guardian must survive a
+            # killed Python parent long enough to drain this entire tree.
+            with launch_owned_process([node, "--input-type=module", "-e", script,
+                    package.as_uri(), str(path), json.dumps(sorted(providers))],
+                    env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL) as refreshed:
+                refreshed.wait(timeout=45)
         except (OSError, subprocess.TimeoutExpired):
             raise ValueError("Pi subscription credential refresh failed before Application execution") from None
         if refreshed.returncode:
