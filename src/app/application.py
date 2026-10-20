@@ -22,6 +22,7 @@ from agentloom.app.definition import (
     inspect_application_definition,
     load_prepared_agent_definition,
 )
+from agentloom.app.harnessing.policy import HarnessingPolicy, resolve_harnessing_policy
 from agentloom.app.invocation import InvocationEvidence
 from agentloom.app.lifecycle import ApplicationRunFinalization, ApplicationRunLifecycle, ApplicationRunResources
 from agentloom.app.run import RunInfo
@@ -111,6 +112,17 @@ def _system_settings(base: UnifiedConfig, application_root: Path, captured: Mapp
     application = _reject_application_global_only_keys(
         filter_llm_only_top_level_keys(raw, source_name=str(path)), source_name=str(path)
     )
+    harnessing = resolve_harnessing_policy(
+        base.raw, application, project_source=str(base.agent_root / "config/system.yaml"), application_source=str(path)
+    )
+    for _role, identity in harnessing.roles.overrides():
+        _, target = _worker_path(application_root, identity)
+        inspection = inspect_application_definition(
+            base.agent_root, str(target), load_prepared_agent_definition(target, project_root=base.agent_root),
+            base_config=base, application_config=application,
+        )
+        if inspection.errors:
+            raise ValueError("\n".join(inspection.errors))
     validate_worker_execution(base.raw.get("worker_execution"), scope="project")
     settings = validate_worker_execution(application.get("worker_execution"), scope="application")
     canonical = {}
@@ -159,6 +171,11 @@ class Application:
         self.project_root = Path(project_config.agent_root).resolve()
         self.application_root = application_root
         self.application_config = deepcopy(dict(application_config))
+        self._harnessing_policy = resolve_harnessing_policy(
+            project_config.raw, self.application_config,
+            project_source=str(self.project_root / "config/system.yaml"),
+            application_source=str(application_root / "config/system.yaml"),
+        )
         self.runtime_context = runtime_context
         self.lifecycle = lifecycle
         self.trace_mode = trace_mode
@@ -193,6 +210,11 @@ class Application:
 
     def _close_root_engine(self) -> None:
         self._engine_scope.close()
+
+    @property
+    def harnessing_policy(self) -> HarnessingPolicy:
+        """Frozen effective Application policy; opening a Run never starts improvement."""
+        return self._harnessing_policy
 
     @property
     def run(self) -> RunInfo:

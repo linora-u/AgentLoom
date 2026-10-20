@@ -549,6 +549,11 @@ def extract_workflow_overlay(
     *,
     source_name: str = "workflow config",
 ) -> dict[str, Any]:
+    if "harnessing" in config_map:
+        raise ValueError(
+            f"harnessing is not configurable in Agent YAML ({source_name}); "
+            "use Application config/system.yaml"
+        )
     if "redaction" in config_map:
         raise ValueError(
             f"redaction is not configurable in Agent YAML ({source_name}); "
@@ -615,6 +620,13 @@ def build_effective_agent_config_snapshot(
         validate_hook=lambda snapshot, overlay: validate_system_snapshot(snapshot, overlay.name)
     )
     base_data = deepcopy(base.raw)
+    from agentloom.app.harnessing.policy import resolve_harnessing_policy, validate_harnessing_source
+
+    if "harnessing" in base_data:
+        validate_harnessing_source(
+            base_data["harnessing"], scope="project", source=str(base.agent_root / "config" / SYSTEM_CONFIG_NAME)
+        )
+    app_system_yaml: dict[str, Any] = {}
     layered_builder.apply_mapping("base_config", normalize_config_paths(base_data, base.agent_root))
     layers.append(
         ConfigLayerSnapshot(
@@ -673,6 +685,10 @@ def build_effective_agent_config_snapshot(
                         app_system_yaml,
                         source_name=str(app_config_path),
                     )
+                    if "harnessing" in app_system_yaml:
+                        validate_harnessing_source(
+                            app_system_yaml["harnessing"], scope="application", source=str(app_config_path)
+                        )
                     layered_builder.apply_mapping(
                         str(app_config_path), normalize_config_paths(app_system_yaml, agent_layer_root)
                     )
@@ -710,6 +726,12 @@ def build_effective_agent_config_snapshot(
                 )
             )
     merged = layered_builder.build()
+    if "harnessing" in base_data or "harnessing" in app_system_yaml:
+        merged["harnessing"] = resolve_harnessing_policy(
+            base_data, app_system_yaml,
+            project_source=str(base.agent_root / "config" / SYSTEM_CONFIG_NAME),
+            application_source=str(agent_layer_root / APP_CONFIG_RELATIVE_PATH),
+        ).model_dump(mode="json", exclude_unset=True)
     normalized = RootSettings.model_validate(merged).model_dump(exclude_unset=True)
     merged.update(normalized)
     normalize_tool_access_control_section(merged, base.agent_root)

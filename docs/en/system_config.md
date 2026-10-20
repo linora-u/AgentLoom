@@ -52,6 +52,51 @@ rejected. Each `BoundWorker.map()` resolves its own call override; Worker count
 is independent of Provider RPM and Runtime Tool dispatch. See the full
 [policy, batch and migration contract](agent_config.md#312-worker_execution--finite-worker-batches).
 
+## harnessing — Application Harness Improvement Policy
+
+Only an explicit `harnessing.enabled: true` in
+`applications/<app>/config/system.yaml` enables an Application. The default is
+false. Project `config/system.yaml` may supply other defaults, but cannot set
+`enabled: true`; Agent YAML cannot declare `harnessing`. Opening an
+`Application` lifecycle alone does not run improvement.
+
+```yaml
+# applications/my_app/config/system.yaml
+harnessing:
+  enabled: true
+  feedback:
+    # contrastive: task, trajectory and business artifacts without hidden task scores.
+    # development_score: requires both evaluator and partition references.
+    mode: contrastive
+  recursion:
+    # parallel explores independent candidates; sequential builds on prior compositions.
+    # This is independent of Worker execution concurrency.
+    mode: parallel
+    k: 1  # Finite positive integer; booleans, strings, null and nonpositive values fail.
+  # Defaults to all six components; an explicit list replaces the inherited list.
+  editable: [system_prompt, skills, tools, toolsets, mcp_servers, worker_agents]
+  # Optional overrides; omitted roles use built-ins. Create these Agent YAML files first.
+  roles:
+    general: workflows/harness/general.yaml
+    domain: workflows/harness/domain.yaml
+    compose: workflows/harness/compose.yaml
+    select: workflows/harness/select.yaml
+    reflect: workflows/harness/reflect.yaml
+```
+
+Role paths are Application-relative, including inherited project defaults.
+Absolute paths, traversal, symlinks and invalid Agent definitions are rejected.
+For development feedback use, for example,
+`feedback: {mode: development_score, evaluator: news_outcome, partition: development}`.
+Project and Application sources may provide separate parts of these references;
+the composed policy must contain both. Contrastive feedback does not use them.
+
+Every source is validated before composition, including disabled or overridden
+values. Unknown fields and removed draft fields such as `scope`, `trigger`,
+`budget`, `selection`, `adoption` and `agents` fail explicitly. Inspect the frozen
+effective policy through `app.harnessing_policy`; configuration snapshot `layers`
+retain unmerged values, source files and declaring roots for provenance.
+
 ## redaction — Content Redaction
 
 `redaction.enabled` controls secret redaction and defaults to `true`. The global

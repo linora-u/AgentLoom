@@ -52,6 +52,46 @@ Application 相对 Worker YAML 路径指定并发。项目 Worker 表、Agent-lo
 独立解析代码覆盖，并发数不关联 Provider RPM 或 Runtime Tool dispatch。
 完整策略、批处理与迁移合同见 [Worker 有限批处理](agent_config.md#312-worker_execution--worker-有限批处理)。
 
+## harnessing — Application Harness 改进策略
+
+仅在应用的 `applications/<app>/config/system.yaml` 中显式设置
+`harnessing.enabled: true` 启用。默认关闭；项目 `config/system.yaml` 可提供其他字段的默认值，
+但不能设置 `enabled: true`，Agent YAML 也不能配置 `harnessing`。
+`Application.open()` 只管理 Run 生命周期，不会因为读取了启用策略而自行启动改进。
+
+```yaml
+# applications/my_app/config/system.yaml
+harnessing:
+  enabled: true
+  feedback:
+    # contrastive：参考任务、轨迹和业务产物，不读取当前任务隐藏评分。
+    # development_score：使用指定开发评价器及分区，须同时提供 evaluator、partition。
+    mode: contrastive
+  recursion:
+    # parallel：横向提出候选并组合；sequential：基于上次组合连续改进。
+    # 控制候选探索方式，不改变应用内部 Worker 的并发配置。
+    mode: parallel
+    k: 1  # 有限正整数；不接受 true、字符串、null、零或负数。
+  # 缺省允许以下全部组件；显式列表替换继承列表。
+  editable: [system_prompt, skills, tools, toolsets, mcp_servers, worker_agents]
+  # 可选：未覆盖的角色使用内置定义。路径相对当前应用，指向普通 Agent YAML。
+  roles:
+    general: workflows/harness/general.yaml
+    domain: workflows/harness/domain.yaml
+    compose: workflows/harness/compose.yaml
+    select: workflows/harness/select.yaml
+    reflect: workflows/harness/reflect.yaml
+```
+
+示例角色文件须先创建；路径不得绝对定位、穿越目录或经过符号链接，实际定义也会校验。
+开发评分示例为 `feedback: {mode: development_score, evaluator: news_outcome, partition: development}`；
+评价器和分区可以分别由项目默认和应用覆盖提供，合并后必须完整。对照模式不使用这些评分引用。
+
+每个源先校验字段和类型，即使策略关闭或其值随后被覆盖，错误配置仍会报错。
+`scope`、`trigger`、`budget`、`selection`、`adoption` 和旧草案 `agents` 均不是支持字段。
+有效策略可通过 `app.harnessing_policy` 查看，嵌套值同样冻结；配置快照的 `layers`
+继续保留未合并源值、来源文件和所属目录。项目角色默认中的相对路径同样由最终 Application 绑定。
+
 ## redaction — 内容脱敏
 
 `redaction.enabled` 控制框架的秘密信息脱敏，缺省为 `true`。全局
