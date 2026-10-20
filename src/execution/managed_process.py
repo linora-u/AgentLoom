@@ -331,12 +331,13 @@ class RecoveredProcess:
         proof = self.receipt_dir / "exited.json"
         error_path = self.receipt_dir / "cleanup-error.json"
         error = json.loads(error_path.read_text()) if error_path.exists() else None
+        anchor_alive = _alive(self.description["anchor"])
         confirmed = (proof.is_file() and json.loads(proof.read_text()) == {
             "physical_exit_confirmed": True, "generation": self.description["generation"]}
-            and not _alive(self.description["anchor"]))
+            and not anchor_alive)
         root_path = self.receipt_dir / "root-result.json"
-        return {"status": "exited" if confirmed else "cleanup_unconfirmed" if error or not _alive(
-                self.description["anchor"]) else "running", "physical_exit_confirmed": confirmed,
+        return {"status": "exited" if confirmed else "cleanup_unconfirmed" if error or not anchor_alive
+                else "running", "physical_exit_confirmed": confirmed,
                 "error": error, "root_result": json.loads(root_path.read_text()) if root_path.exists() else None}
 
     def request_stop(self):
@@ -349,6 +350,8 @@ class RecoveredProcess:
         if self.description["version"] != 2:
             raise ResourceCleanupError("Native resource owner does not support acknowledged cleanup")
         if not _alive(self.description["anchor"]):
+            if self.observe()["physical_exit_confirmed"]:
+                return
             raise ResourceCleanupError("Native anchor was lost without an exit certificate")
         request_id = uuid4().hex
         self._cleanup_request, self._cleanup_sequence = request_id, None
@@ -369,6 +372,8 @@ class RecoveredProcess:
                     raise ResourceCleanupError("Native cleanup acknowledgement remains unconfirmed")
                 self._cleanup_sequence = acknowledgement["cleanup_sequence"]
         except (OSError, ValueError) as error:
+            if self.observe()["physical_exit_confirmed"]:
+                return
             detail = {"error_type": type(error).__name__, "message": str(error), "category": "infrastructure"}
             if getattr(error, "errno", None) is not None:
                 detail["errno"] = error.errno
@@ -380,11 +385,19 @@ class RecoveredProcess:
             observed = self.observe()
             if observed["physical_exit_confirmed"]:
                 return observed
+            anchor_lost = not _alive(self.description["anchor"])
+            if anchor_lost:
+                # The owner writes its certificate before retiring. It may
+                # have done both after the first filesystem observation;
+                # recheck that final fact before reporting an older error.
+                observed = self.observe()
+                if observed["physical_exit_confirmed"]:
+                    return observed
             detail = observed["error"] or {}
             # Ignore failures before our accepted retry, but retain the current
             # scope failure even when another caller initiated its latest STOP.
             if observed["status"] == "cleanup_unconfirmed" and (
-                self._cleanup_request is None or not _alive(self.description["anchor"])
+                self._cleanup_request is None or anchor_lost
                 or (self._cleanup_sequence is not None
                     and detail.get("cleanup_sequence", -1) >= self._cleanup_sequence)
             ):

@@ -424,8 +424,10 @@ def test_application_search_and_profile_helpers_join_default_native_owner(batch_
         assert json.loads(description.with_name("exited.json").read_text())["physical_exit_confirmed"]
 
 
-@pytest.mark.parametrize("recovered", [False, True])
-def test_application_retries_a_real_exit_receipt_write_failure_without_inventing_exit(batch_project, recovered):
+@pytest.mark.parametrize("recovered,stale_observation", [(False, False), (True, False), (True, True)])
+def test_application_retries_a_real_exit_receipt_write_failure_without_inventing_exit(
+    batch_project, monkeypatch, recovered, stale_observation,
+):
     from agentloom.app import Application
     from agentloom.execution.concurrency import WorkItem
     from agentloom.execution.managed_process import ResourceCleanupError, recover_owned_process
@@ -433,6 +435,21 @@ def test_application_retries_a_real_exit_receipt_write_failure_without_inventing
 
     root, application, _worker, probe, _write = batch_project
     resources, anchors = [], []
+    release = root / "release-exit-receipt"
+    if stale_observation:
+        injection = root / "exit-write-barrier"
+        injection.mkdir()
+        (injection / "sitecustomize.py").write_text(
+            "import os,time\nfrom pathlib import Path\n_replace=os.replace\n"
+            f"_release=Path({str(release)!r})\n"
+            "def replace(source,target,*args,**kwargs):\n"
+            "    target=Path(target)\n"
+            "    if target.name=='exited.json' and not target.is_dir():\n"
+            "        while not _release.exists():time.sleep(.005)\n"
+            "    return _replace(source,target,*args,**kwargs)\n"
+            "os.replace=replace\n"
+        )
+        monkeypatch.setenv("PYTHONPATH", str(injection) + os.pathsep + os.environ.get("PYTHONPATH", ""))
 
     def behavior(_payload):
         process, _close = spawn_registered_process(
@@ -455,7 +472,30 @@ def test_application_retries_a_real_exit_receipt_write_failure_without_inventing
         if recovered:
             recovery = recover_owned_process(directory)
             recovery.request_stop()
+            if stale_observation:
+                original = Path.is_file
+                raced = []
+
+                def is_file(path):
+                    observed = original(path)
+                    if path == obstruction and not observed and not raced:
+                        raced.append(True)
+                        release.touch()
+                        deadline = time.monotonic() + 5
+                        # Commit/retire the real independent guardian after
+                        # the reader has already observed the missing proof.
+                        while time.monotonic() < deadline and (
+                            not original(path) or psutil.pid_exists(anchors[-1]["pid"])
+                        ):
+                            time.sleep(.005)
+                        assert original(path) and not psutil.pid_exists(anchors[-1]["pid"])
+                    return observed
+
+                monkeypatch.setattr(Path, "is_file", is_file)
             assert recovery.wait_exited(timeout=5)["physical_exit_confirmed"]
+            if stale_observation:
+                assert raced, "The actual receipt/anchor observation race was not exercised"
+                monkeypatch.setattr(Path, "is_file", original)
         else:
             _close()
         return {"first_cleanup_error": str(caught.value)}
@@ -469,6 +509,7 @@ def test_application_retries_a_real_exit_receipt_write_failure_without_inventing
         assert all(json.loads((directory / "exited.json").read_text())["physical_exit_confirmed"] for directory in resources)
         assert not any(_alive(identity) for identity in anchors)
     finally:
+        release.touch()
         # Last-resort test cleanup is never used to satisfy the assertions.
         for identity in anchors:
             if _alive(identity):
