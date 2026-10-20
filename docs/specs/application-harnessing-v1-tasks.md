@@ -14,3 +14,5 @@ Delivery branch: codex/application-harnessing-136. One private delivery PR; publ
 | H7 | H6 | Code review, fixes, checks, PR ready for review and temporary implementer worktree cleanup. |
 
 Status is recorded by commits and acceptance evidence, not by assuming a task complete when a file exists. No implementation ticket may reduce Issue #136's scope. Deterministic framework tests must remain independent of the private news application. Hidden evaluation, physical cleanup, and safe recovery require actual behavioral evidence.
+
+Implementation and local acceptance completed on 2026-10-21. See the [acceptance report](application-harnessing-v1-acceptance.md) for verified behavior, evidence and limits. PR review, required CI and repository-sync status remain part of the delivery record.
