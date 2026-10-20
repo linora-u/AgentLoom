@@ -238,6 +238,7 @@ def test_managed_host_enforces_before_factory_and_consumes_forwarded_capabilitie
     from agentloom.execution.durable.client import TaskDescription
     from agentloom.execution.concurrency import WorkItem
     from agentloom.execution.durable.files import atomic_json
+    from agentloom.runtimes.pi.credentials import bind_pi_credentials
     root, app = project
     hidden = tmp_path / "held-out.json"
     hidden.write_text("hidden evaluation")
@@ -256,6 +257,7 @@ class Host:
     def invoke(self, task, invocation_id):
         from agentloom.config.config import load_project_config
         from agentloom.config.private_bindings import resolve_bound_credentials
+        from agentloom.runtimes.pi.credentials import current_pi_credentials
         from agentloom.execution.durable.authorization import assert_current_attempt
         assert_current_attempt()
         try:
@@ -267,8 +269,9 @@ class Host:
         return {'hidden':self.hidden, 'control':control,
                 'model':load_project_config(Path(self.options['project_root'])).llm.models['test'].api_key == 'model-private',
                 'tool':resolve_bound_credentials('harness-credential-ref:fixture#/token') == 'tool-private',
+                'pi':current_pi_credentials()['fixture']['access'] == 'pi-private',
                 'private_fd_visible': 'AGENTLOOM_HARNESS_PRIVATE_FD' in env,
-                'secret_visible': 'model-private' in env or 'tool-private' in env}
+                'secret_visible': any(value in env for value in ('model-private','tool-private','pi-private'))}
 def host(options):
     return Host(options)
 ''')
@@ -288,7 +291,7 @@ def host(options):
     atomic_json(job / "authorized.json", {"invocation_id": "attempt"})
     env = {"PATH": os.defpath, "HOME": str(context.root / "home"), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1", "PYTHONPATH": os.pathsep.join((str(bundle.root / "python"), str(bundle.project_root)))}
     models = {"model": {"test": {"model": "test", "adapter": "openai_chat", "api_key": "model-private"}}}
-    with bind_harness_credentials({"fixture#/token": "tool-private"}), bind_harness_model_config(models), forward_harness_bindings() as (private_env, private_fds), (job / "stdout.log").open("wb") as stdout, (job / "stderr.log").open("wb") as stderr:
+    with bind_harness_credentials({"fixture#/token": "tool-private"}), bind_harness_model_config(models), bind_pi_credentials({"fixture": {"type": "oauth", "access": "pi-private"}}), forward_harness_bindings() as (private_env, private_fds), (job / "stdout.log").open("wb") as stdout, (job / "stderr.log").open("wb") as stderr:
         env.update(private_env)
         owner = launch_owned_process([sys.executable, "-B", "-m", "agentloom.execution.durable.job_entry", str(job)], env=env, cwd=bundle.project_root, stdout=stdout, stderr=stderr, pass_fds=private_fds, receipt_dir=job / "resource", gated=True)
     try:
@@ -297,8 +300,8 @@ def host(options):
         assert owner.wait_exited(timeout=10)["physical_exit_confirmed"]
     finally:
         owner.close()
-    assert json.loads((job / "result.json").read_text())["result"] == {"hidden": "denied", "control": "denied", "model": True, "tool": True, "private_fd_visible": False, "secret_visible": False}
-    assert all("model-private" not in path.read_text() and "tool-private" not in path.read_text() for path in job.rglob("*.json"))
+    assert json.loads((job / "result.json").read_text())["result"] == {"hidden": "denied", "control": "denied", "model": True, "tool": True, "pi": True, "private_fd_visible": False, "secret_visible": False}
+    assert all(all(secret not in path.read_text() for secret in ("model-private", "tool-private", "pi-private")) for path in job.rglob("*.json"))
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Harness preflight rejects unvalidated OS backends first")
@@ -309,3 +312,92 @@ def test_proxy_credentials_rejected_before_any_public_archive(project, tmp_path)
     with pytest.raises(ValueError, match="proxy"):
         execute_isolated(bundle, context, "applications.sample.operations:probe", {}, environment={"HTTPS_PROXY": "http://user:password@127.0.0.1:8080"})
     assert not context.root.exists()
+
+
+def test_secret_urls_are_bound_and_metadata_refs_are_not_file_restoration_refs(project, tmp_path):
+    root, app = project
+    (app / "config").mkdir()
+    (app / "config/.mcp.json").write_text(json.dumps({"mcpServers": {"fixture": {"type": "streamable_http", "url": "https://service.test/mcp?api_key=url-private"}}}))
+    credentials = {}
+    bundle = snapshot_application(root, app, tmp_path / "bundles", credential_sink=credentials, model_config={"model": {"test": {"api_key": "model-private"}}})
+    assert credentials == {"applications/sample/config/.mcp.json#/mcpServers/fixture/url": "https://service.test/mcp?api_key=url-private"}
+    assert bundle.manifest["credential_refs"] == list(credentials)
+    assert "url-private" not in (bundle.application_root / "config/.mcp.json").read_text()
+    assert "model-private" not in (bundle.root / "manifest.json").read_text()
+    changed = {"mcpServers": {"new": {"type": "streamable_http", "url": "https://new.test/?token=new-private"}}}
+    with pytest.raises(ValueError, match="credential-bearing URLs"):
+        derive_candidate(bundle, {"applications/sample/config/.mcp.json": json.dumps(changed)}, tmp_path / "bundles", editable=["mcp_servers"], validate=lambda *args: None)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Actual POSIX identity check")
+def test_scope_rejects_a_real_child_with_forged_wrong_parent_pipe(tmp_path):
+    import subprocess
+    import psutil
+    from agentloom.execution.process_scope import NATIVE_SCOPE_FD_ENV
+    read, write = os.pipe()
+    env = os.environ.copy()
+    env[NATIVE_SCOPE_FD_ENV] = str(read)
+    code = "from agentloom.execution.process_scope import bind_managed_process_scope\nwith bind_managed_process_scope():\n raise SystemExit('UNEXPECTED_ALLOW')\n"
+    # This innocent process has a genuine PID/create_time/group, but does not
+    # own the child. A forged anonymous pipe cannot create custody authority.
+    other = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"], start_new_session=True)
+    child = subprocess.Popen([sys.executable, "-c", code], env=env, pass_fds=(read,), start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    os.close(read)
+    try:
+        os.write(write, json.dumps({"anchor": {"pid": other.pid, "creation": psutil.Process(other.pid).create_time(), "group": other.pid}, "child": {"pid": child.pid, "creation": psutil.Process(child.pid).create_time()}}).encode())
+        os.close(write)
+        write = None
+        stdout, stderr = child.communicate(timeout=10)
+        assert child.returncode != 0
+        assert b"does not match its actual guardian identity" in stderr
+        assert b"UNEXPECTED_ALLOW" not in stdout
+    finally:
+        if write is not None:
+            os.close(write)
+        if child.poll() is None:
+            child.kill()
+        child.wait()
+        other.terminate()
+        other.wait()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Real Node process inherited filesystem policy")
+def test_real_node_initializes_with_valid_inherited_and_reopened_stdio(project, tmp_path):
+    import subprocess
+    from agentloom.runtimes.pi.credentials import bind_pi_credentials
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is not installed")
+    version = subprocess.check_output([node, "--version"], text=True).strip()
+    root, app = project
+    (app / "operations.py").write_text('''
+import subprocess
+def node_probe(payload, bundle, context):
+    from agentloom.runtimes.pi.credentials import current_pi_credentials
+    inherited = subprocess.run([payload['node'], '--version'], capture_output=True, text=True)
+    closed = subprocess.run([payload['node'], '--version'], capture_output=True, text=True, preexec_fn=lambda: __import__('os').close(0))
+    return {'inherited_code':inherited.returncode, 'inherited_version':inherited.stdout.strip(), 'reopened_code':closed.returncode, 'reopened_version':closed.stdout.strip(), 'pi_bound':current_pi_credentials()['fixture']['access'] == 'pi-private'}
+''')
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    with bind_pi_credentials({"fixture": {"type": "oauth", "access": "pi-private"}}):
+        result = execute_isolated(bundle, Context(tmp_path / "trial", bundle.candidate_id), "applications.sample.operations:node_probe", {"node": node}, environment={"PATH": os.environ["PATH"]}, timeout=10)
+    assert result == {"inherited_code": 0, "inherited_version": version, "reopened_code": 0, "reopened_version": version, "pi_bound": True}
+
+
+def test_snapshot_preserves_runtime_python_packages_and_all_declared_skill_resources(project, tmp_path):
+    root, app = project
+    (app / "runtime").mkdir()
+    (app / "runtime/__init__.py").write_text("from .fixed import VALUE\n")
+    (app / "runtime/fixed.py").write_text("VALUE = 'frozen program'\n")
+    (app / "data").mkdir()
+    (app / "data/raw-input.json").write_text("dynamic input, not a dependency")
+    skill = app / "skills/nested"
+    (skill / "data").mkdir()
+    (skill / "data/reference.json").write_text('{"fixed":true}')
+    (skill / "dist").mkdir()
+    (skill / "dist/run.js").write_text("console.log('fixed skill script')")
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    assert (bundle.application_root / "runtime/fixed.py").read_text() == "VALUE = 'frozen program'\n"
+    assert (bundle.application_root / "skills/nested/data/reference.json").read_text() == '{"fixed":true}'
+    assert (bundle.application_root / "skills/nested/dist/run.js").is_file()
+    assert not (bundle.application_root / "data").exists()

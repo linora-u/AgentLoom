@@ -145,7 +145,8 @@ def _execute(bundle, context, factory, payload, *, stop=None, timeout=None, read
             if key not in {"PATH", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"}:
                 raise ValueError("Unsupported inherited Harness environment capability: " + key)
             env[key] = value
-        private = _json({"model_config": model_config, "credentials": dict(credentials or {})}).encode() + b"\n"
+        from agentloom.runtimes.pi.credentials import current_pi_credentials
+        private = _json({"model_config": model_config, "credentials": dict(credentials or {}), "pi_credentials": current_pi_credentials()}).encode() + b"\n"
         if len(private) > 4 * 1024 * 1024:
             raise ValueError("Private model configuration exceeds one-shot transport limit")
         bootstrap = bundle.root / "python" / "agentloom" / "app" / "harnessing" / "bootstrap.py"

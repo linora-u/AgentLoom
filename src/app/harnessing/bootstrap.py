@@ -32,6 +32,9 @@ def main():
     if null != 0:
         os.dup2(null, 0)
         os.close(null)
+    # os.open follows PEP 446 even when it reuses descriptor zero. A child
+    # Runtime must inherit a real stdin instead of finding EBADF after exec.
+    os.set_inheritable(0, True)
     # Scope metadata is itself an anonymous authenticated bootstrap pipe. The
     # trusted execution module validates/consumes it before OS restrictions.
     from agentloom.execution.process_scope import bind_managed_process_scope
@@ -52,9 +55,10 @@ def main():
         try:
             from agentloom.config.config import bind_harness_model_config
             from agentloom.config.private_bindings import bind_harness_credentials
+            from agentloom.runtimes.pi.credentials import bind_pi_credentials
             model_config = private.pop("model_config", None)
             credentials = private.pop("credentials", {})
-            with bind_harness_credentials(credentials), bind_harness_model_config(model_config):
+            with bind_harness_credentials(credentials), bind_harness_model_config(model_config), bind_pi_credentials(private.pop("pi_credentials", None)):
                 module, name = descriptor["factory"].split(":", 1)
                 factory = getattr(importlib.import_module(module), name)
                 result = factory(descriptor["payload"], descriptor["bundle"], descriptor["context"])

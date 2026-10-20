@@ -50,19 +50,23 @@ def _secret_key(key: str) -> bool:
     return normalized in _SECRET_KEYS or normalized.endswith(("_api_key", "_password", "_secret", "_token", "_authorization", "_authorizations"))
 
 
-def _sanitize(value: Any, source: str, refs: list[str], pointer: str = "", credentials: MutableMapping | None = None) -> Any:
+def _private_url(value: Any) -> bool:
     if isinstance(value, str) and "://" in value:
         try:
             parsed = urlsplit(value)
-            private_url = parsed.username is not None or parsed.password is not None or any(_secret_key(key) for key, _ in parse_qsl(parsed.query))
+            return parsed.username is not None or parsed.password is not None or any(_secret_key(key) for key, _ in parse_qsl(parsed.query))
         except ValueError:
-            private_url = False
-        if private_url:
-            ref = source + "#" + pointer
-            refs.append(ref)
-            if credentials is not None:
-                credentials[ref] = value
-            return "harness-credential-ref:" + ref
+            return False
+    return False
+
+
+def _sanitize(value: Any, source: str, refs: list[str], pointer: str = "", credentials: MutableMapping | None = None) -> Any:
+    if _private_url(value):
+        ref = source + "#" + pointer
+        refs.append(ref)
+        if credentials is not None:
+            credentials[ref] = value
+        return "harness-credential-ref:" + ref
     if isinstance(value, Mapping):
         result = {}
         for key, item in value.items():
@@ -214,14 +218,27 @@ def _read_regular(path: Path, boundary: Path) -> bytes:
         os.close(descriptor)
 
 
-def _files(root: Path):
+def _files(root: Path, *, declared_resource: bool = False):
+    # A directory name such as ``runtime`` or ``data`` can be importable fixed
+    # application code. Generated-path conventions must not erase packages.
+    resource_root = declared_resource or root.name == "skills" or (root / "SKILL.md").is_file()
     for parent, directories, names in os.walk(root, followlinks=False):
-        directories[:] = sorted(name for name in directories if name not in _EXCLUDED)
+        parent_path = Path(parent)
+        resource_tree = resource_root or "skills" in parent_path.relative_to(root).parts
+        selected = []
+        for name in directories:
+            if name in {".git", "__pycache__", ".pytest_cache", ".ruff_cache"}:
+                continue
+            directory = parent_path / name
+            fixed_package = directory.is_dir() and any(directory.glob("*.py"))
+            if resource_tree or name == "skills" or name not in _EXCLUDED or fixed_package:
+                selected.append(name)
+        directories[:] = sorted(selected)
         for name in directories:
             if (Path(parent) / name).is_symlink():
                 raise ValueError("Candidate resource directory cannot be a symbolic link")
         for name in sorted(names):
-            if name in _SECRET_FILES or name.endswith((".pyc", ".sqlite", ".db", ".log")):
+            if name in _SECRET_FILES or name.endswith(".pyc") or (not resource_tree and name.endswith((".sqlite", ".db", ".log"))):
                 continue
             yield Path(parent) / name
 
@@ -291,7 +308,7 @@ def snapshot_application(project_root: Path, application_root: Path, destination
         path = path if path.is_absolute() else project / path
         if not path.resolve(strict=True).is_relative_to(project):
             raise ValueError("Additional resource must be inside project")
-        sources.update(_files(path) if path.is_dir() else (path,))
+        sources.update(_files(path, declared_resource=True) if path.is_dir() else (path,))
     try:
         # Discover configured references outside the application (for example a
         # project-wide prompt or Skill directory), retaining original ownership.
@@ -314,7 +331,7 @@ def snapshot_application(project_root: Path, application_root: Path, destination
                     raise ValueError("Declared resource escapes project; materialize it explicitly")
                 if any(target.resolve().is_relative_to(path) for path in excluded):
                     raise ValueError("Candidate resource references hidden evaluation data")
-                discovered = set(_files(target)) if target.is_dir() else {target}
+                discovered = set(_files(target, declared_resource=True)) if target.is_dir() else {target}
                 pending.extend(discovered - sources)
                 sources.update(discovered)
         for source in sorted(sources):
@@ -372,6 +389,8 @@ def _surface(relative: Path, before: bytes | None, after: bytes | None) -> set[s
 
 def _check_candidate_secrets(relative: Path, old: Any, new: Any, pointer: str = "") -> None:
     prefix = "harness-credential-ref:"
+    if _private_url(new):
+        raise ValueError("Candidate cannot introduce credential-bearing URLs")
     def contains_reference(value):
         if isinstance(value, str):
             return value.startswith(prefix)

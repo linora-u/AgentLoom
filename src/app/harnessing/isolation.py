@@ -174,6 +174,10 @@ def enforce_isolation(spec: IsolationSpec) -> dict:
     read = (1 << 0) | (1 << 2) | (1 << 3)
     try:
         for path, access in [(path, read) for path in spec.read_paths] + [(path, handled) for path in spec.write_paths] + [(path, 1 << 3) for path in spec.directory_paths]:
+            if path == Path("/dev/null"):
+                # Node and other POSIX Runtimes reopen closed stdio O_RDWR.
+                # This exact kernel sink contains no host data or state.
+                access |= 1 << 1
             if not path.is_dir():
                 access &= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 14) | (1 << 15)
                 if not stat.S_ISREG(path.stat().st_mode):

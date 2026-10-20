@@ -58,8 +58,9 @@ def forward_harness_bindings():
         yield {}, ()
         return
     from .config import current_harness_model_config
+    from agentloom.runtimes.pi.credentials import current_pi_credentials
     import fcntl
-    payload = json.dumps({"credentials": dict(values), "model_config": current_harness_model_config()}, allow_nan=False).encode()
+    payload = json.dumps({"credentials": dict(values), "model_config": current_harness_model_config(), "pi_credentials": current_pi_credentials()}, allow_nan=False).encode()
     if len(payload) > _MAX_BYTES:
         raise ValueError("Private Harness transport exceeds its bounded capacity")
     if not hasattr(os, "memfd_create"):
@@ -93,5 +94,6 @@ def consume_harness_bindings():
         raise ValueError("Private Harness transport exceeds its bounded capacity")
     private = json.loads(raw)
     from .config import bind_harness_model_config
-    with bind_harness_credentials(private["credentials"]), bind_harness_model_config(private["model_config"]):
+    from agentloom.runtimes.pi.credentials import bind_pi_credentials
+    with bind_harness_credentials(private["credentials"]), bind_harness_model_config(private["model_config"]), bind_pi_credentials(private.get("pi_credentials")):
         yield
