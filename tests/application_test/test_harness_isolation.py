@@ -259,7 +259,10 @@ class Host:
         from agentloom.config.private_bindings import resolve_bound_credentials
         from agentloom.runtimes.pi.credentials import current_pi_credentials
         from agentloom.execution.durable.authorization import assert_current_attempt
+        from agentloom.execution.native_journal import NativeCallJournal
         assert_current_attempt()
+        journal = NativeCallJournal(Path(self.options['runtime_root']) / 'new/deep/native-tools')
+        journal.close()
         try:
             Path(self.options['job'], 'authorized.json').write_text('{}')
             control = 'UNEXPECTED_ALLOW'
@@ -285,7 +288,7 @@ def host(options):
     job = context.root / "control-execution/jobs/workflow/attempt"
     job.mkdir(parents=True)
     descriptor = {"invocation_id": "attempt", "task": TaskDescription("agentloom-fixture", "worker.yaml", WorkItem("task", {}), "revision").to_dict(),
-                  "host": {"factory": "applications.sample.operations:host", "options": {"project_root": str(bundle.project_root), "hidden": str(hidden), "job": str(job),
+                  "host": {"factory": "applications.sample.operations:host", "options": {"project_root": str(bundle.project_root), "hidden": str(hidden), "job": str(job), "runtime_root": str(context.root / 'runtime'),
                     "harness_isolation": {"bundle": bundle.to_dict(), "context": {**context.__dict__, "root": str(context.root)}, "read_paths": [], "denied_paths": [str(hidden)]}}}}
     atomic_json(job / "description.json", descriptor)
     atomic_json(job / "authorized.json", {"invocation_id": "attempt"})
@@ -401,3 +404,6 @@ def test_snapshot_preserves_runtime_python_packages_and_all_declared_skill_resou
     assert (bundle.application_root / "skills/nested/data/reference.json").read_text() == '{"fixed":true}'
     assert (bundle.application_root / "skills/nested/dist/run.js").is_file()
     assert not (bundle.application_root / "data").exists()
+    environment = {item['name']: item for item in bundle.manifest['environment']}
+    assert environment['runtime:python']['implementation']
+    assert environment['runtime:platform']['machine']

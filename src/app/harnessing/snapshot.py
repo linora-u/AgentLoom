@@ -9,8 +9,10 @@ import copy
 import hashlib
 import json
 import os
+import platform
 import shutil
 import stat
+import sys
 import tempfile
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
@@ -357,6 +359,8 @@ def snapshot_application(project_root: Path, application_root: Path, destination
             target.write_bytes(_read_regular(source, framework))
             target.chmod(0o755 if source.stat().st_mode & stat.S_IXUSR else 0o644)
         environment = sorted(({"name": item.metadata.get("Name", ""), "version": item.version} for item in distributions()), key=lambda item: (item["name"], item["version"]))
+        environment.extend(({"name": "runtime:python", "version": platform.python_version(), "implementation": platform.python_implementation()},
+                            {"name": "runtime:platform", "version": sys.platform, "machine": platform.machine()}))
         return _commit(staging, destination, application, credential_refs=refs, effective_config=effective_config, model_config=model_config, environment=environment, editable_resources=mutable)
     finally:
         if staging.exists():
