@@ -1029,3 +1029,5 @@ tool_access_control:
 - `system.name`：保持 `"AgentLoom"` ✅ 继承全局
 - `logging.level`：保持 `"INFO"` ✅ 继承全局
 - 所有其他字段：保持全局配置值 ✅
+
+完整任务改进的执行入口、回执、恢复和隔离要求见 [Application Harness 改进](harnessing.md)。
