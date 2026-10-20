@@ -72,7 +72,9 @@ def forward_harness_bindings():
             stream.write(payload)
             stream.flush()
         os.lseek(fd, 0, os.SEEK_SET)
-        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+        # Linux UAPI: F_ADD_SEALS=1024+9, SEAL/SHRINK/GROW/WRITE=1|2|4|8.
+        # Standalone CPython builds may omit these names, not the syscall.
+        fcntl.fcntl(fd, getattr(fcntl, "F_ADD_SEALS", 1033), 0x000F)
         yield {_FD_ENV: str(fd)}, (fd,)
     finally:
         os.close(fd)

@@ -137,7 +137,9 @@ def pi_credential_descriptor():
         with os.fdopen(os.dup(fd), "wb") as stream:
             stream.write(payload)
         os.lseek(fd, 0, os.SEEK_SET)
-        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+        # Linux UAPI values also work when standalone Python omits the names.
+        # Require all SEAL/SHRINK/GROW/WRITE seals; syscall failures propagate.
+        fcntl.fcntl(fd, getattr(fcntl, "F_ADD_SEALS", 1033), 0x000F)
         yield fd
     finally:
         os.close(fd)
