@@ -9,9 +9,18 @@ from pathlib import Path
 import pytest
 
 from agentloom.app.harnessing.controller import run_application
+from agentloom.app.harnessing.isolation import IsolationUnavailable, preflight_isolation
 from agentloom.app.harnessing.models import ApplicationRequest
 from agentloom.app.harnessing.policy import HarnessingPolicy
 from tests.application_test.mixed_runtime_support import finish, model_service, project, write_yaml
+
+
+@pytest.fixture
+def real_isolation():
+    try:
+        return preflight_isolation()
+    except IsolationUnavailable as error:
+        pytest.skip(f"Real OS acceptance requires validated isolation: {error}")
 
 
 DRIVER = """
@@ -95,6 +104,7 @@ class Evaluator:
 def test_public_complete_task_executes_upstream_schedule_and_recovers_without_model_calls(
     tmp_path,
     monkeypatch,
+    real_isolation,
     mode,
     k,
     runtime,
@@ -213,7 +223,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 "evaluator": "applications.mixed.driver:Evaluator",
             }
         policy = HarnessingPolicy.model_validate(values)
-        environment = {"PATH": "/home/lin/.nvm/versions/node/v22.23.3/bin:" + os.defpath}
+        environment = {"PATH": os.environ.get("PATH", os.defpath)}
         result = run_application(request, policy=policy, state_root=tmp_path / "experiments", environment=environment)
         if crash_after_completion:
             assert result.status == "failed"
@@ -249,7 +259,10 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert requests_by_role.count("select") == (k > 1)
         assert requests_by_role.count("reflect") == 1
         assert not result.usage["complete"]
-        assert result.usage["total_tokens"] > 0
+        assert result.usage["total_tokens"] == 70 * len(requests)
+        for role_receipt in result.roles:
+            observed = role_receipt["receipt"]["usage_observations"]
+            assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
         assert (state / "stages/publication.json").exists()
         if scenario == "development_score":
@@ -280,7 +293,9 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             )
 
 
-def test_public_preparation_rejects_hidden_data_inside_an_input_root_before_model_calls(tmp_path, monkeypatch):
+def test_public_preparation_rejects_hidden_data_inside_an_input_root_before_model_calls(
+    tmp_path, monkeypatch, real_isolation
+):
     root = tmp_path / "project"
     project(root, "http://127.0.0.1:9/v1", supervisor="smolagents", worker="smolagents")
     app = root / "applications/mixed"
@@ -300,3 +315,49 @@ def test_public_preparation_rejects_hidden_data_inside_an_input_root_before_mode
     with pytest.raises(ValueError, match="input root overlaps hidden"):
         run_application(request, policy=HarnessingPolicy(enabled=True), state_root=tmp_path / "experiments")
     assert not list((tmp_path / "experiments").rglob("process/input.json"))
+
+
+def test_public_missing_ordinary_role_rejects_before_any_trial(tmp_path, monkeypatch, real_isolation):
+    root = tmp_path / "project"
+    project(root, "http://127.0.0.1:9/v1", supervisor="smolagents", worker="smolagents")
+    app = root / "applications/mixed"
+    (app / "driver.py").write_text(DRIVER)
+    write_yaml(app / "workflows/worker.yaml", {"name": "business", "task": "ORIGINAL_TASK"})
+    monkeypatch.syspath_prepend(str(root))
+    for key in tuple(sys.modules):
+        if key.startswith("applications.mixed"):
+            del sys.modules[key]
+    fact = tmp_path / "fact.txt"
+    fact.write_text("FACT-123")
+    request = ApplicationRequest("mixed", root, app, "applications.mixed.driver:Driver", input_paths=(fact,))
+    with pytest.raises((ValueError, FileNotFoundError), match="missing|exist|Missing|No such"):
+        run_application(
+            request,
+            policy=HarnessingPolicy.model_validate({"enabled": True, "roles": {"general": "workflows/missing.yaml"}}),
+            state_root=tmp_path / "experiments",
+        )
+    assert not list((tmp_path / "experiments").rglob("process/input.json"))
+
+
+def test_public_unsupported_isolation_rejects_before_any_model_or_trial(tmp_path, monkeypatch):
+    from agentloom.app.harnessing import isolation
+
+    with model_service(lambda request: pytest.fail("Unsupported backend must not call a model")) as (url, requests):
+        root = tmp_path / "project"
+        project(root, url, supervisor="smolagents", worker="smolagents")
+        app = root / "applications/mixed"
+        (app / "driver.py").write_text(DRIVER)
+        monkeypatch.syspath_prepend(str(root))
+        for key in tuple(sys.modules):
+            if key.startswith("applications.mixed"):
+                del sys.modules[key]
+
+        def unavailable():
+            raise IsolationUnavailable("fixture lacks validated OS isolation")
+
+        monkeypatch.setattr(isolation, "preflight_isolation", unavailable)
+        request = ApplicationRequest("mixed", root, app, "applications.mixed.driver:Driver")
+        with pytest.raises(IsolationUnavailable, match="lacks validated OS"):
+            run_application(request, policy=HarnessingPolicy(enabled=True), state_root=tmp_path / "experiments")
+        assert requests == []
+        assert not list((tmp_path / "experiments").rglob("process/input.json"))

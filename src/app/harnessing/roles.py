@@ -50,13 +50,16 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
                 definition = YamlAgentFactory._prepare_agent_config(definition)
                 outcome = app._invoke_definition(definition, item, 0)
             receipt = outcome.to_dict()
-            receipt["usage_observations"] = [item.to_dict() for item in read_run_usage(app.run.run_dir)]
+            role_run_dir = app.run.run_dir
             receipt["run"] = {
                 "application_id": app.run.application_id,
                 "task_id": app.run.task_id,
                 "run_id": app.run.run_id,
                 "manifest_path": str(app.run.manifest_path),
             }
+    # Application teardown flushes the persisted runtime event sink. Read only
+    # after that boundary, so this includes the terminal usage observation.
+    receipt["usage_observations"] = [item.to_dict() for item in read_run_usage(role_run_dir)]
     if outcome.status != "success" or outcome.cleanup_errors:
         return {"status": "failed", "receipt": receipt, "error": str(receipt.get("error") or "role cleanup failed")}
     try:
@@ -79,3 +82,35 @@ def candidate_files(bundle) -> dict[str, str]:
         except UnicodeDecodeError:
             continue
     return result
+
+
+def preflight_roles(bundle, policy):
+    """Check every frozen ordinary role and its Worker tree before paid work."""
+    import yaml
+    from agentloom.app.composition import build_builtin_runtime_registry
+    from agentloom.app.definition import inspect_application_definition, load_prepared_agent_definition
+    from agentloom.config.config import bind_config, load_project_config
+
+    config = load_project_config(bundle.project_root)
+    registry = build_builtin_runtime_registry()
+    checked = set()
+    with bind_config(config):
+        for role in ROLE_NAMES:
+            override = getattr(policy.roles, role)
+            if override:
+                source = bundle.application_root / override
+                definition = load_prepared_agent_definition(source, project_root=bundle.project_root)
+            else:
+                source = bundle.application_root / "workflows" / f"harness_{role}.yaml"
+                definition = yaml.safe_load((_RESOURCE_ROOT / f"{role}.yaml").read_text())
+                definition["system_prompt"] = (_RESOURCE_ROOT / f"{role}.md").read_text()
+            inspection = inspect_application_definition(
+                bundle.project_root, str(source), definition, root_is_worker=True, base_config=config
+            )
+            if inspection.errors:
+                raise ValueError(f"Invalid frozen improvement role {role}: " + "\n".join(inspection.errors))
+            for node in inspection.definitions.values():
+                runtime = node["agent_runtime"]
+                if runtime not in checked:
+                    registry.preflight(runtime)
+                    checked.add(runtime)

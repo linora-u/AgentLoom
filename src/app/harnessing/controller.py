@@ -687,6 +687,10 @@ class ImprovementController:
             self.store.immutable("prepared.json", self.invocation)
         _verify_inputs(self.invocation, self.store.root / "inputs")
         self._validate(self.base.project_root, self.base.application_root)
+        from .roles import preflight_roles
+
+        with self._private_bindings():
+            preflight_roles(self.base, self.policy)
         view = self.store.read("library-view.json")
         if view is None:
             feedback, partition = self.policy.feedback.mode, self.policy.feedback.partition or ""

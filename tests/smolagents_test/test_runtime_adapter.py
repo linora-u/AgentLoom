@@ -366,11 +366,15 @@ def test_adapter_classifies_provider_error_and_emits_terminal_failure() -> None:
     assert captured.value.cause is provider_error
     assert captured.value.retryable is True
     assert observed[-1].kind == "terminal"
-    assert observed[-1].details == {
+    details = observed[-1].details
+    assert {key: details[key] for key in ("state", "category", "retryable")} == {
         "state": "failed",
         "category": "provider",
         "retryable": True,
     }
+    assert details["attempt_id"]
+    assert {event.details["attempt_id"] for event in observed} == {details["attempt_id"]}
+    assert [event.details["sequence"] for event in observed] == list(range(len(observed)))
 
 
 def test_adapter_rejects_unsupported_requirements_before_native_execution() -> None:
