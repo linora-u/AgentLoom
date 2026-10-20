@@ -105,6 +105,17 @@ def test_candidate_cannot_change_fixed_business_code(project, tmp_path):
     assert (bundle.application_root / "prompts/main.md").read_text() == "frozen instructions"
 
 
+def test_dotenv_variants_remain_private_even_when_declared_as_extra_resources(project, tmp_path):
+    root, app = project
+    files = [app / name for name in (".env", ".env.local", ".env.production")]
+    for path in files:
+        path.write_text("API_KEY=PRIVATE-DOTENV-CANARY")
+    bundle = snapshot_application(root, app, tmp_path / "bundles", additional_resources=files)
+    assert all(not (bundle.application_root / path.name).exists() for path in files)
+    assert all(b"PRIVATE-DOTENV-CANARY" not in path.read_bytes()
+               for path in bundle.root.rglob("*") if path.is_file())
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Real Linux kernel isolation acceptance; Darwin backend is rejected")
 def test_public_managed_process_denies_hidden_exec_metadata_symlink_and_credentials(project, tmp_path, monkeypatch):
     try:
@@ -153,7 +164,9 @@ from mcp.server.fastmcp import FastMCP
 server = FastMCP('fixture')
 @server.tool()
 def authorized() -> dict:
-    return {'authenticated': os.environ.get('SERVICE_TOKEN') == 'mcp-private-canary'}
+    import sys
+    return {'authenticated': os.environ.get('SERVICE_TOKEN') == 'mcp-private-canary'
+            and sys.argv[-2:] == ['--token', 'mcp-argv-private-canary']}
 server.run(transport='stdio')
 ''')
     (app / "operations.py").write_text((app / "operations.py").read_text() + '''
@@ -172,10 +185,12 @@ async def mcp_probe(payload, bundle, context):
     return {'authenticated': json.loads(result.content[0].text)['authenticated'],
             'shell_can_see_server_secret': 'mcp-private-canary' in environment}
 ''')
-    (app / "config/.mcp.json").write_text(json.dumps({"mcpServers": {"fixture": {"command": sys.executable, "args": ["applications/sample/mcp_server.py"], "env": {"SERVICE_TOKEN": "mcp-private-canary"}}}}))
+    (app / "config/.mcp.json").write_text(json.dumps({"mcpServers": {"fixture": {"command": sys.executable, "args": ["applications/sample/mcp_server.py", "--token", "mcp-argv-private-canary"], "env": {"SERVICE_TOKEN": "mcp-private-canary"}}}}))
     credentials = {}
     bundle = snapshot_application(root, app, tmp_path / "bundles", credential_sink=credentials)
     context = Context(tmp_path / "trial", bundle.candidate_id)
+    assert "mcp-argv-private-canary" not in (bundle.application_root / "config/.mcp.json").read_text()
+    assert isinstance(json.loads((bundle.application_root / "config/.mcp.json").read_text())["mcpServers"]["fixture"]["args"], str)
     assert execute_isolated(bundle, context, "applications.sample.operations:mcp_probe", {}, credentials=credentials, timeout=20) == {"authenticated": True, "shell_can_see_server_secret": False}
     assert all("mcp-private-canary" not in path.read_text() for path in (context.root / "process").rglob("*.json"))
 

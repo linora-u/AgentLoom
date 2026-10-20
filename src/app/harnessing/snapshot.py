@@ -76,7 +76,13 @@ def _sanitize(value: Any, source: str, refs: list[str], pointer: str = "", crede
                 raise ValueError("Snapshot configuration keys must be strings")
             location = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
             schema_definition = isinstance(item, dict) and "type" in item and "/properties" in pointer
-            if _secret_key(key) and not schema_definition and item not in (None, "", {}):
+            # A stdio server's opaque arguments may carry arbitrary tokens,
+            # including positional values with no recognizable flag name.
+            # Freeze its complete argv as one parent-bound capability rather
+            # than guessing which strings are private. Routing stays fixed
+            # while candidates may still add/remove server references.
+            private_args = key == "args" and "/mcpServers/" in pointer and value.get("command")
+            if (_secret_key(key) or private_args) and not schema_definition and item not in (None, "", {}, []):
                 ref = source + "#" + location
                 refs.append(ref)
                 if credentials is not None:
@@ -240,7 +246,7 @@ def _files(root: Path, *, declared_resource: bool = False):
             if (Path(parent) / name).is_symlink():
                 raise ValueError("Candidate resource directory cannot be a symbolic link")
         for name in sorted(names):
-            if name in _SECRET_FILES or name.endswith(".pyc") or (not resource_tree and name.endswith((".sqlite", ".db", ".log"))):
+            if name in _SECRET_FILES or name.startswith(".env.") or name.endswith(".pyc") or (not resource_tree and name.endswith((".sqlite", ".db", ".log"))):
                 continue
             yield Path(parent) / name
 
@@ -340,6 +346,8 @@ def snapshot_application(project_root: Path, application_root: Path, destination
                 pending.extend(discovered - sources)
                 sources.update(discovered)
         for source in sorted(sources):
+            if source.name in _SECRET_FILES or source.name.startswith(".env."):
+                continue
             if any(source.resolve().is_relative_to(path) for path in excluded):
                 continue
             relative = source.relative_to(project)
