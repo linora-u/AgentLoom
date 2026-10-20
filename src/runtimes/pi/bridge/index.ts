@@ -1,7 +1,7 @@
 /** One SDK session per managed process. stdout is exclusively protocol JSONL. */
 import { createInterface } from "node:readline";
 import { createServer } from "node:net";
-import { readFileSync } from "node:fs";
+import { closeSync, readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
@@ -15,7 +15,7 @@ import { enableInstructionOnlyTurns, runInstructionOnlyTurn } from "./session.js
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
-  ModelRuntime, SettingsManager, SessionManager, DefaultResourceLoader,
+  AuthStorage, ModelRuntime, SettingsManager, SessionManager, DefaultResourceLoader,
   createAgentSession, type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 
@@ -26,6 +26,9 @@ const sdkVersion = JSON.parse(readFileSync(sdkPackage, "utf8")).version as strin
 const capabilities = {structured_tools: true, parallel_tools: true, checkpoint_resume: true, subagents: true, goal: true, stop_hooks: true, structured_output: true};
 const agentDir = process.argv[2];
 const piAuthPath = process.argv[3];
+const privateAuthFd = process.argv[4];
+const privateAuth = privateAuthFd ? JSON.parse(readFileSync(Number(privateAuthFd), "utf8")) : undefined;
+if (privateAuthFd) closeSync(Number(privateAuthFd));
 let instance: string | undefined;
 let session: AgentSession | undefined;
 let persistence: SessionPersistence | undefined;
@@ -128,9 +131,10 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   const codex = p.model.protocol === "openai_codex_responses";
   const chatgpt = p.model.protocol === "openai_chatgpt_responses";
   const subscription = codex || chatgpt;
-  if (subscription && !piAuthPath) throw new Error("Pi ChatGPT credential path is unavailable");
+  if (subscription && !piAuthPath && privateAuth === undefined) throw new Error("Pi ChatGPT credential path is unavailable");
   const runtime = await ModelRuntime.create({
-    authPath: subscription ? piAuthPath : join(agentDir, "auth.json"),
+    ...(privateAuth !== undefined ? {credentials: AuthStorage.inMemory(privateAuth)} :
+      {authPath: subscription ? piAuthPath : join(agentDir, "auth.json")}),
     modelsPath: null, refreshOnCreate: false,
   });
   const api = codex ? "openai-codex-responses" :
@@ -155,7 +159,11 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   }
   const model = runtime.getModel(providerId, modelId);
   if (!model) throw new Error(`Pi ${codex ? "Codex model" : chatgpt ? "ChatGPT model" : "model"} ${modelId} is unavailable`);
-  if (codex) await ensureCodexLogin(runtime, model, event);
+  if (codex && privateAuth !== undefined) {
+    const auth = await runtime.getAuth(model, {signal: current?.abort.signal});
+    if (auth?.source !== "OAuth") throw new Error("Bound Pi subscription credential is unavailable");
+  }
+  else if (codex) await ensureCodexLogin(runtime, model, event);
   else if (subscription) {
     let auth;
     try {auth = await runtime.getAuth(model, {signal: current?.abort.signal});}
