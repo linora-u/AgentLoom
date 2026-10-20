@@ -13,8 +13,10 @@ import yaml
 
 
 class ModelReply(NamedTuple):
-    content: str
+    content: str | list[tuple[str, str, dict]]
     finish_reason: str
+    reasoning_content: str | None = None
+    response_model: str | None = None
 
 
 class ProviderFailure(NamedTuple):
@@ -45,6 +47,7 @@ def model_service(
     ],
     *,
     fail_requests: set[int] | None = None,
+    on_request: Callable[[dict[str, Any], dict[str, str]], None] | None = None,
 ):
     requests: list[dict[str, Any]] = []
     errors: list[Exception] = []
@@ -63,6 +66,8 @@ def model_service(
                 self.send_error(500, 'Fixture provider failure')
                 return
             try:
+                if on_request is not None:
+                    on_request(request, dict(self.headers))
                 answer = program(request)
                 if isinstance(answer, ProviderFailure):
                     self.send_response(answer.status)
@@ -72,8 +77,10 @@ def model_service(
                         'type': 'invalid_request_error'}}).encode())
                     return
                 finish_override = None
+                reasoning_content = None
+                response_model = None
                 if isinstance(answer, ModelReply):
-                    answer, finish_override = answer
+                    answer, finish_override, reasoning_content, response_model = answer
                 if self.path.endswith('/responses'):
                     output = ([
                         {'type': 'function_call', 'id': f'fc_{index}', 'call_id': call_id,
@@ -95,6 +102,8 @@ def model_service(
                     }).encode())
                     return
                 message: dict[str, Any] = {'role': 'assistant', 'content': answer if isinstance(answer, str) else None}
+                if reasoning_content is not None:
+                    message["reasoning_content"] = reasoning_content
                 if isinstance(answer, list):
                     message['tool_calls'] = [
                         {'id': call_id, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(arguments)}}
@@ -113,13 +122,13 @@ def model_service(
                         {'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish}],
                          'usage': {'prompt_tokens': 50, 'completion_tokens': 20, 'total_tokens': 70}},
                     ]:
-                        self.wfile.write(('data: ' + json.dumps(chunk) + '\n\n').encode())
+                        self.wfile.write(('data: ' + json.dumps({**chunk, 'model': response_model or request['model']}) + '\n\n').encode())
                     self.wfile.write(b'data: [DONE]\n\n')
                 else:
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
                     self.wfile.write(json.dumps({'id': 'fixture-completion', 'object': 'chat.completion',
-                        'created': 1, 'model': request['model'],
+                        'created': 1, 'model': response_model or request['model'],
                         'choices': [{'index': 0, 'message': message, 'finish_reason': finish}],
                         'usage': {'prompt_tokens': 50, 'completion_tokens': 20, 'total_tokens': 70}}).encode())
             except Exception as exc:

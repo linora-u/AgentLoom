@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
 from agentloom.app.harnessing.isolation import IsolationUnavailable, preflight_isolation
 from agentloom.app.harnessing.process import execute_isolated
 from agentloom.app.harnessing.snapshot import derive_candidate, load_bundle, snapshot_application
@@ -153,6 +152,52 @@ def test_credential_binding_cannot_be_moved_or_redirected(project, tmp_path):
         derive_candidate(bundle, {"applications/sample/config/.mcp.json": json.dumps(frozen)}, tmp_path / "bundles", editable=["mcp_servers"], validate=lambda project, app: None)
 
 
+@pytest.mark.parametrize("mutation", ["plaintext", "new_reference", "move_reference", "private_url", "redirect_args"])
+def test_candidate_secret_rejection_leaves_no_archive_or_staging_bytes(project, tmp_path, mutation):
+    from copy import deepcopy
+
+    root, app = project
+    (app / "config").mkdir()
+    relative = "applications/sample/config/.mcp.json"
+    private_values = ("PARENT-TOKEN-CANARY", "PARENT-ARGV-CANARY", "CANDIDATE-TOKEN-CANARY")
+    (app / "config/.mcp.json").write_text(json.dumps({"mcpServers": {"fixture": {
+        "command": "/usr/bin/python3", "args": ["--token", private_values[1]],
+        "env": {"SERVICE_TOKEN": private_values[0]}}}}))
+    credentials = {}
+    destination = tmp_path / "bundles"
+    bundle = snapshot_application(root, app, destination, credential_sink=credentials)
+    frozen = json.loads((bundle.application_root / "config/.mcp.json").read_text())
+    candidate = deepcopy(frozen)
+    server = candidate["mcpServers"]["fixture"]
+    if mutation == "plaintext":
+        candidate["mcpServers"]["other"] = {"command": "/usr/bin/python3", "env": {"SERVICE_TOKEN": private_values[2]}}
+    elif mutation == "new_reference":
+        candidate["mcpServers"]["other"] = {"command": "/usr/bin/python3", "env": {"SERVICE_TOKEN": "harness-credential-ref:" + relative + "#/new"}}
+    elif mutation == "move_reference":
+        candidate["mcpServers"]["other"] = {"command": "/usr/bin/python3", "env": {"SERVICE_TOKEN": server["env"]["SERVICE_TOKEN"]}}
+    elif mutation == "private_url":
+        candidate["mcpServers"]["other"] = {"type": "streamable_http", "url": "https://service.test/?token=" + private_values[2]}
+    else:
+        server["args"] = ["--different-launch"]
+    existing = set(destination.iterdir())
+    with pytest.raises(ValueError, match="credential|capability"):
+        derive_candidate(bundle, {relative: json.dumps(candidate)}, destination,
+                         editable=["mcp_servers"], validate=lambda *args: None)
+    assert set(destination.iterdir()) == existing
+    bundle.verify()
+    assert all(canary.encode() not in path.read_bytes() for canary in private_values
+               for path in destination.rglob("*") if path.is_file())
+    # The same original references remain legitimate without rebinding or
+    # writing their private values; a normal prompt edit can still commit.
+    derived = derive_candidate(bundle, {relative: json.dumps(frozen), "applications/sample/prompts/main.md": "PUBLIC-CANDIDATE-EDIT"},
+                               destination, editable=["mcp_servers", "system_prompt"], validate=lambda *args: None)
+    assert (derived.application_root / "prompts/main.md").read_text() == "PUBLIC-CANDIDATE-EDIT"
+    assert json.loads((derived.application_root / "config/.mcp.json").read_text()) == frozen
+    assert credentials[relative + "#/mcpServers/fixture/env/SERVICE_TOKEN"] == private_values[0]
+    assert all(canary.encode() not in path.read_bytes() for canary in private_values
+               for path in destination.rglob("*") if path.is_file())
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Real inherited Linux enforcement")
 def test_local_stdio_mcp_receives_only_its_bound_capability(project, tmp_path):
     preflight_isolation()
@@ -249,10 +294,10 @@ def controlled_stop(payload, bundle, context):
 def test_managed_host_enforces_before_factory_and_consumes_forwarded_capabilities(project, tmp_path, monkeypatch):
     from agentloom.config.config import bind_harness_model_config
     from agentloom.config.private_bindings import bind_harness_credentials, forward_harness_bindings
-    from agentloom.execution.managed_process import launch_owned_process
-    from agentloom.execution.durable.client import TaskDescription
     from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.durable.client import TaskDescription
     from agentloom.execution.durable.files import atomic_json
+    from agentloom.execution.managed_process import launch_owned_process
     from agentloom.runtimes.pi.credentials import bind_pi_credentials
     root, app = project
     hidden = tmp_path / "held-out.json"
@@ -350,6 +395,7 @@ def test_secret_urls_are_bound_and_metadata_refs_are_not_file_restoration_refs(p
 @pytest.mark.skipif(os.name != "posix", reason="Actual POSIX identity check")
 def test_scope_rejects_a_real_child_with_forged_wrong_parent_pipe(tmp_path):
     import subprocess
+
     import psutil
     from agentloom.execution.process_scope import NATIVE_SCOPE_FD_ENV
     read, write = os.pipe()
@@ -382,6 +428,7 @@ def test_scope_rejects_a_real_child_with_forged_wrong_parent_pipe(tmp_path):
 @pytest.mark.skipif(sys.platform != "linux", reason="Real Node process inherited filesystem policy")
 def test_real_node_initializes_with_valid_inherited_and_reopened_stdio(project, tmp_path):
     import subprocess
+
     from agentloom.runtimes.pi.credentials import bind_pi_credentials
     node = shutil.which("node")
     if node is None:
@@ -460,3 +507,18 @@ def hook_probe(payload, bundle, context):
     assert not psutil.pid_exists(child)
     cleanup = json.loads((context.root / "process/attempts/000001/cleanup.json").read_text())
     assert cleanup["physical_exit_confirmed"] is True
+
+
+def test_bound_credential_echo_in_plaintext_prompt_is_rejected_before_staging(project, tmp_path):
+    from agentloom.config.private_bindings import bind_harness_credentials
+    root, app = project
+    (app / "prompts").mkdir(exist_ok=True)
+    (app / "prompts/root.md").write_text("PUBLIC BASE")
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    before = set((tmp_path / "bundles").iterdir())
+    with bind_harness_credentials({"fixture#/token": "private-prompt-canary"}):
+        with pytest.raises(RuntimeError, match="bound credential"):
+            derive_candidate(bundle, {"applications/sample/prompts/root.md": "private-prompt-canary"},
+                             tmp_path / "bundles", editable=["system_prompt"])
+    assert set((tmp_path / "bundles").iterdir()) == before
+    assert all(b"private-prompt-canary" not in path.read_bytes() for path in bundle.root.rglob("*") if path.is_file())

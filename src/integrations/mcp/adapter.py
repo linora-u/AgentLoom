@@ -77,6 +77,8 @@ class AgentLoomMCPAdapter(ToolAdapter):
         func: Callable[[dict | None], CallToolResult],
         mcp_tool: Tool,
     ) -> ToolBinding:
+        from agentloom.execution.model_privacy import reject_private_content
+        reject_private_content(mcp_tool.model_dump())
         schema = deepcopy(mcp_tool.inputSchema)
         validator_type = validator_for(schema)
         validator_type.check_schema(schema)

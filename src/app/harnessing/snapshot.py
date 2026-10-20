@@ -436,7 +436,10 @@ def _check_candidate_secrets(relative: Path, old: Any, new: Any, pointer: str = 
 
 
 def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | None], destination: Path, *, editable: Sequence[str], validate: Callable[[Path, Path], None] | None = None) -> CandidateBundle:
+    from agentloom.execution.model_privacy import reject_private_content
+
     from .tool_capabilities import validate_tool_capabilities
+    reject_private_content(changes)
     base.verify()
     capabilities = base.manifest.get("tool_capabilities", {})
     allowed = set(editable)

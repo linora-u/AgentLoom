@@ -11,10 +11,11 @@ import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefi
 const mime = await import(new URL("./utils/mime.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href);
 type Obj = Record<string, any>;
 
-export function capturedExecutor(name: string, cwd: string, args: Obj) {
+export function capturedExecutor(name: string, cwd: string, args: Obj, containsPrivate?: (value: unknown) => boolean) {
   let bytes: Buffer | undefined;
   let imageMime: string | null = null;
   let uncertain = false;
+  let privateRejected = false;
   const chunks: Buffer[] = [];
   const expected = args.path === undefined ? undefined : resolve(cwd, args.path);
   const checkPath = (actual: string) => {
@@ -40,7 +41,17 @@ export function capturedExecutor(name: string, cwd: string, args: Obj) {
     createBashToolDefinition(cwd, {operations: {exec: async (command, directory, options) => {
       try {
         const result = await local.exec(command, directory,
-          {...options, onData: data => {chunks.push(Buffer.from(data)); options.onData(data);}});
+          {...options, onData: data => {
+            chunks.push(Buffer.from(data));
+            // The SDK can spill incremental bash output to disk. In a private
+            // Harness run, inspect the joined stream before its first onData.
+            if (!containsPrivate) options.onData(data);
+          }});
+        if (containsPrivate) {
+          const complete = Buffer.concat(chunks);
+          privateRejected = containsPrivate(complete.toString("utf8"));
+          if (!privateRejected) options.onData(complete);
+        }
         if (!Number.isInteger(result.exitCode)) {uncertain = true; throw new Error("Shell exit status is unknown");}
         return result;
       } catch (error) {
@@ -50,7 +61,7 @@ export function capturedExecutor(name: string, cwd: string, args: Obj) {
         throw error;
       }
     }}});
-  return {tool, isUncertain: () => uncertain, save: async (authorization: Obj, result: any, agentDir: string) => {
+  return {tool, isPrivateRejected: () => privateRejected, isUncertain: () => uncertain, save: async (authorization: Obj, result: any, agentDir: string) => {
     let raw: any = result ?? null;
     let format = "json";
     if (name === "read" && bytes) {
@@ -64,9 +75,11 @@ export function capturedExecutor(name: string, cwd: string, args: Obj) {
     } else if (name === "bash") {raw = Buffer.concat(chunks).toString("utf8"); format = "text";}
     // The SDK reports exitCode, not stream EOF. Its idle drain may close pipes
     // held by background descendants; never infer complete coverage from exit 0.
-    const value = JSON.stringify({raw_output: raw, result: result ?? null, format,
-      complete: name === "bash" ? null : true,
-      limitations: name === "bash" ? ["SDK does not expose stream EOF; background descendant output may be missing"] : [],
+    privateRejected = privateRejected || Boolean(containsPrivate?.([raw, result]));
+    const value = JSON.stringify({raw_output: privateRejected ? null : raw,
+      result: privateRejected ? null : result ?? null, format: privateRejected ? "json" : format,
+      complete: privateRejected ? false : name === "bash" ? null : true,
+      limitations: privateRejected ? ["Tool response contained a bound credential; execution effect is uncertain"] : name === "bash" ? ["SDK does not expose stream EOF; background descendant output may be missing"] : [],
       display_truncated: Boolean(result?.details?.truncation?.truncated)});
     const filename = `capture-${authorization.authorization_id}.json`;
     await writeFile(resolve(agentDir, filename), value, {encoding: "utf8", mode: 0o600, flag: "wx"});

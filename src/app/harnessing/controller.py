@@ -9,13 +9,13 @@ import importlib
 import random
 import threading
 import uuid
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 from contextlib import contextmanager
 from contextvars import copy_context
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
 
 from .models import (
     ApplicationExecutionResult,
@@ -81,6 +81,7 @@ def _copy_inputs(paths, root: Path, *, hidden_paths=()):
     import hashlib
     import os
     import stat
+
     from agentloom.execution.storage import SecureDirectory
 
     manifest, replacements = {}, []
@@ -216,18 +217,15 @@ class ImprovementController:
         )
 
     def _process(self, bundle, context, factory, payload):
-        from .process import execute_isolated
+        from .process import execute_isolated, execute_trusted_orchestration
 
-        execute = execute_isolated
-        if (
+        # These are the only two trusted boundaries. Keep the fixed News
+        # adapter choice explicit rather than obscuring private inputs and
+        # returned public data behind a dynamically selected callable.
+        trusted_orchestration = (
             factory == "agentloom.app.harnessing.controller:execute_trial"
             and self.request.driver == "news_agent.runtime.harnessing:NewsApplicationDriver"
-        ):
-            # A fixed in-tree adapter keeps DBOS arbitration outside its Host
-            # sandboxes. No candidate configuration can request this boundary.
-            from .process import execute_trusted_orchestration
-
-            execute = execute_trusted_orchestration
+        )
 
         self._check_stop()
         options = {
@@ -240,7 +238,9 @@ class ImprovementController:
         if self.model_config is not None:
             options["model_config"] = self.model_config
         try:
-            return execute(bundle, context, factory, json_value(payload), **options)
+            if trusted_orchestration:
+                return execute_trusted_orchestration(bundle, context, factory, json_value(payload), **options)
+            return execute_isolated(bundle, context, factory, json_value(payload), **options)
         except BaseException as error:
             # H2 returns/raises only after its owner closes. Salvage persisted
             # observations even if the process died before a driver receipt.
@@ -436,13 +436,14 @@ class ImprovementController:
                 changes = output.get("edits")
                 if not isinstance(changes, Mapping):
                     raise ValueError("Role must return an explicit edit mapping")
-                bundle = derive_candidate(
-                    current,
-                    changes,
-                    self.store.root / "bundles",
-                    editable=self.policy.editable,
-                    validate=self._validate,
-                )
+                with self._private_bindings():
+                    bundle = derive_candidate(
+                        current,
+                        changes,
+                        self.store.root / "bundles",
+                        editable=self.policy.editable,
+                        validate=self._validate,
+                    )
                 self.store.finish(
                     "candidate." + label,
                     {
@@ -607,6 +608,7 @@ class ImprovementController:
     def _restore_credentials(self):
         """Rebind only frozen capability references; never archive private values."""
         import json
+
         from agentloom.config.yaml_loader import load_unique_yaml
 
         for reference in self.base.manifest.get("credential_refs", ()):
@@ -635,8 +637,8 @@ class ImprovementController:
         self.model_config = catalog.model_dump(mode="json")
 
     def prepare(self):
-        from .snapshot import snapshot_application, load_bundle
         from .isolation import preflight_isolation
+        from .snapshot import load_bundle, snapshot_application
 
         preflight_isolation()
         for method in ("prepare", "execute_once", "reconcile", "publish", "validate_candidate", "preflight"):
@@ -710,8 +712,9 @@ class ImprovementController:
         with self._private_bindings():
             preflight_roles(self.base, self.policy)
         if self.library is None:
-            from .library import HarnessLibrary
             from agentloom.config.config import UnifiedConfig, bind_config, load_project_config
+
+            from .library import HarnessLibrary
 
             # Resource/default settings are frozen. The memory store remains
             # the original trusted project's store, outside all Trial copies.
@@ -894,8 +897,9 @@ def run_application(
             raise ValueError("No frozen experiment policy exists for this resume identity")
         policy = HarnessingPolicy.model_validate(stored_policy)
     if policy is None:
-        from agentloom.config.config import load_project_config
         from agentloom.app.application import _system_settings
+        from agentloom.config.config import load_project_config
+
         from .policy import resolve_harnessing_policy
 
         config = load_project_config(request.project_root)

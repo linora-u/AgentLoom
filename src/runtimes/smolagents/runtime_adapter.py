@@ -24,7 +24,12 @@ from agentloom.execution.agent_runtime import (
 )
 from agentloom.execution.logging import get_logger
 from agentloom.execution.model_binding import ModelTurnBinding
-from agentloom.execution.model_protocol import ModelOutputTruncated, ModelProtocolError, ModelTurnResult
+from agentloom.execution.model_protocol import (
+    ModelOutputTruncated,
+    ModelProtocolError,
+    ModelResponseRejected,
+    ModelTurnResult,
+)
 from agentloom.execution.tool_gateway import ToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord
 from agentloom.runtimes.smolagents.checkpoint_codec import (
@@ -339,6 +344,9 @@ class SmolagentsRuntimeAdapter:
         for record in records:
             if not isinstance(record, ToolCallRecord):
                 continue
+            if record.error is not None and record.error.kind == "credential_echo":
+                native = getattr(self._native_runtime, "_agent", self._native_runtime)
+                native.interrupt()
             self._emit_event(
                 "tool",
                 details={
@@ -349,10 +357,12 @@ class SmolagentsRuntimeAdapter:
                 },
             )
 
-    def _observe_model_turn(self, turn: ModelTurnResult | ModelOutputTruncated) -> None:
+    def _observe_model_turn(self, turn: ModelTurnResult | ModelOutputTruncated | ModelResponseRejected) -> None:
         if isinstance(turn, ModelOutputTruncated):
             details = {"phase": "truncated", "raw_reason": turn.raw_reason,
                        "output_budget": turn.output_budget}
+        elif isinstance(turn, ModelResponseRejected):
+            details = {"phase": "rejected"}
         else:
             details = {"phase": "completed", "item_count": len(turn.items), "response_id": turn.response_id}
         self._emit_event("model", details=details)
@@ -505,14 +515,27 @@ class SmolagentsRuntimeAdapter:
             checkpoint_token = self._checkpoint_sink_context.set(checkpoint_sink)
             native = getattr(self._native_runtime, "_agent", self._native_runtime)
             observe_turns = getattr(getattr(native, "model", None), "observe_turns", None)
+            rejected_turns = []
+            def observe(turn):
+                self._observe_model_turn(turn)
+                if isinstance(turn, ModelResponseRejected):
+                    rejected_turns.append(turn)
+                    native.interrupt()
             model_observer = (
-                observe_turns(self._observe_model_turn)
+                observe_turns(observe)
                 if callable(observe_turns)
                 else nullcontext()
             )
             try:
                 with model_observer:
-                    native_result = self._native_runtime.run(**run_kwargs)
+                    try:
+                        native_result = self._native_runtime.run(**run_kwargs)
+                    except Exception:
+                        if rejected_turns:
+                            raise rejected_turns[0] from None
+                        raise
+                    if rejected_turns:
+                        raise rejected_turns[0] from None
             finally:
                 self._checkpoint_sink_context.reset(checkpoint_token)
             if (

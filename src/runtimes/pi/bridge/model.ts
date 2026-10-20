@@ -68,16 +68,25 @@ function searchEvidence(events: readonly unknown[]): SearchEvidence {
     ...(serviceTier ? {serviceTier} : {})};
 }
 
-function failedStream(model: Model<Api>, interrupted: boolean, reason?: string) {
+function failedStream(model: Model<Api>, interrupted: boolean, reason?: string, usage?: AssistantMessage["usage"]) {
   const stream = createAssistantMessageEventStream();
   const message: AssistantMessage = {role: "assistant", content: [], api: model.api, provider: model.provider,
     model: model.id, timestamp: Date.now(), stopReason: interrupted ? "aborted" : "error",
     errorMessage: interrupted ? "Pi model request interrupted" : reason || "Pi model request failed",
-    usage: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+    usage: usage ?? {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}}};
   stream.push({type: "error", reason: message.stopReason as "error" | "aborted", error: message});
   stream.end(message);
   return stream;
+}
+
+function safeUsage(usage: AssistantMessage["usage"]): AssistantMessage["usage"] {
+  const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+  return {input: number(usage.input), output: number(usage.output), cacheRead: number(usage.cacheRead),
+    cacheWrite: number(usage.cacheWrite), totalTokens: number(usage.totalTokens),
+    ...(typeof usage.reasoning === "number" ? {reasoning: number(usage.reasoning)} : {}),
+    cost: {input: number(usage.cost.input), output: number(usage.cost.output),
+      cacheRead: number(usage.cost.cacheRead), cacheWrite: number(usage.cost.cacheWrite), total: number(usage.cost.total)}};
 }
 
 export function configureModel(session: AgentSession, settings: Obj, headers: Obj,
@@ -85,7 +94,8 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
     agentDir: string, invoke: (payload: Obj) => Promise<Obj>,
     provider: {codex: boolean; chatgpt: boolean} = {codex: false, chatgpt: false},
     reportSearch?: (identity: Obj, attempt: number, evidence: SearchEvidence) => void,
-    reportTier?: (identity: Obj, attempt: number, tier: string) => void) {
+    reportTier?: (identity: Obj, attempt: number, tier: string) => void,
+    containsPrivate: (value: unknown) => boolean = () => false) {
   const {codex, chatgpt} = provider;
   const subscription = codex || chatgpt;
   const nativeStream = session.agent.streamFunction;
@@ -175,10 +185,30 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
           if (subscription && ["response.output_item.done", "response.completed",
               "response.incomplete", "response.failed", "response.output_text.annotation.added"]
               .includes((data as Obj).type)) events.push(data);
-          await options?.onProviderStreamEvent?.(data, selectedModel);
+          if (!containsPrivate(data)) await options?.onProviderStreamEvent?.(data, selectedModel);
         },
       });
       const message = await stream.result();
+      const evidence = subscription ? searchEvidence(events) : undefined;
+      // This wrapper has not returned its stream to the SDK yet. Reject before
+      // model traces, tools, search evidence and native session persistence.
+      const generated = Object.entries(message).filter(([key, value]) => !(
+        (key === "model" && value === model.id) || (key === "responseModel" && value === model.id) ||
+        (key === "provider" && value === model.provider) || (key === "api" && value === model.api) ||
+        (key === "role" && value === "assistant") || (key === "stopReason" &&
+          ["stop", "length", "toolUse", "error", "aborted"].includes(value))
+      )).map(([key, value]) => key === "content"
+        ? message.content.map(block => Object.entries(block).filter(([field]) => field !== "type").map(([, part]) => part))
+        : key === "usage" ? Object.values(message.usage).map(part =>
+          part && typeof part === "object" ? Object.values(part) : part) : value);
+      if (containsPrivate([generated, evidence])) {
+        const rejected = failedStream(model, false, "Model response contained a bound credential", safeUsage(message.usage));
+        if (requestCaptured) {
+          responseAttempted = true;
+          await capture(permit.identity, attempt, "response", await rejected.result());
+        }
+        return rejected;
+      }
       const normalized = message as AssistantMessage & Obj;
       if (["length", "max_output_tokens"].includes(rawReason || "") || message.stopReason === "length") {
         normalized.stopReason = "length";
@@ -186,7 +216,6 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         normalized.provider_finish_reason = rawReason || "length";
       }
       normalized.output_budget = budget;
-      const evidence = subscription ? searchEvidence(events) : undefined;
       if (evidence) {
         if (settings.extra_completion_params?.web_search !== "off")
           reportSearch?.(permit.identity, attempt, evidence);
@@ -205,7 +234,8 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
       if (requestCaptured && !responseAttempted && identity) {
         await capture(identity, attempt, "response", {
           stopReason: options?.signal?.aborted ? "aborted" : "error",
-          errorMessage: error instanceof Error ? error.message : "Pi model transport failed",
+          errorMessage: error instanceof Error && !containsPrivate(error.message)
+            ? error.message : "Pi model transport failed",
         });
       }
       // SDK stream contract for an adapter/receipt failure, never a retry policy.

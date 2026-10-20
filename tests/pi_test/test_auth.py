@@ -78,3 +78,29 @@ def test_subscription_capture_retains_refresh_authority_in_parent_store(tmp_path
     assert captured["openai-codex"]["access"] == "selected-access"
     assert captured["openai-codex"]["refresh"] == ""
     assert source.read_bytes() == original
+
+
+def test_private_memory_credentials_guard_remembers_rotation_without_enabling_ordinary_runs():
+    import subprocess
+
+    from agentloom.runtimes.pi.environment import build_pi_subprocess_env
+    from agentloom.runtimes.pi.install import find_node, installed_pi_entry
+
+    env = build_pi_subprocess_env()
+    node = find_node(env)
+    bridge = installed_pi_entry(node=node).parent
+    script = '''
+const {memoryCredentials} = await import(process.argv[1]);
+const {credentialGuard} = await import(process.argv[2]);
+const guard = credentialGuard([]);
+const store = memoryCredentials({provider:{type:'oauth',access:'old-access',refresh:'old-refresh',expires:1}}, guard.remember);
+await store.modify('provider', () => ({type:'oauth',access:'new-access',refresh:'new-refresh',expires:2}));
+const bound = ['old-access','old-refresh','new-access','new-refresh'].every(value => guard.contains({id:value}));
+const ordinary = credentialGuard(undefined);
+ordinary.remember(await store.read('provider'));
+console.log(JSON.stringify({bound, ordinaryInactive:!ordinary.contains('new-access')}));
+'''
+    result = subprocess.run([node, "--input-type=module", "-e", script,
+        (bridge / "credentials.js").as_uri(), (bridge / "privacy.js").as_uri()],
+        env=env, check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout) == {"bound": True, "ordinaryInactive": True}

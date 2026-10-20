@@ -63,6 +63,51 @@ def require_harness_bindings():
         raise ValueError("Isolated Harness execution requires its trusted private bindings")
 
 
+def harness_private_values() -> tuple[str, ...] | None:
+    """Current bound private strings, for rejecting provider echoes in memory."""
+    bindings = _VALUES.get()
+    if bindings is None:
+        return None
+    from agentloom.runtimes.pi.credentials import current_pi_credentials
+
+    from .config import current_harness_model_config
+
+    values: set[str] = set()
+
+    def collect(value):
+        if isinstance(value, str) and value and not value.startswith(_PREFIX):
+            values.add(value)
+            if value.lower().startswith(("bearer ", "basic ")):
+                values.add(value.split(" ", 1)[1])
+        elif isinstance(value, Mapping):
+            for item in value.values():
+                collect(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+
+    for value in bindings.values():
+        collect(value)
+
+    def catalog(value):
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                normalized = str(key).lower().replace("-", "_")
+                if normalized in {"api_key", "authorization", "cookie", "password", "access_token", "refresh_token", "secret"} or normalized.endswith(("_api_key", "_token", "_secret", "_password")):
+                    collect(item)
+                else:
+                    catalog(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                catalog(item)
+
+    catalog(current_harness_model_config())
+    for credential in (current_pi_credentials() or {}).values():
+        for key in ("access", "refresh", "key", "api_key"):
+            collect(credential.get(key))
+    return tuple(sorted(values, key=len, reverse=True))
+
+
 def resolve_bound_credentials(value: Any) -> Any:
     bindings = _VALUES.get()
     if bindings is None:

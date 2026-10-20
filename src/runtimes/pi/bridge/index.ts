@@ -8,6 +8,7 @@ import type { ValidateFunction } from "ajv";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { configureModel, type SearchEvidence } from "./model.js";
 import { providerError } from "./errors.js";
+import { credentialGuard } from "./privacy.js";
 import { memoryCredentials } from "./credentials.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
@@ -129,12 +130,13 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   nativeIncomplete = false;
   outputCorrection = false;
   const s = p.model.settings;
+  const privacy = credentialGuard(p.additional_args?.bound_private_values);
   const codex = p.model.protocol === "openai_codex_responses";
   const chatgpt = p.model.protocol === "openai_chatgpt_responses";
   const subscription = codex || chatgpt;
   if (subscription && !piAuthPath && privateAuth === undefined) throw new Error("Pi ChatGPT credential path is unavailable");
   const runtime = await ModelRuntime.create({
-    ...(privateAuth !== undefined ? {credentials: memoryCredentials(privateAuth)} :
+    ...(privateAuth !== undefined ? {credentials: memoryCredentials(privateAuth, privacy.remember)} :
       {authPath: subscription ? piAuthPath : join(agentDir, "auth.json")}),
     modelsPath: null, refreshOnCreate: false,
   });
@@ -193,7 +195,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   const identity = (callId: string, nativeParentId?: string | null) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
-  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence);
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence, privacy.enabled ? privacy.contains : undefined);
   const extra = s.extra_completion_params || {};
   const searchMode = subscription ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
@@ -226,7 +228,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
   }, agentDir, invoke, {codex, chatgpt},
   (identity, attempt, result) => reportSearch?.(identity, attempt, result),
-  (identity, attempt, tier) => reportTier?.(identity, attempt, tier));
+  (identity, attempt, tier) => reportTier?.(identity, attempt, tier), privacy.contains);
   const nativePayload = created.agent.onPayload;
   created.agent.onPayload = async (payload, model) => {
     const result = {...(await nativePayload?.(payload, model) ?? payload) as Obj};

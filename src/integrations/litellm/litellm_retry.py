@@ -162,11 +162,17 @@ def _call_provider(
         kwargs = {**kwargs, "client": observed_client}
     try:
         response = original_func(*args, **kwargs)
+        from agentloom.execution.model_privacy import reject_private_response
+        reject_private_response(response, model=kwargs.get("model"))
     except Exception as error:
+        from agentloom.execution.model_privacy import rejection_usage, safe_provider_error
+        safe_error = safe_provider_error(error)
         if recorder is not None and turn is not None:
             recorder.record_model_response(
-                turn.turn_id, runtime="smolagents", error=error, attempt=turn.attempt,
+                turn.turn_id, rejection_usage(safe_error), runtime="smolagents", error=safe_error, attempt=turn.attempt,
             )
+        if safe_error is not error:
+            raise safe_error from None
         if capture_error is not None:
             raise capture_error from error
         raise

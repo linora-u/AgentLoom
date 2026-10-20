@@ -14,10 +14,18 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
     from agentloom.runtimes.pi.credentials import bind_pi_credentials
 
     counts = []
+    private_canaries = (
+        "fixture-key", "MCP-ARGV-PRIVATE-CANARY", "DOTENV-PRIVATE-CANARY",
+        "PRIVATE-OAUTH-CANARY-136", "PRIVATE-REFRESH-CANARY-136",
+    )
+
+    def authenticate(request, headers):
+        # A working credential must reach only the actual HTTP auth header,
+        # while the model-visible body and returned edit remain public data.
+        assert {key.lower(): value for key, value in headers.items()}["authorization"] == "Bearer fixture-key"
 
     def program(request):
-        assert "MCP-ARGV-PRIVATE-CANARY" not in json.dumps(request)
-        assert "DOTENV-PRIVATE-CANARY" not in json.dumps(request)
+        assert all(canary not in json.dumps(request) for canary in private_canaries)
         system = str(request["messages"][0]["content"])
         if "Extract only supported reusable experiences" in system:
             value, role = {"experiences": []}, "reflect"
@@ -40,7 +48,7 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
         counts.append(role)
         return finish(request, value)
 
-    with model_service(program) as (url, requests):
+    with model_service(program, on_request=authenticate) as (url, requests):
         definition = project(tmp_path, url, supervisor=runtime, worker=runtime)
         app = definition.parents[1]
         root = yaml.safe_load(definition.read_text())
@@ -65,6 +73,9 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             assert result.output == "COMPOSED-RESULT"
             assert result.harnessing.status == "completed", result.harnessing.to_dict()
             assert result.harnessing.selected_trial_id.startswith("final")
+            compose = next(role for role in result.harnessing.roles if role["role"] == "compose")
+            assert compose["output"]["edits"] == {"applications/mixed/prompts/root.md": "COMPOSED-ROOT"}
+            assert all(canary not in json.dumps(result.harnessing.to_dict()) for canary in private_canaries)
             selected = next(trial for trial in result.harnessing.trials
                             if trial.trial_id == result.harnessing.selected_trial_id)
             assert result.run.run_id == selected.runs[-1]["run_id"]
@@ -97,10 +108,8 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             assert len(requests) == calls
             for path in (tmp_path / "runtime").rglob("*"):
                 if path.is_file():
-                    assert b"PRIVATE-OAUTH-CANARY-136" not in path.read_bytes()
-                    assert b"PRIVATE-REFRESH-CANARY-136" not in path.read_bytes()
-                    assert b"MCP-ARGV-PRIVATE-CANARY" not in path.read_bytes()
-                    assert b"DOTENV-PRIVATE-CANARY" not in path.read_bytes()
+                    content = path.read_bytes()
+                    assert all(canary.encode() not in content for canary in private_canaries)
             with pytest.raises(ValueError, match="harness_resume_id"):
                 write_yaml(app / "config/system.yaml", {"harnessing": {"enabled": True}})
                 write_yaml(definition, root)

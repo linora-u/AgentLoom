@@ -238,6 +238,12 @@ class PiRuntime:
                 runtime_options["max_stop_attempts"] = remaining_terminal_attempts
                 wire_settings = dict(selection.settings)
                 wire_settings.pop("supports_structured_output", None)
+                from agentloom.config.private_bindings import harness_private_values
+                private_values = harness_private_values()
+                additional_args = dict(request.additional_args)
+                additional_args.pop("bound_private_values", None)
+                if private_values is not None:
+                    additional_args["bound_private_values"] = list(private_values)
                 wire = Run(method="run", application_id=request.application_id or "standalone",
                     task_id=request.task_id or "standalone", task=task, cwd=cwd,
                     instructions=definition.instructions or "", model=ModelSelection(model_type=selection.model_type,
@@ -247,7 +253,7 @@ class PiRuntime:
                     skills=[Skill(name=skill.name, description=skill.description, location=str(skill.location))
                             for skill in definition.skills],
                     continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
-                    additional_args=dict(request.additional_args), checkpoint_enabled=protocol.store is not None,
+                    additional_args=additional_args, checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)
                 if attempt == 0 and selection.protocol == "openai_codex_responses":
                     login_gate = CodexLoginGate(self.transport.pi_auth_path)
@@ -273,6 +279,14 @@ class PiRuntime:
                     cached_input_tokens=usage.cached_input_tokens + part.cached_input_tokens,
                     reasoning_tokens=usage.reasoning_tokens + part.reasoning_tokens)
                 if result.error:
+                    # A native tool may abort after the model already reported
+                    # usage. Harness failures read persisted events, not the
+                    # discarded successful-result path. Preserve known counts
+                    # without inventing a zero report for an unmeasured error.
+                    if usage.input_tokens or usage.output_tokens or usage.total_tokens:
+                        emit("usage", {**{name: getattr(usage, name) for name in (
+                            "input_tokens", "output_tokens", "total_tokens",
+                            "cached_input_tokens", "reasoning_tokens")}, "usage_complete": False})
                     error = result.error
                     raise AgentRuntimeError(error.message, category="internal" if error.category == "protocol" else error.category,
                                             retryable=error.retryable)
