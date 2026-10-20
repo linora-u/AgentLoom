@@ -317,6 +317,7 @@ An isolated subprocess or validation harness may set `AGENTLOOM_RUNTIME_ROOT`. I
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
 | `runtime.root_dir` | `str` | `".agentloom"` | ❌ No | Only root for framework runtime state. Relative paths resolve from the project root; absolute paths are accepted |
+| `runtime.trace.mode` | `"full"` \| `"off"` | `"full"` | ❌ No | `full` persists complete Trace evidence; `off` keeps ContextRef and intermediate evidence only in a system temporary directory for the current Run and removes it when the Run exits |
 | `runtime.successful_run_retention_days` | `int` | `7` | ❌ No | Retention for completed run directories |
 | `runtime.failed_run_retention_days` | `int` | `30` | ❌ No | Retention for failed/interrupted run directories |
 | `runtime.artifact_retention_days` | `int` | `3` | ❌ No | Retention for raw `artifacts/` inside a retained run |
@@ -354,6 +355,14 @@ There is no `--log-to-file`, `logging.enabled`, `logging.dir`, or `logging.file_
 Automatic cleanup runs at most once per configured interval. `loom clean-runtime` applies the policy explicitly. It only deletes eligible run directories or their raw artifacts; it never traverses checkpoints, workspaces, self-learning state, or Application-owned output directories.
 
 Persistent Agent recall uses `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state uses `todos.json` inside the canonical checkpoint. Durable schedules and scheduler service state use `.agentloom/schedules/`. Every framework-owned runtime consumer follows the same `runtime.root_dir`; Application-owned output directories remain separate.
+
+`runtime.trace.mode: off` disables long-term persistence of model requests,
+responses, Tool payloads, and step Trace. Large Tool results still use a
+task-scoped system temporary directory so `ContextRef` paging works during
+execution. That directory is removed when the Run scope exits, including
+failure and interruption. DBOS state, checkpoints, process-exit receipts, Run
+manifests, and Application-owned output are not Trace and are unaffected. The
+manifest records the effective policy in `trace.mode` and `trace.persisted`.
 
 To verify a real attempt, read `manifest.json` and its referenced logs, audits, and artifacts; an exit code alone is not sufficient.
 

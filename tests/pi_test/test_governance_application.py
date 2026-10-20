@@ -142,7 +142,8 @@ def test_resume_verifies_native_journal_reference_when_tool_trace_was_not_writte
         reference = re.search(r'ctx_[0-9a-f]{32}', journal.read_text()).group()
         with inspect_run(failed.value.run) as trace:
             assert not any(event['kind'] == 'tool' for event in trace.events())
-            digest = trace.reference_metadata(reference)['sha256']
+            metadata = trace.reference_metadata(reference)
+            digest = metadata.get('storage_sha256', metadata['sha256'])
             if damage:
                 payload = trace.storage.path / 'payloads' / f'{digest}.blob'
                 with payload.open('r+b') as stream:

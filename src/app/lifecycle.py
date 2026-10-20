@@ -186,6 +186,9 @@ class ApplicationRunLifecycle:
     def bind_services(self, runtime_context: Any, effective_config: dict, *,
                       file_logging: bool | None = None, trace_exporter: Any = None):
         """Own the shared Run context, trace, logger and redaction bindings."""
+        import tempfile
+        from contextlib import ExitStack
+        from pathlib import Path
         from types import SimpleNamespace
 
         from agentloom.config.redaction import bind_redaction_policy
@@ -198,15 +201,48 @@ class ApplicationRunLifecycle:
         )
         from agentloom.execution.observability import RunTrace, bind_trace_recorder
         from agentloom.execution.presentation import StepPresenter
+        from agentloom.execution.context import RuntimeContext
         builder = LoggingConfigBuilder().apply_mapping(effective_config.get('logging', {}), source='effective logging config')
         from agentloom.app.invocation import bind_runtime_event_sink
         from agentloom.config.config import get_config
         from agentloom.execution.workspace import bind_workspace_project
-        with bind_workspace_project(get_config().agent_root), bind_redaction_policy(effective_config), bind_run_context(runtime_context), bind_trace_recorder(runtime_context, exporter=trace_exporter) as recorder, bind_runtime_event_sink(self.observe_runtime_event):
-            backend = initialize_run_logger(runtime_context, logging_builder=builder, file_logging=file_logging)
-            recorder.attach_presenter(StepPresenter(backend, RunTrace(recorder.storage, runtime_context.run_id)))
-            with bind_logger_backend(backend, context=runtime_context):
-                yield SimpleNamespace(recorder=recorder, logger_backend=backend, log=get_logger(backend, __name__))
+        trace_mode = str(
+            effective_config.get("runtime", {}).get("trace", {}).get("mode", "full")
+        )
+        with ExitStack() as stack:
+            trace_context = runtime_context
+            if trace_mode == "off":
+                temporary_root = Path(stack.enter_context(
+                    tempfile.TemporaryDirectory(prefix="agentloom-trace-")
+                ))
+                trace_context = RuntimeContext(
+                    root_dir=temporary_root,
+                    application_id=runtime_context.application_id,
+                    task_id=runtime_context.task_id,
+                    run_id=runtime_context.run_id,
+                )
+                trace_exporter = None
+            stack.enter_context(bind_workspace_project(get_config().agent_root))
+            stack.enter_context(bind_redaction_policy(effective_config))
+            stack.enter_context(bind_run_context(runtime_context))
+            recorder = stack.enter_context(
+                bind_trace_recorder(trace_context, exporter=trace_exporter)
+            )
+            stack.enter_context(bind_runtime_event_sink(self.observe_runtime_event))
+            backend = initialize_run_logger(
+                runtime_context, logging_builder=builder, file_logging=file_logging
+            )
+            recorder.attach_presenter(
+                StepPresenter(backend, RunTrace(recorder.storage, runtime_context.run_id))
+            )
+            stack.enter_context(bind_logger_backend(backend, context=runtime_context))
+            yield SimpleNamespace(
+                recorder=recorder,
+                logger_backend=backend,
+                log=get_logger(backend, __name__),
+                trace_mode=trace_mode,
+                trace_dir=trace_context.trace_dir,
+            )
 
     @property
     def phase(self) -> RunPhase:
