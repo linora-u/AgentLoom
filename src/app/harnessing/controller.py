@@ -217,12 +217,12 @@ class ImprovementController:
         )
 
     def _process(self, bundle, context, factory, payload):
-        from .process import execute_isolated, execute_trusted_orchestration
+        from .process import execute_isolated, execute_managed_orchestration
 
         # These are the only two trusted boundaries. Keep the fixed News
         # adapter choice explicit rather than obscuring private inputs and
         # returned public data behind a dynamically selected callable.
-        trusted_orchestration = (
+        managed_orchestration = (
             factory == "agentloom.app.harnessing.controller:execute_trial"
             and self.request.driver == "news_agent.runtime.harnessing:NewsApplicationDriver"
         )
@@ -238,8 +238,8 @@ class ImprovementController:
         if self.model_config is not None:
             options["model_config"] = self.model_config
         try:
-            if trusted_orchestration:
-                return execute_trusted_orchestration(bundle, context, factory, json_value(payload), **options)
+            if managed_orchestration:
+                return execute_managed_orchestration(bundle, context, factory, json_value(payload), **options)
             return execute_isolated(bundle, context, factory, json_value(payload), **options)
         except BaseException as error:
             # H2 returns/raises only after its owner closes. Salvage persisted
