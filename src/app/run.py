@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
+
+if TYPE_CHECKING:
+    from agentloom.app.harnessing.models import ApplicationExecutionResult
 
 from agentloom.execution.agent_runtime import JSONValue, copy_json_value
 
@@ -72,6 +75,7 @@ class ApplicationRunResult:
     goal: GoalSnapshot | None = None
     final_answer_presented: bool = False
     answer_present: bool = True
+    harnessing: ApplicationExecutionResult | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(

@@ -770,6 +770,14 @@ def _persist_run_observability(
             result_artifact="artifacts/result.txt",
             result_size=len(rendered_result.encode("utf-8")),
         )
+        # Recovery must distinguish a JSON null from absent output, and a
+        # string containing JSON from an object. The human-readable artifact
+        # remains available to existing consumers.
+        runtime_context.atomic_write_run_file(
+            runtime_context.artifacts_dir / "result.json",
+            json.dumps(result, ensure_ascii=False, allow_nan=False),
+        )
+        manifest_updates["result_json_artifact"] = "artifacts/result.json"
 
     if runtime_events:
         runtime_event_size = runtime_context.atomic_write_run_file_chunks(
