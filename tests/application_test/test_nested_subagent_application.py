@@ -23,6 +23,10 @@ def test_worker_can_delegate_to_its_pinned_subagent(tmp_path, runtime):
             assert "LEAF-EVIDENCE-136" in tool_messages(request)[-1]["content"]
             return finish(request, "MIDDLE-EVIDENCE-136")
         if not tool_messages(request):
+            # The leaf is assembled only when the middle Worker executes. It
+            # must still use the graph captured before the root model call.
+            leaf = middle.with_name("leaf.yaml")
+            leaf.write_text(leaf.read_text().replace("LEAF-ROLE-136", "LIVE-EDIT-136"))
             return [("call-middle-136", "inspect_note", {"query": "Ask the leaf to verify."})]
         assert "MIDDLE-EVIDENCE-136" in tool_messages(request)[-1]["content"]
         return finish(request, "ROOT-EVIDENCE-136")

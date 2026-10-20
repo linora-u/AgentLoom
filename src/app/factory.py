@@ -19,7 +19,7 @@ from agentloom.app.validation import (
     NormalizedAgentConfig,
     resolve_input_schema_object,
 )
-from agentloom.app.workflows import get_worker_agent_yaml_path, infer_category_from_yaml_path
+from agentloom.app.workflows import infer_category_from_yaml_path
 from agentloom.config import C
 from agentloom.config.config import EffectiveAgentConfigSnapshot
 from agentloom.config.paths import configuration_root, normalize_config_paths
@@ -124,6 +124,7 @@ class YamlConfiguredAgent(RoleDrivenAgent):
         effective = getattr(self, "_effective_agent_config", None)
         tools, mcp_manager = YamlAgentFactory.get_tools_from_config(self._config, logger=logger, effective_agent_config=effective)
         self._mcp_manager = mcp_manager
+        tools.extend(YamlAgentFactory.get_subagent_tools(self._config, logger=logger))
         return tools
 
     def agent_as_tool(self):
@@ -400,54 +401,7 @@ class YamlConfiguredSupervisorAgent(RoleDrivenAgent):
         self._mcp_manager = mcp_manager
         tools.extend(standard_tools)
 
-        expected_agents = self._config.get('worker_agents', [])
-        if not expected_agents:
-            log.info("[YamlConfiguredSupervisorAgent] Successfully loaded all tools for supervisor agent.")
-            return tools
-
-        source_path = self._config.get("_yaml_file_path")
-        worker_agents_folder = (Path(source_path).parent / "worker_agents"
-                                if source_path else get_worker_agent_yaml_path(self.workflow_category))
-
-        pinned_workers = self._config.get("_worker_definitions")
-        pinned_worker_paths = self._config.get("_worker_definition_paths")
-        if isinstance(pinned_workers, dict) and isinstance(
-            pinned_worker_paths,
-            dict,
-        ):
-            resolved_worker_agents = [
-                (
-                    item["path"],
-                    Path(pinned_worker_paths[item["path"]]),
-                )
-                for item in expected_agents
-            ]
-        else:
-            resolved_worker_agents = AgentConfigNormalizer.precheck_worker_agent_paths(
-                expected_agents, worker_agents_folder, agent_root=C.agent_root,
-            )
-
-        for configured_path, found_file in resolved_worker_agents:
-            try:
-                # Load configuration
-                pinned_workers = self._config.get("_worker_definitions", {})
-                if str(found_file) in pinned_workers:
-                    agent_config = copy.deepcopy(pinned_workers[str(found_file)])
-                else:
-                    agent_config = YamlAgentFactory._load_config_from_file(found_file)
-
-                # Create agent tool
-                agent_tool = YamlAgentFactory.create_agent_as_tool(
-                    agent_config,
-                    logger=worker_logger,
-                    _source_path_is_pinned=str(found_file) in pinned_workers,
-                )
-                if agent_tool is not None:
-                    tools.append(agent_tool)
-            except Exception as e:
-                msg = f"Failed to load worker agent from path '{configured_path}' ({found_file}): {e}"
-                log.error(msg)
-                raise ValueError(msg) from e
+        tools.extend(YamlAgentFactory.get_subagent_tools(self._config, logger=worker_logger))
 
         log.info("[YamlConfiguredSupervisorAgent] Successfully loaded all tools for supervisor agent.")
         return tools
@@ -532,6 +486,44 @@ class YamlAgentFactory:
     Provides capabilities for creating agent tools from YAML configuration.
     Supports YAML Agent definitions.
     """
+
+    @staticmethod
+    def get_subagent_tools(config: dict, logger: Any = None) -> list:
+        """Bind declared children at every depth from the prepared graph.
+
+        Worker and Supervisor roles share the same child assembly. Prepared
+        definitions remain pinned; a new invocation gets fresh child instances
+        through the normal Agent-as-Tool factory.
+        """
+        expected = config.get("worker_agents", [])
+        AgentConfigNormalizer.validate_worker_agents_config(expected)
+        if not expected:
+            return []
+        definitions = config.get("_worker_definitions")
+        paths = config.get("_worker_definition_paths")
+        if isinstance(definitions, dict) and isinstance(paths, dict):
+            resolved = [(item["path"], Path(paths[item["path"]])) for item in expected]
+        else:
+            source = config.get("_yaml_file_path")
+            if not source:
+                raise ValueError("Declared subagents require a definition source path")
+            resolved = AgentConfigNormalizer.precheck_worker_agent_paths(
+                expected, Path(source).parent / "worker_agents", agent_root=C.agent_root,
+            )
+        tools = []
+        for reference, path in resolved:
+            try:
+                pinned = isinstance(definitions, dict) and str(path) in definitions
+                child = copy.deepcopy(definitions[str(path)]) if pinned else YamlAgentFactory._load_config_from_file(path)
+                tool = YamlAgentFactory.create_agent_as_tool(
+                    child, logger=logger, _source_path_is_pinned=pinned,
+                )
+                if tool is None:
+                    raise ValueError("Subagent definition did not produce a callable tool")
+                tools.append(tool)
+            except Exception as exc:
+                raise ValueError(f"Failed to load subagent '{reference}' ({path}): {exc}") from exc
+        return tools
 
     @staticmethod
     def get_tools_from_config(config: dict, logger: Any = None, effective_agent_config: dict | None = None) -> tuple:
