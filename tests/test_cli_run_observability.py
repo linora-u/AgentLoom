@@ -68,6 +68,26 @@ def test_run_rejects_task_override() -> None:
     assert "No such option: --task" in result.output
 
 
+def test_run_rejects_ambiguous_task_and_experiment_resume() -> None:
+    result = CliRunner().invoke(main, ["run", "unused.yaml", "--resume", "task_123",
+                                     "--resume-experiment", "experiment_123"])
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.output
+
+
+def test_delivered_partial_experiment_keeps_output_but_exits_unsuccessfully(monkeypatch):
+    from agentloom.app.harnessing.models import ApplicationExecutionResult
+
+    experiment = ApplicationExecutionResult("experiment_123", "snapshot_123", "partial",
+        selected_trial_id="final1", delivery={"published": True}, errors=("reflection failed",))
+    monkeypatch.setattr("agentloom.app.runner.execute_app", lambda *args, **kwargs:
+        SimpleNamespace(output="ACTUAL-DELIVERY", answer_present=True, harnessing=experiment))
+    result = CliRunner().invoke(main, ["run", "unused.yaml"])
+    assert result.exit_code == 1
+    assert "ACTUAL-DELIVERY" in result.stdout
+    assert "experiment_123 (partial)" in result.stderr
+
+
 def test_text_run_displays_goal_status(monkeypatch: pytest.MonkeyPatch) -> None:
     def succeed(*_args, **_kwargs):
         return SimpleNamespace(

@@ -101,6 +101,7 @@ class RunLifecycleEvent:
     phase: RunPhase | None = None
     goal: GoalSnapshot | None = None
     schema_version: int = 1
+    harnessing: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -109,6 +110,9 @@ class RunLifecycleEvent:
             copy_json_value(self.output, field_name="run lifecycle event output"),
         )
         object.__setattr__(self, "goal", _goal_snapshot(self.goal))
+        if self.harnessing is not None:
+            from agentloom.app.harnessing.models import frozen
+            object.__setattr__(self, "harnessing", frozen(self.harnessing))
         if self.answer_present is not None and not isinstance(self.answer_present, bool):
             raise TypeError("answer_present must be a boolean when provided")
 

@@ -218,11 +218,16 @@ def dispatch_supervisor(yaml_path, *, resume_task_id, file_logging, event_sink,
             run = _public_run(record)
             start = datetime.fromisoformat(record["started_at"])
             end = datetime.fromisoformat(record["ended_at"])
-            _emit_lifecycle_event(event_sink, RunLifecycleEvent("run.started", run, start))
+            metadata = {"experiment_id": result.experiment_id, "trial_id": trial.trial_id,
+                        "candidate_id": trial.candidate_id,
+                        "selected": trial.trial_id == result.selected_trial_id}
+            _emit_lifecycle_event(event_sink, RunLifecycleEvent("run.started", run, start,
+                                                              harnessing=metadata))
             event = "run.completed" if trial.status == "completed" else "run.failed"
             _emit_lifecycle_event(event_sink, RunLifecycleEvent(event, run, end,
                 output=json_value(trial.output), answer_present=record.get("answer_present"),
-                goal=record.get("goal"), error=trial.error or None))
+                goal=record.get("goal"), error=trial.error or None,
+                harnessing={**result.to_dict(), **metadata} if metadata["selected"] else metadata))
             if trace_exporter is not None:
                 _export_trace(trace_exporter, run)
     if not result.selected_trial_id or not result.delivery:

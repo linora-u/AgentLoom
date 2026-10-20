@@ -63,6 +63,7 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
                             if trial.trial_id == result.harnessing.selected_trial_id)
             assert result.run.run_id == selected.runs[-1]["run_id"]
             assert counts.count("business") == counts.count("worker") == 4
+            assert result.harnessing.usage["total_tokens"] == len(requests) * 70
             assert len(events) == 8
             assert len({event.run.run_dir for event in events}) == 4
             calls = len(requests)
@@ -70,6 +71,16 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
                 harness_resume_id=result.harnessing.experiment_id)
             assert recovered.output == result.output
             assert recovered.run == result.run
+            assert len(requests) == calls
+            from click.testing import CliRunner
+            from agentloom.app.cli import run
+            command = CliRunner().invoke(run, [str(definition), "--no-file-log",
+                "--resume-experiment", result.harnessing.experiment_id, "--output-format", "json"])
+            assert command.exit_code == 0, command.output
+            message = json.loads(command.stdout)
+            assert message["event"] == "run.completed"
+            assert message["harnessing"]["selected_trial_id"] == result.harnessing.selected_trial_id
+            assert message["run"]["run_id"] == result.run.run_id
             assert len(requests) == calls
             for path in (tmp_path / "runtime").rglob("*"):
                 if path.is_file():
