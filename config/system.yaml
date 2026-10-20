@@ -41,6 +41,8 @@ context_engine:
 
 runtime:
   root_dir: ".agentloom"
+  trace:
+    mode: "off"
   successful_run_retention_days: 7
   failed_run_retention_days: 30
   artifact_retention_days: 3

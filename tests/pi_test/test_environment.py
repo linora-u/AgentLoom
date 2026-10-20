@@ -4,6 +4,24 @@ import os
 import pytest
 
 from agentloom.runtimes.pi.environment import build_pi_subprocess_env
+from agentloom.execution.subprocess_env import build_subprocess_env
+
+
+@pytest.mark.parametrize("builder", [build_subprocess_env, build_pi_subprocess_env])
+def test_news_credentials_are_filtered_without_changing_proxy_or_parent(monkeypatch, builder):
+    credentials = {"ANYSEARCH_AUTH_PRIMARY": "test-primary", "ANYSEARCH_AUTH_BACKUP_1": "test-backup",
+                   "ANYSEARCH_AUTH_BACKUP_10": "test-backup-10", "NEWS_LLM_API_KEY": "test-model-key"}
+    for name, value in credentials.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/cloud-ca.pem")
+    monkeypatch.setenv("NEWS_LLM_BASE_URL", "https://llm.example/v1")
+    before = os.environ.copy()
+    env = builder()
+    assert not credentials.keys() & env.keys()
+    for name in ("HTTPS_PROXY", "SSL_CERT_FILE", "NEWS_LLM_BASE_URL"):
+        assert env[name] == before[name]
+    assert os.environ == before
 
 
 @pytest.mark.parametrize("parent_settings", [

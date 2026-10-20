@@ -1,6 +1,7 @@
 """Platform tools at the real YAML Application seam with a neutral runtime."""
 
 import json
+import os
 import re
 import shlex
 import sys
@@ -573,13 +574,46 @@ def test_multimegabyte_single_line_tool_result_remains_pageable(platform_project
         size = metadata["size"]
         assert size == len(payload.encode("utf-8"))
         assert len(metadata["chunk_sha256"]) == 4
+        assert metadata["encoding"] == "zlib-chunks-v1"
+        assert metadata["storage_size"] < size // 10
         assert trace.read_page(ref, offset=size - len("终".encode()), limit=16).data.decode() == "终"
-        content_path = result.run.trace_dir / "payloads" / f"{metadata['sha256']}.blob"
+        content_path = result.run.trace_dir / "payloads" / f"{metadata['storage_sha256']}.blob"
         with content_path.open("r+b") as stream:
-            stream.seek(size - 1)
+            stream.seek(-1, os.SEEK_END)
             stream.write(b"X")
         with pytest.raises(TraceStorageError, match="integrity check failed"):
             trace.read_page(ref, offset=size - len("终".encode()), limit=16)
+
+
+def test_trace_off_uses_task_temporary_storage_and_removes_it_after_run(platform_project):
+    _, workflow, programs, _, run = platform_project
+    system_path = workflow.parents[3] / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["runtime"] = {"root_dir": "state/runtime", "trace": {"mode": "off"}}
+    system_path.write_text(yaml.safe_dump(system))
+    payload = "temporary-context-" * 2000
+    observed = {}
+
+    def execute(definition, _request):
+        record = definition.tool_gateway.invoke(
+            call_id="temporary-trace", tool_name="trace_payload", arguments={"value": payload},
+        )
+        reference = re.search(r"ctx_[0-9a-f]{32}", record.model_content()).group()
+        from agentloom.execution.observability import get_current_trace_recorder
+        recorder = get_current_trace_recorder()
+        assert recorder is not None
+        observed["trace_dir"] = recorder.storage.path
+        from agentloom.execution.observability import RunTrace
+        with RunTrace(recorder.storage.duplicate(), recorder.context.run_id) as trace:
+            assert trace.read_text(reference) == payload
+        return "temporary trace complete"
+
+    programs["platform"] = execute
+    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+    manifest = json.loads(result.run.manifest_path.read_text())
+    assert manifest["trace"] == {"mode": "off", "persisted": False}
+    assert result.run.trace_dir is None
+    assert not observed["trace_dir"].exists()
 
 
 def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):
@@ -803,7 +837,8 @@ def test_resume_rejects_corrupted_retained_tool_reference_before_agent_runs(plat
     with pytest.raises(ApplicationRunInterrupted) as interrupted:
         run(**options)
     with inspect_run(interrupted.value.run) as trace:
-        digest = trace.reference_metadata(references[0])["sha256"]
+        metadata = trace.reference_metadata(references[0])
+        digest = metadata.get("storage_sha256", metadata["sha256"])
         payload_path = trace.storage.path / "payloads" / f"{digest}.blob"
         if damage == "corrupt":
             payload_path.write_bytes(b"corrupted")

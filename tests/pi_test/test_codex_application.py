@@ -292,8 +292,11 @@ def test_codex_search_mode_request_and_evidence(tmp_path, monkeypatch, mode):
     assert payload["reasoning"] == {"effort": "xhigh", "summary": "auto"}
     if mode == "off":
         assert not any(tool.get("type") == "web_search" for tool in payload.get("tools", []))
+        assert "web_search_call.action.sources" not in payload.get("include", [])
     else:
         assert {"type": "web_search"} in payload["tools"]
+        assert "web_search_call.action.sources" in payload["include"]
+        assert "reasoning.encrypted_content" in payload["include"]
     if mode == "required":
         assert payload["tool_choice"] == {"type": "web_search"}
     else:
@@ -789,6 +792,22 @@ def test_native_compaction_preserves_completed_response_above_configured_window(
     with inspect_run(result.run) as trace:
         responses = [event for event in trace.events() if event["kind"] == "model_response"]
         assert responses[0]["usage"] == {"input_tokens": 484013, "output_tokens": 40870, "reasoning_tokens": 0}
+
+
+def test_native_search_retains_sources_without_assistant_citations(tmp_path, monkeypatch):
+    sources = [{"type": "url", "url": "https://example.org/original-disclosure"}]
+    app, wire = _fixture(tmp_path, monkeypatch, search="auto", citations=False,
+                         search_actions=[{"type": "search", "queries": ["original disclosure"],
+                                          "sources": sources}])
+    with bind_config(load_project_config(tmp_path)):
+        result = execute_app(app, file_logging=False)
+    request = json.loads(wire.read_text().splitlines()[0])["body"]
+    assert "web_search_call.action.sources" in request["include"]
+    with inspect_run(result.run) as trace:
+        response = next(event for event in trace.events() if event["kind"] == "model_response")
+        captured = json.loads(trace.read_text(response["response_ref"]))
+    assert captured["native_search"]["citations"] == []
+    assert captured["native_search"]["calls"][0]["action"]["sources"] == sources
 
 
 def test_native_search_retains_search_open_find_and_all_completed_calls(tmp_path, monkeypatch):

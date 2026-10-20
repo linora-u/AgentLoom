@@ -77,7 +77,7 @@ from agentloom.execution.trace_export import TraceExporter
 _TASK_TREE_CLEANUP_MAX_BYTES = 1024 * 1024
 
 
-def _run_info(runtime_context: Any, log_path: Path | None) -> RunInfo:
+def _run_info(runtime_context: Any, log_path: Path | None, *, trace_mode: str = "full") -> RunInfo:
     """Build the immutable public view of an internal RuntimeContext."""
 
     return RunInfo(
@@ -87,7 +87,7 @@ def _run_info(runtime_context: Any, log_path: Path | None) -> RunInfo:
         run_dir=runtime_context.run_dir.absolute(),
         manifest_path=runtime_context.manifest_path.absolute(),
         log_path=log_path.absolute() if log_path is not None else None,
-        trace_dir=runtime_context.trace_dir.absolute(),
+        trace_dir=runtime_context.trace_dir.absolute() if trace_mode == "full" else None,
     )
 
 
@@ -336,7 +336,8 @@ def _execute_app(
             task_id=task_id,
             run_id=run_id,
         )
-        public_run = _run_info(runtime_context, None)
+        trace_mode = str(effective_config.get("runtime", {}).get("trace", {}).get("mode", "full"))
+        public_run = _run_info(runtime_context, None, trace_mode=trace_mode)
     except BaseException as exc:
         _emit_preflight_rejection(event_sink, exc)
         raise
@@ -371,7 +372,11 @@ def _execute_app(
 
     try:
         try:
-            manifest_metadata = {"application_revision": running_revision, "redaction": {"enabled": effective_redaction}}
+            manifest_metadata = {
+                "application_revision": running_revision,
+                "redaction": {"enabled": effective_redaction},
+                "trace": {"mode": trace_mode, "persisted": trace_mode == "full"},
+            }
             if definition_snapshot_revision is not None:
                 manifest_metadata["definition_snapshot_revision"] = definition_snapshot_revision
             run_attempt_lease = lifecycle.initialize_run(runtime_context,
@@ -393,11 +398,19 @@ def _execute_app(
             public_run = _run_info(
                 runtime_context,
                 _configured_run_log_path(runtime_context, logger_backend),
+                trace_mode=services.trace_mode,
             )
             emit_started()
 
-            app = Application(project_config=get_config(), application_root=application_root, application_config=application_config,
-                runtime_context=runtime_context, lifecycle=lifecycle, logger=logger_backend)
+            app = Application(
+                project_config=get_config(),
+                application_root=application_root,
+                application_config=application_config,
+                runtime_context=runtime_context,
+                lifecycle=lifecycle,
+                trace_mode=services.trace_mode,
+                logger=logger_backend,
+            )
             with app.bind():
                 log = get_logger(logger_backend, __name__)
                 try:

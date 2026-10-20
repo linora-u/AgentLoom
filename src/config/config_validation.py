@@ -227,11 +227,27 @@ class ToolAccessControlSettings(BaseModel):
     path_validation: list[PathValidationRule] = Field(default_factory=list)
 
 
+class TraceSettings(BaseModel):
+    """Persistence policy for model, Tool and execution Trace payloads."""
+
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["full", "off"] = "full"
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _normalize_yaml_off(cls, value: Any) -> Any:
+        # YAML 1.1 readers, including PyYAML, decode an unquoted ``off`` as
+        # false. Accept that exact result so documented ``mode: off`` works.
+        # True is intentionally rejected because it has no unambiguous mode.
+        return "off" if value is False else value
+
+
 class RuntimeSettings(BaseModel):
     """Canonical runtime-home and retention settings."""
 
     model_config = ConfigDict(extra="forbid")
     root_dir: str = ".agentloom"
+    trace: TraceSettings = Field(default_factory=TraceSettings)
     successful_run_retention_days: int = Field(default=7, ge=0)
     failed_run_retention_days: int = Field(default=30, ge=0)
     artifact_retention_days: int = Field(default=3, ge=0)

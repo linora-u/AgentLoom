@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import os
 import re
 import threading
+import zlib
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -35,6 +37,7 @@ _TRACE_REF_RE = re.compile(r"^(?:payload_[0-9a-f]{32}|ctx_[0-9a-f]{32})$")
 _CONTEXT_REF_RE = re.compile(r"\[ContextRef (ctx_[0-9a-f]{32})\b")
 _RUN_DIR_RE = re.compile(r"^run_[A-Za-z0-9_-]+$")
 _VERIFY_CHUNK_BYTES = 1024 * 1024
+_COMPRESS_PAYLOAD_THRESHOLD = 4096
 MAX_DURABLE_CONTEXT_PAGE_BYTES = 65536
 
 
@@ -101,35 +104,94 @@ class TraceRecorder:
             ).iterencode(safe)
         else:
             pieces = iter((str(safe),))
-        chunk_hashes: list[str] = []
-        chunk_checksum = hashlib.sha256()
-        chunk_size = 0
+        byte_pieces = iter(_utf8_chunks(pieces))
+        prefix_buffer = bytearray()
+        exhausted = False
+        while len(prefix_buffer) <= _COMPRESS_PAYLOAD_THRESHOLD:
+            try:
+                prefix_buffer.extend(next(byte_pieces))
+            except StopIteration:
+                exhausted = True
+                break
+        if exhausted:
+            data = bytes(prefix_buffer)
+            digest, size = self.storage.write_content_addressed(
+                "payloads", iter((data,))
+            )
+            reference = f"{prefix}_{uuid4().hex}"
+            self.storage.atomic_write_json(
+                f"refs/{reference}.json",
+                {
+                    "sha256": digest,
+                    "size": size,
+                    "content_type": content_type,
+                    "chunk_size": _VERIFY_CHUNK_BYTES,
+                    "chunk_sha256": [
+                        hashlib.sha256(data[start:start + _VERIFY_CHUNK_BYTES]).hexdigest()
+                        for start in range(0, len(data), _VERIFY_CHUNK_BYTES)
+                    ],
+                    **(metadata or {}),
+                },
+            )
+            return reference
+        logical_checksum = hashlib.sha256()
+        logical_size = 0
+        compressed_chunks: list[dict[str, Any]] = []
 
-        def indexed_chunks() -> Iterator[bytes]:
-            nonlocal chunk_checksum, chunk_size
-            for piece in _utf8_chunks(pieces):
+        def encoded_chunks() -> Iterator[bytes]:
+            nonlocal logical_size
+            raw = bytearray()
+            storage_offset = 0
+            for piece in itertools.chain((bytes(prefix_buffer),), byte_pieces):
                 cursor = 0
                 while cursor < len(piece):
-                    take = min(len(piece) - cursor, _VERIFY_CHUNK_BYTES - chunk_size)
-                    chunk_checksum.update(piece[cursor:cursor + take])
-                    chunk_size += take
+                    take = min(len(piece) - cursor, _VERIFY_CHUNK_BYTES - len(raw))
+                    raw.extend(piece[cursor:cursor + take])
                     cursor += take
-                    if chunk_size == _VERIFY_CHUNK_BYTES:
-                        chunk_hashes.append(chunk_checksum.hexdigest())
-                        chunk_checksum = hashlib.sha256()
-                        chunk_size = 0
-                yield piece
-            if chunk_size:
-                chunk_hashes.append(chunk_checksum.hexdigest())
+                    if len(raw) == _VERIFY_CHUNK_BYTES:
+                        data = bytes(raw)
+                        compressed = zlib.compress(data)
+                        logical_checksum.update(data)
+                        compressed_chunks.append({
+                            "raw_offset": logical_size,
+                            "raw_size": len(data),
+                            "raw_sha256": hashlib.sha256(data).hexdigest(),
+                            "storage_offset": storage_offset,
+                            "storage_size": len(compressed),
+                            "storage_sha256": hashlib.sha256(compressed).hexdigest(),
+                        })
+                        logical_size += len(data)
+                        storage_offset += len(compressed)
+                        raw.clear()
+                        yield compressed
+            if raw or not compressed_chunks:
+                data = bytes(raw)
+                compressed = zlib.compress(data)
+                logical_checksum.update(data)
+                compressed_chunks.append({
+                    "raw_offset": logical_size,
+                    "raw_size": len(data),
+                    "raw_sha256": hashlib.sha256(data).hexdigest(),
+                    "storage_offset": storage_offset,
+                    "storage_size": len(compressed),
+                    "storage_sha256": hashlib.sha256(compressed).hexdigest(),
+                })
+                logical_size += len(data)
+                yield compressed
 
-        digest, size = self.storage.write_content_addressed(
-            "payloads", indexed_chunks()
+        storage_digest, storage_size = self.storage.write_content_addressed(
+            "payloads", encoded_chunks()
         )
+        digest = logical_checksum.hexdigest()
         reference = f"{prefix}_{uuid4().hex}"
         self.storage.atomic_write_json(
             f"refs/{reference}.json",
-            {"sha256": digest, "size": size, "content_type": content_type,
-             "chunk_size": _VERIFY_CHUNK_BYTES, "chunk_sha256": chunk_hashes,
+            {"sha256": digest, "size": logical_size, "content_type": content_type,
+             "encoding": "zlib-chunks-v1",
+             "storage_sha256": storage_digest, "storage_size": storage_size,
+             "chunk_size": _VERIFY_CHUNK_BYTES,
+             "chunk_sha256": [chunk["raw_sha256"] for chunk in compressed_chunks],
+             "compressed_chunks": compressed_chunks,
              **(metadata or {})},
         )
         return reference
@@ -622,6 +684,10 @@ class RunTrace:
         digest = metadata["sha256"]
         if not isinstance(digest, str) or len(digest) != 64:
             raise TraceStorageError("Invalid trace payload digest")
+        if metadata.get("encoding") == "zlib-chunks-v1":
+            storage_digest = metadata.get("storage_sha256")
+            if not isinstance(storage_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", storage_digest):
+                raise TraceStorageError("Invalid compressed trace payload digest")
         return metadata
 
     def reference_metadata(self, reference: str) -> dict[str, Any]:
@@ -633,6 +699,11 @@ class RunTrace:
         """Verify every byte of a committed reference before resuming execution."""
 
         metadata = self._metadata(reference)
+        if metadata.get("encoding") == "zlib-chunks-v1":
+            self._read_compressed_window(
+                metadata, 0, metadata["size"], reference, verify_storage=True
+            )
+            return
         checksum = hashlib.sha256()
         size = 0
         with self.storage.open_binary_reader(f"payloads/{metadata['sha256']}.blob") as stream:
@@ -641,6 +712,85 @@ class RunTrace:
                 size += len(chunk)
         if size != metadata["size"] or checksum.hexdigest() != metadata["sha256"]:
             raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+
+    def _read_compressed_window(
+        self, metadata: dict[str, Any], start: int, end: int, reference: str,
+        *, verify_storage: bool = False,
+    ) -> bytes:
+        """Read and verify the compressed chunks overlapping one logical byte range."""
+
+        total = metadata.get("size")
+        chunks = metadata.get("compressed_chunks")
+        storage_size = metadata.get("storage_size")
+        if (
+            not isinstance(total, int) or total < 0
+            or not isinstance(storage_size, int) or storage_size < 0
+            or not isinstance(chunks, list) or not chunks
+            or start < 0 or end < start or end > total
+        ):
+            raise TraceStorageError(f"Invalid compressed trace payload metadata: {reference}")
+        storage_digest = metadata["storage_sha256"]
+        logical = hashlib.sha256() if start == 0 and end == total else None
+        stored = hashlib.sha256() if verify_storage else None
+        selected = bytearray()
+        expected_raw_offset = 0
+        expected_storage_offset = 0
+        with self.storage.open_binary_reader(f"payloads/{storage_digest}.blob") as stream:
+            if os.fstat(stream.fileno()).st_size != storage_size:
+                raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+            for chunk in chunks:
+                values = (
+                    chunk.get("raw_offset"), chunk.get("raw_size"),
+                    chunk.get("storage_offset"), chunk.get("storage_size"),
+                ) if isinstance(chunk, dict) else ()
+                if (
+                    len(values) != 4
+                    or any(not isinstance(value, int) or value < 0 for value in values)
+                    or values[0] != expected_raw_offset
+                    or values[2] != expected_storage_offset
+                    or not isinstance(chunk.get("raw_sha256"), str)
+                    or not isinstance(chunk.get("storage_sha256"), str)
+                ):
+                    raise TraceStorageError(f"Invalid compressed trace payload metadata: {reference}")
+                raw_offset, raw_size, compressed_offset, compressed_size = values
+                overlap_start = max(start, raw_offset)
+                overlap_end = min(end, raw_offset + raw_size)
+                if overlap_start < overlap_end or logical is not None or stored is not None:
+                    stream.seek(compressed_offset)
+                    compressed = stream.read(compressed_size)
+                    if (
+                        len(compressed) != compressed_size
+                        or hashlib.sha256(compressed).hexdigest() != chunk["storage_sha256"]
+                    ):
+                        raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+                    if stored is not None:
+                        stored.update(compressed)
+                    try:
+                        raw = zlib.decompress(compressed)
+                    except zlib.error as exc:
+                        raise TraceStorageError(
+                            f"Trace payload integrity check failed: {reference}"
+                        ) from exc
+                    if (
+                        len(raw) != raw_size
+                        or hashlib.sha256(raw).hexdigest() != chunk["raw_sha256"]
+                    ):
+                        raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+                    if logical is not None:
+                        logical.update(raw)
+                    if overlap_start < overlap_end:
+                        selected.extend(
+                            raw[overlap_start - raw_offset:overlap_end - raw_offset]
+                        )
+                expected_raw_offset += raw_size
+                expected_storage_offset += compressed_size
+        if expected_raw_offset != total or expected_storage_offset != storage_size:
+            raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+        if logical is not None and logical.hexdigest() != metadata["sha256"]:
+            raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+        if stored is not None and stored.hexdigest() != storage_digest:
+            raise TraceStorageError(f"Trace payload integrity check failed: {reference}")
+        return bytes(selected)
 
     @staticmethod
     def _verify_window(stream: Any, metadata: dict[str, Any], start: int, end: int,
@@ -679,6 +829,10 @@ class RunTrace:
 
     def read_text(self, reference: str) -> str:
         metadata = self._metadata(reference)
+        if metadata.get("encoding") == "zlib-chunks-v1":
+            return self._read_compressed_window(
+                metadata, 0, metadata["size"], reference, verify_storage=True
+            ).decode("utf-8")
         digest = metadata["sha256"]
         data = self.storage.read_bytes(f"payloads/{digest}.blob")
         if len(data) != metadata["size"] or hashlib.sha256(data).hexdigest() != digest:
@@ -691,6 +845,17 @@ class RunTrace:
         if offset < 0 or not 1 <= limit <= 65536:
             raise ValueError("Trace page requires offset >= 0 and 1 <= limit <= 65536")
         metadata = self._metadata(reference)
+        if metadata.get("encoding") == "zlib-chunks-v1":
+            total = metadata["size"]
+            end = min(total, offset + limit)
+            data = self._read_compressed_window(metadata, min(offset, total), end, reference)
+            next_offset = offset + len(data)
+            return TracePage(
+                data=data,
+                next_offset=next_offset if next_offset < total else None,
+                total_bytes=total,
+                content_type=str(metadata["content_type"]),
+            )
         digest = metadata["sha256"]
         with self.storage.open_binary_reader(f"payloads/{digest}.blob") as stream:
             total = self._verify_window(stream, metadata, offset, min(metadata["size"], offset + limit), reference)
@@ -713,6 +878,39 @@ class RunTrace:
         if not 1 <= len(needle) <= 256 or offset < 0 or not 1 <= limit <= 100:
             raise ValueError("Trace search requires a short query, byte offset and 1..100 matches")
         metadata = self._metadata(reference)
+        if metadata.get("encoding") == "zlib-chunks-v1":
+            total = metadata["size"]
+            if offset >= total:
+                self._read_compressed_window(metadata, 0, 0, reference)
+                return TraceSearchPage([], None, total)
+            scan_end = min(total, offset + 1024 * 1024)
+            window = self._read_compressed_window(
+                metadata, offset, min(total, scan_end + len(needle) - 1), reference
+            )
+            matches: list[tuple[int, str]] = []
+            cursor = 0
+            while len(matches) < limit:
+                found = window.find(needle, cursor)
+                if found < 0 or offset + found >= scan_end:
+                    break
+                position = offset + found
+                start = max(0, position - 128)
+                end = min(total, position + len(needle) + 256)
+                excerpt = self._read_compressed_window(metadata, start, end, reference)
+                before = excerpt.rfind(b"\n", 0, position - start)
+                if before >= 0:
+                    excerpt = excerpt[before + 1:]
+                after = excerpt.find(b"\n", position - start - before - 1 + len(needle))
+                if after >= 0:
+                    excerpt = excerpt[:after]
+                matches.append((position, excerpt.decode("utf-8", errors="replace")))
+                cursor = found + len(needle)
+            next_offset = offset + cursor if len(matches) == limit else scan_end
+            return TraceSearchPage(
+                matches,
+                next_offset if next_offset < total else None,
+                total,
+            )
         digest = metadata["sha256"]
         with self.storage.open_binary_reader(f"payloads/{digest}.blob") as stream:
             total = metadata["size"]
