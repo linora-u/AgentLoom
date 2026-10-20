@@ -1,6 +1,6 @@
 """Bind saved Pi subscription credentials without granting the login file.
 
-Only the trusted experiment parent reads/refreshed the normal SDK login store.
+Only the trusted experiment parent reads/refreshes the normal SDK login store.
 The inherited child binding is in memory and the bridge consumes a private
 descriptor before creating any Agent tools. Ordinary Pi sessions keep their
 existing SDK-managed credential-file behavior.

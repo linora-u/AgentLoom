@@ -9,7 +9,10 @@ from agentloom.config.config import bind_config, load_project_config
 from tests.application_test.mixed_runtime_support import finish, model_service, project, tool_messages, write_yaml
 
 
-def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(tmp_path):
+@pytest.mark.parametrize("runtime", ["smolagents", "pi"])
+def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(tmp_path, runtime):
+    from agentloom.runtimes.pi.credentials import bind_pi_credentials
+
     counts = []
 
     def program(request):
@@ -36,7 +39,7 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
         return finish(request, value)
 
     with model_service(program) as (url, requests):
-        definition = project(tmp_path, url, supervisor="smolagents", worker="smolagents")
+        definition = project(tmp_path, url, supervisor=runtime, worker=runtime)
         app = definition.parents[1]
         root = yaml.safe_load(definition.read_text())
         root["system_prompt"] = {"path": "prompts/root.md"}
@@ -49,7 +52,9 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
         write_yaml(worker, value)
         write_yaml(app / "config/system.yaml", {"harnessing": {"enabled": True}})
         events = []
-        with bind_config(load_project_config(tmp_path)):
+        private = {"unused-provider": {"type": "oauth", "access": "PRIVATE-OAUTH-CANARY-136",
+                                      "refresh": "PRIVATE-REFRESH-CANARY-136", "expires": 9999999999999}}
+        with bind_config(load_project_config(tmp_path)), bind_pi_credentials(private):
             result = execute_app(definition, file_logging=False, event_sink=events.append)
             assert result.output == "COMPOSED-RESULT"
             assert result.harnessing.status == "completed", result.harnessing.to_dict()
@@ -66,6 +71,10 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             assert recovered.output == result.output
             assert recovered.run == result.run
             assert len(requests) == calls
+            for path in (tmp_path / "runtime").rglob("*"):
+                if path.is_file():
+                    assert b"PRIVATE-OAUTH-CANARY-136" not in path.read_bytes()
+                    assert b"PRIVATE-REFRESH-CANARY-136" not in path.read_bytes()
             with pytest.raises(ValueError, match="harness_resume_id"):
                 execute_app(definition, resume_task_id=result.run.task_id)
 

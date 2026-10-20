@@ -8,6 +8,7 @@ import type { ValidateFunction } from "ajv";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { configureModel, type SearchEvidence } from "./model.js";
 import { providerError } from "./errors.js";
+import { memoryCredentials } from "./credentials.js";
 import { decode } from "./protocol.js";
 import { nativeTools } from "./tools.js";
 import { restoreSession, SessionPersistence } from "./checkpoint.js";
@@ -15,7 +16,7 @@ import { enableInstructionOnlyTurns, runInstructionOnlyTurn } from "./session.js
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
-  AuthStorage, ModelRuntime, SettingsManager, SessionManager, DefaultResourceLoader,
+  ModelRuntime, SettingsManager, SessionManager, DefaultResourceLoader,
   createAgentSession, type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 
@@ -133,7 +134,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   const subscription = codex || chatgpt;
   if (subscription && !piAuthPath && privateAuth === undefined) throw new Error("Pi ChatGPT credential path is unavailable");
   const runtime = await ModelRuntime.create({
-    ...(privateAuth !== undefined ? {credentials: AuthStorage.inMemory(privateAuth)} :
+    ...(privateAuth !== undefined ? {credentials: memoryCredentials(privateAuth)} :
       {authPath: subscription ? piAuthPath : join(agentDir, "auth.json")}),
     modelsPath: null, refreshOnCreate: false,
   });
