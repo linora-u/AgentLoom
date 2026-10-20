@@ -245,7 +245,9 @@ def _files(root: Path, *, declared_resource: bool = False):
             yield Path(parent) / name
 
 
-def _commit(staging: Path, destination: Path, application: str, *, credential_refs: Sequence[str], effective_config: Mapping | None, model_config: Mapping | None, environment: Sequence[dict], editable_resources: Mapping | None = None) -> CandidateBundle:
+def _commit(staging: Path, destination: Path, application: str, *, credential_refs: Sequence[str], effective_config: Mapping | None, model_config: Mapping | None, environment: Sequence[dict], editable_resources: Mapping | None = None, tool_capabilities: Mapping | None = None) -> CandidateBundle:
+    from .tool_capabilities import capture_tool_capabilities
+    capabilities = capture_tool_capabilities(staging / "project") if tool_capabilities is None else dict(tool_capabilities)
     files = {}
     total = 0
     for root in (staging / "project", staging / "python"):
@@ -264,7 +266,8 @@ def _commit(staging: Path, destination: Path, application: str, *, credential_re
     manifest = {"schema_version": 1, "application": application, "files": files,
                 "effective_config": _sanitize(effective_config or {}, "effective_config", []),
                 "model_config": _sanitize(model_config or {}, "model_config", []),
-                "credential_refs": sorted(set(refs)), "environment": list(environment), "editable_resources": dict(editable_resources or {})}
+                "credential_refs": sorted(set(refs)), "environment": list(environment), "editable_resources": dict(editable_resources or {}),
+                "tool_capabilities": capabilities}
     identity = _digest(_json(manifest))
     final = destination / identity.split(":", 1)[1]
     destination.mkdir(parents=True, exist_ok=True)
@@ -425,7 +428,9 @@ def _check_candidate_secrets(relative: Path, old: Any, new: Any, pointer: str = 
 
 
 def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | None], destination: Path, *, editable: Sequence[str], validate: Callable[[Path, Path], None] | None = None) -> CandidateBundle:
+    from .tool_capabilities import validate_tool_capabilities
     base.verify()
+    capabilities = base.manifest.get("tool_capabilities", {})
     allowed = set(editable)
     if not allowed <= _EDITABLE:
         raise ValueError("Unsupported editable component")
@@ -463,11 +468,15 @@ def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | None], d
                     _check_candidate_secrets(relative, parse(before) if before else None, parse(after))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(after)
+        # This check is independent of the business driver's validation and
+        # precedes any potential runtime/tool construction by that driver.
+        # Never recapture a descendant's tool declarations as trusted powers.
+        validate_tool_capabilities(staging / "project", capabilities)
         if validate is not None:
             validate(staging / "project", staging / "project" / base.application)
         else:
             _validate_definitions(staging / "project", staging / "project" / base.application)
-        return _commit(staging, destination, base.application, credential_refs=base.manifest["credential_refs"], effective_config=base.manifest["effective_config"], model_config=base.manifest["model_config"], environment=base.manifest["environment"], editable_resources=base.manifest.get("editable_resources", {}))
+        return _commit(staging, destination, base.application, credential_refs=base.manifest["credential_refs"], effective_config=base.manifest["effective_config"], model_config=base.manifest["model_config"], environment=base.manifest["environment"], editable_resources=base.manifest.get("editable_resources", {}), tool_capabilities=capabilities)
     finally:
         if staging.exists():
             shutil.rmtree(staging)

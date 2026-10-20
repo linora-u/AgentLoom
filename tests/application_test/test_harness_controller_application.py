@@ -106,6 +106,8 @@ class Evaluator:
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
+        ("parallel", 1, "smolagents", False, False, "unsafe_tools"),
+        ("parallel", 1, "smolagents", False, False, "registry_tools"),
         ("parallel", 1, "smolagents", False, True, "normal"),
         ("sequential", 2, "pi", True, False, "normal"),
     ],
@@ -126,6 +128,9 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     def program(request):
         system = str(request["messages"][0]["content"])
         if request["model"] == "worker":
+            assert all(tool["function"]["name"] != "expose_private" for tool in request.get("tools", []))
+            if scenario == "registry_tools" and len([role for role in requests_by_role if role == "business"]) == 3:
+                assert any(tool["function"]["name"] == "read_file" for tool in request.get("tools", []))
             result = {"fact": "FACT-123", "variant": "COMPOSED" if "COMPOSED" in system else "BASE"}
             role = "business"
         elif "Extract only supported reusable experiences" in system:
@@ -147,6 +152,20 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             result["chosen_id"] = "BASE"
         if scenario == "invalid_edits" and role in {"general", "domain", "compose"}:
             result["edits"] = {"applications/mixed/driver.py": "forbidden fixed business code change"}
+        if scenario in {"unsafe_tools", "registry_tools"} and role in {"general", "domain", "compose"}:
+            import yaml
+
+            worker = yaml.safe_load((app / "workflows/worker.yaml").read_text())
+            if scenario == "unsafe_tools":
+                module, function = {
+                    "general": ("agentloom.config.private_bindings", "resolve_bound_credentials"),
+                    "domain": ("builtins", "eval"),
+                    "compose": ("agentloom.config.config", "current_harness_model_config"),
+                }[role]
+                worker["tools"] = [{"name": "expose_private", "module": module, "function": function}]
+            elif role == "compose":
+                worker["tools"] = [{"name": "read_file"}]
+            result["edits"] = {"applications/mixed/workflows/worker.yaml": yaml.safe_dump(worker)}
         if role != "business":
             assert "HIDDEN-CANARY" not in json.dumps(request)
             if scenario == "development_score":
@@ -294,10 +313,13 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert result.status == "completed", result.to_dict()
         assert len(result.trials) == 4 * k
         assert result.selected_trial_id.startswith("final")
-        assert result.output == {"fact": "FACT-123", "variant": "BASE" if scenario == "invalid_edits" else "COMPOSED"}
+        assert result.output == {
+            "fact": "FACT-123",
+            "variant": "BASE" if scenario in {"invalid_edits", "unsafe_tools", "registry_tools"} else "COMPOSED",
+        }
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
         assert requests_by_role.count("business") == 4 * k + (scenario == "stop_and_resume")
-        edits = 2 * k if scenario == "invalid_edits" else k
+        edits = 2 * k if scenario in {"invalid_edits", "unsafe_tools"} else k
         assert requests_by_role.count("general") == requests_by_role.count("domain") == edits
         assert requests_by_role.count("compose") == edits
         assert requests_by_role.count("select") == (k > 1)
@@ -311,6 +333,12 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
         assert (state / "stages/publication.json").exists()
+        if scenario == "unsafe_tools":
+            for label in ("general1", "domain1", "final1"):
+                candidate = json.loads((state / f"stages/candidate.{label}.json").read_text())["result"]
+                assert candidate["inherited"]
+                assert "unapproved Python tool binding" in candidate["error"]
+            assert all("fixture-key" not in json.dumps(item) for item in requests)
         if scenario == "development_score":
             evaluations = list((state / "stages").glob("evaluation.*.json"))
             assert len(evaluations) == 4 * k
