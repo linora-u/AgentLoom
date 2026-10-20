@@ -60,3 +60,21 @@ def test_waiting_codex_login_can_be_cancelled(tmp_path: Path):
 def test_login_browser_rejects_untrusted_host():
     with pytest.raises(AgentRuntimeError, match="invalid Codex login URL"):
         open_login_browser("https://evil.example/oauth/authorize")
+
+
+def test_subscription_capture_retains_refresh_authority_in_parent_store(tmp_path, monkeypatch):
+    from agentloom.runtimes.pi.credentials import capture_pi_credentials
+
+    source = tmp_path / "auth.json"
+    source.write_text(json.dumps({
+        "openai-codex": {"type": "oauth", "access": "selected-access",
+                         "refresh": "parent-refresh", "expires": (time.time() + 3600) * 1000},
+        "other-provider": {"type": "api_key", "key": "unrelated-secret"},
+    }))
+    original = source.read_bytes()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    captured = capture_pi_credentials({"models": {"business": {"adapter": "openai_codex_responses"}}})
+    assert set(captured) == {"openai-codex"}
+    assert captured["openai-codex"]["access"] == "selected-access"
+    assert captured["openai-codex"]["refresh"] == ""
+    assert source.read_bytes() == original

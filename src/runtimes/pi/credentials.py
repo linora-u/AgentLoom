@@ -51,7 +51,12 @@ def _read(path, providers):
             raise ValueError()
     except (ValueError, KeyError, TypeError):
         raise ValueError("Pi subscription login is unavailable; refresh the Pi login before running the Application") from None
-    return selected
+    # A child needs the short-lived access capability. Keep rotation authority
+    # exclusively in the parent's normal SDK store. An expired child fails
+    # authentication and can resume with a fresh parent binding; it cannot
+    # rotate a refresh token without updating that authoritative store.
+    return {provider: {**credential, "refresh": ""}
+            for provider, credential in selected.items()}
 
 
 def capture_pi_credentials(model_catalog):
