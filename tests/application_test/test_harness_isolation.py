@@ -407,3 +407,41 @@ def test_snapshot_preserves_runtime_python_packages_and_all_declared_skill_resou
     environment = {item['name']: item for item in bundle.manifest['environment']}
     assert environment['runtime:python']['implementation']
     assert environment['runtime:platform']['machine']
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual external subreaper custody under inherited OS policy")
+@pytest.mark.parametrize("mode", ["completed", "timeout"])
+def test_scoped_shell_cleanup_defers_descendants_until_confirmed_whole_host_exit(project, tmp_path, mode):
+    import psutil
+    root, app = project
+    (app / "operations.py").write_text('''
+import os, subprocess, sys
+from pathlib import Path
+from agentloom.execution.process import run_captured_process, CapturedProcessTimeout
+def hook_probe(payload, bundle, context):
+    marker = str(Path(context['root']) / 'output/detached-pid')
+    script = "import os,subprocess,sys,time;from pathlib import Path; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'],env={},start_new_session=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);Path("+repr(marker)+").write_text(str(child.pid));print('hook output',flush=True)"
+    if payload['mode'] == 'timeout':
+        script += ";time.sleep(120)"
+    import shlex
+    command = shlex.join([sys.executable, '-c', script])
+    try:
+        result = run_captured_process(command, cwd=str(Path(bundle['root'])/'project'), env=os.environ.copy(), stdin=b'{}', timeout=.3, stdout_limit=1000, stderr_limit=1000)
+        return {'timed_out':False,'scope':result.cleanup_scope,'physical_exit_confirmed':result.physical_exit_confirmed,'output':result.stdout.strip()}
+    except CapturedProcessTimeout as error:
+        return {'timed_out':True,'scope':error.cleanup_scope,'physical_exit_confirmed':error.physical_exit_confirmed,'effect_uncertain':error.effect_uncertain}
+''')
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    context = Context(tmp_path / "trial", bundle.candidate_id)
+    result = execute_isolated(bundle, context, "applications.sample.operations:hook_probe", {"mode": mode}, timeout=15)
+    assert result["timed_out"] == (mode == "timeout")
+    assert result["scope"] == "outer_host"
+    assert result["physical_exit_confirmed"] is False
+    if mode == "timeout":
+        assert result["effect_uncertain"]
+    else:
+        assert result["output"] == "hook output"
+    child = int((context.root / "output/detached-pid").read_text())
+    assert not psutil.pid_exists(child)
+    cleanup = json.loads((context.root / "process/attempts/000001/cleanup.json").read_text())
+    assert cleanup["physical_exit_confirmed"] is True

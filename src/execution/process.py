@@ -20,7 +20,13 @@ _PROCESS_RUN_TOKEN_ENV = "AGENTLOOM_SUBPROCESS_RUN_TOKEN"
 
 
 class CapturedProcessTimeout(TimeoutError):
-    """Raised after a timed-out process and all descendants are terminated."""
+    """A timed-out effect; outer-owned descendants await the Host exit barrier."""
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.cleanup_scope = "outer_host" if _harness_custody() else "subprocess_tree"
+        self.physical_exit_confirmed = self.cleanup_scope == "subprocess_tree"
+        self.effect_uncertain = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +39,17 @@ class CapturedProcessResult:
     stdout_truncated: bool
     stderr_truncated: bool
     duration_seconds: float
+    cleanup_scope: str = "subprocess_tree"
+    physical_exit_confirmed: bool = True
+
+
+def _harness_custody() -> bool:
+    from agentloom.execution.durability_scope import current_durability_boundary
+    from agentloom.execution.process_scope import managed_process_generation
+
+    # Both bindings originate in the authenticated, trusted Host bootstrap.
+    # Public environment group markers cannot opt into this cleanup path.
+    return current_durability_boundary() is not None and managed_process_generation() is not None
 
 
 def _read_preview(stream: Any, limit: int) -> tuple[str, int, bool]:
@@ -62,7 +79,21 @@ def _marked_processes(
 
 
 def terminate_process_tree(process: subprocess.Popen[Any], token: str) -> None:
-    """Terminate a process group plus descendants that escaped its session."""
+    """Retire a root; authenticated Harness custody drains at Host exit.
+
+    Ordinary execution terminates the complete tree here. An isolated Host's
+    external guardian owns the full tree barrier, with distinct receipts.
+    """
+    if _harness_custody():
+        # This interpreter cannot enumerate /proc after OS restriction. The
+        # already-authenticated external guardian owns every descendant,
+        # including adopted, detached children with a scrubbed environment.
+        # Retire this concrete root only; whole-Host physical extinction is a
+        # separate required barrier before a Trial can be eligible or retried.
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=1)
+        return
     from agentloom.execution.process_scope import _guardian_generation
 
     known: dict[int, psutil.Process] = {}
@@ -282,6 +313,8 @@ def run_captured_process(
         stdout_truncated=stdout_truncated,
         stderr_truncated=stderr_truncated,
         duration_seconds=round(time.monotonic() - started, 6),
+        cleanup_scope="outer_host" if _harness_custody() else "subprocess_tree",
+        physical_exit_confirmed=not _harness_custody(),
     )
 
 
@@ -299,7 +332,8 @@ def run_process_to_fds(
 
     This is the low-level seam for runtimes that own durable output files and
     therefore do not need :func:`run_captured_process` to create temporary
-    capture streams. Timeout still guarantees complete process-tree teardown.
+    capture streams. Under authenticated Harness custody, timeout is uncertain
+    until the external owner confirms whole-Host physical extinction.
     """
 
     process, close_process = spawn_registered_process(

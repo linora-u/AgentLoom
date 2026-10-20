@@ -78,6 +78,15 @@ class Guardian:
         # Retain exact psutil identities after detachment, reparenting or
         # termination: an unreadable zombie environment is not proof of exit.
         members = {pid: process for pid, process in self.known_members.items() if process.is_running()}
+        # Linux subreaping retains custody even when a tool detaches, clears
+        # every environment marker and its original parent exits immediately.
+        # Observe real ancestry outside the restricted Host, not from tools.
+        for process in psutil.Process().children(recursive=True):
+            try:
+                process.create_time()
+                members[process.pid] = process
+            except psutil.NoSuchProcess:
+                pass
         # Only our framework-generated generation is delegated to this scope;
         # a public PGID in an unrelated process's environment is not authority.
         if self.command is not None:
