@@ -475,15 +475,7 @@ class ImprovementController:
     def _parallel(self, base, k):
         common = self._evidence(base)
         jobs = [(f"{role}{index}", role) for index in range(1, k + 1) for role in ("general", "domain")]
-        proposed = self._independent(
-            [lambda label=label, role=role: self._edit(label, role, base, common) for label, role in jobs]
-        )
-        self._independent(
-            [
-                lambda label=label, bundle=bundle: self._trial(label, bundle)
-                for (label, _), bundle in zip(jobs, proposed)
-            ]
-        )
+        self._propose_and_probe(jobs, base, common)
         labels = [label for label, _ in jobs]
         evidence = self._evidence(base, pool=labels)
         finals = [f"final{index}" for index in range(1, k + 1)]
@@ -500,15 +492,7 @@ class ImprovementController:
         for index in range(1, k + 1):
             common = self._evidence(current, pool=history)
             jobs = [(f"{role}{index}", role) for role in ("general", "domain")]
-            proposed = self._independent(
-                [lambda label=label, role=role: self._edit(label, role, current, common) for label, role in jobs]
-            )
-            self._independent(
-                [
-                    lambda label=label, bundle=bundle: self._trial(label, bundle)
-                    for (label, _), bundle in zip(jobs, proposed)
-                ]
-            )
+            self._propose_and_probe(jobs, current, common)
             history.extend(label for label, _ in jobs)
             label = f"final{index}"
             current = self._edit(label, "compose", current, self._evidence(current, pool=history))
@@ -517,7 +501,17 @@ class ImprovementController:
             finals.append(label)
         return finals
 
+    def _propose_and_probe(self, jobs, parent, evidence):
+        proposed = self._independent(
+            [lambda label=label, role=role: self._edit(label, role, parent, evidence) for label, role in jobs]
+        )
+        self._independent(
+            [lambda label=label, bundle=bundle: self._trial(label, bundle)
+             for (label, _), bundle in zip(jobs, proposed)]
+        )
+
     def _select(self, finals):
+        self._check_stop()
         eligible = [key for key in finals if self.receipts[key].eligible]
         if not eligible:
             raise ValueError("No composed final satisfies the complete business delivery contract")
@@ -639,7 +633,6 @@ class ImprovementController:
         for method in ("prepare", "execute_once", "reconcile", "publish", "validate_candidate", "preflight"):
             if not callable(getattr(self.driver, method, None)):
                 raise ValueError(f"Application driver lacks required {method} capability")
-        self.driver.preflight(self.request, self.policy)
         if self.policy.feedback.mode == "development_score":
             load_driver(self.policy.feedback.evaluator)
         self.store.immutable("request.json", self.request)
@@ -649,7 +642,11 @@ class ImprovementController:
         if base_record:
             self.base = load_bundle(Path(base_record["root"]))
             self.base.verify()
+            # Original preflight may inspect live source/business inputs.
+            # Recovery validates archived configuration via _validate below;
+            # only private capability references are rebound from live files.
         else:
+            self.driver.preflight(self.request, self.policy)
             resources = getattr(self.driver, "editable_resources", lambda request: {})(self.request)
             self.base = snapshot_application(
                 self.request.project_root,
@@ -744,11 +741,13 @@ class ImprovementController:
             choice = self._select(finals)
             selected = self.receipts[choice["chosen"]]
             reason = choice["reason"]
+            self._check_stop()
             decision_id = fingerprint([self.experiment_id, selected.trial_id, selected.candidate_id])
             publication = self.store.begin("publication", {"selected": selected, "decision_id": decision_id})
             if publication["status"] == "completed":
                 delivery = publication["result"]
             else:
+                self._check_stop()
                 delivery = json_value(self.driver.publish(self.invocation, selected, decision_id))
                 self.store.finish("publication", delivery)
             status = "completed"
@@ -834,6 +833,28 @@ def run_application(
         raise ValueError("Nested complete-task dispatch must use the bound driver's once entry")
     if stop_token is not None and not callable(getattr(stop_token, "is_set", None)):
         raise ValueError("stop_token must expose is_set()")
+    experiment_id = resume_id or "experiment-" + uuid.uuid4().hex
+    if not isinstance(experiment_id, str) or not experiment_id or any(
+        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in experiment_id
+    ):
+        raise ValueError("Invalid experiment resume identity")
+    if resume_id is not None and policy is None:
+        # Enabling/disabling or corrupting live Application YAML cannot
+        # redefine an already frozen experiment's policy on recovery.
+        from .policy import HarnessingPolicy
+        if state_root is None:
+            from agentloom.config.config import load_project_config
+            from agentloom.execution.context import resolve_runtime_home
+            config = load_project_config(request.project_root)
+            state_root = resolve_runtime_home(config.raw, agent_root=request.project_root).root_dir / "harnessing"
+        resumed = ExperimentStore(Path(state_root) / experiment_id)
+        try:
+            stored_policy = resumed.read("policy.json")
+        finally:
+            resumed.close()
+        if stored_policy is None:
+            raise ValueError("No frozen experiment policy exists for this resume identity")
+        policy = HarnessingPolicy.model_validate(stored_policy)
     if policy is None:
         from agentloom.config.config import load_project_config
         from agentloom.app.application import _system_settings
@@ -861,11 +882,6 @@ def run_application(
 
         config = load_project_config(request.project_root)
         state_root = resolve_runtime_home(config.raw, agent_root=request.project_root).root_dir / "harnessing"
-    experiment_id = resume_id or "experiment-" + uuid.uuid4().hex
-    if not isinstance(experiment_id, str) or any(
-        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in experiment_id
-    ):
-        raise ValueError("Invalid experiment resume identity")
     store = ExperimentStore(Path(state_root) / experiment_id)
     try:
         with store.lock():

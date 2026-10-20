@@ -16,6 +16,8 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
     counts = []
 
     def program(request):
+        assert "MCP-ARGV-PRIVATE-CANARY" not in json.dumps(request)
+        assert "DOTENV-PRIVATE-CANARY" not in json.dumps(request)
         system = str(request["messages"][0]["content"])
         if "Extract only supported reusable experiences" in system:
             value, role = {"experiences": []}, "reflect"
@@ -46,6 +48,10 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
         write_yaml(definition, root)
         (app / "prompts").mkdir()
         (app / "prompts/root.md").write_text("BASE-ROOT")
+        for name in (".env.local", ".env.production"):
+            (app / name).write_text("OPENAI_API_KEY=DOTENV-PRIVATE-CANARY\n")
+        (app / ".mcp.json").write_text(json.dumps({"mcpServers": {"private": {
+            "command": "/usr/bin/env", "args": ["--token", "MCP-ARGV-PRIVATE-CANARY"]}}}))
         worker = definition.parent / "worker_agents/inspect.yaml"
         value = yaml.safe_load(worker.read_text())
         value["tools"] = []
@@ -67,11 +73,18 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             assert len(events) == 8
             assert len({event.run.run_dir for event in events}) == 4
             calls = len(requests)
+            # Recovery must not parse mutable source definitions or reload
+            # Worker/prompt resources, even through the public CLI entry.
+            definition.write_text("invalid: [")
+            worker.write_text("invalid: [")
+            (app / "config/system.yaml").write_text("invalid: [")
+            (app / "prompts/root.md").write_text("LIVE-MUTATION")
             recovered = execute_app(definition, file_logging=False,
                 harness_resume_id=result.harnessing.experiment_id)
             assert recovered.output == result.output
             assert recovered.run == result.run
             assert len(requests) == calls
+            definition.unlink()
             from click.testing import CliRunner
             from agentloom.app.cli import run
             command = CliRunner().invoke(run, [str(definition), "--no-file-log",
@@ -86,7 +99,11 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
                 if path.is_file():
                     assert b"PRIVATE-OAUTH-CANARY-136" not in path.read_bytes()
                     assert b"PRIVATE-REFRESH-CANARY-136" not in path.read_bytes()
+                    assert b"MCP-ARGV-PRIVATE-CANARY" not in path.read_bytes()
+                    assert b"DOTENV-PRIVATE-CANARY" not in path.read_bytes()
             with pytest.raises(ValueError, match="harness_resume_id"):
+                write_yaml(app / "config/system.yaml", {"harnessing": {"enabled": True}})
+                write_yaml(definition, root)
                 execute_app(definition, resume_task_id=result.run.task_id)
 
 

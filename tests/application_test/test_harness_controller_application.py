@@ -102,6 +102,8 @@ class Evaluator:
     [
         ("parallel", 1, "smolagents", False, False, "normal"),
         ("parallel", 1, "smolagents", False, False, "stop_and_resume"),
+        ("parallel", 1, "smolagents", False, False, "stop_after_final"),
+        ("parallel", 1, "pi", False, False, "stop_after_final"),
         ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
@@ -268,8 +270,24 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             stopper = Thread(target=stop_after_actual_business, daemon=True)
             stopper.start()
         result = run_application(
-            request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop
+            request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
+            events=(lambda event: stop.set() if event["event"] == "trial.completed"
+                    and event.get("trial_id") == "final1" else None) if scenario == "stop_after_final" else None,
         )
+        if scenario == "stop_after_final":
+            assert result.status == "stopped", result.to_dict()
+            assert len(result.trials) == 4
+            assert not result.delivery and not (tmp_path / "delivery.json").exists()
+            assert requests_by_role.count("reflect") == requests_by_role.count("select") == 0
+            assert not (tmp_path / "experiments" / result.experiment_id / "stages/publication.json").exists()
+            business_calls = requests_by_role.count("business")
+            assert business_calls == 4
+            (app / "workflows/worker.yaml").write_text("invalid: [")
+            (app / "prompts/business.md").write_text("LIVE-MUTATION")
+            stop.clear()
+            result = run_application(request, policy=policy, state_root=tmp_path / "experiments",
+                environment=environment, resume_id=result.experiment_id, stop_token=stop)
+            assert requests_by_role.count("business") == business_calls
         if stopper is not None:
             stopper.join(timeout=1)
             assert not stopper.is_alive()

@@ -193,14 +193,15 @@ def dispatch_supervisor(yaml_path, *, resume_task_id, file_logging, event_sink,
     from agentloom.config.paths import configuration_root
 
     base = get_config()
-    path = _resolve_yaml_path(yaml_path)
+    path = ((Path(yaml_path) if Path(yaml_path).is_absolute() else base.agent_root / yaml_path).resolve()
+            if harness_resume_id is not None else _resolve_yaml_path(yaml_path))
     root = configuration_root(path, base.agent_root)
-    app_config, _ = _system_settings(base, root)
-    policy = resolve_harnessing_policy(base.raw, app_config)
-    if not policy.enabled:
-        if harness_resume_id is not None:
-            raise ValueError("harness_resume_id requires Application harnessing.enabled")
-        return None
+    policy = None
+    if harness_resume_id is None:
+        app_config, _ = _system_settings(base, root)
+        policy = resolve_harnessing_policy(base.raw, app_config)
+        if not policy.enabled:
+            return None
     if resume_task_id is not None:
         raise ValueError("Harness experiments resume with harness_resume_id, not a child Task ID")
     request = ApplicationRequest(root.relative_to(base.agent_root / "applications").as_posix(),
