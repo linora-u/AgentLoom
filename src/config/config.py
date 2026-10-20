@@ -44,6 +44,24 @@ MODEL_CONFIG_NAME = "model.yaml"
 LOCAL_MODEL_CONFIG_NAME = "model.local.yaml"
 _CAMPAIGN_LLM_CONFIG_FD_ENV = "AGENTLOOM_MEMORY_CAMPAIGN_LLM_CONFIG_FD"
 _MAX_CAMPAIGN_LLM_CONFIG_BYTES = 1024 * 1024
+_HARNESS_MODEL_CONFIG: ContextVar[LLMConfig | None] = ContextVar("agentloom_harness_private_model_config", default=None)
+
+
+@contextmanager
+def bind_harness_model_config(raw: Mapping[str, Any] | None):
+    """Bind the trusted child's already-consumed anonymous configuration pipe.
+
+    The effective model catalog remains in memory. Candidate files contain
+    references only and must never replace these values with credential markers.
+    """
+    catalog = None
+    if raw is not None:
+        catalog = LLMConfig.model_validate(dict(raw)) if "models" in raw else LLMConfig.from_dict(dict(raw))
+    token = _HARNESS_MODEL_CONFIG.set(catalog)
+    try:
+        yield
+    finally:
+        _HARNESS_MODEL_CONFIG.reset(token)
 APP_CONFIG_RELATIVE_PATH = Path("config") / SYSTEM_CONFIG_NAME
 _PROJECT_NAME = "AgentLoom"
 _WORKFLOW_OVERLAY_KEYS = {
@@ -120,6 +138,9 @@ def _load_llm_config(path: Path) -> LLMConfig:
     credential-bearing payload is consumed exactly once and the descriptor is
     closed before any tool or provider subprocess can inherit it.
     """
+    bound_harness = _HARNESS_MODEL_CONFIG.get()
+    if bound_harness is not None:
+        return bound_harness.model_copy(deep=True)
     fd_value = ""
     if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") == "1":
         fd_value = str(os.environ.pop(_CAMPAIGN_LLM_CONFIG_FD_ENV, "") or "")
@@ -422,7 +443,7 @@ def load_project_config(project_root: Path | str) -> UnifiedConfig:
     config = UnifiedConfig(merged, agent_root=agent_root, llm_config=llm_config)
     # Programmatic configs and the credential-pipe campaign are explicit
     # overrides. Only unchanged disk-loaded bases may be refreshed for a Run.
-    if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") != "1":
+    if os.environ.get("AGENTLOOM_MEMORY_CAMPAIGN_CAPSULE_ACTIVE") != "1" and _HARNESS_MODEL_CONFIG.get() is None:
         config._loaded_raw = deepcopy(config.raw)
         config._loaded_llm = config.llm.model_dump()
     return config
@@ -610,7 +631,7 @@ def build_effective_agent_config_snapshot(
         except ValueError:
             pass  # Programmatic Agents without an Application use project models.
         else:
-            if model_root != base.agent_root:
+            if model_root != base.agent_root and _HARNESS_MODEL_CONFIG.get() is None:
                 llm_config = base.llm.overlay_from_yaml(model_root / "config" / MODEL_CONFIG_NAME)
                 llm_config = llm_config.patch_from_yaml(
                     model_root / "config" / LOCAL_MODEL_CONFIG_NAME
