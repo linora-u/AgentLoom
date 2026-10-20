@@ -56,6 +56,9 @@ class Driver:
             cleanup_complete=not outcome.cleanup_errors)
         context.business_root.mkdir(exist_ok=True)
         (context.business_root / 'receipt.json').write_text(json.dumps(receipt.to_dict()))
+        if invocation.request.driver_options.get('crash_after_completion') and context.trial_id == 'base1':
+            import os
+            os._exit(17)
         return receipt
     def publish(self, invocation, selected, decision_id):
         target = Path(invocation.request.driver_options['delivery'])
@@ -71,10 +74,11 @@ class Driver:
 
 
 @pytest.mark.parametrize(
-    "mode,k,runtime,custom_roles",
+    "mode,k,runtime,custom_roles,crash_after_completion",
     [
-        ("parallel", 1, "smolagents", False),
-        ("sequential", 2, "pi", True),
+        ("parallel", 1, "smolagents", False, False),
+        ("parallel", 1, "smolagents", False, True),
+        ("sequential", 2, "pi", True, False),
     ],
 )
 def test_public_complete_task_executes_upstream_schedule_and_recovers_without_model_calls(
@@ -174,11 +178,25 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             task="ORIGINAL_TASK",
             input_paths=(fact,),
             hidden_paths=(hidden,),
-            driver_options={"delivery": str(tmp_path / "delivery.json")},
+            driver_options={
+                "delivery": str(tmp_path / "delivery.json"),
+                "crash_after_completion": crash_after_completion,
+            },
         )
         policy = HarnessingPolicy.model_validate({"enabled": True, "recursion": {"mode": mode, "k": k}, "roles": roles})
         environment = {"PATH": "/home/lin/.nvm/versions/node/v22.23.3/bin:" + os.defpath}
         result = run_application(request, policy=policy, state_root=tmp_path / "experiments", environment=environment)
+        if crash_after_completion:
+            assert result.status == "failed"
+            assert requests_by_role.count("business") == 1
+            result = run_application(
+                request,
+                policy=policy,
+                state_root=tmp_path / "experiments",
+                resume_id=result.experiment_id,
+                environment=environment,
+            )
+            assert requests_by_role.count("business") == 4 * k
         assert result.status == "completed", result.to_dict()
         assert len(result.trials) == 4 * k
         assert result.selected_trial_id.startswith("final")

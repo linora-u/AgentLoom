@@ -168,6 +168,8 @@ class ImprovementController:
         self.events, self.stop = events, stop_token
         self.environment, self.model_config = environment, model_config
         self.credentials = dict(credentials or {})
+        self.model_profile_id = ""
+        self.public_models = {}
         self.library = library
         self.trials, self.role_receipts, self.errors = [], [], []
         self.bundles, self.receipts, self.evaluations = {}, {}, {}
@@ -337,7 +339,9 @@ class ImprovementController:
             self.role_receipts.append({"stage": key, "role": role, **result})
         actual = result.get("receipt", {})
         invocation_id = actual.get("invocation_id")
-        if invocation_id:
+        if actual.get("usage_observations"):
+            self._usage(actual["usage_observations"])
+        elif invocation_id:
             usage = actual.get("usage", {})
             self._usage(
                 (
@@ -521,6 +525,36 @@ class ImprovementController:
         with self._private_bindings():
             self.driver.validate_candidate(self.invocation, project, app)
 
+    def _freeze_models(self):
+        # Store transport/model parameters and private references, never keys.
+        # A resumed task keeps these parameters even if live defaults change.
+        from .snapshot import _sanitize
+
+        private = {}
+        public = _sanitize(json_value(self.model_config), "models", [], credentials=private)
+        frozen_catalog = self.store.read("model-profiles.json")
+        if frozen_catalog is None:
+            frozen_catalog = self.store.immutable("model-profiles.json", public)
+        prefix = "harness-credential-ref:"
+
+        def bind(value, *, remove=False):
+            if isinstance(value, str) and value.startswith(prefix):
+                reference = value[len(prefix) :]
+                if remove:
+                    return None
+                if reference not in private:
+                    raise ValueError("A frozen model profile is missing its trusted credential")
+                return private[reference]
+            if isinstance(value, dict):
+                return {key: bind(item, remove=remove) for key, item in value.items()}
+            if isinstance(value, list):
+                return [bind(item, remove=remove) for item in value]
+            return value
+
+        self.model_config = bind(frozen_catalog)
+        self.public_models = bind(frozen_catalog, remove=True)
+        self.model_profile_id = fingerprint(frozen_catalog)
+
     def _restore_credentials(self):
         """Rebind only frozen capability references; never archive private values."""
         import json
@@ -555,6 +589,7 @@ class ImprovementController:
             load_driver(self.policy.feedback.evaluator)
         self.store.immutable("request.json", self.request)
         self.store.immutable("policy.json", _policy_dict(self.policy))
+        self._freeze_models()
         base_record = self.store.read("base.json")
         if base_record:
             self.base = load_bundle(Path(base_record["root"]))
@@ -568,6 +603,7 @@ class ImprovementController:
                 excluded_paths=self.request.hidden_paths,
                 editable_resources=resources,
                 credential_sink=self.credentials,
+                model_config=self.public_models,
             )
             self.store.immutable("base.json", self.base.to_dict())
         self._restore_credentials()
@@ -589,7 +625,11 @@ class ImprovementController:
             self.invocation = PreparedInvocation(
                 request,
                 invocation.objective,
-                {**_rebase(invocation.inputs, replacements), "frozen_files": manifest},
+                {
+                    **_rebase(invocation.inputs, replacements),
+                    "frozen_files": manifest,
+                    "model_profile_id": self.model_profile_id,
+                },
                 invocation.acceptance,
                 _rebase(invocation.data, replacements),
             )
@@ -618,7 +658,7 @@ class ImprovementController:
     def run(self):
         self.prepare()
         old = self.store.read("result.json")
-        if old and old["status"] in {"completed", "partial", "failed"}:
+        if old and old["status"] == "completed":
             return ApplicationExecutionResult.from_dict(old)
         selected, delivery, reason, library_result = None, {}, "", {}
         status = "failed"
