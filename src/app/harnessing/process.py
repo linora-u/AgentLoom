@@ -54,7 +54,7 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
     return _execute(bundle, context, factory, payload, stop=stop, timeout=timeout, read_paths=read_paths, denied_paths=denied_paths, environment=environment, model_config=model_config, credentials=credentials, boundary="trial")
 
 
-def execute_trusted_orchestration(bundle, context, factory, payload, **options):
+def execute_trusted_orchestration(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None, credentials: Mapping | None = None) -> dict:
     """Fixed news orchestration whose actual Agents run in isolated Hosts.
 
     This internal seam is not selectable in YAML. It cannot run roles or an
@@ -62,7 +62,7 @@ def execute_trusted_orchestration(bundle, context, factory, payload, **options):
     """
     if factory != "agentloom.app.harnessing.controller:execute_trial" or payload.get("driver") != "news_agent.runtime.harnessing:NewsApplicationDriver":
         raise ValueError("Trusted orchestration is restricted to the built-in managed news driver")
-    return _execute(bundle, context, factory, payload, boundary="managed_host", **options)
+    return _execute(bundle, context, factory, payload, stop=stop, timeout=timeout, read_paths=read_paths, denied_paths=denied_paths, environment=environment, model_config=model_config, credentials=credentials, boundary="managed_host")
 
 
 def _execute(bundle, context, factory, payload, *, stop=None, timeout=None, read_paths=(), denied_paths=(), environment=None, model_config=None, credentials=None, boundary):
