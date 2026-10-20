@@ -51,10 +51,10 @@ def execute_trial(payload: dict, bundle: dict, context: dict) -> dict:
     archived = load_bundle(Path(bundle["root"]))
     trial = TrialContext.from_dict(context)
     invocation = PreparedInvocation.from_dict(payload["invocation"])
-    driver = load_driver(payload["driver"])
     from agentloom.config.config import bind_config, load_project_config
 
     with bind_trial_context(trial), bind_config(load_project_config(archived.project_root)):
+        driver = load_driver(payload["driver"])
         reconcile = getattr(driver, "reconcile", None)
         result = reconcile(invocation, archived, trial) if reconcile else None
         if result is None:
@@ -197,11 +197,22 @@ class ImprovementController:
             self.invocation.task_snapshot_id,
             self.store.root / ("roles" if role else "trials") / key,
             memory_snapshot=self.memory_snapshot,
-            library_view=self.library_view,
+            library_view=self.library_view if role else (),
         )
 
     def _process(self, bundle, context, factory, payload):
         from .process import execute_isolated
+
+        execute = execute_isolated
+        if (
+            factory == "agentloom.app.harnessing.controller:execute_trial"
+            and self.request.driver == "news_agent.runtime.harnessing:NewsApplicationDriver"
+        ):
+            # A fixed in-tree adapter keeps DBOS arbitration outside its Host
+            # sandboxes. No candidate configuration can request this boundary.
+            from .process import execute_trusted_orchestration
+
+            execute = execute_trusted_orchestration
 
         self._check_stop()
         options = {
@@ -214,7 +225,7 @@ class ImprovementController:
         if self.model_config is not None:
             options["model_config"] = self.model_config
         try:
-            return execute_isolated(bundle, context, factory, json_value(payload), **options)
+            return execute(bundle, context, factory, json_value(payload), **options)
         except InterruptedError as error:
             raise ExperimentStopped(str(error)) from error
 

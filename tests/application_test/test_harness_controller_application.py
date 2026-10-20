@@ -37,6 +37,7 @@ class Driver:
         path = context.business_root / 'receipt.json'
         return ExecutionReceipt.from_dict(json.loads(path.read_text())) if path.exists() else None
     def execute_once(self, invocation, bundle, context):
+        assert context.library_view == (), 'Business actors must not receive improvement library references'
         fact = Path(invocation.data['fact_path']).read_text()
         try:
             Path(invocation.request.hidden_paths[0]).read_text()
@@ -88,6 +89,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     k,
     runtime,
     custom_roles,
+    crash_after_completion,
 ):
     requests_by_role = []
 

@@ -638,11 +638,11 @@ class MemoryStore:
             try:
                 return {
                     "ok": True,
-                    "items": self.list(
+                    "items": [item for item in self.list(
                         scope,
                         scope_id=scope_id,
                         agent_config=agent_config,
-                    ),
+                    ) if not item["memory_key"].startswith("harness:")],
                 }
             except ValueError as exc:
                 if str(exc) == "missing_application_context":
@@ -754,6 +754,10 @@ class MemoryStore:
                     (app_id,),
                 ).fetchall()
 
+        # Harness lessons carry comparison/partition evidence and are supplied
+        # only by HarnessLibrary.view. Ordinary business memory must not turn
+        # them into unpartitioned future or development-score instructions.
+        rows = [row for row in rows if not str(row["memory_key"]).startswith("harness:")]
         application_keys = {
             (str(row["kind"]), str(row["memory_key"]))
             for row in rows
