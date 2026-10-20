@@ -75,7 +75,7 @@ def _policy_dict(policy):
     return asdict(policy)
 
 
-def _copy_inputs(paths, root: Path):
+def _copy_inputs(paths, root: Path, *, hidden_paths=()):
     """Freeze supplied facts once; no live source path is granted to trial code."""
     import hashlib
     import os
@@ -89,6 +89,11 @@ def _copy_inputs(paths, root: Path):
             if source.is_symlink():
                 raise ValueError("Input snapshots cannot follow symlinks")
             source = source.resolve(strict=True)
+            if any(
+                source.is_relative_to(Path(hidden).resolve()) or Path(hidden).resolve().is_relative_to(source)
+                for hidden in hidden_paths
+            ):
+                raise ValueError("Task input root overlaps hidden evaluation data; prepare a public projection")
             logical_root = f"input-{index}"
             destination = root / logical_root
             files = sorted(source.rglob("*")) if source.is_dir() else [source]
@@ -226,12 +231,32 @@ class ImprovementController:
             options["model_config"] = self.model_config
         try:
             return execute(bundle, context, factory, json_value(payload), **options)
-        except InterruptedError as error:
-            raise ExperimentStopped(str(error)) from error
+        except BaseException as error:
+            # Operation-level unknowns are not fabricated zero-token model
+            # invocations. They survive retries alongside any measured calls.
+            with self._mutex:
+                unknown = self.store.read("unmeasured-operations.json", {})
+                attempt = len(tuple((context.root / "process/attempts").glob("*")))
+                key = f"{context.trial_id}:{attempt}"
+                unknown[key] = {
+                    "operation_id": context.trial_id,
+                    "attempt": attempt,
+                    "factory": factory,
+                    "error_type": type(error).__name__,
+                    "usage": "unknown",
+                }
+                self.store.write("unmeasured-operations.json", unknown)
+            if isinstance(error, InterruptedError):
+                raise ExperimentStopped(str(error)) from error
+            raise
 
     def _usage(self, observations):
         with self._mutex:
-            return self.store.observe_usage(observations)
+            summary = self.store.observe_usage(observations)
+            unknown = self.store.read("unmeasured-operations.json", {})
+            summary["unmeasured_operations"] = [unknown[key] for key in sorted(unknown)]
+            summary["complete"] = summary["complete"] and not unknown
+            return summary
 
     def _trial(self, key, bundle):
         self._check_stop()
@@ -626,7 +651,9 @@ class ImprovementController:
                 invocation = self.driver.prepare(self.request, self.base)
             if not isinstance(invocation, PreparedInvocation):
                 invocation = PreparedInvocation.from_dict(invocation)
-            manifest, replacements = _copy_inputs(invocation.request.input_paths, self.store.root / "inputs")
+            manifest, replacements = _copy_inputs(
+                invocation.request.input_paths, self.store.root / "inputs", hidden_paths=self.request.hidden_paths
+            )
             request = replace(
                 invocation.request,
                 input_paths=tuple(target for _, target in replacements),

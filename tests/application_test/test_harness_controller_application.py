@@ -50,7 +50,8 @@ class Driver:
         output = outcome.output
         receipt = ExecutionReceipt(context.trial_id, bundle.candidate_id,
             'completed' if outcome.status == 'success' else 'failed', output,
-            accepted=outcome.status == 'success' and output.get('fact') == 'FACT-123',
+            accepted=outcome.status == 'success' and output.get('fact') == 'FACT-123' and not (
+                invocation.request.driver_options.get('reject_final') and context.trial_id.startswith('final')),
             acceptance={'hidden': hidden, 'fixed_fact': fact}, runs=(run,),
             usage=(UsageObservation(outcome.invocation_id, **{k:outcome.usage.get(k)
                 for k in ('input_tokens','output_tokens','total_tokens')}, complete=False),),
@@ -75,11 +76,14 @@ class Driver:
 
 
 @pytest.mark.parametrize(
-    "mode,k,runtime,custom_roles,crash_after_completion",
+    "mode,k,runtime,custom_roles,crash_after_completion,scenario",
     [
-        ("parallel", 1, "smolagents", False, False),
-        ("parallel", 1, "smolagents", False, True),
-        ("sequential", 2, "pi", True, False),
+        ("parallel", 1, "smolagents", False, False, "normal"),
+        ("parallel", 2, "smolagents", False, False, "selector_invalid"),
+        ("parallel", 1, "smolagents", False, False, "final_rejected"),
+        ("parallel", 1, "smolagents", False, False, "invalid_edits"),
+        ("parallel", 1, "smolagents", False, True, "normal"),
+        ("sequential", 2, "pi", True, False, "normal"),
     ],
 )
 def test_public_complete_task_executes_upstream_schedule_and_recovers_without_model_calls(
@@ -90,6 +94,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     runtime,
     custom_roles,
     crash_after_completion,
+    scenario,
 ):
     requests_by_role = []
 
@@ -113,6 +118,10 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             result, role = {"edits": {}, "rationale": "No supported general edit."}, "general"
         else:
             raise AssertionError(system[:300])
+        if scenario == "selector_invalid" and role == "select":
+            result["chosen_id"] = "BASE"
+        if scenario == "invalid_edits" and role in {"general", "domain", "compose"}:
+            result["edits"] = {"applications/mixed/driver.py": "forbidden fixed business code change"}
         requests_by_role.append(role)
         return (
             finish(request, result)
@@ -183,6 +192,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             driver_options={
                 "delivery": str(tmp_path / "delivery.json"),
                 "crash_after_completion": crash_after_completion,
+                "reject_final": scenario == "final_rejected",
             },
         )
         policy = HarnessingPolicy.model_validate({"enabled": True, "recursion": {"mode": mode, "k": k}, "roles": roles})
@@ -190,6 +200,8 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         result = run_application(request, policy=policy, state_root=tmp_path / "experiments", environment=environment)
         if crash_after_completion:
             assert result.status == "failed"
+            assert result.usage["unmeasured_operations"]
+            assert not result.usage["complete"]
             assert requests_by_role.count("business") == 1
             result = run_application(
                 request,
@@ -199,14 +211,24 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 environment=environment,
             )
             assert requests_by_role.count("business") == 4 * k
+        if scenario in {"selector_invalid", "final_rejected"}:
+            assert result.status == "failed", result.to_dict()
+            assert len(result.trials) == 4 * k
+            assert any(t.trial_id.startswith("base") and t.eligible for t in result.trials)
+            assert not result.selected_trial_id and result.output is None
+            assert not (tmp_path / "delivery.json").exists()
+            assert requests_by_role.count("reflect") == 0
+            assert requests_by_role.count("select") == (scenario == "selector_invalid")
+            return
         assert result.status == "completed", result.to_dict()
         assert len(result.trials) == 4 * k
         assert result.selected_trial_id.startswith("final")
-        assert result.output == {"fact": "FACT-123", "variant": "COMPOSED"}
+        assert result.output == {"fact": "FACT-123", "variant": "BASE" if scenario == "invalid_edits" else "COMPOSED"}
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
         assert requests_by_role.count("business") == 4 * k
-        assert requests_by_role.count("general") == requests_by_role.count("domain") == k
-        assert requests_by_role.count("compose") == k
+        edits = 2 * k if scenario == "invalid_edits" else k
+        assert requests_by_role.count("general") == requests_by_role.count("domain") == edits
+        assert requests_by_role.count("compose") == edits
         assert requests_by_role.count("select") == (k > 1)
         assert requests_by_role.count("reflect") == 1
         assert not result.usage["complete"]
@@ -235,3 +257,25 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 resume_id=result.experiment_id,
                 environment=environment,
             )
+
+
+def test_public_preparation_rejects_hidden_data_inside_an_input_root_before_model_calls(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    project(root, "http://127.0.0.1:9/v1", supervisor="smolagents", worker="smolagents")
+    app = root / "applications/mixed"
+    (app / "driver.py").write_text(DRIVER)
+    monkeypatch.syspath_prepend(str(root))
+    for key in tuple(sys.modules):
+        if key.startswith("applications.mixed"):
+            del sys.modules[key]
+    facts = tmp_path / "facts"
+    facts.mkdir()
+    (facts / "public.txt").write_text("FACT-123")
+    hidden = facts / "heldout.txt"
+    hidden.write_text("HIDDEN SCORE")
+    request = ApplicationRequest(
+        "mixed", root, app, "applications.mixed.driver:Driver", input_paths=(facts,), hidden_paths=(hidden,)
+    )
+    with pytest.raises(ValueError, match="input root overlaps hidden"):
+        run_application(request, policy=HarnessingPolicy(enabled=True), state_root=tmp_path / "experiments")
+    assert not list((tmp_path / "experiments").rglob("process/input.json"))
