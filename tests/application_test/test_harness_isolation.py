@@ -4,6 +4,8 @@ import json
 import os
 import shutil
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,3 +127,103 @@ def test_public_managed_process_denies_hidden_exec_metadata_symlink_and_credenti
     assert len(list((context.root / "process/attempts").iterdir())) == 1
     assert "private-canary" not in (context.root / "process/input.json").read_text()
     assert json.loads((context.root / "process/attempts/000001/cleanup.json").read_text())["physical_exit_confirmed"]
+
+
+def test_credential_binding_cannot_be_moved_or_redirected(project, tmp_path):
+    root, app = project
+    (app / "config").mkdir()
+    (app / "config/.mcp.json").write_text(json.dumps({"mcpServers": {"fixture": {"command": "/usr/bin/python3", "env": {"SERVICE_TOKEN": "mcp-private-canary"}}}}))
+    credentials = {}
+    bundle = snapshot_application(root, app, tmp_path / "bundles", credential_sink=credentials)
+    frozen = json.loads((bundle.application_root / "config/.mcp.json").read_text())
+    assert list(credentials.values()) == ["mcp-private-canary"]
+    frozen["mcpServers"]["fixture"]["command"] = "/usr/bin/env"
+    with pytest.raises(ValueError, match="redirect"):
+        derive_candidate(bundle, {"applications/sample/config/.mcp.json": json.dumps(frozen)}, tmp_path / "bundles", editable=["mcp_servers"], validate=lambda project, app: None)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Real inherited Linux enforcement")
+def test_local_stdio_mcp_receives_only_its_bound_capability(project, tmp_path):
+    preflight_isolation()
+    root, app = project
+    (app / "config").mkdir()
+    (app / "mcp_server.py").write_text('''
+import os
+from mcp.server.fastmcp import FastMCP
+server = FastMCP('fixture')
+@server.tool()
+def authorized() -> dict:
+    return {'authenticated': os.environ.get('SERVICE_TOKEN') == 'mcp-private-canary'}
+server.run(transport='stdio')
+''')
+    (app / "operations.py").write_text((app / "operations.py").read_text() + '''
+
+async def mcp_probe(payload, bundle, context):
+    import json, subprocess
+    from mcp import StdioServerParameters
+    from agentloom.integrations.mcp.config import load_mcp_json, parse_mcp_servers_from_json
+    from agentloom.integrations.mcp.managed_stdio import managed_stdio_tools
+    settings = load_mcp_json(Path(bundle['root']) / 'project/applications/sample/config/.mcp.json')
+    binding = parse_mcp_servers_from_json(settings, strict=True)[0]
+    server = StdioServerParameters(command=binding.command, args=binding.args, env=binding.env)
+    async with managed_stdio_tools(server, timeout=5.0) as (session, tools):
+        result = await session.call_tool('authorized', {})
+    environment = subprocess.run(['/usr/bin/env'],capture_output=True,text=True).stdout
+    return {'authenticated': json.loads(result.content[0].text)['authenticated'],
+            'shell_can_see_server_secret': 'mcp-private-canary' in environment}
+''')
+    (app / "config/.mcp.json").write_text(json.dumps({"mcpServers": {"fixture": {"command": sys.executable, "args": ["applications/sample/mcp_server.py"], "env": {"SERVICE_TOKEN": "mcp-private-canary"}}}}))
+    credentials = {}
+    bundle = snapshot_application(root, app, tmp_path / "bundles", credential_sink=credentials)
+    context = Context(tmp_path / "trial", bundle.candidate_id)
+    assert execute_isolated(bundle, context, "applications.sample.operations:mcp_probe", {}, credentials=credentials, timeout=20) == {"authenticated": True, "shell_can_see_server_secret": False}
+    assert all("mcp-private-canary" not in path.read_text() for path in (context.root / "process").rglob("*.json"))
+
+
+def test_original_guardian_digest_must_match_snapshot(project, tmp_path, monkeypatch):
+    import agentloom.execution.managed_process as managed
+    root, app = project
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    fake = tmp_path / "fake-framework"
+    fake.mkdir()
+    (fake / "_process_guardian.py").write_text("# another guardian")
+    monkeypatch.setattr(managed, "__file__", str(fake / "managed_process.py"))
+    with pytest.raises(ValueError, match="guardian source differs"):
+        execute_isolated(bundle, Context(tmp_path / "trial", bundle.candidate_id), "applications.sample.operations:probe", {})
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual Linux guardian and inherited policy acceptance")
+def test_stop_confirms_detached_resource_exit_before_same_trial_retry(project, tmp_path):
+    import psutil
+    root, app = project
+    (app / "operations.py").write_text((app / "operations.py").read_text() + '''
+
+def controlled_stop(payload, bundle, context):
+    import time
+    root = Path(context['root'])
+    marker = root / 'output/child-pid'
+    if marker.exists():
+        return {'recovered': True}
+    process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'], start_new_session=True)
+    marker.write_text(str(process.pid))
+    while True:
+        time.sleep(.02)
+''')
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    context = Context(tmp_path / "trial", bundle.candidate_id)
+    stop = threading.Event()
+    def cancel_after_child_exists():
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not (context.root / "output/child-pid").exists():
+            time.sleep(.01)
+        stop.set()
+    thread = threading.Thread(target=cancel_after_child_exists)
+    thread.start()
+    with pytest.raises(InterruptedError):
+        execute_isolated(bundle, context, "applications.sample.operations:controlled_stop", {}, stop=stop, timeout=15)
+    thread.join()
+    child = int((context.root / "output/child-pid").read_text())
+    assert not psutil.pid_exists(child)
+    assert json.loads((context.root / "process/attempts/000001/cleanup.json").read_text())["physical_exit_confirmed"]
+    assert execute_isolated(bundle, context, "applications.sample.operations:controlled_stop", {}, timeout=10) == {"recovered": True}
+    assert len(list((context.root / "process/attempts").iterdir())) == 2

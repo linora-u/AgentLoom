@@ -55,7 +55,7 @@ def _runtime_paths() -> tuple[Path, ...]:
     return tuple(sorted(path for path in roots if path.exists()))
 
 
-def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None) -> dict:
+def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None, credentials: Mapping | None = None) -> dict:
     """Execute ``factory(payload, bundle_descriptor, context_descriptor)`` once.
 
     Private model config crosses only the child's anonymous stdin pipe and is
@@ -66,6 +66,8 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
 
     preflight_isolation()
     bundle.verify()
+    if not set(credentials or {}) <= set(bundle.manifest["credential_refs"]):
+        raise ValueError("Private capability binding was not declared by this candidate")
     if not isinstance(factory, str) or ":" not in factory or any(part.startswith("_") for part in factory.split(":")):
         raise ValueError("Isolated factory must be an importable public module:function")
     descriptor = _context_dict(context)
@@ -121,7 +123,7 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
             hidden = Path(hidden).resolve()
             if any(hidden.is_relative_to(Path(grant).resolve()) or Path(grant).resolve().is_relative_to(hidden) for grant in (*reads, *writes)):
                 raise ValueError("A Trial resource grant overlaps hidden evaluation data")
-        spec = IsolationSpec(tuple(reads), writes)
+        spec = IsolationSpec(tuple(reads), writes, (root,))
         import agentloom.execution.managed_process as managed_module
         guardian_entry = Path(managed_module.__file__).with_name("_process_guardian.py").resolve()
         expected_guardian = bundle.manifest["files"]["python/agentloom/execution/_process_guardian.py"]["hash"]
@@ -136,7 +138,7 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
             if key not in {"PATH", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"}:
                 raise ValueError("Unsupported inherited Harness environment capability: " + key)
             env[key] = value
-        private = _json({"model_config": model_config}).encode() + b"\n"
+        private = _json({"model_config": model_config, "credentials": dict(credentials or {})}).encode() + b"\n"
         if len(private) > 4 * 1024 * 1024:
             raise ValueError("Private model configuration exceeds one-shot transport limit")
         bootstrap = bundle.root / "python" / "agentloom" / "app" / "harnessing" / "bootstrap.py"
@@ -181,7 +183,10 @@ def _result(path, identity):
     if value.get("identity") != identity:
         raise IsolatedExecutionError("Isolated operation result has another identity")
     if "error" in value:
-        raise IsolatedExecutionError("Isolated operation failed: " + value["error"]["type"] + ": " + value["error"]["message"])
+        error = value["error"]
+        frames = error.get("frames", [])
+        location = f" at {frames[-1]['file']}:{frames[-1]['line']}" if frames else ""
+        raise IsolatedExecutionError("Isolated operation failed: " + error["type"] + ": " + error["message"] + location)
     result = value.get("result")
     if not isinstance(result, dict):
         raise IsolatedExecutionError("Isolated operation must return a JSON mapping")

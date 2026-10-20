@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -44,8 +45,10 @@ def main():
         isolation.enforce_isolation(spec)
         try:
             from agentloom.config.config import bind_harness_model_config
+            from agentloom.config.private_bindings import bind_harness_credentials
             model_config = private.pop("model_config", None)
-            with bind_harness_model_config(model_config):
+            credentials = private.pop("credentials", {})
+            with bind_harness_credentials(credentials), bind_harness_model_config(model_config):
                 module, name = descriptor["factory"].split(":", 1)
                 factory = getattr(importlib.import_module(module), name)
                 result = factory(descriptor["payload"], descriptor["bundle"], descriptor["context"])
@@ -60,7 +63,8 @@ def main():
         except BaseException as error:
             # Do not persist a provider/config exception's input values or
             # tracebacks: Pydantic errors can contain credential-bearing data.
-            _write_result(result_fd, {"identity": descriptor["identity"], "error": {"type": type(error).__name__, "message": "trusted isolated operation failed"}})
+            frames = [{"file": frame.filename, "line": frame.lineno, "function": frame.name} for frame in traceback.extract_tb(error.__traceback__)]
+            _write_result(result_fd, {"identity": descriptor["identity"], "error": {"type": type(error).__name__, "message": "trusted isolated operation failed", "frames": frames}})
             raise SystemExit(1)
 
 

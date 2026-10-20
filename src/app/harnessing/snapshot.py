@@ -12,7 +12,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import distributions
 from pathlib import Path
@@ -22,7 +22,7 @@ import yaml
 
 _EXCLUDED = frozenset({".git", ".venv", "venv", "__pycache__", "node_modules", ".agentloom", ".pytest_cache", ".ruff_cache", "data", "runtime", "output", "outputs", "results", "logs", "dist"})
 _SECRET_FILES = frozenset({".env", "auth.json", "credentials.json", "id_rsa", "id_ed25519"})
-_SECRET_KEYS = frozenset({"api_key", "authorization", "password", "secret", "secret_key", "private_key", "access_token", "refresh_token", "token", "client_secret", "cookie"})
+_SECRET_KEYS = frozenset({"api_key", "authorization", "authorizations", "fallback_authorizations", "password", "secret", "secret_key", "private_key", "access_token", "refresh_token", "token", "client_secret", "cookie"})
 _CONFIG_EXTENSIONS = frozenset({".yaml", ".yml", ".json"})
 _EDITABLE = frozenset({"system_prompt", "skills", "tools", "toolsets", "mcp_servers", "worker_agents"})
 _MAX_FILES = 16384
@@ -46,25 +46,28 @@ def _relative(value: str) -> Path:
 
 def _secret_key(key: str) -> bool:
     normalized = key.lower().replace("-", "_")
-    return normalized in _SECRET_KEYS or normalized.endswith(("_api_key", "_password", "_secret", "_token"))
+    return normalized in _SECRET_KEYS or normalized.endswith(("_api_key", "_password", "_secret", "_token", "_authorization", "_authorizations"))
 
 
-def _sanitize(value: Any, source: str, refs: list[str], pointer: str = "") -> Any:
+def _sanitize(value: Any, source: str, refs: list[str], pointer: str = "", credentials: MutableMapping | None = None) -> Any:
     if isinstance(value, Mapping):
         result = {}
         for key, item in value.items():
             if not isinstance(key, str):
                 raise ValueError("Snapshot configuration keys must be strings")
             location = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
-            if _secret_key(key) and item not in (None, "", {}):
+            schema_definition = isinstance(item, dict) and "type" in item and "/properties" in pointer
+            if _secret_key(key) and not schema_definition and item not in (None, "", {}):
                 ref = source + "#" + location
                 refs.append(ref)
+                if credentials is not None:
+                    credentials[ref] = copy.deepcopy(item)
                 result[key] = "harness-credential-ref:" + ref
             else:
-                result[key] = _sanitize(item, source, refs, location)
+                result[key] = _sanitize(item, source, refs, location, credentials)
         return result
     if isinstance(value, (list, tuple)):
-        return [_sanitize(item, source, refs, pointer + "/" + str(index)) for index, item in enumerate(value)]
+        return [_sanitize(item, source, refs, pointer + "/" + str(index), credentials) for index, item in enumerate(value)]
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
     raise ValueError("Snapshot configuration must be JSON serializable")
@@ -156,6 +159,8 @@ class CandidateBundle:
                     entry = expected.get(logical)
                     if entry is None or _digest(path.read_bytes()) != entry["hash"]:
                         raise ValueError("Candidate resource changed: " + logical)
+                    if bool(path.stat().st_mode & stat.S_IXUSR) != entry["executable"]:
+                        raise ValueError("Candidate executable permission changed: " + logical)
         if actual_files != set(expected):
             raise ValueError("Candidate resources are missing")
 
@@ -238,7 +243,7 @@ def _commit(staging: Path, destination: Path, application: str, *, credential_re
     return CandidateBundle(identity, final, application, manifest)
 
 
-def snapshot_application(project_root: Path, application_root: Path, destination: Path, *, additional_resources: Sequence[Path] = (), excluded_paths: Sequence[Path] = (), editable_resources: Mapping[str, str] | None = None, effective_config: Mapping | None = None, model_config: Mapping | None = None) -> CandidateBundle:
+def snapshot_application(project_root: Path, application_root: Path, destination: Path, *, additional_resources: Sequence[Path] = (), excluded_paths: Sequence[Path] = (), editable_resources: Mapping[str, str] | None = None, credential_sink: MutableMapping[str, Any] | None = None, effective_config: Mapping | None = None, model_config: Mapping | None = None) -> CandidateBundle:
     """Freeze declared resources and fixed code without copying business databases.
 
     References outside the Application must be under the project and declared
@@ -306,7 +311,7 @@ def snapshot_application(project_root: Path, application_root: Path, destination
                 parsed = json.loads(payload) if source.suffix == ".json" else yaml.safe_load(payload)
                 if isinstance(parsed, (dict, list)):
                     owner = application_path if source.is_relative_to(application_path) else project
-                    sanitized = _portable_paths(_sanitize(parsed, relative.as_posix(), refs), owner, project)
+                    sanitized = _portable_paths(_sanitize(parsed, relative.as_posix(), refs, credentials=credential_sink), owner, project)
                     payload = _json(sanitized) if source.suffix == ".json" else yaml.safe_dump(sanitized, allow_unicode=True, sort_keys=True).encode()
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(payload)
@@ -349,6 +354,37 @@ def _surface(relative: Path, before: bytes | None, after: bytes | None) -> set[s
     raise ValueError("Candidate cannot edit fixed code or undeclared resources: " + relative.as_posix())
 
 
+def _check_candidate_secrets(relative: Path, old: Any, new: Any, pointer: str = "") -> None:
+    prefix = "harness-credential-ref:"
+    def contains_reference(value):
+        if isinstance(value, str):
+            return value.startswith(prefix)
+        if isinstance(value, dict):
+            return any(contains_reference(item) for item in value.values())
+        if isinstance(value, list):
+            return any(contains_reference(item) for item in value)
+        return False
+    if isinstance(new, str) and new.startswith(prefix):
+        if new != prefix + relative.as_posix() + "#" + pointer or new != old:
+            raise ValueError("Candidate cannot move or introduce a private capability reference")
+    if isinstance(new, dict):
+        previous = old if isinstance(old, dict) else {}
+        if contains_reference(previous) and any(key in previous for key in ("command", "url")):
+            for key in ("type", "command", "args", "url", "env", "headers"):
+                if previous.get(key) != new.get(key):
+                    raise ValueError("Candidate cannot redirect a credential-bearing server capability")
+        for key, value in new.items():
+            if _secret_key(str(key)) and value not in (None, "", {}):
+                if not isinstance(value, str) or not value.startswith(prefix):
+                    raise ValueError("Candidate cannot introduce private credential values")
+            escaped = str(key).replace("~", "~0").replace("/", "~1")
+            _check_candidate_secrets(relative, previous.get(key), value, pointer + "/" + escaped)
+    elif isinstance(new, list):
+        previous = old if isinstance(old, list) else []
+        for index, item in enumerate(new):
+            _check_candidate_secrets(relative, previous[index] if index < len(previous) else None, item, pointer + "/" + str(index))
+
+
 def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | None], destination: Path, *, editable: Sequence[str], validate: Callable[[Path, Path], None] | None = None) -> CandidateBundle:
     base.verify()
     allowed = set(editable)
@@ -383,8 +419,9 @@ def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | None], d
                     raise ValueError("Cannot delete a missing candidate resource")
                 target.unlink()
             else:
-                if "harness-credential-ref:" in value and (before is None or set(value.split("harness-credential-ref:")[1:]) != set(before.decode().split("harness-credential-ref:")[1:])):
-                    raise ValueError("Candidate cannot introduce or change credential references")
+                if relative.suffix in _CONFIG_EXTENSIONS:
+                    parse = json.loads if relative.suffix == ".json" else yaml.safe_load
+                    _check_candidate_secrets(relative, parse(before) if before else None, parse(after))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(after)
         if validate is not None:

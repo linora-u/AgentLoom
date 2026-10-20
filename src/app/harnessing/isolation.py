@@ -25,16 +25,17 @@ class IsolationUnavailable(RuntimeError):
 class IsolationSpec:
     read_paths: tuple[Path, ...]
     write_paths: tuple[Path, ...]
+    directory_paths: tuple[Path, ...] = ()
 
     def __post_init__(self):
-        for name in ("read_paths", "write_paths"):
+        for name in ("read_paths", "write_paths", "directory_paths"):
             paths = tuple(Path(path).resolve(strict=True) for path in getattr(self, name))
             if any(path == Path("/") or (name == "read_paths" and path == Path.home()) for path in paths):
                 raise ValueError("Isolation cannot grant an entire root or home directory")
             object.__setattr__(self, name, paths)
 
     def to_dict(self):
-        return {"read_paths": [str(path) for path in self.read_paths], "write_paths": [str(path) for path in self.write_paths]}
+        return {"read_paths": [str(path) for path in self.read_paths], "write_paths": [str(path) for path in self.write_paths], "directory_paths": [str(path) for path in self.directory_paths]}
 
 
 def preflight_isolation() -> dict:
@@ -136,7 +137,7 @@ def enforce_isolation(spec: IsolationSpec) -> dict:
     ruleset = _checked(libc.syscall(444, ctypes.byref(_Ruleset(handled, 0, 3)), ctypes.sizeof(_Ruleset), 0), "Landlock ruleset")
     read = (1 << 0) | (1 << 2) | (1 << 3)
     try:
-        for path, access in [(path, read) for path in spec.read_paths] + [(path, handled) for path in spec.write_paths]:
+        for path, access in [(path, read) for path in spec.read_paths] + [(path, handled) for path in spec.write_paths] + [(path, 1 << 3) for path in spec.directory_paths]:
             if not path.is_dir():
                 access &= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 14) | (1 << 15)
                 if not stat.S_ISREG(path.stat().st_mode):
