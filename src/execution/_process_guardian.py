@@ -150,7 +150,11 @@ class Guardian:
                             "parent": command["parent"]}
         if self.receipt_dir is not None:
             self.receipt_dir.mkdir(parents=True, exist_ok=True)
-            self.temporary = tempfile.TemporaryDirectory(prefix="agentloom-process-")
+            # The trusted owner lives outside a Trial's filesystem policy.
+            # Trial TMPDIRs can be arbitrarily deep, while sockaddr_un has a
+            # small fixed path limit. Keep the private recovery endpoint short
+            # without granting tools any additional filesystem access.
+            self.temporary = tempfile.TemporaryDirectory(prefix="agentloom-process-", dir="/tmp")
             endpoint = str(Path(self.temporary.name) / "control.sock")
             self.listener = socket.socket(socket.AF_UNIX)
             self.listener.bind(endpoint)

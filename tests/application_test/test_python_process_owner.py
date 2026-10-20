@@ -191,6 +191,36 @@ def test_default_map_reclaims_native_tree_after_top_python_sigkill(tmp_path, bac
             _safety(host, identities)
 
 
+def test_application_native_owner_uses_short_private_endpoint_with_deep_trial_tmpdir(batch_project, monkeypatch):
+    from agentloom.app import Application
+    from agentloom.execution.concurrency import WorkItem
+    from agentloom.execution.process import run_registered_process
+
+    root, application, _worker, probe, _write = batch_project
+    temporary = root / ("deep-trial-" * 12) / "tmp"
+    temporary.mkdir(parents=True)
+    assert len(os.fsencode(temporary)) > 108
+    monkeypatch.setenv("TMPDIR", str(temporary))
+
+    def behavior(payload):
+        process = run_registered_process([sys.executable, "-c", "print('owned')"], env=dict(os.environ),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert process.returncode == 0
+        return payload
+
+    probe.behavior = behavior
+    with Application.open(application, project_root=root, file_logging=False) as app:
+        outcome = app.worker("workflows/worker.yaml").invoke(WorkItem("short-socket", {"value": 1}))
+    assert outcome.status == "success", outcome.to_dict()
+    descriptions = list(root.rglob("native_resources/*/description.json"))
+    assert descriptions
+    for path in descriptions:
+        descriptor = json.loads(path.read_text())
+        assert len(os.fsencode(descriptor["endpoint"])) < 108
+        assert json.loads(path.with_name("exited.json").read_text())["physical_exit_confirmed"]
+        assert not Path(descriptor["endpoint"]).exists()
+
+
 def test_native_start_failure_preserves_os_cause_without_unconfirmed_cleanup(batch_project, monkeypatch):
     from agentloom.app import Application
     from agentloom.execution.concurrency import WorkItem
