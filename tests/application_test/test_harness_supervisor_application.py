@@ -46,7 +46,7 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             counts.append("business")
             return finish(request, "COMPOSED-RESULT" if "COMPOSED-ROOT" in system else "BASE-RESULT")
         counts.append(role)
-        return finish(request, value)
+        return json.dumps(value)  # Built-in improvement roles use Pi for both business runtimes.
 
     with model_service(program, on_request=authenticate) as (url, requests):
         definition = project(tmp_path, url, supervisor=runtime, worker=runtime)

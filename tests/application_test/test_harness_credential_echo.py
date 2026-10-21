@@ -127,10 +127,10 @@ def test_complete_application_worker_rejects_mcp_credential_echo_without_repeati
         assert canary not in json.dumps(request)
         system = str(request["messages"][0]["content"])
         if "Extract only supported reusable experiences" in system:
-            return finish(request, {"experiences": []})
+            return json.dumps({"experiences": []})
         if any(marker in system for marker in ("Compose one coherent complete Application",
                 "domain-specific working methods", "general problem-solving")):
-            return finish(request, {"edits": [], "rationale": "Keep the baseline"})
+            return json.dumps({"edits": [], "rationale": "Keep the baseline"})
         if request["model"] == "worker":
             workers.append(request)
             return [("mcp-once", "mcp__fixture__authorized", {})]
