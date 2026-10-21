@@ -877,7 +877,10 @@ def run_application(
         raise ValueError("stop_token must expose is_set()")
     if resume_id is not None and experiment_id is not None:
         raise ValueError("Provide either a new experiment identity or a resume identity")
-    experiment_id = resume_id or experiment_id or "experiment-" + uuid.uuid4().hex
+    if resume_id is not None:
+        experiment_id = resume_id
+    elif experiment_id is None:
+        experiment_id = "experiment-" + uuid.uuid4().hex
     if not isinstance(experiment_id, str) or not experiment_id or any(
         char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in experiment_id
     ):

@@ -103,6 +103,21 @@ class Evaluator:
 """
 
 
+@pytest.mark.parametrize("identity", ["", False, "../escape", []])
+def test_invalid_reserved_identity_is_rejected_before_experiment_creation(tmp_path, identity):
+    request = ApplicationRequest("example", tmp_path, tmp_path / "applications/example", "example:Driver", task="task")
+    with pytest.raises(ValueError, match="Invalid experiment"):
+        run_application(request, experiment_id=identity, state_root=tmp_path / "experiments")
+    assert not (tmp_path / "experiments").exists()
+
+
+def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
+    request = ApplicationRequest("example", tmp_path, tmp_path / "applications/example", "example:Driver", task="task")
+    with pytest.raises(ValueError, match="either"):
+        run_application(request, experiment_id="new", resume_id="old", state_root=tmp_path / "experiments")
+    assert not (tmp_path / "experiments").exists()
+
+
 @pytest.mark.parametrize(
     "mode,k,runtime,custom_roles,crash_after_completion,scenario",
     [
