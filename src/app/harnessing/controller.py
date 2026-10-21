@@ -413,6 +413,33 @@ class ImprovementController:
             raise ValueError(f"{role} failed: {result.get('error', 'no output')}")
         return result["output"], actual
 
+    def _reflection(self, bundle, evidence):
+        """Repair invalid role output once without replaying accepted business work."""
+        error = ""
+        for key in ("reflection", "reflection.retry1"):
+            try:
+                # Put corrective feedback before the large files/executions so
+                # even a paged built-in evidence index exposes it immediately.
+                feedback = {"previous_error": error, "evidence_refs": sorted(self.receipts)} if error else {}
+                output, receipt = self._role(key, "reflect", bundle, {**feedback, **evidence})
+                if any(set(item.get("evidence_refs", ())) - set(self.receipts)
+                       for item in output.get("experiences", [])):
+                    error = "Reflection references unknown execution evidence; use only supplied IDs: " + ", ".join(sorted(self.receipts))
+                    # Older controllers persisted a library intent before this
+                    # validation. Reject that unfinished intent, retaining its
+                    # original inputs and the completed invalid role receipt.
+                    pending = self.store.read("stages/library.json")
+                    if (pending and pending["status"] == "running"
+                            and pending["inputs"].get("reflection") == output):
+                        self.store.finish("library", {"error": error}, status="rejected")
+                    raise ValueError(error)
+                return output, receipt, "library" if key == "reflection" else "library.retry1"
+            except Exception as exc:
+                if getattr(exc, "category", "") == "infrastructure":
+                    raise
+                error = f"{type(exc).__name__}: {exc}"
+        raise ValueError(error)
+
     def _edit(self, label, role, current, evidence):
         from .snapshot import derive_candidate, load_bundle
 
@@ -797,17 +824,12 @@ class ImprovementController:
                 evidence.update(
                     selected_trial=selected.trial_id, selection_reason=reason, evidence_refs=sorted(self.receipts)
                 )
-                output, reflection_receipt = self._role(
-                    "reflection", "reflect", self.bundles[selected.trial_id], evidence
-                )
-                entry = self.store.begin("library", {"selected": selected, "reflection": output})
+                output, reflection_receipt, library_key = self._reflection(self.bundles[selected.trial_id], evidence)
+                entry = self.store.begin(library_key, {"selected": selected, "reflection": output})
                 if entry["status"] == "completed":
                     library_result = entry["result"]
                 else:
                     experiences = output.get("experiences", [])
-                    valid_refs = set(self.receipts)
-                    if any(set(item.get("evidence_refs", ())) - valid_refs for item in experiences):
-                        raise ValueError("Reflection references unknown execution evidence")
                     library_result = (
                         self.library.submit(
                             experiences,
@@ -824,7 +846,7 @@ class ImprovementController:
                         if self.library
                         else {"submitted": 0}
                     )
-                    self.store.finish("library", library_result)
+                    self.store.finish(library_key, library_result)
             except Exception as error:
                 self.errors.append(f"Reflection/library failed after delivery: {type(error).__name__}: {error}")
                 status = "partial"

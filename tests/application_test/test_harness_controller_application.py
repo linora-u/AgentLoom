@@ -130,6 +130,8 @@ def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 2, "pi", False, False, "normal"),
         ("parallel", 1, "pi", False, False, "large_evidence"),
+        ("parallel", 1, "pi", False, False, "reflection_recovery"),
+        ("parallel", 1, "pi", False, False, "reflection_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
         ("parallel", 1, "pi", True, False, "duplicate_edits"),
@@ -189,6 +191,14 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             role = "business"
         elif "Extract only supported reusable experiences" in system:
             result, role = {"experiences": []}, "reflect"
+            if scenario == "reflection_invalid" or (
+                scenario == "reflection_recovery" and requests_by_role.count("reflect") == 0
+            ):
+                result = {"experiences": [{"trigger": "task", "symptom": "unsupported historical claim",
+                    "action": "do not import historical document claims", "verification": "not established",
+                    "evidence_refs": ["reviews/old-benchmark.json", "base1", "final1"]}]}
+            elif scenario == "reflection_recovery":
+                assert "Reflection references unknown execution evidence" in json.dumps(request)
         elif "Select the deliverable that best satisfies" in system:
             result, role = {"chosen_id": "C1", "reason": "Uses the required frozen fact."}, "select"
         elif "Compose one coherent complete Application" in system:
@@ -374,9 +384,48 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
             experiment_id="preallocated-experiment",
             events=(lambda event: stop.set() if event["event"] == "trial.completed"
-                    and event.get("trial_id") == "final1" else None) if scenario == "stop_after_final" else None,
+                    and event.get("trial_id") == "final1" else None) if scenario == "stop_after_final" else (
+                        (lambda event: stop.set() if event["event"] == "role.completed"
+                         and event.get("stage") == "reflection" else None)
+                        if scenario == "reflection_recovery" else None),
         )
         assert result.experiment_id == "preallocated-experiment"
+        if scenario == "reflection_recovery":
+            from agentloom.app.harnessing.store import ExperimentStore
+
+            assert result.status == "stopped" and result.delivery
+            state = tmp_path / "experiments" / result.experiment_id
+            reflection_path = state / "stages/reflection.json"
+            original_reflection = reflection_path.read_bytes()
+            bad_output = json.loads(original_reflection)["result"]["output"]
+            selected = next(t for t in result.trials if t.trial_id == result.selected_trial_id)
+            # Reproduce the persisted intent from an older controller that
+            # validated references only after beginning library submission.
+            store = ExperimentStore(state)
+            store.begin("library", {"selected": selected, "reflection": bad_output})
+            store.close()
+            publication = (state / "stages/publication.json").read_bytes()
+            business_calls = requests_by_role.count("business")
+            stop.clear()
+            result = run_application(request, state_root=tmp_path / "experiments",
+                environment=environment, resume_id=result.experiment_id, stop_token=stop)
+            assert result.status == "completed", result.to_dict()
+            assert reflection_path.read_bytes() == original_reflection
+            assert (state / "stages/publication.json").read_bytes() == publication
+            assert requests_by_role.count("business") == business_calls == 4
+            assert json.loads((state / "stages/library.json").read_text())["status"] == "rejected"
+            assert json.loads((state / "stages/library.retry1.json").read_text())["status"] == "completed"
+        if scenario == "reflection_invalid":
+            assert result.status == "partial" and result.delivery
+            assert all(t.accepted for t in result.trials)
+            assert requests_by_role.count("reflect") == 2
+            assert requests_by_role.count("business") == 4
+            calls = len(requests)
+            recovered = run_application(request, state_root=tmp_path / "experiments",
+                environment=environment, resume_id=result.experiment_id)
+            assert recovered.status == "partial" and len(requests) == calls
+            assert not list((tmp_path / "experiments" / result.experiment_id / "stages").glob("library*.json"))
+            return
         if scenario == "stop_after_final":
             assert result.status == "stopped", result.to_dict()
             assert len(result.trials) == 4
@@ -451,7 +500,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert requests_by_role.count("general") == requests_by_role.count("domain") == edits
         assert requests_by_role.count("compose") == edits
         assert requests_by_role.count("select") == (k > 1)
-        assert requests_by_role.count("reflect") == 1
+        assert requests_by_role.count("reflect") == (2 if scenario == "reflection_recovery" else 1)
         if not custom_roles:
             assert sum(item["model"] == "improvement" for item in requests) == sum(
                 role != "business" for role in requests_by_role) + len(evidence_reads)
