@@ -6,7 +6,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from threading import Event, Thread
+from threading import Barrier, Event, Thread
 from time import monotonic, sleep
 
 import pytest
@@ -152,6 +152,21 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
 ):
     requests_by_role = []
     evidence_reads = []
+
+    if (mode, k, runtime, custom_roles, scenario) == ("parallel", 2, "pi", False, "normal"):
+        # Identical independent compositions must share one immutable bundle
+        # without consuming another model attempt when publication races.
+        rendezvous = Barrier(2)
+        rename = os.rename
+
+        def concurrent_candidate_commit(source, destination, *args, **kwargs):
+            source_path = Path(source)
+            prompt = source_path / "project/applications/mixed/prompts/business.md"
+            if source_path.name.startswith(".candidate-") and prompt.is_file() and prompt.read_text() == "COMPOSED":
+                rendezvous.wait(timeout=30)
+            return rename(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(os, "rename", concurrent_candidate_commit)
 
     def message_text(message):
         content = message["content"]

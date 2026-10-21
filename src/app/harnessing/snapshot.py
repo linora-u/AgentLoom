@@ -6,6 +6,7 @@ private values separately; an archived reference is never a working credential.
 from __future__ import annotations
 
 import copy
+import errno
 import hashlib
 import json
 import os
@@ -277,13 +278,27 @@ def _commit(staging: Path, destination: Path, application: str, *, credential_re
     identity = _digest(_json(manifest))
     final = destination / identity.split(":", 1)[1]
     destination.mkdir(parents=True, exist_ok=True)
+
+    def existing_bundle():
+        bundle = load_bundle(final)
+        if bundle.candidate_id != identity:
+            raise ValueError("Existing candidate does not match its content address")
+        return bundle
+
     if final.exists():
-        return load_bundle(final)
+        return existing_bundle()
     (staging / "manifest.json").write_bytes(_json(manifest))
     for path in staging.rglob("*"):
         if path.is_file():
             path.chmod(0o555 if path.stat().st_mode & stat.S_IXUSR else 0o444)
-    os.rename(staging, final)
+    try:
+        os.rename(staging, final)
+    except OSError as error:
+        if error.errno not in {errno.EEXIST, errno.ENOTEMPTY}:
+            raise
+        # Another independent edit can publish the same immutable content
+        # after the existence check. Reuse only a fully verified winner.
+        return existing_bundle()
     return CandidateBundle(identity, final, application, manifest)
 
 
