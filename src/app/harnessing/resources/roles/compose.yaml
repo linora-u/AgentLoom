@@ -1,5 +1,5 @@
 name: harness_compose
-agent_runtime: smolagents
+agent_runtime: pi
 description: Compose a coherent complete Application harness from executed probes.
 task: Compare the supplied execution evidence and return one consistent resource edit set.
 tools: []

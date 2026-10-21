@@ -112,6 +112,7 @@ class Evaluator:
         ("parallel", 1, "pi", False, False, "stop_after_final"),
         ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
+        ("parallel", 2, "pi", False, False, "normal"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
         ("parallel", 1, "pi", True, False, "duplicate_edits"),
@@ -203,6 +204,14 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         root = tmp_path / "project"
         project(root, url, supervisor="smolagents", worker=runtime)
         app = root / "applications/mixed"
+        if not custom_roles:
+            # Built-ins inherit the Application's default, including a model
+            # profile absent from the project catalog.
+            write_yaml(app / "config/model.yaml", {"model": {
+                "default_model_type": "improvement",
+                "improvement": {"adapter": "openai_chat", "model": "improvement",
+                                "base_url": url, "api_key": "fixture-key", "timeout": 20,
+                                "num_retries": 0, "supports_structured_output": True}}})
         (app / "driver.py").write_text(DRIVER)
         (app / "prompts").mkdir()
         (app / "prompts/business.md").write_text("BASE")
@@ -292,9 +301,11 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             stopper.start()
         result = run_application(
             request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
+            experiment_id="preallocated-experiment",
             events=(lambda event: stop.set() if event["event"] == "trial.completed"
                     and event.get("trial_id") == "final1" else None) if scenario == "stop_after_final" else None,
         )
+        assert result.experiment_id == "preallocated-experiment"
         if scenario == "stop_after_final":
             assert result.status == "stopped", result.to_dict()
             assert len(result.trials) == 4
@@ -370,9 +381,12 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert requests_by_role.count("compose") == edits
         assert requests_by_role.count("select") == (k > 1)
         assert requests_by_role.count("reflect") == 1
-        assert result.usage["complete"] == (
-            runtime == "smolagents" and not crash_after_completion and scenario != "stop_and_resume"
-        )
+        if not custom_roles:
+            assert sum(item["model"] == "improvement" for item in requests) == sum(
+                role != "business" for role in requests_by_role)
+        # Built-in roles now use Pi even when business execution uses smol.
+        # This fixture's Pi adapter does not report every usage dimension.
+        assert result.usage["complete"] is False
         assert result.usage["total_tokens"] == 70 * len(requests)
         for role_receipt in result.roles:
             observed = role_receipt["receipt"]["usage_observations"]

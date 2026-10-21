@@ -13,8 +13,8 @@ harnessing:
   recursion:
     mode: parallel  # parallel：从共同基础探索；sequential：沿上一组合方案继续改进。
     k: 1            # 有限正整数。正常计划有 4k 次完整业务执行、3k 次改进会话。
-  # editable 默认允许 prompts、skills、tools、toolsets、mcp_servers、worker_agents。
-  # 可按需要缩小，例如 editable: [prompts, skills, worker_agents]。
+  # editable 默认允许 system_prompt、skills、tools、toolsets、mcp_servers、worker_agents。
+  # 可按需要缩小，例如 editable: [system_prompt, skills, worker_agents]。
   # roles 可引用普通应用内 Worker YAML；未指定时使用框架内置 Agent：
   # roles:
   #   general: workflows/worker_agents/improve_general.yaml
@@ -25,6 +25,10 @@ harnessing:
 ```
 
 这些是 AgentLoom 的配置契约。通用改进、领域改进、Probe、Compose、有限递归、final 选择和反思借鉴 Harness²；开发评分、Application 配置与多 Agent 执行适配由 AgentLoom 提供。`k` 控制探索规模；选择、反思、评价和重试另计用量，现有单次调用超时和输出限制继续有效。
+
+五个内置改进角色均使用 Pi，复用已安装的 Pi SDK 和现有认证；模型取应用生效的
+`model.default_model_type`。业务 Worker 的 `agent_runtime` 与 `model_type` 仍由各自 YAML 声明。
+应用无须重复定义五份角色 YAML；只有确实需要定制角色时才配置 `roles`。
 
 自定义角色使用与内置角色相同的输入输出契约：输入为包含 `evidence` 的对象；五种角色的输出如下。
 
@@ -64,6 +68,9 @@ recovered = execute_app(
 ```
 
 程序应用接入 `agentloom.app.harnessing.controller.run_application`，提供一次性的完整任务驱动。驱动负责准备固定事实、整体验收、恢复核对和幂等发布；不能只在改进器外循环调用某个 Worker。公开请求支持显式事实输入与隐藏数据路径，模型配置和凭据由可信父进程绑定。
+
+需要在首次模型执行前保存任务与实验对应关系的调用方，可先持久化自己的实验 ID，首次调用时传入
+`experiment_id`，之后用 `resume_id` 恢复。两者不能同时传入；恢复读取已归档策略。
 
 ## 结果含义
 

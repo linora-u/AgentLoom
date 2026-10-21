@@ -861,6 +861,7 @@ def run_application(
     events=None,
     stop_token=None,
     resume_id=None,
+    experiment_id=None,
     state_root: Path | None = None,
     environment=None,
     model_config=None,
@@ -874,7 +875,9 @@ def run_application(
         raise ValueError("Nested complete-task dispatch must use the bound driver's once entry")
     if stop_token is not None and not callable(getattr(stop_token, "is_set", None)):
         raise ValueError("stop_token must expose is_set()")
-    experiment_id = resume_id or "experiment-" + uuid.uuid4().hex
+    if resume_id is not None and experiment_id is not None:
+        raise ValueError("Provide either a new experiment identity or a resume identity")
+    experiment_id = resume_id or experiment_id or "experiment-" + uuid.uuid4().hex
     if not isinstance(experiment_id, str) or not experiment_id or any(
         char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in experiment_id
     ):

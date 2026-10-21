@@ -1,5 +1,5 @@
 name: harness_general
-agent_runtime: smolagents
+agent_runtime: pi
 description: Propose general improvements to the complete Application harness.
 task: Read the supplied evidence and return a complete explicit resource edit set.
 tools: []
