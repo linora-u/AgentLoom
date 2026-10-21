@@ -304,7 +304,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             resources = Path(__file__).parents[2] / "src/app/harnessing/resources/roles"
             for role in ("general", "domain", "compose", "select", "reflect"):
                 value = yaml.safe_load((resources / f"{role}.yaml").read_text())
-                value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text())
+                value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text(), tools=[])
                 path = app / "workflows" / f"role_{role}.yaml"
                 write_yaml(path, value)
                 roles[role] = f"workflows/role_{role}.yaml"

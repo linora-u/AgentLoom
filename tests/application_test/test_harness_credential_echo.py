@@ -93,7 +93,7 @@ def test_complete_application_rejects_authenticated_provider_echo_before_first_w
         roles = {}
         for role in ("general", "domain", "compose", "select", "reflect"):
             value = yaml.safe_load((resources / f"{role}.yaml").read_text())
-            value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text())
+            value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text(), tools=[])
             roles[role] = f"workflows/role_{role}.yaml"
             write_yaml(app / roles[role], value)
         request = ApplicationRequest("mixed", root, app,
