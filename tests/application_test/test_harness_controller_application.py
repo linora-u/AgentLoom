@@ -193,6 +193,9 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 task = next(message_text(message) for message in request["messages"]
                             if message["role"] == "user" and "Input data (JSON):\n" in message_text(message))
                 evidence = json.loads(task.split("Input data (JSON):\n", 1)[1])["evidence"]
+                resource_root = Path(evidence["resource_root"])
+                assert resource_root != root
+                assert resource_root.name == "project" and resource_root.parent.parent.name == "bundles"
                 evidence_reads.append("index")
                 return [("read-index", "read", {"path": evidence["evidence_file"]})]
             if len(tool_results) == 1:

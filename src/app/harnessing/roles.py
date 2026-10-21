@@ -11,7 +11,7 @@ ROLE_NAMES = ("general", "domain", "compose", "select", "reflect")
 _RESOURCE_ROOT = Path(__file__).parent / "resources" / "roles"
 
 
-def _evidence_input(evidence, workspace):
+def _evidence_input(evidence, workspace, project_root):
     """Keep complete large evidence behind the built-ins' ordinary Pi read tool."""
     from agentloom.execution import SecureDirectory
 
@@ -42,9 +42,12 @@ def _evidence_input(evidence, workspace):
         storage.atomic_write_text("harness-evidence/index.json", json.dumps(
             project(evidence), ensure_ascii=False, indent=2))
     return {"evidence_file": str(workspace / "harness-evidence/index.json"),
+            "resource_root": str(project_root),
             "original_evidence_file": str(workspace / "harness-evidence/original.json"),
             "original_sha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
             "instructions": "Read evidence_file with the Pi read tool. The index retains every field. "
+                "Read current resource files by joining resource_root with their logical project-relative paths. "
+                "Historical host paths in execution records are not the current resource root. "
                 "For harness_text_parts, format path_template with index=0 through count-1 "
                 "and concatenate those files' text in order "
                 "to recover the exact original string; each part is at most 8192 characters. "
@@ -104,7 +107,7 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
                 definition["system_prompt"] = (_RESOURCE_ROOT / f"{role}.md").read_text()
                 definition = YamlAgentFactory._prepare_agent_config(definition)
                 item = WorkItem(payload["stage"], {"evidence": _evidence_input(
-                    payload["evidence"], trial.workspace_root)})
+                    payload["evidence"], trial.workspace_root, archived.project_root)})
                 outcome = app._invoke_definition(definition, item, 0)
             receipt = outcome.to_dict()
             role_run_dir = app.run.run_dir
