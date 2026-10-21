@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from threading import Event, Thread
@@ -128,6 +129,7 @@ def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
         ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 2, "pi", False, False, "normal"),
+        ("parallel", 1, "pi", False, False, "large_evidence"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
         ("parallel", 1, "pi", True, False, "duplicate_edits"),
@@ -149,6 +151,13 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     scenario,
 ):
     requests_by_role = []
+    evidence_reads = []
+
+    def message_text(message):
+        content = message["content"]
+        if isinstance(content, str):
+            return content
+        return "".join(part.get("text", "") for part in content if isinstance(part, dict))
 
     def program(request):
         if custom_roles and runtime == "pi" and request["model"] == "supervisor":
@@ -178,6 +187,30 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             result, role = {"edits": [], "rationale": "No supported general edit."}, "general"
         else:
             raise AssertionError(system[:300])
+        if scenario == "large_evidence" and role == "general":
+            tool_results = [message for message in request["messages"] if message["role"] == "tool"]
+            if not tool_results:
+                task = next(message_text(message) for message in request["messages"]
+                            if message["role"] == "user" and "Input data (JSON):\n" in message_text(message))
+                evidence = json.loads(task.split("Input data (JSON):\n", 1)[1])["evidence"]
+                evidence_reads.append("index")
+                return [("read-index", "read", {"path": evidence["evidence_file"]})]
+            if len(tool_results) == 1:
+                ref = re.search(r"ctx_[0-9a-f]{32}", message_text(tool_results[0]))
+                assert ref is not None
+                assert any(tool["function"]["name"] == "loom_retrieve_context"
+                           for tool in request["tools"])
+                evidence_reads.append("retrieve-index")
+                return [("retrieve-index", "loom_retrieve_context", {"ref": ref.group()})]
+            if len(tool_results) == 2:
+                index_text = message_text(tool_results[1])
+                assert "next_offset=none" in index_text
+                index = json.loads(index_text.split("\n", 1)[1])
+                parts = index["files"]["applications/mixed/prompts/large.md"]["harness_text_parts"]
+                evidence_reads.append("tail")
+                return [("read-tail", "read", {
+                    "path": parts["path_template"].format(index=parts["count"] - 1)})]
+            assert "END-OF-COMPLETE-EVIDENCE" in message_text(tool_results[-1])
         if scenario == "selector_invalid" and role == "select":
             result["chosen_id"] = "BASE"
         if scenario == "invalid_edits" and role in {"general", "domain", "compose"}:
@@ -231,6 +264,11 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         (app / "prompts").mkdir()
         (app / "prompts/business.md").write_text("BASE")
         (app / "prompts/obsolete.md").write_text("UNUSED RESOURCE")
+        if scenario == "large_evidence":
+            # A real Application may contain a multi-megabyte reference file.
+            # Every built-in Pi role must still execute, rather than silently
+            # inheriting the base after its JSONL bridge rejects the input.
+            (app / "prompts/large.md").write_text("x" * (9 * 1024 * 1024) + "END-OF-COMPLETE-EVIDENCE")
         write_yaml(
             app / "workflows/worker.yaml",
             {
@@ -398,7 +436,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert requests_by_role.count("reflect") == 1
         if not custom_roles:
             assert sum(item["model"] == "improvement" for item in requests) == sum(
-                role != "business" for role in requests_by_role)
+                role != "business" for role in requests_by_role) + len(evidence_reads)
         # Built-in roles now use Pi even when business execution uses smol.
         # This fixture's Pi adapter does not report every usage dimension.
         assert result.usage["complete"] is False
@@ -407,6 +445,20 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             observed = role_receipt["receipt"]["usage_observations"]
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
+        if scenario == "large_evidence":
+            import hashlib
+
+            assert evidence_reads == ["index", "retrieve-index", "tail"]
+            assert all(role["status"] == "completed" for role in result.roles)
+            evidence_root = state / "roles/general1.edit1/workspace/harness-evidence"
+            index = json.loads((evidence_root / "index.json").read_text())
+            value = index["files"]["applications/mixed/prompts/large.md"]
+            parts = value["harness_text_parts"]
+            restored = "".join(Path(parts["path_template"].format(index=i)).read_text()
+                               for i in range(parts["count"]))
+            assert restored == (app / "prompts/large.md").read_text()
+            assert hashlib.sha256(restored.encode()).hexdigest() == value["sha256"]
+            assert all(len(json.dumps(item).encode()) < 512 * 1024 for item in requests)
         assert (state / "stages/publication.json").exists()
         if scenario == "normal" and mode == "parallel":
             candidate = json.loads((state / "stages/candidate.final1.json").read_text())["result"]

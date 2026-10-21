@@ -30,6 +30,12 @@ harnessing:
 `model.default_model_type`。业务 Worker 的 `agent_runtime` 与 `model_type` 仍由各自 YAML 声明。
 应用无须重复定义五份角色 YAML；只有确实需要定制角色时才配置 `roles`。
 
+内置角色可通过 Pi 的只读 `read` 工具读取本次隔离工作区。大型执行证据写入
+`harness-evidence/original.json`，模型接收索引路径而不是把全部正文放进桥接输入帧。
+索引保留全部字段；长文本按顺序分片，并记录字符数和 SHA-256，可完整还原。
+角色使用 `read` 的 `offset`、`limit` 分页查看索引及所需正文。自定义角色继续接收原有
+`evidence` 对象，工具与输入契约由其普通 Worker YAML 声明。
+
 自定义角色使用与内置角色相同的输入输出契约：输入为包含 `evidence` 的对象；五种角色的输出如下。
 
 | 角色 | 输出 |

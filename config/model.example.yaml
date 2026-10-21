@@ -33,7 +33,7 @@ model:
     # Required wire protocol. Supported values:
     # openai_chat, openai_responses, anthropic_messages, openai_chatgpt_responses.
     adapter: openai_chat
-    base_url: "xxxxxxx"
+    base_url: "https://your-model-endpoint.example/v1"
     api_key: "xxxxxxx"
     model: "openai/gpt-5_5"
     temperature: 0.2
@@ -58,7 +58,7 @@ model:
   fast:
     adapter: openai_chat
     # 使用 openai/ 前缀让 LiteLLM 识别这是 OpenAI 兼容端点
-    base_url: "xxxxxxx"
+    base_url: "https://your-model-endpoint.example/v1"
     api_key: "xxxxxxx"
     model: "gemini/gemini-3_1-pro-preview"
     # 注意：LiteLLM 对 gpt-5 模型要求 temperature=1.0
@@ -73,7 +73,7 @@ model:
     adapter: openai_chat
     # smolagents smart_summary requires this profile. Pi compacts using
     # its selected model and does not require a separate summary profile.
-    base_url: "xxxxxxx"
+    base_url: "https://your-model-endpoint.example/v1"
     api_key: "xxxxxxx"
     model: "openai/gpt-5_5"
     temperature: 0.2
