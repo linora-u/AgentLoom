@@ -418,8 +418,8 @@ class ImprovementController:
         error = ""
         for key in ("reflection", "reflection.retry1"):
             try:
-                # Put corrective feedback before the large files/executions so
-                # even a paged built-in evidence index exposes it immediately.
+                # Retain corrective feedback with complete execution evidence;
+                # the new role stage keeps the original rejected output intact.
                 feedback = {"previous_error": error, "evidence_refs": sorted(self.receipts)} if error else {}
                 output, receipt = self._role(key, "reflect", bundle, {**feedback, **evidence})
                 if any(set(item.get("evidence_refs", ())) - set(self.receipts)
