@@ -122,6 +122,18 @@ def _references(value: Any):
         yield runtime["prompt_template_path"]
 
 
+def _worker_resources(value: Any, source: Path, project: Path):
+    """Use ordinary Application path semantics for the delegated YAML closure."""
+    from agentloom.app.definition import resolve_worker_path
+    if isinstance(value, dict) and isinstance(value.get("worker_agents"), list):
+        for item in value["worker_agents"]:
+            if isinstance(item, dict) and isinstance(item.get("path"), str):
+                target = resolve_worker_path(project, source, item["path"])
+                if not target.is_relative_to(project):
+                    raise ValueError("Delegated Agent resource escapes project")
+                yield target
+
+
 def _portable_paths(value: Any, owner: Path, project: Path) -> Any:
     value = copy.deepcopy(value)
     if not isinstance(value, dict):
@@ -350,6 +362,12 @@ def snapshot_application(project_root: Path, application_root: Path, destination
             raw = _read_regular(source, project)
             parsed = json.loads(raw) if source.suffix == ".json" else yaml.safe_load(raw)
             owner = application_path if source.is_relative_to(application_path) else project
+            for target in _worker_resources(parsed, source, project):
+                if any(target.resolve().is_relative_to(path) for path in excluded):
+                    raise ValueError("Candidate delegation references hidden evaluation data")
+                if target not in sources:
+                    sources.add(target)
+                    pending.append(target)
             for reference in _references(parsed):
                 target = Path(reference).expanduser()
                 target = target if target.is_absolute() else owner / target

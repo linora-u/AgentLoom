@@ -25,13 +25,25 @@ def _read(path):
         return data
 
 
+def artifacts_intact(receipt):
+    import hashlib
+    for artifact in receipt.artifacts:
+        if "path" in artifact:
+            path = Path(artifact["path"])
+            if not path.is_file() or path.is_symlink() or "sha256" not in artifact:
+                return False
+            if hashlib.sha256(path.read_bytes()).hexdigest() != artifact["sha256"].removeprefix("sha256:"):
+                return False
+    return True
+
+
 def resource_tree(controller):
     """Only executable configuration and its declared resource closure is evidence.
 
     The immutable dependency bundle remains complete; historical reviews, business
     Python and input databases do not become editable harness files by proximity.
     """
-    from .snapshot import _references
+    from .snapshot import _references, _worker_resources
     bundle = controller.base
     root, app = bundle.project_root, bundle.application_root
     role_paths = {(app / reference).resolve() for _, reference in controller.policy.roles.overrides()}
@@ -52,6 +64,10 @@ def resource_tree(controller):
         scanned.add(path)
         value = json.loads(path.read_text()) if path.suffix == ".json" else yaml.safe_load(path.read_text())
         owner = app if path.is_relative_to(app) else root
+        for target in _worker_resources(value, path, root):
+            if target not in selected and target.resolve() not in role_paths:
+                selected.add(target)
+                pending.append(target)
         for reference in _references(value):
             target = (owner / reference).resolve()
             if not target.is_relative_to(root) or not target.exists():
@@ -237,7 +253,11 @@ class ApplicationAdapter:
         return root
 
     def _receipt(self, run_dir):
-        return ExecutionReceipt.from_dict(json.loads((Path(run_dir) / "receipt.json").read_text()))
+        receipt = ExecutionReceipt.from_dict(json.loads((Path(run_dir) / "receipt.json").read_text()))
+        record = self.controller.store.read("stages/" + receipt.trial_id + ".json")
+        if not record or record.get("status") != "completed" or record.get("result") != receipt.to_dict():
+            raise ValueError("Trial receipt differs from its completed host execution record")
+        return receipt
 
     def delivered(self, run_dir):
         try:
@@ -246,14 +266,7 @@ class ApplicationAdapter:
             return False
 
     def artifacts_intact(self, run_dir):
-        receipt = self._receipt(run_dir)
-        for artifact in receipt.artifacts:
-            if "path" in artifact and "sha256" in artifact:
-                import hashlib
-                path = Path(artifact["path"])
-                if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != artifact["sha256"].removeprefix("sha256:"):
-                    return False
-        return True
+        return artifacts_intact(self._receipt(run_dir))
 
     def _public_output(self, run_dir):
         receipt = self._receipt(run_dir)
@@ -271,7 +284,42 @@ class ApplicationAdapter:
         evidence = renderer(self.controller.invocation, receipt) if renderer else {
             "status": receipt.status, "accepted": receipt.accepted,
             "acceptance": receipt.acceptance, "output": receipt.output, "error": receipt.error}
-        return "[OBSERVATION]\n" + json.dumps(json_value(evidence), ensure_ascii=False, indent=2)
+        lines = ["[OBSERVATION]\n" + json.dumps(json_value(evidence), ensure_ascii=False, indent=2)]
+        # The driver summary is navigation, not a substitute for actual tool
+        # behavior. Retain every recorded action and observation, truncating
+        # only individual observations under the upstream display contract.
+        boundary = Path(run_dir).resolve()
+        seen = set()
+        for run in receipt.runs:
+            manifest = run.get("manifest_path")
+            if not manifest:
+                continue
+            path = Path(manifest).parent / "audit/runtime_events.jsonl"
+            if not path.resolve().is_relative_to(boundary) or path in seen or not path.is_file():
+                continue
+            seen.add(path)
+            lines.append("\n## Runtime " + str(run.get("run_id", path.parent.parent.name)))
+            for raw in path.read_text().splitlines():
+                try:
+                    event = json.loads(raw)
+                except ValueError:
+                    continue
+                if event.get("kind") != "tool":
+                    continue
+                details = event.get("details", {})
+                record = details.get("record") or {}
+                name = record.get("tool_name") or details.get("name") or "tool"
+                arguments = record.get("input", details.get("arguments", {}))
+                lines.append("[ACTION] " + name + "\n" + json.dumps(arguments, ensure_ascii=False))
+                value = record.get("output", details.get("result"))
+                if record.get("error") or details.get("status") == "failed":
+                    lines.append("[ERROR] " + str(record.get("error") or details.get("error", "tool failed")))
+                elif value is not None:
+                    text = json.dumps(value, ensure_ascii=False)
+                    if len(text) > obs_trunc:
+                        text = text[:obs_trunc] + "\n[observation display truncated; original retained in host runtime audit]"
+                    lines.append("[OBSERVATION]\n" + text)
+        return "\n".join(lines)
 
     def development_feedback(self, task_id, run):
         from .controller import EvaluationPending

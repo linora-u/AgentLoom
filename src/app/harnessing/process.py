@@ -55,10 +55,10 @@ def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Ma
 
 
 def execute_managed_orchestration(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None, credentials: Mapping | None = None) -> dict:
-    """Fixed news orchestration whose actual Agents run in isolated Hosts.
+    """Trusted orchestration whose actual Agents run in mandatory isolated Hosts.
 
-    This internal seam is not selectable in YAML. It cannot run roles or an
-    arbitrary driver; every NewsHost must install the frozen mandatory policy.
+    This capability belongs to the immutable Python driver, never candidate YAML.
+    Improvement roles cannot select it.
     """
     if factory != "agentloom.app.harnessing.controller:execute_trial":
         raise ValueError("Managed orchestration only executes the trusted complete-task driver")

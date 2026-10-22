@@ -219,9 +219,8 @@ class ImprovementController:
     def _process(self, bundle, context, factory, payload):
         from .process import execute_isolated, execute_managed_orchestration
 
-        # These are the only two trusted boundaries. Keep the fixed News
-        # adapter choice explicit rather than obscuring private inputs and
-        # returned public data behind a dynamically selected callable.
+        # A trusted Python driver may delegate mandatory isolation to managed
+        # Hosts. Candidate YAML cannot opt out of the complete-task boundary.
         managed_orchestration = (factory == "agentloom.app.harnessing.controller:execute_trial"
             and getattr(self.driver, "execution_boundary", "isolated") == "managed_hosts")
         if managed_orchestration:
@@ -300,6 +299,20 @@ class ImprovementController:
             receipt = ExecutionReceipt.from_dict(result)
             if receipt.trial_id != key or receipt.candidate_id != bundle.candidate_id:
                 raise ValueError("Physical trial returned a different identity")
+            import hashlib
+            artifacts = []
+            for raw in receipt.artifacts:
+                artifact = json_value(raw)
+                if "path" in artifact:
+                    path = Path(artifact["path"])
+                    if not path.resolve().is_relative_to(context.root) or not path.is_file() or path.is_symlink():
+                        raise ValueError("Trial artifact is missing or escapes its owned execution state")
+                    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                    if artifact.get("sha256", actual).removeprefix("sha256:") != actual:
+                        raise ValueError("Trial artifact changed before its execution receipt was committed")
+                    artifact["sha256"] = actual
+                artifacts.append(artifact)
+            receipt = replace(receipt, artifacts=tuple(artifacts))
             self.store.finish(key, receipt)
         with self._mutex:
             self.trials.append(receipt)
@@ -513,6 +526,13 @@ class ImprovementController:
             selected = self.store.root / "bundles" / old["selected_candidate_id"].split(":", 1)[1]
             if load_bundle(selected).candidate_id != old["selected_candidate_id"]:
                 raise ValueError("Completed result candidate identity changed")
+            from .upstream import artifacts_intact
+            receipt = next((ExecutionReceipt.from_dict(item) for item in old["trials"]
+                            if item["trial_id"] == old["selected_trial_id"]), None)
+            if receipt is None or not receipt.eligible or not artifacts_intact(receipt):
+                raise ValueError("Completed result selected artifacts are missing or changed")
+            if json_value(receipt.output) != old["output"]:
+                raise ValueError("Completed result output differs from its selected receipt")
             return ApplicationExecutionResult.from_dict(old)
         self.prepare()
         from agentloom.runtimes.pi.credentials import bind_pi_credentials, capture_pi_credentials
