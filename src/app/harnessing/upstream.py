@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import yaml
 
-from .models import ExecutionReceipt, fingerprint, json_value
+from .models import fingerprint, json_value
 from .snapshot import derive_candidate
 
 METHOD_REVISION = "harness2-1cfe254-agentloom-v2"
@@ -308,11 +308,7 @@ class ApplicationAdapter:
         return root
 
     def _receipt(self, run_dir):
-        receipt = ExecutionReceipt.from_dict(json.loads((Path(run_dir) / "receipt.json").read_text()))
-        record = self.controller.store.read("stages/" + receipt.trial_id + ".json")
-        if not record or record.get("status") != "completed" or record.get("result") != receipt.to_dict():
-            raise ValueError("Trial receipt differs from its completed host execution record")
-        return receipt
+        return self.controller.restore_trial(run_dir)
 
     def delivered(self, run_dir):
         try:
@@ -468,6 +464,10 @@ def run_method(controller):
     from harness2.core.proposer import Proposer
     from harness2.core.schedule import mode_token, run_task
     adapter = ApplicationAdapter(controller)
+    # Validate archived host receipts before upstream can reuse or rewrite a
+    # cached Trial. Completed business work is restored without execution.
+    for path in sorted((controller.store.root / "trials").glob("*/receipt.json")):
+        controller.restore_trial(path.parent)
     mode = mode_token(controller.policy.recursion.mode)
     prop = Proposer(adapter.spec.channels["proposer"], audit_dir=controller.store.root / "method" / "sessions",
                     transport=PiTransport(controller))
@@ -475,16 +475,6 @@ def run_method(controller):
         result = run_task(adapter.task_id, controller.policy.recursion.k, adapter=adapter, prop=prop,
                           runs_root=adapter.spec.runs_root, modes=(mode,), library=library, selector_prop=prop,
                           tag=fingerprint([controller.experiment_id, json_value(controller.policy.feedback.model_dump())])[:16])
-        # A cached upstream task does not call execute. Rehydrate only host
-        # receipts; completed business work is never replayed to build a report.
-        from .snapshot import load_bundle
-        for path in sorted((controller.store.root / "trials").glob("*/receipt.json")):
-            receipt = ExecutionReceipt.from_dict(json.loads(path.read_text()))
-            if receipt.trial_id not in controller.receipts:
-                controller.receipts[receipt.trial_id] = receipt
-                controller.trials.append(receipt)
-                controller.bundles[receipt.trial_id] = load_bundle(controller.store.root / "bundles" / receipt.candidate_id.split(":", 1)[1])
-                controller._usage(receipt.usage)
         records = {item["stage"]: item for item in controller.role_receipts}
         for path in sorted((controller.store.root / "roles").glob("*/receipt.json")):
             record = json.loads(path.read_text())

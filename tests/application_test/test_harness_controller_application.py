@@ -137,6 +137,7 @@ def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
         ("parallel", 1, "pi", False, False, "evaluation_recovery"),
         ("parallel", 1, "pi", False, False, "role_commit_recovery"),
         ("parallel", 1, "pi", False, False, "role_timeout"),
+        ("parallel", 1, "pi", False, False, "cached_receipt_mismatch"),
         ("parallel", 1, "pi", False, False, "unscorable"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 2, "pi", False, False, "normal"),
@@ -337,7 +338,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
             experiment_id="preallocated-experiment",
             events=(lambda event: stop.set() if event["event"] == "trial.completed"
-                    and event.get("trial_id", "").startswith(("agg", "c")) else None) if scenario == "stop_after_final" else None,
+                    and event.get("trial_id", "").startswith(("agg", "c")) else None) if scenario in {"stop_after_final", "cached_receipt_mismatch"} else None,
         )
         assert result.experiment_id == "preallocated-experiment"
         if scenario == "role_commit_recovery":
@@ -356,7 +357,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             result = run_application(request, state_root=tmp_path / "experiments",
                 environment=environment, resume_id=result.experiment_id)
             assert requests_by_role.count("business") == 4
-        if scenario == "stop_after_final":
+        if scenario in {"stop_after_final", "cached_receipt_mismatch"}:
             assert result.status == "stopped", result.to_dict()
             assert len(result.trials) == 4
             assert not result.delivery and not (tmp_path / "delivery.json").exists()
@@ -364,6 +365,20 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             assert not (tmp_path / "experiments" / result.experiment_id / "stages/publication.json").exists()
             business_calls = requests_by_role.count("business")
             assert business_calls == 4
+            if scenario == "cached_receipt_mismatch":
+                receipt_path = tmp_path / "experiments" / result.experiment_id / "trials/inv1/receipt.json"
+                changed = json.loads(receipt_path.read_text())
+                changed["output"] = {"fact": "TAMPERED-NONSELECTED-RECEIPT"}
+                receipt_path.write_text(json.dumps(changed))
+                calls = len(requests)
+                stop.clear()
+                rejected = run_application(request, state_root=tmp_path / "experiments",
+                    environment=environment, resume_id=result.experiment_id, stop_token=stop)
+                assert rejected.status == "failed", rejected.to_dict()
+                assert "Trial receipt differs from its completed host execution record" in "\n".join(rejected.errors)
+                assert not rejected.delivery and not (tmp_path / "delivery.json").exists()
+                assert len(requests) == calls and requests_by_role.count("business") == business_calls
+                return
             (app / "workflows/worker.yaml").write_text("invalid: [")
             (app / "prompts/business.md").write_text("LIVE-MUTATION")
             (root / "config/system.yaml").write_text("invalid: [")

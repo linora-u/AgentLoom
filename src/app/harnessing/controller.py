@@ -6,6 +6,7 @@ execution, physical lifecycle, usage observations and idempotent publication.
 from __future__ import annotations
 
 import importlib
+import json
 import threading
 import uuid
 from contextlib import contextmanager
@@ -278,6 +279,36 @@ class ImprovementController:
             summary["complete"] = summary["complete"] and not unknown
             return summary
 
+    def _register_trial(self, receipt, bundle=None):
+        """Register only a receipt matching the authoritative completed stage."""
+        record = self.store.read(self.store._stage_name(receipt.trial_id))
+        if not record or record.get("status") != "completed" or record.get("result") != receipt.to_dict():
+            raise ValueError("Trial receipt differs from its completed host execution record")
+        with self._mutex:
+            previous = self.receipts.get(receipt.trial_id)
+            if previous is not None:
+                if previous != receipt:
+                    raise ValueError("Registered Trial receipt changed")
+                return receipt
+            if bundle is None:
+                from .snapshot import load_bundle
+                bundle = load_bundle(self.store.root / "bundles" / receipt.candidate_id.split(":", 1)[1])
+            if receipt.candidate_id != bundle.candidate_id:
+                raise ValueError("Trial receipt belongs to another candidate bundle")
+            self.trials.append(receipt)
+            self.receipts[receipt.trial_id], self.bundles[receipt.trial_id] = receipt, bundle
+            self._usage(receipt.usage)
+        return receipt
+
+    def restore_trial(self, run_dir):
+        """Read cached host evidence through the same registration boundary."""
+        run_dir = Path(run_dir).resolve()
+        receipt = ExecutionReceipt.from_dict(json.loads((run_dir / "receipt.json").read_text()))
+        expected = self.store.root / "trials" / receipt.trial_id
+        if run_dir != expected.resolve() or not run_dir.is_relative_to(self.store.root / "trials"):
+            raise ValueError("Trial receipt escapes its owned execution state")
+        return self._register_trial(receipt)
+
     def _trial(self, key, bundle):
         self._check_stop()
         context = self._context(key, bundle)
@@ -316,10 +347,9 @@ class ImprovementController:
                 artifacts.append(artifact)
             receipt = replace(receipt, artifacts=tuple(artifacts))
             self.store.finish(key, receipt)
-        with self._mutex:
-            self.trials.append(receipt)
-            self.receipts[key], self.bundles[key] = receipt, bundle
-        self._usage(receipt.usage)
+        if receipt.trial_id != key or receipt.candidate_id != bundle.candidate_id:
+            raise ValueError("Physical trial returned a different identity")
+        self._register_trial(receipt, bundle)
         self._emit("trial.completed", trial_id=key, status=receipt.status, accepted=receipt.accepted)
         if self.policy.feedback.mode == "development_score":
             try:
