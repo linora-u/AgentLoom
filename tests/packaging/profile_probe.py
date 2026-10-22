@@ -6,18 +6,18 @@ The release verifier copies this file and the MCP peer into its evidence directo
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import importlib.metadata
 import importlib.util
-import hashlib
 import json
 import os
-from pathlib import Path
-import signal
 import shutil
+import signal
 import subprocess
 import sys
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 from typing import Any
 
@@ -26,7 +26,7 @@ import yaml
 
 
 @contextmanager
-def model_service(profile, calls, failure=None, answer="PROFILE-APPLICATION-OK"):
+def model_service(profile, calls, failure=None, answer="PROFILE-APPLICATION-OK", program=None):
     requests = []
     killed_children = []
 
@@ -50,9 +50,12 @@ def model_service(profile, calls, failure=None, answer="PROFILE-APPLICATION-OK")
                 return
             index = len(requests) - 1
             call = calls[index] if index < len(calls) else None
-            if call is None and profile == "smol":
+            reply_answer = answer
+            if program:
+                call, reply_answer = program(payload)
+            elif call is None and profile == "smol":
                 call = ("final_answer", {"answer": answer})
-            message: dict[str, Any] = {"role": "assistant", "content": answer}
+            message: dict[str, Any] = {"role": "assistant", "content": reply_answer}
             finish = "stop"
             if call is not None:
                 name, arguments = call
@@ -165,6 +168,28 @@ def configure(workspace, profile, case, url):
     return app, calls, marker
 
 
+def harness_reply(payload):
+    """Control only the model; installed Pi performs the actual file operations."""
+    messages = payload["messages"]
+    prompt = "\n".join(str(message.get("content") or "") for message in messages if message["role"] != "tool")
+    outputs = [str(message.get("content") or "") for message in messages if message["role"] == "tool"]
+    assert not any("policy_blocked" in output or "ENOENT" in output for output in outputs), outputs
+    target = "context/harness/applications/probe/prompts/main.md"
+    if "# YOUR DIMENSION:" in prompt:
+        plan = [("read", {"path": "context/task.md"})]
+        answer = "<notes>KEEP_BASE: inspected this task.</notes>"
+    elif "You are the integration judge and synthesizer." in prompt:
+        plan = [("read", {"path": target}),
+                ("write", {"path": target, "content": "COMPOSED-INSTALLED"})]
+        answer = "<notes>revised -> prompt -> checked the declared task and proposal evidence.</notes>"
+    elif "You are reading the complete record of one improvement round" in prompt:
+        plan = [("read", {"path": "context/decisions/inv1.md"})]
+        answer = "<edits>observed: complete composed run\nverdict: confounded</edits>\nNO_ENTRY"
+    else:
+        return None, "COMPOSED-INSTALLED" if "COMPOSED-INSTALLED" in prompt else "BASE-INSTALLED"
+    return (plan[len(outputs)], "") if len(outputs) < len(plan) else (None, answer)
+
+
 def _pi_damage_target(case):
     if case == "stale_bridge":
         import agentloom
@@ -182,10 +207,42 @@ def run(profile, case, workspace, code_tools=False):
     failure = {"provider_failure": "provider", "child_failure": "child"}.get(case)
     calls = []
     answer = "TODO_OFF_OK MOOL-4" if case == "shipped_yaml" else "PROFILE-APPLICATION-OK"
-    with model_service(profile, calls, failure, answer) as (url, requests, killed_children):
+    with model_service(profile, calls, failure, answer,
+                       program=harness_reply if case == "harness" else None) as (url, requests, killed_children):
         app, planned, marker = configure(workspace, profile, case, url)
         calls.extend(planned)
-        if case in {"missing_yaml", "missing_smol", "missing_sdk", "stale_bridge", "missing_asset", "provider_failure", "child_failure", "help"}:
+        if case == "harness":
+            import harness2
+            from agentloom.app.runner import execute_app
+            from agentloom.config.config import bind_config, load_project_config
+            assert "site-packages" in Path(harness2.__file__).resolve().parts
+            for name in ("LICENSE", "UPSTREAM.json", "PATCHES.md"):
+                assert Path(harness2.__file__).with_name(name).is_file(), name
+            application = app.parents[1]
+            (application / "prompts").mkdir()
+            (application / "prompts/main.md").write_text("BASE-INSTALLED")
+            (application / "config").mkdir()
+            (application / "config/system.yaml").write_text("harnessing:\n  enabled: true\n")
+            definition = yaml.safe_load(app.read_text())
+            definition["system_prompt"] = {"path": "prompts/main.md"}
+            app.write_text(yaml.safe_dump(definition))
+            with bind_config(load_project_config(workspace)):
+                result = execute_app(app, file_logging=False)
+                assert result.output == "COMPOSED-INSTALLED", result.harnessing.to_dict()
+                assert result.harnessing.status == "completed"
+                assert len(result.harnessing.trials) == 4
+                assert result.harnessing.selected_trial_id == "agg1"
+                assert next(trial for trial in result.harnessing.trials if trial.trial_id == "base1").candidate_id != result.harnessing.selected_candidate_id
+                count = len(requests)
+                recovered = execute_app(app, file_logging=False,
+                    harness_resume_id=result.harnessing.experiment_id)
+                assert recovered.output == result.output and len(requests) == count
+            assert (application / "prompts/main.md").read_text() == "BASE-INSTALLED"
+            evidence.update(harness_origin=str(Path(harness2.__file__).resolve()),
+                            experiment=result.harnessing.experiment_id,
+                            selected=result.harnessing.selected_trial_id,
+                            model_requests=len(requests), resume_model_requests=0)
+        elif case in {"missing_yaml", "missing_smol", "missing_sdk", "stale_bridge", "missing_asset", "provider_failure", "child_failure", "help"}:
             command = [sys.executable, "-I", "-m", "agentloom"]
             command += ["--help"] if case == "help" else ["run", "missing.yaml" if case == "missing_yaml" else str(app), "--output-format", "jsonl"]
             env = dict(os.environ, AGENTLOOM_PROJECT_ROOT=str(workspace))
