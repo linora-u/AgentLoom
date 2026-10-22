@@ -32,6 +32,14 @@ def role_of(request):
     return None
 
 
+def advertised_context_paths(request):
+    """Read navigation supplied to the model, including JSON-escaped task data."""
+    mission = next(text(message) for message in request["messages"] if message["role"] == "user")
+    heading = "Available context files (relative to this session's working directory):"
+    mission = mission.split(heading, 1)[-1]
+    return sorted({path for path in re.findall(r"`(context/[^`<>\\\n]+)`", mission) if not path.endswith("/")})
+
+
 class HarnessModel:
     def __init__(self, prompt_path, *, scenario="normal", composed="COMPOSED", feedback=False):
         self.prompt_path = prompt_path
@@ -53,6 +61,8 @@ class HarnessModel:
         messages = [message for message in request["messages"] if message["role"] == "tool"]
         if not messages:
             self.sessions[role] += 1
+        if self.scenario == "context_discovery":
+            return self._discover_context(request, role, messages)
         if self.scenario == "failed_role_commit_recovery" and role == "general" and self.sessions[role] == 1:
             return " "  # A measured Pi completion that cannot satisfy a role reply.
         if self.scenario == "role_timeout" and role == "general":
@@ -143,3 +153,64 @@ class HarnessModel:
         if self.scenario == "reflection_invalid":
             return "<experience>cue: Incomplete evidence\nlesson: Unsupported improvement</experience>"
         return "<edits>component: prompt\nobserved: one composed execution\nverdict: confounded</edits>\nNO_ENTRY"
+
+    def _discover_context(self, request, role, messages):
+        paths = advertised_context_paths(request)
+        sources = [path for path in paths if path.startswith("context/source/")]
+        feedback = [path for path in paths if path.startswith("context/development_feedback/")]
+        notes = [path for path in paths if path.startswith("context/decisions/")]
+        pool = [path for path in paths if path.startswith("context/pool/") and (
+            path.endswith(("/harness.diff", "/produced.md", "/rollout.md", "/SKILL.md")))]
+        candidates = [path for path in paths if re.fullmatch(r"context/candidates/[^/]+\.md", path)]
+        skill = [path for path in paths if path.startswith("context/harness/") and path.endswith("/SKILL.md")]
+        reads = ["context/task.md", *sources, *feedback]
+        if role in {"general", "domain", "compose"}:
+            assert len(skill) == 1
+            reads.append(skill[0])
+        if role == "compose":
+            assert pool and notes and feedback, "Candidate comparison paths must be advertised to the composer"
+            assert all(any(path.endswith(suffix) for path in pool)
+                       for suffix in ("/harness.diff", "/produced.md", "/rollout.md", "/SKILL.md"))
+            reads.extend([*pool, *notes, *(path for path in paths if path.startswith("context/deliverables/"))])
+        if role == "select":
+            assert len(candidates) > 1 and feedback
+            assert {path.rsplit("/", 1)[-1].removesuffix(".md") for path in candidates} == {
+                path.rsplit("/", 1)[-1].removesuffix(".json") for path in feedback}
+            assert not any(path.startswith(("context/pool/", "context/decisions/", "context/harness/")) for path in paths)
+            reads.extend(candidates)
+        if role == "reflect":
+            baseline = [path for path in paths if path.startswith("context/base_harness/") and path.endswith("/SKILL.md")]
+            adoption = [path for path in paths if path.endswith("/adoption.json")]
+            assert baseline and adoption and pool and notes and feedback
+            reads.extend([*skill, *baseline, *adoption, *pool, *notes])
+        reads = list(dict.fromkeys(reads))
+        if not messages:
+            self.reads.extend((role, "read", path) for path in reads)
+            return [(f"{role}-read-{index}", "read", {"path": path}) for index, path in enumerate(reads)]
+        evidence = "\n".join(text(message) for message in messages)
+        if role not in {"general", "domain"} or feedback:
+            assert "DEV-CONFIGURED-SCORE" in evidence and "FACT-123" in evidence
+        if role in {"compose", "reflect"}:
+            assert "GENERAL-NOTE-142" in evidence and "DOMAIN-NOTE-142" in evidence
+            for suffix in ("/harness.diff", "/produced.md"):
+                observed = [text(message) for index, path in enumerate(reads) if path.endswith(suffix)
+                            for message in messages if message.get("tool_call_id") == f"{role}-read-{index}"]
+                assert observed and (all("PROBE" in body for body in observed) if role == "compose"
+                                     else any("PROBE" in body for body in observed)), observed
+        if role in {"general", "domain", "compose"} and len(messages) == len(reads):
+            assert "BASE-SKILL" in evidence
+            marker = "COMPOSED" if role == "compose" else "PROBE"
+            self.reads.append((role, "edit", skill[0]))
+            return [(f"{role}-edit", "edit", {"path": skill[0], "edits": [
+                {"oldText": "BASE-SKILL", "newText": marker + "-SKILL"}]})]
+        self.seen_feedback.append(role)
+        if role == "general":
+            return "<notes>GENERAL-NOTE-142: inspected the task and changed the Skill for a real Probe.</notes>"
+        if role == "domain":
+            return "<notes>DOMAIN-NOTE-142: inspected the task and changed the Skill for a real Probe.</notes>"
+        if role == "compose":
+            return "<notes>revised -> Skill -> inspected actual Probe diffs, outputs, notes and development measurements.</notes>"
+        if role == "select":
+            choice = candidates[0].rsplit("/", 1)[-1].removesuffix(".md")
+            return f"<why>Read every anonymous candidate and its development measurements.</why>\n```choice\n{choice}\n```"
+        return "<edits>component: Skill\nobserved: actual Probe and composed execution\nverdict: confounded</edits>\nNO_ENTRY"

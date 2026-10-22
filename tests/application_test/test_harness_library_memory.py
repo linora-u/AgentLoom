@@ -13,7 +13,7 @@ from agentloom.app.harnessing.controller import run_application
 from agentloom.app.harnessing.models import ApplicationRequest
 from agentloom.app.harnessing.policy import HarnessingPolicy
 
-from tests.application_test.harness_model_support import role_of, text
+from tests.application_test.harness_model_support import advertised_context_paths, role_of, text
 from tests.application_test.mixed_runtime_support import model_service, project, write_yaml
 from tests.application_test.test_harness_controller_application import DRIVER, real_isolation  # noqa: F401
 
@@ -87,18 +87,23 @@ def test_historical_stream_reuses_real_library_without_business_memory_or_base_p
             system = text(request["messages"][0])
             return json.dumps({"fact": "FACT-123", "variant": "COMPOSED" if "COMPOSED" in system else "BASE"})
         tools = [item for item in request["messages"] if item.get("role") == "tool"]
+        paths = advertised_context_paths(request)
+        current = [path for path in paths if path.startswith("context/harness/") and path.endswith("/prompts/business.md")]
+        library = [path for path in paths if path.startswith("context/library/")]
         plan = [("read", {"path": "context/task.md"})]
         if role == "general":
-            plan.append(("read", {"path": "context/harness/applications/mixed/prompts/business.md"}))
-            plan.append(("read", {"path": "context/library/INDEX.md"}))
+            assert len(current) == 1
+            plan.append(("read", {"path": current[0]}))
+            assert bool(library) == phase["expect_library"]
             if phase["expect_library"]:
-                plan.extend(("read", {"path": path}) for path in (
-                    "context/library/harnesses/2020-01-01/EXPERIENCE.md",
-                    "context/library/harnesses/2020-01-01/harness/applications/mixed/prompts/business.md",
-                ))
+                experience = [path for path in library if path.endswith("/EXPERIENCE.md")]
+                adopted = [path for path in library if "/harness/" in path and path.endswith("/prompts/business.md")]
+                assert experience and adopted
+                plan.extend(("read", {"path": path}) for path in [*experience, *adopted])
         if role == "compose":
-            plan.append(("read", {"path": "context/harness/applications/mixed/prompts/business.md"}))
-            plan.append(("write", {"path": "context/harness/applications/mixed/prompts/business.md", "content": "COMPOSED"}))
+            assert len(current) == 1
+            plan.append(("read", {"path": current[0]}))
+            plan.append(("write", {"path": current[0], "content": "COMPOSED"}))
         if len(tools) < len(plan):
             name, arguments = plan[len(tools)]
             return [(f"{role}-{len(tools)}", name, arguments)]
@@ -110,7 +115,6 @@ def test_historical_stream_reuses_real_library_without_business_memory_or_base_p
                 assert LESSON in evidence and "COMPOSED" in text(tools[-1])
                 read_evidence.append(evidence)
             else:
-                assert json.loads(text(tools[-1]))["status"] == "error", evidence
                 assert LESSON not in evidence
         if role == "reflect":
             return ("<edits>component: business prompt\nchange: explicit output procedure\n"

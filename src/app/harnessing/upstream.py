@@ -144,9 +144,7 @@ def _surface(controller, resources):
                     "YAML fixed fields (task, acceptance, runtime, models, hooks) are frozen. Agent definitions and delegation "
                     "may change within these constraints. Preserve supporting Skill resources and declared dependencies. "
                     "Do not execute application code in this improvement session. Historical Library entries are previous tasks, "
-                    "not current execution evidence. All edits are validated by the trusted Application driver."
-                    "\n\nApplication resource files (relative to this session's working directory):\n"
-                    + "\n".join(f"- `context/harness/{path}`" for path in sorted(resources))),
+                    "not current execution evidence. All edits are validated by the trusted Application driver."),
     )
 
 
@@ -187,6 +185,8 @@ class PiTransport:
         import hashlib
         evidence = {path.relative_to(cwd / "context").as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in sorted((cwd / "context").rglob("*")) if path.is_file()}
+        mission += ("\n\nAvailable context files (relative to this session's working directory):\n"
+                    + "\n".join(f"- `context/{path}`" for path in sorted(evidence)))
         base_key = "pi." + re.sub(r"[^A-Za-z0-9_.-]", "_", label) + "." + fingerprint([label, mission, system, evidence])[:16]
         attempt = 1
         while True:
