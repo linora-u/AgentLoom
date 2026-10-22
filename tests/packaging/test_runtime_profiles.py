@@ -1,16 +1,17 @@
 """Distribution metadata is the installer's public dependency contract."""
 from __future__ import annotations
 
-from email.parser import BytesParser
-from pathlib import Path
+import json
 import runpy
 import shutil
 import subprocess
 import sys
+from email.parser import BytesParser
+from pathlib import Path
 from zipfile import ZipFile
 
-from packaging.requirements import Requirement
 import pytest
+from packaging.requirements import Requirement
 
 
 def test_missing_pi_asset_targets_the_installed_runtime(tmp_path, monkeypatch):
@@ -39,6 +40,11 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
             "node_modules", "dist", "__pycache__", "*.pyc", ".agentloom-install.*"))
         for name in ("pyproject.toml", "README.md"):
             shutil.copyfile(root / name, source / name)
+        vendored = Path("third_party/harness2")
+        shutil.copytree(root / vendored / "harness2", source / vendored / "harness2",
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        for name in ("LICENSE", "PROVENANCE.md"):
+            shutil.copyfile(root / vendored / name, source / vendored / name)
         schema = next((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
         version = int(schema.name.split("-v")[1].split(".")[0])
         schema.rename(schema.with_name(f"bridge-v{version + 1}.schema.json"))
@@ -55,6 +61,17 @@ def test_built_wheel_selects_smol_only_through_its_explicit_profile(tmp_path, re
         assert "agentloom/runtimes/pi/bridge/tools.ts" in names_in_wheel
         assert "agentloom/runtimes/pi/bridge/model.ts" in names_in_wheel
         assert "agentloom/runtimes/smolagents/prompts/toolcalling_agent.example.yaml" in names_in_wheel
+        assert {f"harness2/core/{name}.py" for name in (
+            "schedule", "recursion", "context", "proposer", "selection", "library",
+        )} <= set(names_in_wheel)
+        vendored_package = source / "third_party/harness2/harness2"
+        for name in ("LICENSE", "UPSTREAM.json", "PATCHES.md"):
+            assert wheel.read(f"harness2/{name}") == (vendored_package / name).read_bytes()
+        assert wheel.read("harness2/LICENSE") == (source / "third_party/harness2/LICENSE").read_bytes()
+        provenance = json.loads(wheel.read("harness2/UPSTREAM.json"))
+        assert provenance["repository"] == "https://github.com/google-research/harness2"
+        assert provenance["revision"] == "1cfe254e8d25b15f37048c3730134686abe60335"
+        assert provenance["license"] == "Apache-2.0"
         schemas = list((source / "src/runtimes/pi").glob("bridge-v*.schema.json"))
         assert schemas
         assert all("agentloom/runtimes/pi/" + path.name in names_in_wheel for path in schemas)
