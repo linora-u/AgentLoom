@@ -450,11 +450,11 @@ def _check_candidate_secrets(relative: Path, old: Any, new: Any, pointer: str = 
             _check_candidate_secrets(relative, previous[index] if index < len(previous) else None, item, pointer + "/" + str(index))
 
 
-def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | None], destination: Path, *, editable: Sequence[str], validate: Callable[[Path, Path], None] | None = None) -> CandidateBundle:
+def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | bytes | None], destination: Path, *, editable: Sequence[str], permitted_paths: Sequence[str] = (), validate: Callable[[Path, Path], None] | None = None) -> CandidateBundle:
     from agentloom.execution.model_privacy import reject_private_content
 
     from .tool_capabilities import validate_tool_capabilities
-    reject_private_content(changes)
+    reject_private_content({name: value for name, value in changes.items() if not isinstance(value, bytes)})
     base.verify()
     capabilities = base.manifest.get("tool_capabilities", {})
     allowed = set(editable)
@@ -471,13 +471,13 @@ def derive_candidate(base: CandidateBundle, changes: Mapping[str, str | None], d
                 path.chmod(0o755 if path.stat().st_mode & stat.S_IXUSR else 0o644)
         for name, value in changes.items():
             relative = _relative(name)
-            if not relative.is_relative_to(Path(base.application)) and not relative.is_relative_to(Path("skills")):
+            if name not in permitted_paths and not relative.is_relative_to(Path(base.application)) and not relative.is_relative_to(Path("skills")):
                 raise ValueError("Candidate edit must belong to this Application or its Skills")
-            if value is not None and not isinstance(value, str):
+            if value is not None and not isinstance(value, (str, bytes)):
                 raise ValueError("Candidate edits must contain UTF-8 text or null")
             target = staging / "project" / relative
             before = target.read_bytes() if target.is_file() else None
-            after = value.encode() if value is not None else None
+            after = value if isinstance(value, bytes) else value.encode() if value is not None else None
             registered = base.manifest.get("editable_resources", {}).get(name)
             surfaces = {registered} if registered is not None else _surface(relative, before, after)
             if registered is not None and validate is None:

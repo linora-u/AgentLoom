@@ -56,6 +56,7 @@ class ApplicationRequest(Serializable):
     input_paths: tuple[Path, ...] = ()
     hidden_paths: tuple[Path, ...] = ()
     driver_options: Mapping[str, Any] = field(default_factory=dict)
+    harness_stream: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.application_id or ":" not in self.driver:
@@ -68,6 +69,7 @@ class ApplicationRequest(Serializable):
             object.__setattr__(self, name, tuple(Path(os.path.abspath(Path(path).expanduser())) for path in getattr(self, name)))
         object.__setattr__(self, "task", frozen(self.task))
         object.__setattr__(self, "driver_options", frozen(self.driver_options))
+        object.__setattr__(self, "harness_stream", frozen(self.harness_stream))
 
     @classmethod
     def from_dict(cls, value):

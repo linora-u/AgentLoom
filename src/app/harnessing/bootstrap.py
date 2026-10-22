@@ -49,8 +49,12 @@ def main():
         if descriptor["execution_boundary"] == "trial":
             isolation.enforce_isolation(spec)
         elif descriptor["execution_boundary"] == "managed_host":
-            if descriptor["factory"] != "agentloom.app.harnessing.controller:execute_trial" or descriptor["payload"].get("driver") != "news_agent.runtime.harnessing:NewsApplicationDriver":
+            if descriptor["factory"] != "agentloom.app.harnessing.controller:execute_trial":
                 raise ValueError("Unrecognized trusted managed Host driver")
+            module, symbol = descriptor["payload"]["driver"].split(":", 1)
+            driver = getattr(importlib.import_module(module), symbol)
+            if getattr(driver, "execution_boundary", "isolated") != "managed_hosts" or not callable(getattr(driver, "validate_managed_execution", None)):
+                raise ValueError("Managed Host lacks a trusted execution capability")
         else:
             raise ValueError("Unrecognized trusted execution boundary")
         try:

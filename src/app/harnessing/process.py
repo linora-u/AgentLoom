@@ -60,8 +60,12 @@ def execute_managed_orchestration(bundle: CandidateBundle, context, factory: str
     This internal seam is not selectable in YAML. It cannot run roles or an
     arbitrary driver; every NewsHost must install the frozen mandatory policy.
     """
-    if factory != "agentloom.app.harnessing.controller:execute_trial" or payload.get("driver") != "news_agent.runtime.harnessing:NewsApplicationDriver":
-        raise ValueError("Trusted orchestration is restricted to the built-in managed news driver")
+    if factory != "agentloom.app.harnessing.controller:execute_trial":
+        raise ValueError("Managed orchestration only executes the trusted complete-task driver")
+    from .controller import load_driver
+    driver = load_driver(payload.get("driver", ""))
+    if getattr(driver, "execution_boundary", "isolated") != "managed_hosts" or not callable(getattr(driver, "validate_managed_execution", None)):
+        raise ValueError("Managed orchestration lacks its trusted execution capability")
     return _execute(bundle, context, factory, payload, stop=stop, timeout=timeout, read_paths=read_paths, denied_paths=denied_paths, environment=environment, model_config=model_config, credentials=credentials, boundary="managed_host")
 
 
