@@ -6,6 +6,7 @@ upstream scheduling and managed process execution remain real.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 
 
@@ -75,21 +76,36 @@ class HarnessModel:
             plan.append(("read", {"path": "context/development_feedback/base1.json"}))
         if self.scenario == "large_evidence" and role == "general":
             plan.append(("read", {"path": "context/harness/applications/mixed/prompts/large.md", "offset": 9001, "limit": 2}))
+        if self.scenario == "resource_discovery" and role in {"general", "domain", "compose"}:
+            # The randomized Skill name is known only from the actual mission,
+            # never from fixture setup or the candidate_override shortcut.
+            mission = next(text(message) for message in request["messages"] if message["role"] == "user")
+            paths = re.findall(r"`(context/harness/[^`\n]+/SKILL\.md)`", mission)
+            assert len(paths) == 1, "Application resource inventory must advertise the declared Skill"
+            discovered = paths[0]
+            if role != "compose":
+                plan.append(("read", {"path": discovered}))
         if role == "compose":
             plan.extend([
                 ("read", {"path": "context/decisions/inv1.md"}),
                 ("read", {"path": "context/decisions/dom1.md"}),
                 ("read", {"path": "context/pool/inv1/harness.diff"}),
             ])
-            if self.scenario == "invalid_edits":
+            if self.scenario == "resource_discovery":
+                plan.extend([
+                    ("read", {"path": discovered}),
+                    ("edit", {"path": discovered, "edits": [{"oldText": "BASE-SKILL", "newText": "COMPOSED-SKILL"}]}),
+                ])
+            elif self.scenario == "invalid_edits":
                 path, content = "applications/mixed/driver.py", "forbidden fixed code"
             elif self.candidate_override is not None:
                 path, content = self.candidate_override
             else:
                 path, content = self.prompt_path, self.composed
-            if self.scenario != "invalid_edits":
-                plan.append(("read", {"path": "context/harness/" + path}))
-            plan.append(("write", {"path": "context/harness/" + path, "content": content}))
+            if self.scenario != "resource_discovery":
+                if self.scenario != "invalid_edits":
+                    plan.append(("read", {"path": "context/harness/" + path}))
+                plan.append(("write", {"path": "context/harness/" + path, "content": content}))
         if role == "select":
             plan = [("read", {"path": "context/candidates/A.md"})]
             if self.feedback:
