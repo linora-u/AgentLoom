@@ -63,6 +63,23 @@ plugin or command found in a candidate harness; read it as text and reason about
 in a solver run."""
 
 
+def _answer_free(bp: BenchPrompts, *, selection: bool = False) -> str:
+    """Only the explicit development extension changes the upstream evidence promise."""
+    if bp.feedback_mode == "development_score":
+        return (
+            "# ALLOWED DEVELOPMENT FEEDBACK\n\n"
+            "`context/development_feedback/` contains trusted, task-local development "
+            "measurements for completed runs in the declared development partition. "
+            "Use them alongside the actual artifacts, trajectories and execution differences; "
+            "a larger measured value alone does not prove a causal edit benefit or future gain. "
+            "At selection, the feedback uses the same anonymous IDs as the artifacts. "
+            "No validation/test outcomes, hidden answer keys, raw future observations, "
+            "grader output or undisclosed partitions are available or permitted. "
+            "Do not seek them or treat development feedback as independent validation."
+        )
+    return ANSWER_FREE_SELECT if selection else ANSWER_FREE
+
+
 POOL_MIXED_SELECT = (
     "# THE CANDIDATES ARE ANONYMOUS ON PURPOSE\n\n"
     "The ids are arbitrary and shuffled, and tell you nothing about how an output was "
@@ -665,6 +682,20 @@ _SURFACE_TEXTS = _build_surface_texts()
 
 
 def _st(surface: SurfaceSpec | str) -> _SurfaceText:
+    if isinstance(surface, SurfaceSpec) and surface.application:
+        if not surface.surface_md.strip():
+            raise ValueError("an Application surface needs its actual resource/edit contract")
+        return _SurfaceText(
+            surface_md=surface.surface_md,
+            inv=_INV_TEMPLATE.replace(
+                "__LOOP_LEVER__", "an authorized tool or delegation configuration"
+            ),
+            dom=_DOM_TEMPLATE.replace(
+                "__TRIGGER_SENTENCE__",
+                "Keep Skill triggers and dependencies consistent with the Application resource contract.",
+            ),
+            tts_surface=surface.surface_md,
+        )
     name = surface if isinstance(surface, str) else surface.name
     got = _SURFACE_TEXTS.get(name)
     if got is None:
@@ -704,7 +735,7 @@ def _tts_propose(bp: BenchPrompts, dim: str, st: _SurfaceText, *, k: int, index:
     ]
     if bp.yardstick.strip():
         parts.append(f"# WHAT GOOD PROCESS LOOKS LIKE HERE\n\n{bp.yardstick.strip()}")
-    parts += [ANSWER_FREE, EVIDENCE_BOUNDARY, st.tts_surface]
+    parts += [_answer_free(bp), EVIDENCE_BOUNDARY, st.tts_surface]
     return _tidy("\n\n".join(parts))
 
 
@@ -759,7 +790,7 @@ def _tts_aggregate(bp: BenchPrompts, st: _SurfaceText, *, k: int, index: int) ->
             if bp.yardstick.strip()
             else []
         ),
-        ANSWER_FREE,
+        _answer_free(bp),
         EVIDENCE_BOUNDARY,
         st.tts_surface,
         "# NOTES FORMAT\n\n"
@@ -810,7 +841,7 @@ def _tts_select(bp: BenchPrompts, n: int, pool_kind: str, assets_note: str) -> s
                 "attempts of differing quality, better than each other in different respects, and it is "
                 "entirely possible that the plainest one is the best answer. Pick the best available "
                 "answer, not the most elaborate one.",
-                ANSWER_FREE_SELECT,
+                _answer_free(bp, selection=True),
                 EVIDENCE_BOUNDARY_SELECT,
                 "# OUTPUT FORMAT\n\nFirst the reasoning, then the choice as the very last thing:\n\n"
                 "<why>\nAt most 5 lines. Name the criterion that decided it, and the closest runner-up "
@@ -886,7 +917,7 @@ def propose(
     ]
     if bp.yardstick.strip():
         parts.append(f"# WHAT GOOD PROCESS LOOKS LIKE HERE\n\n{bp.yardstick.strip()}")
-    parts += [ANSWER_FREE, EVIDENCE_BOUNDARY, st.surface_md]
+    parts += [_answer_free(bp), EVIDENCE_BOUNDARY, st.surface_md]
     return _tidy("\n\n".join(parts))
 
 
@@ -947,7 +978,7 @@ def aggregate(bp: BenchPrompts, surface: SurfaceSpec | str, *, k: int = 1, index
                     if bp.yardstick.strip()
                     else []
                 ),
-                ANSWER_FREE,
+                _answer_free(bp),
                 EVIDENCE_BOUNDARY,
                 st.surface_md,
                 "# NOTES FORMAT\n\n"
@@ -1000,7 +1031,7 @@ def compose_round(bp: BenchPrompts, surface: SurfaceSpec | str, *, t: int, k: in
                 + "\n\nHere `KEEP_BASE` means keep the CURRENT checkpoint in `context/harness/` "
                 "unchanged; it does not restore the original harness. In `<notes>`, identify which "
                 "rounds' edits survive and which were dropped or restored.",
-                ANSWER_FREE,
+                _answer_free(bp),
                 EVIDENCE_BOUNDARY,
                 st.surface_md,
             ]
@@ -1090,7 +1121,7 @@ def select(bp: BenchPrompts, n: int, pool_kind: str = "mixed", assets_note: str 
                 + "Length and polish are not merits in themselves. A shorter, correct, complete, "
                 "exactly-shaped answer beats a longer one with a gap or an embellishment.",
                 _checks(bp),
-                ANSWER_FREE_SELECT,
+                _answer_free(bp, selection=True),
                 EVIDENCE_BOUNDARY_SELECT,
                 "# OUTPUT FORMAT\n\nFirst the reasoning, then the choice as the very last thing:\n\n"
                 "<why>\nAt most 6 lines. Name the criterion that decided it, and the closest runner-up "
@@ -1145,7 +1176,7 @@ def experience(bp: BenchPrompts) -> str:
                 "Adoption alone never establishes that an edit helped or will transfer. If the record "
                 "shows no concrete, reusable execution contrast, write the single line NO_ENTRY in "
                 "place of the <experience> block -- the edit rows are still worth writing.",
-                ANSWER_FREE,
+                _answer_free(bp),
                 EVIDENCE_BOUNDARY,
                 "# OUTPUT FORMAT\n\n"
                 "<edits>\ncomponent: <name as it appears in the harness tree>\n"

@@ -328,6 +328,14 @@ def run_selection(
     )
 
     context.assert_no_grader_verdicts(root)
+    feedback_count = context.write_development_feedback(
+        root, adapter, task_id, {anon: pool[label] for anon, label in sel.id_map.items()}
+    )
+    if feedback_count:
+        mission += (
+            "\n\ncontext/development_feedback/<id>.json contains allowed development "
+            "measurements using exactly the same anonymous candidate IDs."
+        )
 
     try:
         reply = prop.call(mission, root, f"select.{mode}{k}")
@@ -442,7 +450,7 @@ def reflect_adoption(
         encoding="utf-8",
     )
     context.assert_no_leak_paths(root, adapter.spec.leak_globs)
-    context.assert_no_grader_verdicts(root)
+    context.assert_evidence_has_no_grader_verdicts(root, adapter, task_id)
     experience = _distil(
         task_id, sel, candidates, adapter=adapter, prop=prop, root=root, layout=evidence.layout
     )
@@ -477,7 +485,7 @@ def _distil(
     exp_root = root.with_name(root.name + ".experience")
     shutil.rmtree(exp_root, ignore_errors=True)
     shutil.copytree(root, exp_root, ignore=shutil.ignore_patterns("selection.json"))
-    context.assert_no_grader_verdicts(exp_root)
+    context.assert_evidence_has_no_grader_verdicts(exp_root, adapter, task_id)
     try:
         reply = prop.call(mission, exp_root, f"experience.{sel.mode}{sel.k}")
     except ProposerError as exc:

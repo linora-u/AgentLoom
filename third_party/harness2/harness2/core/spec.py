@@ -30,7 +30,7 @@ from .tree import SurfaceSpec
 
 ModelId = str
 
-CHANNELS = ("claude_cli", "opencode")
+CHANNELS = ("claude_cli", "opencode", "pi")
 
 
 @dataclass(frozen=True)
@@ -101,8 +101,12 @@ class BenchPrompts:
     selection_lead: str = ""
     selection_conformance: str = "full"
     prompt_pack: str = "adapt"
+    # AgentLoom extension: explicit development feedback does not alter RunView.
+    feedback_mode: str = "contrastive"
 
     def __post_init__(self) -> None:
+        if self.feedback_mode not in ("contrastive", "development_score"):
+            raise ValueError(f"unknown feedback mode {self.feedback_mode!r}")
         if self.prompt_pack not in ("adapt", "tts"):
             raise ValueError(
                 f"BenchPrompts.prompt_pack must be 'adapt' or 'tts', got {self.prompt_pack!r}"

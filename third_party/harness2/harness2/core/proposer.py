@@ -32,6 +32,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from .. import config
 from .spec import ChannelSpec
@@ -67,6 +68,14 @@ class ProposerError(RuntimeError):
         self.cost_usd = cost_usd
 
 
+class MethodInterrupted(BaseException):
+    """Host stop/recoverable dependency interruption: never retry or adopt a fallback.
+
+    Deliberately outside Exception, like KeyboardInterrupt, because the method's ordinary
+    proposal/rollout error handlers must not continue scheduling after a host interruption.
+    """
+
+
 @dataclass
 class Reply:
     """One session: what came back, what it cost, and where the audit trail is."""
@@ -97,10 +106,14 @@ class Proposer:
     project: str = field(default_factory=lambda: config.VERTEX_PROJECT)
     region: str = field(default_factory=lambda: config.VERTEX_REGION)
     _calls: list[Reply] = field(default_factory=list)
+    # AgentLoom supplies the Pi session, without changing core cache/harvest semantics.
+    transport: Callable[..., tuple[str, float, str]] | None = None
 
     def __post_init__(self) -> None:
         if not self.spec.model.strip():
             raise ValueError("Set HARNESS2_IMPROVER_MODEL before starting model sessions")
+        if self.spec.kind == "pi" and self.transport is None:
+            raise ValueError("the pi channel requires an explicit host transport")
 
     def env(self) -> dict[str, str]:
         e = {k: v for k, v in os.environ.items() if k not in _DROP_ENV}
@@ -159,9 +172,14 @@ class Proposer:
                 if context_dir and Path(context_dir).is_dir():
                     shutil.copytree(context_dir, tmp / "context", dirs_exist_ok=True)
                 with _SEM if _SEM is not None else contextlib.nullcontext():
-                    text, cost, err = (
-                        self._claude_cli if self.spec.kind == "claude_cli" else self._opencode
-                    )(tmp, mission, system, wall)
+                    if self.spec.kind == "pi":
+                        text, cost, err = self.transport(
+                            tmp, mission, system, wall, label=label
+                        )
+                    else:
+                        text, cost, err = (
+                            self._claude_cli if self.spec.kind == "claude_cli" else self._opencode
+                        )(tmp, mission, system, wall)
                 spent_usd += cost
                 if not text.strip():
                     last = err or "empty reply"

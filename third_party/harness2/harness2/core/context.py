@@ -30,13 +30,16 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
+import hashlib
+import json
+import math
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
 
 from . import tree as harness_tree
-from .spec import BenchmarkAdapter, RunView
+from .spec import BenchmarkAdapter, RunView, resolve_prompts
 
 
 @dataclass
@@ -55,6 +58,7 @@ class ContextTree:
     deliverables_mode: str = "contents"
     source_files: int = 0
     decisions: int = 0
+    development_feedback: int = 0
 
     @property
     def layout(self) -> str:
@@ -98,6 +102,10 @@ class ContextTree:
             lines.append(
                 "context/library/                earlier tasks in this "
                 "area -- browse INDEX.md first, then open what looks relevant"
+            )
+        if self.development_feedback:
+            lines.append(
+                "context/development_feedback/   allowed development measurements, one file per rollout"
             )
         return "\n".join(lines)
 
@@ -167,6 +175,10 @@ def build(
     assert_no_leak_paths(dest, adapter.spec.leak_globs)
 
     assert_no_grader_verdicts(dest)
+    feedback = write_development_feedback(
+        dest, adapter, task_id,
+        {r.label: r for r in rollouts} | {label: run for label, _, run in pool if run is not None},
+    )
 
     if rollouts and not got_r:
         raise RuntimeError(
@@ -185,6 +197,76 @@ def build(
         deliverables_mode=("names" if names_only else "contents"),
         source_files=source_files,
         decisions=len(decisions or {}),
+        development_feedback=feedback,
+    )
+
+
+def _validate_development_feedback(value: object) -> dict:
+    """A narrow, branch-neutral measurement envelope, not an arbitrary grader-file bypass."""
+    allowed = {"status", "metrics", "sample_count", "partition", "evaluator", "reason"}
+    if not isinstance(value, dict) or set(value) - allowed:
+        raise ValueError("development feedback must use the declared measurement envelope")
+    if value.get("status") not in ("scored", "unscorable"):
+        raise ValueError("development feedback status must be scored or unscorable")
+    if type(value.get("sample_count")) is not int or value["sample_count"] < 0:
+        raise ValueError("development feedback sample_count must be a nonnegative integer")
+    for key in ("partition", "evaluator"):
+        if not isinstance(value.get(key), str) or not value[key].strip():
+            raise ValueError(f"development feedback requires {key}")
+    if "reason" in value and not isinstance(value["reason"], str):
+        raise ValueError("development feedback reason must be text")
+
+    def numeric_metrics(metrics):
+        if not isinstance(metrics, dict):
+            raise ValueError("development metrics must be numeric mappings")
+        for key, item in metrics.items():
+            if not isinstance(key, str):
+                raise ValueError("development metric names must be strings")
+            if isinstance(item, dict):
+                numeric_metrics(item)
+            elif item is not None and not (
+                isinstance(item, (int, float)) and math.isfinite(item)
+            ):
+                raise ValueError("development metrics may contain only finite numbers or null")
+
+    numeric_metrics(value.get("metrics"))
+    return value
+
+
+def write_development_feedback(
+    dest: Path,
+    adapter: BenchmarkAdapter,
+    task_id: str,
+    runs: Mapping[str, RunView],
+) -> int:
+    """Trusted host feedback only; mapping keys also enforce selection anonymity."""
+    if resolve_prompts(adapter, task_id).feedback_mode != "development_score":
+        return 0
+    fn = getattr(adapter, "development_feedback", None)
+    if not callable(fn):
+        raise ValueError("development_score requires a trusted development_feedback adapter")
+    count = 0
+    for visible_id, run in runs.items():
+        if not (run.ok and run.delivered):
+            continue
+        value = _validate_development_feedback(fn(task_id, run))
+        if not visible_id or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in visible_id):
+            raise ValueError("invalid visible development feedback identity")
+        root = dest / "development_feedback"
+        root.mkdir(exist_ok=True)
+        (root / f"{visible_id}.json").write_text(
+            json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
+        count += 1
+    assert_no_leak_paths(dest, adapter.spec.leak_globs)
+    return count
+
+
+def assert_evidence_has_no_grader_verdicts(root: Path, adapter, task_id: str) -> None:
+    """Keep the original tripwire except the explicit, schema-validated development files."""
+    assert_no_grader_verdicts(
+        root,
+        permitted_development=resolve_prompts(adapter, task_id).feedback_mode == "development_score",
     )
 
 
@@ -309,8 +391,8 @@ def _write_pool(
                 line
                 for name in sorted(reference.keys() | candidate.keys())
                 for line in difflib.unified_diff(
-                    reference.get(name, "").splitlines(keepends=True),
-                    candidate.get(name, "").splitlines(keepends=True),
+                    _diff_lines(reference.get(name, "")),
+                    _diff_lines(candidate.get(name, "")),
                     fromfile=f"current/{name}",
                     tofile=f"{label}/{name}",
                 )
@@ -332,6 +414,12 @@ def _write_pool(
                 (d / "rollout.md").write_text(f"(unavailable: {exc})", encoding="utf-8")
         got.append(label)
     return got
+
+
+def _diff_lines(value: str | bytes) -> list[str]:
+    if isinstance(value, bytes):
+        return [f"<binary sha256={hashlib.sha256(value).hexdigest()} bytes={len(value)}>\n"]
+    return value.splitlines(keepends=True)
 
 
 def _listing(adapter, run_dir: Path) -> list[str]:
@@ -452,7 +540,8 @@ _MARKER_SCAN_SUFFIXES = frozenset(
 
 
 def assert_no_grader_verdicts(
-    root: Path | str, markers: Sequence[str] = GRADER_VERDICT_MARKERS
+    root: Path | str, markers: Sequence[str] = GRADER_VERDICT_MARKERS,
+    *, permitted_development: bool = False,
 ) -> None:
     """Refuse a context tree containing the grader's own output, by file name and by content.
 
@@ -466,6 +555,9 @@ def assert_no_grader_verdicts(
         if not p.is_file():
             continue
         rel = p.relative_to(root).as_posix()
+        if permitted_development and p.parent == root / "development_feedback" and p.suffix == ".json":
+            _validate_development_feedback(json.loads(p.read_text(encoding="utf-8")))
+            continue
         for m in markers:
             if m in rel:
                 raise ValueError(

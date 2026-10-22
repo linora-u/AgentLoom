@@ -22,13 +22,15 @@ changes.
 
 from __future__ import annotations
 
+import fnmatch
+import hashlib
 import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-Tree = dict[str, str]
+Tree = dict[str, str | bytes]
 
 
 RESERVED_SCRIPTS = frozenset({"read_doc.py", "pack.py", "unpack.py"})
@@ -58,6 +60,11 @@ class SurfaceSpec:
     reject_empty_always_on: bool = False
 
     stubs: tuple[tuple[str, str], ...] = ()
+    # AgentLoom Application resources are validated by the adapter, not c1..c8 rules.
+    application: bool = False
+    resource_paths: tuple[str, ...] = ()
+    editable_globs: tuple[str, ...] = ()
+    surface_md: str = ""
 
 
 @lru_cache(maxsize=8)
@@ -95,6 +102,10 @@ def is_allowed(surface: SurfaceSpec, rel: str) -> bool:
         rel = normalize_rel(rel)
     except ValueError:
         return False
+    if surface.application:
+        return rel in surface.resource_paths or any(
+            fnmatch.fnmatchcase(rel, pattern) for pattern in surface.editable_globs
+        )
     if rel in surface.always_on:
         return True
     if surface.hooks_file is not None and rel == surface.hooks_file:
@@ -144,13 +155,23 @@ def read_tree(surface: SurfaceSpec, d: Path | str, *, rejected: list[str] | None
             if rejected is not None:
                 rejected.append(rel)
             continue
-        out[rel] = p.read_text(encoding="utf-8", errors="replace")
+        if surface.application:
+            if p.is_symlink():
+                raise ValueError(f"symlink is not an Application resource: {rel!r}")
+            data = p.read_bytes()
+            try:
+                out[rel] = data.decode("utf-8")
+            except UnicodeDecodeError:
+                out[rel] = data
+        else:
+            out[rel] = p.read_text(encoding="utf-8", errors="replace")
     return out
 
 
 def is_tree(surface: SurfaceSpec, d: Path | str) -> bool:
     d = Path(d)
-    return d.is_dir() and any((d / a).is_file() for a in surface.always_on)
+    required = surface.resource_paths if surface.application else surface.always_on
+    return d.is_dir() and any((d / a).is_file() for a in required)
 
 
 def write_tree(surface: SurfaceSpec, tree: Tree, dest: Path | str, *, stubs: bool = True) -> Path:
@@ -175,7 +196,10 @@ def write_tree(surface: SurfaceSpec, tree: Tree, dest: Path | str, *, stubs: boo
     for rel, content in tree.items():
         p = dest / normalize_rel(rel)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        if isinstance(content, bytes):
+            p.write_bytes(content)
+        else:
+            p.write_text(content, encoding="utf-8")
     if stubs:
         for rel, body in surface.stubs:
             p = dest / rel
@@ -186,7 +210,7 @@ def write_tree(surface: SurfaceSpec, tree: Tree, dest: Path | str, *, stubs: boo
 
 
 def always_on_text(surface: SurfaceSpec, tree: Tree) -> str:
-    return "\n\n".join(tree.get(a, "") for a in surface.always_on)
+    return "\n\n".join(v for a in surface.always_on if isinstance(v := tree.get(a, ""), str))
 
 
 def autotrigger(surface: SurfaceSpec, tree: Tree, *, always_on_max: int | None = None) -> list[str]:
@@ -194,6 +218,8 @@ def autotrigger(surface: SurfaceSpec, tree: Tree, *, always_on_max: int | None =
 
     A line that would push the body over the always-on cap is skipped instead.
     """
+    if surface.application:
+        return []  # YAML and runtime loading define Application triggers, not c1..c8 prose.
     cap = surface.always_on_max if always_on_max is None else always_on_max
     body = always_on_text(surface, tree)
     fixed: list[str] = []
@@ -342,6 +368,11 @@ def validate(
     reserved_scripts: frozenset[str] | set[str] = RESERVED_SCRIPTS,
 ) -> dict:
     """Raise ValueError listing every problem; return a census of the validated tree."""
+    if surface.application:
+        bad = [rel for rel in tree if not is_allowed(surface, rel)]
+        if bad:
+            raise ValueError(f"resources outside the Application surface: {sorted(bad)}")
+        return {"n_files": len(tree), "always_on_chars": len(always_on_text(surface, tree))}
     errs: list[str] = []
     r = _rx(surface)
     cap = surface.always_on_max if always_on_max is None else always_on_max
@@ -411,7 +442,15 @@ def diversity(trees: dict[str, Tree]) -> dict:
         return {"n": len(names), "n_distinct": len(names), "mean_line_jaccard": 1.0}
 
     def lines(t: Tree) -> set[str]:
-        return {f"{rel}:{ln}" for rel, c in t.items() for ln in c.splitlines() if ln.strip()}
+        return {
+            f"{rel}:{ln}"
+            for rel, c in t.items()
+            for ln in (
+                ["binary-sha256:" + hashlib.sha256(c).hexdigest()]
+                if isinstance(c, bytes) else c.splitlines()
+            )
+            if ln.strip()
+        }
 
     sets = {n: lines(trees[n]) for n in names}
     sims = []
