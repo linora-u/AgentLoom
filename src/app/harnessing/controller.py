@@ -216,7 +216,7 @@ class ImprovementController:
             library_view=self.library_view if role else (),
         )
 
-    def _process(self, bundle, context, factory, payload):
+    def _process(self, bundle, context, factory, payload, *, timeout=None):
         from .process import execute_isolated, execute_managed_orchestration
 
         # A trusted Python driver may delegate mandatory isolation to managed
@@ -233,6 +233,7 @@ class ImprovementController:
         self._check_stop()
         options = {
             "stop": self.stop,
+            "timeout": timeout,
             "read_paths": self.invocation.request.input_paths,
             "environment": self.environment,
             "denied_paths": self.request.hidden_paths,
@@ -348,6 +349,9 @@ class ImprovementController:
                 raise ValueError("Development evaluator must return a JSON mapping")
             if result.get("partition", partition) != partition:
                 raise ValueError("Evaluator returned a different data partition")
+            from .upstream import normalize_development_feedback
+            self._usage(result.get("usage", ()))
+            normalize_development_feedback(result, self.policy.feedback)
             self.store.finish(evaluation_key, result)
         self.evaluations[key] = result
         self._usage(result.get("usage", ()))

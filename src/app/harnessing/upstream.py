@@ -41,6 +41,28 @@ def evaluator_identity(reference):
     return {"reference": reference, "source_sha256": hashlib.sha256(Path(source).read_bytes()).hexdigest()}
 
 
+def normalize_development_feedback(raw, policy):
+    """Expose measurements through upstream's strict anonymous envelope only."""
+    from harness2.core.context import _validate_development_feedback
+    def numeric(value):
+        if isinstance(value, dict):
+            return {key: item for key, child in value.items()
+                    if (item := numeric(child)) is not None and not key.endswith(("_path", "_id"))}
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value
+        return None
+    status, samples = raw.get("status"), raw.get("sample_count")
+    if status not in {"scored", "unscorable"} or type(samples) is not int or samples < 0:
+        raise ValueError("Development evaluator must report explicit scored/unscorable status and sample_count")
+    metrics = numeric(raw.get("metrics", {key: value for key, value in raw.items()
+                if key not in {"usage", "partition", "sample_count", "evaluator"}})) or {}
+    if status == "scored" and (samples == 0 or not metrics):
+        raise ValueError("A scored development result requires measured samples and numeric metrics")
+    return _validate_development_feedback({"status": status, "metrics": metrics,
+        "sample_count": samples, "partition": policy.partition, "evaluator": policy.evaluator,
+        "reason": "No eligible measurement samples" if status == "unscorable" else ""})
+
+
 def _read(path):
     data = path.read_bytes()
     try:
@@ -181,7 +203,7 @@ class PiTransport:
         payload = {"role": role, "stage": key, "definition": getattr(controller.policy.roles, role),
                    "mission": mission, "system": system}
         controller._emit("role.started", stage=key, role=role)
-        result = controller._process(controller.base, context, "agentloom.app.harnessing.roles:execute_role", payload)
+        result = controller._process(controller.base, context, "agentloom.app.harnessing.roles:execute_role", payload, timeout=timeout)
         receipt = result.get("receipt", {})
         controller._usage(receipt.get("usage_observations", ()))
         record = {"stage": key, "role": role, "label": label, "status": result.get("status"),
@@ -355,26 +377,7 @@ class ApplicationAdapter:
             except Exception as error:
                 raise EvaluationPending(f"Development evaluator requires recovery for {label}: {error}") from error
         raw = json_value(self.controller.evaluations[label])
-        # Evaluators may return arbitrary diagnostic metadata. Only numeric
-        # measurements cross the anonymous selector boundary; receipt identities,
-        # artifact paths and textual summaries remain in the trusted host record.
-        def numeric(value):
-            if isinstance(value, dict):
-                return {key: item for key, child in value.items()
-                        if (item := numeric(child)) is not None and not key.endswith(("_path", "_id"))}
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                return value
-            return None
-        metrics = numeric(raw.get("metrics", {key: value for key, value in raw.items()
-                    if key not in {"usage", "partition", "sample_count", "evaluator"}})) or {}
-        samples = raw.get("sample_count", 0)
-        if type(samples) is not int or samples < 0:
-            raise ValueError("Development evaluator sample_count must be a nonnegative integer")
-        unscorable = raw.get("status") == "unscorable" or raw.get("accepted") is False or not metrics
-        return {"status": "unscorable" if unscorable else "scored", "metrics": metrics,
-                "sample_count": samples, "partition": self.controller.policy.feedback.partition,
-                "evaluator": self.controller.policy.feedback.evaluator,
-                "reason": "No eligible measurement samples" if unscorable else ""}
+        return normalize_development_feedback(raw, self.controller.policy.feedback)
 
 
 
