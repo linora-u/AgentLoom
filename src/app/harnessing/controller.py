@@ -227,7 +227,8 @@ class ImprovementController:
             validator = getattr(self.driver, "validate_managed_execution", None)
             if not callable(validator):
                 raise ValueError("Managed-host execution requires a trusted driver validator")
-            validator(self.invocation, bundle)
+            with self._private_bindings():
+                validator(self.invocation, bundle)
 
         self._check_stop()
         options = {
@@ -329,6 +330,8 @@ class ImprovementController:
     def _evaluate(self, key, receipt):
         evaluation_key = "evaluation." + key
         reference = self.policy.feedback.evaluator
+        from .upstream import evaluator_identity
+        self.store.immutable("evaluator.json", evaluator_identity(reference))
         partition = self.policy.feedback.partition or ""
         record = self.store.begin(
             evaluation_key,
@@ -432,7 +435,9 @@ class ImprovementController:
                 raise ValueError(f"Application driver lacks required {method} capability")
         if self.policy.feedback.mode == "development_score":
             load_driver(self.policy.feedback.evaluator)
-        self.store.immutable("method.json", {"revision": "harness2-1cfe254-agentloom-v2"})
+        from .upstream import method_identity, evaluator_identity
+        self.store.immutable("method.json", method_identity())
+        self.store.immutable("evaluator.json", evaluator_identity(self.policy.feedback.evaluator))
         self.store.immutable("request.json", self.request)
         self.store.immutable("policy.json", _policy_dict(self.policy))
         base_record = self.store.read("base.json")
@@ -509,9 +514,12 @@ class ImprovementController:
         self.memory_snapshot = view["memory_snapshot"]
 
     def run(self):
+        from .upstream import method_identity, evaluator_identity
         old_method = self.store.read("method.json")
-        if self.store.read("request.json") is not None and old_method != {"revision": "harness2-1cfe254-agentloom-v2"}:
+        if self.store.read("request.json") is not None and old_method != method_identity():
             raise ValueError("Incompatible Harness method archive; create a new experiment")
+        if self.store.read("request.json") is not None and self.store.read("evaluator.json") != evaluator_identity(self.policy.feedback.evaluator):
+            raise ValueError("Development evaluator identity changed; create a new experiment")
         old = self.store.read("result.json")
         if old and old["status"] == "completed":
             from .snapshot import load_bundle

@@ -17,6 +17,30 @@ from .snapshot import derive_candidate
 METHOD_REVISION = "harness2-1cfe254-agentloom-v2"
 
 
+def method_identity():
+    import hashlib
+    import harness2.core
+    sources = {}
+    for root, prefix in ((Path(harness2.core.__file__).parent, "upstream"), (Path(__file__).parent, "adapter")):
+        for path in sorted(root.glob("*.py")):
+            sources[prefix + "/" + path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"revision": METHOD_REVISION, "content_fingerprint": fingerprint(sources)}
+
+
+def evaluator_identity(reference):
+    import hashlib
+    import inspect
+    if not reference:
+        return {}
+    from .controller import load_driver
+    evaluator = load_driver(reference)
+    target = evaluator if inspect.isfunction(evaluator) else type(evaluator)
+    source = inspect.getsourcefile(target)
+    if not source or not Path(source).is_file():
+        raise ValueError("Trusted development evaluator requires an inspectable source identity")
+    return {"reference": reference, "source_sha256": hashlib.sha256(Path(source).read_bytes()).hexdigest()}
+
+
 def _read(path):
     data = path.read_bytes()
     try:
@@ -387,9 +411,43 @@ def _stream_library(controller, adapter, mode):
     location.mkdir(parents=True, exist_ok=True)
     with (location / "library.lock").open("a+b") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        library = Library(location, controller.request.application_id, adapter.surface)
-        library.retain(prior)
-        yield library
+        from .store import ExperimentStore
+        stream_store = ExperimentStore(location)
+        try:
+            stream_store.immutable("stream.json", {"identity": identity,
+                "task_ids": tasks if stream else [adapter.task_id],
+                "method": method_identity(),
+                "evaluator": evaluator_identity(controller.policy.feedback.evaluator)})
+            bindings = stream_store.read("task-bindings.json", {})
+            binding = {"task_snapshot_id": controller.invocation.task_snapshot_id,
+                "base_candidate_id": controller.base.candidate_id,
+                "model_profile_id": controller.model_profile_id,
+                "experiment_root": str(controller.store.root)}
+            previous = bindings.get(adapter.task_id)
+            if previous is not None and previous != binding:
+                raise ValueError("Harness stream task belongs to different frozen inputs, configuration or execution")
+            ordered = tasks if stream else [adapter.task_id]
+            current_index = ordered.index(adapter.task_id)
+            if any(ordered.index(task) > current_index for task in bindings):
+                raise ValueError("Cannot replay an earlier incomplete task after this Harness stream advanced")
+            for task in prior:
+                earlier = bindings.get(task)
+                if earlier is None:
+                    raise ValueError("Harness stream cannot skip an earlier task")
+                completed = Path(earlier["experiment_root"]) / "result.json"
+                if not completed.is_file():
+                    raise ValueError("Earlier Harness stream task has no completed delivery")
+                result = json.loads(completed.read_text())
+                if result.get("status") != "completed" or result.get("task_snapshot_id") != earlier["task_snapshot_id"]:
+                    raise ValueError("Earlier Harness stream task requires recovery before advancing")
+            bindings[adapter.task_id] = binding
+            stream_store.write("task-bindings.json", bindings)
+            library = Library(location, controller.request.application_id, adapter.surface)
+            library.retain(prior)
+            yield library
+        finally:
+            stream_store.close()
+
 
 
 def run_method(controller):
