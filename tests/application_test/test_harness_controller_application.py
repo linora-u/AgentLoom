@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
-from threading import Event, Thread
+from threading import Barrier, Event, Thread
 from time import monotonic, sleep
 
 import pytest
@@ -103,6 +104,21 @@ class Evaluator:
 """
 
 
+@pytest.mark.parametrize("identity", ["", False, "../escape", []])
+def test_invalid_reserved_identity_is_rejected_before_experiment_creation(tmp_path, identity):
+    request = ApplicationRequest("example", tmp_path, tmp_path / "applications/example", "example:Driver", task="task")
+    with pytest.raises(ValueError, match="Invalid experiment"):
+        run_application(request, experiment_id=identity, state_root=tmp_path / "experiments")
+    assert not (tmp_path / "experiments").exists()
+
+
+def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
+    request = ApplicationRequest("example", tmp_path, tmp_path / "applications/example", "example:Driver", task="task")
+    with pytest.raises(ValueError, match="either"):
+        run_application(request, experiment_id="new", resume_id="old", state_root=tmp_path / "experiments")
+    assert not (tmp_path / "experiments").exists()
+
+
 @pytest.mark.parametrize(
     "mode,k,runtime,custom_roles,crash_after_completion,scenario",
     [
@@ -112,6 +128,10 @@ class Evaluator:
         ("parallel", 1, "pi", False, False, "stop_after_final"),
         ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
+        ("parallel", 2, "pi", False, False, "normal"),
+        ("parallel", 1, "pi", False, False, "large_evidence"),
+        ("parallel", 1, "pi", False, False, "reflection_recovery"),
+        ("parallel", 1, "pi", False, False, "reflection_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
         ("parallel", 1, "pi", True, False, "duplicate_edits"),
@@ -133,6 +153,28 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     scenario,
 ):
     requests_by_role = []
+    evidence_reads = []
+
+    if (mode, k, runtime, custom_roles, scenario) == ("parallel", 2, "pi", False, "normal"):
+        # Identical independent compositions must share one immutable bundle
+        # without consuming another model attempt when publication races.
+        rendezvous = Barrier(2)
+        rename = os.rename
+
+        def concurrent_candidate_commit(source, destination, *args, **kwargs):
+            source_path = Path(source)
+            prompt = source_path / "project/applications/mixed/prompts/business.md"
+            if source_path.name.startswith(".candidate-") and prompt.is_file() and prompt.read_text() == "COMPOSED":
+                rendezvous.wait(timeout=30)
+            return rename(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(os, "rename", concurrent_candidate_commit)
+
+    def message_text(message):
+        content = message["content"]
+        if isinstance(content, str):
+            return content
+        return "".join(part.get("text", "") for part in content if isinstance(part, dict))
 
     def program(request):
         if custom_roles and runtime == "pi" and request["model"] == "supervisor":
@@ -149,6 +191,14 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             role = "business"
         elif "Extract only supported reusable experiences" in system:
             result, role = {"experiences": []}, "reflect"
+            if scenario == "reflection_invalid" or (
+                scenario == "reflection_recovery" and requests_by_role.count("reflect") == 0
+            ):
+                result = {"experiences": [{"trigger": "task", "symptom": "unsupported historical claim",
+                    "action": "do not import historical document claims", "verification": "not established",
+                    "evidence_refs": ["reviews/old-benchmark.json", "base1", "final1"]}]}
+            elif scenario == "reflection_recovery":
+                assert "Reflection references unknown execution evidence" in json.dumps(request)
         elif "Select the deliverable that best satisfies" in system:
             result, role = {"chosen_id": "C1", "reason": "Uses the required frozen fact."}, "select"
         elif "Compose one coherent complete Application" in system:
@@ -162,6 +212,33 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             result, role = {"edits": [], "rationale": "No supported general edit."}, "general"
         else:
             raise AssertionError(system[:300])
+        if scenario == "large_evidence" and role == "general":
+            tool_results = [message for message in request["messages"] if message["role"] == "tool"]
+            if not tool_results:
+                task = next(message_text(message) for message in request["messages"]
+                            if message["role"] == "user" and "Input data (JSON):\n" in message_text(message))
+                evidence = json.loads(task.split("Input data (JSON):\n", 1)[1])["evidence"]
+                resource_root = Path(evidence["resource_root"])
+                assert resource_root != root
+                assert resource_root.name == "project" and resource_root.parent.parent.name == "bundles"
+                evidence_reads.append("index")
+                return [("read-index", "read", {"path": evidence["evidence_file"]})]
+            if len(tool_results) == 1:
+                ref = re.search(r"ctx_[0-9a-f]{32}", message_text(tool_results[0]))
+                assert ref is not None
+                assert any(tool["function"]["name"] == "loom_retrieve_context"
+                           for tool in request["tools"])
+                evidence_reads.append("retrieve-index")
+                return [("retrieve-index", "loom_retrieve_context", {"ref": ref.group()})]
+            if len(tool_results) == 2:
+                index_text = message_text(tool_results[1])
+                assert "next_offset=none" in index_text
+                index = json.loads(index_text.split("\n", 1)[1])
+                parts = index["files"]["applications/mixed/prompts/large.md"]["harness_text_parts"]
+                evidence_reads.append("tail")
+                return [("read-tail", "read", {
+                    "path": parts["path_template"].format(index=parts["count"] - 1)})]
+            assert "END-OF-COMPLETE-EVIDENCE" in message_text(tool_results[-1])
         if scenario == "selector_invalid" and role == "select":
             result["chosen_id"] = "BASE"
         if scenario == "invalid_edits" and role in {"general", "domain", "compose"}:
@@ -203,10 +280,23 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         root = tmp_path / "project"
         project(root, url, supervisor="smolagents", worker=runtime)
         app = root / "applications/mixed"
+        if not custom_roles:
+            # Built-ins inherit the Application's default, including a model
+            # profile absent from the project catalog.
+            write_yaml(app / "config/model.yaml", {"model": {
+                "default_model_type": "improvement",
+                "improvement": {"adapter": "openai_chat", "model": "improvement",
+                                "base_url": url, "api_key": "fixture-key", "timeout": 20,
+                                "num_retries": 0, "supports_structured_output": True}}})
         (app / "driver.py").write_text(DRIVER)
         (app / "prompts").mkdir()
         (app / "prompts/business.md").write_text("BASE")
         (app / "prompts/obsolete.md").write_text("UNUSED RESOURCE")
+        if scenario == "large_evidence":
+            # A real Application may contain a multi-megabyte reference file.
+            # Every built-in Pi role must still execute, rather than silently
+            # inheriting the base after its JSONL bridge rejects the input.
+            (app / "prompts/large.md").write_text("x" * (9 * 1024 * 1024) + "END-OF-COMPLETE-EVIDENCE")
         write_yaml(
             app / "workflows/worker.yaml",
             {
@@ -239,7 +329,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             resources = Path(__file__).parents[2] / "src/app/harnessing/resources/roles"
             for role in ("general", "domain", "compose", "select", "reflect"):
                 value = yaml.safe_load((resources / f"{role}.yaml").read_text())
-                value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text())
+                value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text(), tools=[])
                 path = app / "workflows" / f"role_{role}.yaml"
                 write_yaml(path, value)
                 roles[role] = f"workflows/role_{role}.yaml"
@@ -292,9 +382,50 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             stopper.start()
         result = run_application(
             request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
+            experiment_id="preallocated-experiment",
             events=(lambda event: stop.set() if event["event"] == "trial.completed"
-                    and event.get("trial_id") == "final1" else None) if scenario == "stop_after_final" else None,
+                    and event.get("trial_id") == "final1" else None) if scenario == "stop_after_final" else (
+                        (lambda event: stop.set() if event["event"] == "role.completed"
+                         and event.get("stage") == "reflection" else None)
+                        if scenario == "reflection_recovery" else None),
         )
+        assert result.experiment_id == "preallocated-experiment"
+        if scenario == "reflection_recovery":
+            from agentloom.app.harnessing.store import ExperimentStore
+
+            assert result.status == "stopped" and result.delivery
+            state = tmp_path / "experiments" / result.experiment_id
+            reflection_path = state / "stages/reflection.json"
+            original_reflection = reflection_path.read_bytes()
+            bad_output = json.loads(original_reflection)["result"]["output"]
+            selected = next(t for t in result.trials if t.trial_id == result.selected_trial_id)
+            # Reproduce the persisted intent from an older controller that
+            # validated references only after beginning library submission.
+            store = ExperimentStore(state)
+            store.begin("library", {"selected": selected, "reflection": bad_output})
+            store.close()
+            publication = (state / "stages/publication.json").read_bytes()
+            business_calls = requests_by_role.count("business")
+            stop.clear()
+            result = run_application(request, state_root=tmp_path / "experiments",
+                environment=environment, resume_id=result.experiment_id, stop_token=stop)
+            assert result.status == "completed", result.to_dict()
+            assert reflection_path.read_bytes() == original_reflection
+            assert (state / "stages/publication.json").read_bytes() == publication
+            assert requests_by_role.count("business") == business_calls == 4
+            assert json.loads((state / "stages/library.json").read_text())["status"] == "rejected"
+            assert json.loads((state / "stages/library.retry1.json").read_text())["status"] == "completed"
+        if scenario == "reflection_invalid":
+            assert result.status == "partial" and result.delivery
+            assert all(t.accepted for t in result.trials)
+            assert requests_by_role.count("reflect") == 2
+            assert requests_by_role.count("business") == 4
+            calls = len(requests)
+            recovered = run_application(request, state_root=tmp_path / "experiments",
+                environment=environment, resume_id=result.experiment_id)
+            assert recovered.status == "partial" and len(requests) == calls
+            assert not list((tmp_path / "experiments" / result.experiment_id / "stages").glob("library*.json"))
+            return
         if scenario == "stop_after_final":
             assert result.status == "stopped", result.to_dict()
             assert len(result.trials) == 4
@@ -369,15 +500,32 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert requests_by_role.count("general") == requests_by_role.count("domain") == edits
         assert requests_by_role.count("compose") == edits
         assert requests_by_role.count("select") == (k > 1)
-        assert requests_by_role.count("reflect") == 1
-        assert result.usage["complete"] == (
-            runtime == "smolagents" and not crash_after_completion and scenario != "stop_and_resume"
-        )
+        assert requests_by_role.count("reflect") == (2 if scenario == "reflection_recovery" else 1)
+        if not custom_roles:
+            assert sum(item["model"] == "improvement" for item in requests) == sum(
+                role != "business" for role in requests_by_role) + len(evidence_reads)
+        # Built-in roles now use Pi even when business execution uses smol.
+        # This fixture's Pi adapter does not report every usage dimension.
+        assert result.usage["complete"] is False
         assert result.usage["total_tokens"] == 70 * len(requests)
         for role_receipt in result.roles:
             observed = role_receipt["receipt"]["usage_observations"]
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
+        if scenario == "large_evidence":
+            import hashlib
+
+            assert evidence_reads == ["index", "retrieve-index", "tail"]
+            assert all(role["status"] == "completed" for role in result.roles)
+            evidence_root = state / "roles/general1.edit1/workspace/harness-evidence"
+            index = json.loads((evidence_root / "index.json").read_text())
+            value = index["files"]["applications/mixed/prompts/large.md"]
+            parts = value["harness_text_parts"]
+            restored = "".join(Path(parts["path_template"].format(index=i)).read_text()
+                               for i in range(parts["count"]))
+            assert restored == (app / "prompts/large.md").read_text()
+            assert hashlib.sha256(restored.encode()).hexdigest() == value["sha256"]
+            assert all(len(json.dumps(item).encode()) < 512 * 1024 for item in requests)
         assert (state / "stages/publication.json").exists()
         if scenario == "normal" and mode == "parallel":
             candidate = json.loads((state / "stages/candidate.final1.json").read_text())["result"]

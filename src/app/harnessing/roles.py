@@ -1,12 +1,59 @@
 """Improvement sessions are ordinary configured Agents, including the built-ins."""
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from .models import TrialContext, bind_trial_context, json_value
 
 ROLE_NAMES = ("general", "domain", "compose", "select", "reflect")
 _RESOURCE_ROOT = Path(__file__).parent / "resources" / "roles"
+
+
+def _evidence_input(evidence, workspace, project_root):
+    """Keep complete large evidence behind the built-ins' ordinary Pi read tool."""
+    from agentloom.execution import SecureDirectory
+
+    original = json.dumps(evidence, ensure_ascii=False, indent=2)
+    if len(original.encode("utf-8")) <= 32768:
+        return evidence
+    workspace = Path(workspace)
+    with SecureDirectory(workspace) as storage:
+        storage.ensure_dir("harness-evidence")
+        storage.atomic_write_text("harness-evidence/original.json", original)
+
+        def project(value):
+            if isinstance(value, str) and len(value) > 8192:
+                digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+                for number, start in enumerate(range(0, len(value), 8192)):
+                    name = f"harness-evidence/{digest}-{number:06d}.txt"
+                    storage.atomic_write_text(name, value[start:start + 8192])
+                return {"harness_text_parts": {
+                    "path_template": str(workspace / f"harness-evidence/{digest}-{{index:06d}}.txt"),
+                    "count": (len(value) + 8191) // 8192,
+                }, "characters": len(value), "sha256": digest}
+            if isinstance(value, dict):
+                return {key: project(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [project(item) for item in value]
+            return value
+
+        storage.atomic_write_text("harness-evidence/index.json", json.dumps(
+            project(evidence), ensure_ascii=False, indent=2))
+    return {"evidence_file": str(workspace / "harness-evidence/index.json"),
+            "resource_root": str(project_root),
+            "original_evidence_file": str(workspace / "harness-evidence/original.json"),
+            "original_sha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+            "instructions": "Read evidence_file with the Pi read tool. The index retains every field. "
+                "Read current resource files by joining resource_root with their logical project-relative paths. "
+                "Historical host paths in execution records are not the current resource root. "
+                "For harness_text_parts, format path_template with index=0 through count-1 "
+                "and concatenate those files' text in order "
+                "to recover the exact original string; each part is at most 8192 characters. "
+                "Use read offset/limit to page through long indexes. If a result provides a ContextRef, "
+                "use loom_retrieve_context to retrieve or search its complete retained content. "
+                "No input or execution evidence was omitted."}
 
 
 def validate_role_output(role: str, value):
@@ -50,8 +97,8 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
         with bind_root_run(trial.trial_id):
             require_root_run_state().get_or_create_memory_snapshot(lambda: trial.memory_snapshot)
             override = payload.get("definition", "")
-            item = WorkItem(payload["stage"], {"evidence": payload["evidence"]})
             if override:
+                item = WorkItem(payload["stage"], {"evidence": payload["evidence"]})
                 outcome = app.worker(override).invoke(item)
             else:
                 # The packaged fallback is loaded through the ordinary YAML
@@ -59,6 +106,8 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
                 definition = yaml.safe_load((_RESOURCE_ROOT / f"{role}.yaml").read_text())
                 definition["system_prompt"] = (_RESOURCE_ROOT / f"{role}.md").read_text()
                 definition = YamlAgentFactory._prepare_agent_config(definition)
+                item = WorkItem(payload["stage"], {"evidence": _evidence_input(
+                    payload["evidence"], trial.workspace_root, archived.project_root)})
                 outcome = app._invoke_definition(definition, item, 0)
             receipt = outcome.to_dict()
             role_run_dir = app.run.run_dir

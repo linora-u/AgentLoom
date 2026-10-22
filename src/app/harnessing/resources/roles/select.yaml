@@ -1,8 +1,8 @@
 name: harness_select
-agent_runtime: smolagents
+agent_runtime: pi
 description: Select one already executed and accepted composed final.
 task: Compare every supplied anonymized final with the original task and choose exactly one available ID.
-tools: []
+tools: [{name: read}, {name: loom_retrieve_context}]
 toolsets: []
 default_toolsets: []
 self_learning: {enabled: false}

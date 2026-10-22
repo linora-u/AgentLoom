@@ -1,8 +1,8 @@
 name: harness_reflect
-agent_runtime: smolagents
+agent_runtime: pi
 description: Distill supported experiences after complete Application adoption.
 task: Use the selected configuration and actual execution evidence to return supported experiences or an empty list.
-tools: []
+tools: [{name: read}, {name: loom_retrieve_context}]
 toolsets: []
 default_toolsets: []
 self_learning: {enabled: false}

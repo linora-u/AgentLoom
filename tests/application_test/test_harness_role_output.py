@@ -38,8 +38,9 @@ def test_every_role_has_a_closed_actual_provider_schema_and_validated_output(tmp
             change_model(tmp_path, adapter="openai_responses")
         for role, expected in outputs.items():
             value = yaml.safe_load((_RESOURCE_ROOT / f"{role}.yaml").read_text())
+            assert value["agent_runtime"] == "pi"
             schema = value["output_schema"]
-            value.update(agent_runtime="pi", system_prompt=(_RESOURCE_ROOT / f"{role}.md").read_text(),
+            value.update(system_prompt=(_RESOURCE_ROOT / f"{role}.md").read_text(),
                          runtime_options={"compaction": {"enabled": False}, "transport": "sse", "cacheWarming": "off"})
             path = definition.parent / f"{role}.yaml"
             path.write_text(yaml.safe_dump(value))
