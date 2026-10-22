@@ -338,10 +338,11 @@ class ApplicationAdapter:
         seen = set()
         for run in receipt.runs:
             manifest = run.get("manifest_path")
-            if not manifest:
+            location = run.get("run_dir") or (Path(manifest).parent if manifest else None)
+            if not location:
                 continue
-            path = Path(manifest).parent / "audit/runtime_events.jsonl"
-            if not path.resolve().is_relative_to(boundary) or path in seen or not path.is_file():
+            path = (Path(location) / "audit/runtime_events.jsonl").resolve()
+            if not path.is_relative_to(boundary) or path in seen or not path.is_file():
                 continue
             seen.add(path)
             lines.append("\n## Runtime " + str(run.get("run_id", path.parent.parent.name)))
