@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from threading import Barrier, Event, Thread
@@ -136,6 +137,7 @@ def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
         ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 1, "pi", False, False, "evaluation_recovery"),
         ("parallel", 1, "pi", False, False, "role_commit_recovery"),
+        ("parallel", 1, "pi", False, False, "failed_role_commit_recovery"),
         ("parallel", 1, "pi", False, False, "role_timeout"),
         ("parallel", 1, "pi", False, False, "cached_receipt_mismatch"),
         ("parallel", 1, "pi", False, False, "unscorable"),
@@ -334,12 +336,44 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
 
             stopper = Thread(target=stop_after_actual_business, daemon=True)
             stopper.start()
-        result = run_application(
-            request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
-            experiment_id="preallocated-experiment",
-            events=(lambda event: stop.set() if event["event"] == "trial.completed"
-                    and event.get("trial_id", "").startswith(("agg", "c")) else None) if scenario in {"stop_after_final", "cached_receipt_mismatch"} else None,
-        )
+        if scenario == "failed_role_commit_recovery":
+            script = '''
+import json, os, sys
+from pathlib import Path
+from agentloom.app.harnessing import process
+from agentloom.app.harnessing.controller import run_application
+from agentloom.app.harnessing.models import ApplicationRequest
+from agentloom.app.harnessing.policy import HarnessingPolicy
+atomic = process._atomic
+def crash_after_failed_role_commit(path, value):
+    atomic(path, value)
+    if (path.name == 'result.json' and path.parent.name == 'process'
+            and 'roles' in path.parts and value.get('result', {}).get('status') == 'failed'):
+        os._exit(91)
+process._atomic = crash_after_failed_role_commit
+value = json.load(sys.stdin)
+run_application(ApplicationRequest.from_dict(value['request']),
+    policy=HarnessingPolicy.model_validate(value['policy']), state_root=Path(value['state_root']),
+    environment=value['environment'], experiment_id='preallocated-experiment')
+'''
+            controller = subprocess.run([sys.executable, "-c", script], input=json.dumps({
+                "request": request.to_dict(), "policy": policy.model_dump(mode="json"),
+                "state_root": str(tmp_path / "experiments"), "environment": environment}),
+                env={**os.environ, "PYTHONPATH": os.pathsep.join([str(root), os.environ.get("PYTHONPATH", "")])},
+                capture_output=True, text=True, timeout=30)
+            assert controller.returncode == 91, controller.stderr
+            orphan = next((tmp_path / "experiments/preallocated-experiment/roles").glob("*/process/result.json"))
+            assert json.loads(orphan.read_text())["result"]["status"] == "failed"
+            assert not (orphan.parent.parent / "receipt.json").exists()
+            result = run_application(request, state_root=tmp_path / "experiments", environment=environment,
+                resume_id="preallocated-experiment")
+        else:
+            result = run_application(
+                request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
+                experiment_id="preallocated-experiment",
+                events=(lambda event: stop.set() if event["event"] == "trial.completed"
+                        and event.get("trial_id", "").startswith(("agg", "c")) else None) if scenario in {"stop_after_final", "cached_receipt_mismatch"} else None,
+            )
         assert result.experiment_id == "preallocated-experiment"
         if scenario == "role_commit_recovery":
             assert result.status == "stopped", result.to_dict()
@@ -441,7 +475,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         }
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
         assert requests_by_role.count("business") == 4 * k + (scenario == "stop_and_resume")
-        assert harness.sessions["general"] == k + (scenario == "role_timeout")
+        assert harness.sessions["general"] == k + (scenario in {"role_timeout", "failed_role_commit_recovery"})
         assert harness.sessions["domain"] == k
         assert harness.sessions["compose"] == (2 * k if scenario in {"invalid_edits", "unsafe_tools"} else k)
         assert harness.sessions["select"] == (k > 1)
@@ -466,6 +500,9 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             observed = role_receipt["receipt"]["usage_observations"]
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
+        if scenario == "failed_role_commit_recovery":
+            failed = [role for role in result.roles if role["role"] == "general" and role["status"] == "failed"]
+            assert len(failed) == 1 and failed[0]["receipt"]["usage_observations"]
         if scenario == "role_timeout":
             retries = sorted((state / "roles").glob("pi.inv1.*"))
             assert [path.name.rsplit(".", 1)[-1] for path in retries] == ["t1", "t2"]

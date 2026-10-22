@@ -52,6 +52,8 @@ class HarnessModel:
         messages = [message for message in request["messages"] if message["role"] == "tool"]
         if not messages:
             self.sessions[role] += 1
+        if self.scenario == "failed_role_commit_recovery" and role == "general" and self.sessions[role] == 1:
+            return " "  # A measured Pi completion that cannot satisfy a role reply.
         if self.scenario == "role_timeout" and role == "general":
             plan = [("read", {"path": "context/harness/" + self.prompt_path})]
             if self.sessions[role] == 1:

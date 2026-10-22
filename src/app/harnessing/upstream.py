@@ -191,9 +191,7 @@ class PiTransport:
             key = base_key + ".t" + str(attempt)
             context = controller._context(key, controller.base, role=True)
             previous = context.root / "process/result.json"
-            if previous.exists() and json.loads(previous.read_text()).get("result", {}).get("status") != "completed":
-                attempt += 1
-                continue
+            cached_result = previous.exists()
             workspace = context.workspace_root
             workspace.mkdir(parents=True, exist_ok=True)
             # Managed operation identity survives a transport/controller crash;
@@ -208,18 +206,25 @@ class PiTransport:
             try:
                 result = controller._process(controller.base, context, "agentloom.app.harnessing.roles:execute_role",
                     payload, timeout=timeout, retry_incomplete=False)
-                break
             except IncompleteOperation:
                 # Upstream starts each retry from its fresh baseline context.
                 # Do not launch a new model session over failed partial edits.
                 attempt += 1
-        receipt = result.get("receipt", {})
-        controller._usage(receipt.get("usage_observations", ()))
-        record = {"stage": key, "role": role, "label": label, "status": result.get("status"),
-                  "output": result.get("output", ""), "receipt": receipt}
-        with controller._mutex:
-            controller.store.write(f"roles/{key}/receipt.json", record)
-            controller.role_receipts.append(record)
+                continue
+            receipt = result.get("receipt", {})
+            controller._usage(receipt.get("usage_observations", ()))
+            record = {"stage": key, "role": role, "label": label, "status": result.get("status"),
+                      "output": result.get("output", ""), "receipt": receipt}
+            with controller._mutex:
+                controller.store.write(f"roles/{key}/receipt.json", record)
+                if not any(item["stage"] == key for item in controller.role_receipts):
+                    controller.role_receipts.append(record)
+            if cached_result and result.get("status") != "completed":
+                # Controller loss after the process commit must not discard a
+                # paid failed role's receipt or measured usage on recovery.
+                attempt += 1
+                continue
+            break
         if result.get("status") != "completed":
             return "", 0.0, str(result.get("error", "Pi role failed"))
         # Upstream will collect exactly context/harness from its own workspace.
