@@ -190,7 +190,7 @@ def test_complete_pi_application_rejects_large_split_native_output_before_sdk_sp
     canary = "NATIVE-ECHO-PRIVATE-CANARY-136"
     first, second = canary.split("PRIVATE", 1)
     script = ("import sys,time;from pathlib import Path;"
-        "p=Path.home().parent/'native-executed';p.write_text('1');"
+        "p=Path.home().parent/'native-executed';p.write_text(str(int(p.read_text())+1) if p.exists() else '1');"
         f"sys.stdout.write('Z'*60000+{first!r});sys.stdout.flush();time.sleep(.1);"
         f"sys.stdout.write({'PRIVATE'+second!r})")
     command = shlex.join([sys.executable, "-c", script])
@@ -229,7 +229,7 @@ def test_complete_pi_application_rejects_large_split_native_output_before_sdk_sp
     assert len(requests) == 7  # Four business calls and three upstream authoring sessions.
     assert result.usage["total_tokens"] == len(requests) * 70
     assert result.delivery == {} and result.selected_trial_id == ""
-    assert all(not trial.eligible for trial in result.trials)
+    assert len(result.trials) == 4 and all(not trial.eligible for trial in result.trials)
     markers = list(state.rglob("native-executed"))
     assert len(markers) == 4 and all(path.read_text() == "1" for path in markers)
     journals = [json.loads(path.read_text()) for path in state.rglob("*.json")
