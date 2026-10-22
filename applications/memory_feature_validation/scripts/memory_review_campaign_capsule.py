@@ -44,6 +44,8 @@ _TRUSTED_EXECUTION_PREFIXES = (
     "applications/memory_feature_validation",
     "src",
     "agentloom",
+    "third_party/harness2/harness2",
+    "harness2",
     "config/system.yaml",
     "pyproject.toml",
     "uv.lock",
@@ -54,6 +56,7 @@ _TRUSTED_IMPORT_SHADOW_PATHS = (
     "applications/memory_feature_validation.py",
     "src.py",
     "agentloom.py",
+    "harness2.py",
 )
 _ALLOWED_PARENT_ENV = {
     "ALL_PROXY",
@@ -275,12 +278,17 @@ def _clean_python_env(root: Path, *, token: str, uv: Path) -> dict[str, str]:
     return env
 
 
+_VENDORED_HARNESS_PACKAGE_DIRS = {
+    "agentloom": "src",
+    "harness2": "third_party/harness2/harness2",
+}
 _SUPPORTED_MAPPED_PACKAGE_DIRS = (
     {"agentloom": "src"},
+    _VENDORED_HARNESS_PACKAGE_DIRS,
 )
 
 
-def _capsule_runtime_layout(root: Path) -> tuple[str, str]:
+def _capsule_runtime_contract(root: Path) -> tuple[str, str, bool]:
     """Resolve a supported runtime layout from the verified source snapshot."""
     try:
         with (root / "pyproject.toml").open("rb") as handle:
@@ -289,15 +297,20 @@ def _capsule_runtime_layout(root: Path) -> tuple[str, str]:
         package_dirs = project.get("tool", {}).get("setuptools", {}).get("package-dir", {})
         if package_dirs == {}:
             package = {"src.__main__:main": "src", "agentloom.__main__:main": "agentloom"}[configured]
-            return package, package
+            return package, package, False
         if (
             configured == "agentloom.__main__:main"
             and package_dirs in _SUPPORTED_MAPPED_PACKAGE_DIRS
         ):
-            return "agentloom", "src"
+            return "agentloom", "src", package_dirs == _VENDORED_HARNESS_PACKAGE_DIRS
         raise ValueError("unsupported package mapping")
     except (AttributeError, KeyError, OSError, TypeError, ValueError) as exc:
         raise RuntimeError("capsule loom entrypoint contract was invalid") from exc
+
+
+def _capsule_runtime_layout(root: Path) -> tuple[str, str]:
+    package, source_directory, _vendored_harness = _capsule_runtime_contract(root)
+    return package, source_directory
 
 
 def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
@@ -350,7 +363,7 @@ def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
         created_identity = (initial.st_dev, initial.st_ino)
         if not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1:
             raise RuntimeError("capsule loom launcher was not a new regular file")
-        package, source_directory = _capsule_runtime_layout(root)
+        package, source_directory, vendored_harness = _capsule_runtime_contract(root)
         # Keep the historical launcher byte-for-byte compatible; canonical
         # snapshots validate their actual implementation origin before import.
         payload = payload.replace(b'"src"', json.dumps(package).encode()).replace(
@@ -358,25 +371,25 @@ def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
         )
         if source_directory != package:
             # The locked environment intentionally contains dependencies only.
-            # Reproduce the one supported setuptools source mapping explicitly,
+            # Reproduce the supported canonical source mapping explicitly,
             # registering only the canonical name and rejecting installed shadows.
             direct_lookup = b'_SRC_SPEC = find_spec("agentloom")\n'
             mapped_lookup = (
-                '_SOURCE = _CAPSULE_ROOT / "src"\n'
-                'if _SOURCE.resolve() != _SOURCE or (_SOURCE / "__init__.py").is_symlink():\n'
-                '    raise RuntimeError("capsule source directory was invalid")\n'
-                '_SRC_SPEC = find_spec("agentloom")\n'
-                'if _SRC_SPEC is not None and (\n'
-                '    _SRC_SPEC.origin is None\n'
-                '    or Path(_SRC_SPEC.origin).resolve() != _SOURCE / "__init__.py"\n'
-                '):\n'
-                '    raise RuntimeError("capsule src import origin was invalid")\n'
-                'from importlib.util import module_from_spec, spec_from_file_location\n'
-                '_SRC_SPEC = spec_from_file_location(\n'
-                '    "agentloom", _SOURCE / "__init__.py",\n'
-                '    submodule_search_locations=[str(_SOURCE)],\n'
-                ')\n'
-            ).encode()
+                b'_SOURCE = _CAPSULE_ROOT / "src"\n'
+                b'if _SOURCE.resolve() != _SOURCE or (_SOURCE / "__init__.py").is_symlink():\n'
+                b'    raise RuntimeError("capsule source directory was invalid")\n'
+                b'_SRC_SPEC = find_spec("agentloom")\n'
+                b'if _SRC_SPEC is not None and (\n'
+                b'    _SRC_SPEC.origin is None\n'
+                b'    or Path(_SRC_SPEC.origin).resolve() != _SOURCE / "__init__.py"\n'
+                b'):\n'
+                b'    raise RuntimeError("capsule src import origin was invalid")\n'
+                b'from importlib.util import module_from_spec, spec_from_file_location\n'
+                b'_SRC_SPEC = spec_from_file_location(\n'
+                b'    "agentloom", _SOURCE / "__init__.py",\n'
+                b'    submodule_search_locations=[str(_SOURCE)],\n'
+                b')\n'
+            )
             payload = payload.replace(direct_lookup, mapped_lookup).replace(
                 b'(_CAPSULE_ROOT / "agentloom" / "__init__.py").resolve()',
                 b'(_CAPSULE_ROOT / "src" / "__init__.py").resolve()',
@@ -387,6 +400,35 @@ def _write_trusted_loom_launcher(root: Path, python: Path) -> Path:
                 b'_SRC_SPEC.loader.exec_module(_PACKAGE)\n'
                 b'from agentloom.__main__ import main',
             )
+            if vendored_harness:
+                # Bind this one approved dependency directly. Adding its parent
+                # to sys.path would expose unrelated vendored import shadows.
+                dependency_lookup = (
+                    b'_HARNESS_SOURCE = _CAPSULE_ROOT / "third_party/harness2/harness2"\n'
+                    b'if (\n'
+                    b'    _HARNESS_SOURCE.resolve() != _HARNESS_SOURCE\n'
+                    b'    or not (_HARNESS_SOURCE / "__init__.py").is_file()\n'
+                    b'    or (_HARNESS_SOURCE / "__init__.py").is_symlink()\n'
+                    b'):\n'
+                    b'    raise RuntimeError("capsule harness2 source directory was invalid")\n'
+                    b'_HARNESS_SPEC = find_spec("harness2")\n'
+                    b'if _HARNESS_SPEC is not None and (\n'
+                    b'    _HARNESS_SPEC.origin is None\n'
+                    b'    or Path(_HARNESS_SPEC.origin).resolve() != _HARNESS_SOURCE / "__init__.py"\n'
+                    b'):\n'
+                    b'    raise RuntimeError("capsule harness2 import origin was invalid")\n'
+                    b'_HARNESS_SPEC = spec_from_file_location(\n'
+                    b'    "harness2", _HARNESS_SOURCE / "__init__.py",\n'
+                    b'    submodule_search_locations=[str(_HARNESS_SOURCE)],\n'
+                    b')\n'
+                    b'_HARNESS_PACKAGE = module_from_spec(_HARNESS_SPEC)\n'
+                    b'sys.modules["harness2"] = _HARNESS_PACKAGE\n'
+                    b'_HARNESS_SPEC.loader.exec_module(_HARNESS_PACKAGE)\n'
+                )
+                payload = payload.replace(
+                    b'_PACKAGE = module_from_spec(_SRC_SPEC)\n',
+                    dependency_lookup + b'_PACKAGE = module_from_spec(_SRC_SPEC)\n',
+                )
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
             descriptor = -1
             handle.write(payload)
@@ -1415,11 +1457,11 @@ def build_capsule_descriptor(
     if src_spec is None and source_directory != runtime_package:
         # This runner observes the dependency-only environment without importing
         # runtime implementation. The trusted launcher enforces the same mapping.
-        source = repo_root / source_directory
-        source_init = source / "__init__.py"
-        if source.resolve() == source and source_init.is_file() and not source_init.is_symlink():
+        runtime_source = repo_root / source_directory
+        source_init = runtime_source / "__init__.py"
+        if runtime_source.resolve() == runtime_source and source_init.is_file() and not source_init.is_symlink():
             src_spec = importlib.util.spec_from_file_location(
-                runtime_package, source_init, submodule_search_locations=[str(source)],
+                runtime_package, source_init, submodule_search_locations=[str(runtime_source)],
             )
     src_origin = Path(src_spec.origin) if src_spec and src_spec.origin else Path()
     shebang_target = Path()
