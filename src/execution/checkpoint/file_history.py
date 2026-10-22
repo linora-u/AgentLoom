@@ -87,6 +87,8 @@ class FileHistoryManager:
         *,
         storage: SecureDirectory | None = None,
     ) -> None:
+        from agentloom.execution.storage import file_copy_metadata_supported
+        self._preserve_metadata = file_copy_metadata_supported()
         self._backup_dir = Path(backup_dir)
         self._storage = storage or SecureDirectory(self._backup_dir, create=True)
         self._lock = threading.Lock()
@@ -252,7 +254,10 @@ class FileHistoryManager:
                         continue
                     # Ensure parent directory exists (file may have been deleted).
                     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-                    self._storage.copy_to(backup.backup_filename, abs_path)
+                    if self._preserve_metadata:
+                        self._storage.copy_to(backup.backup_filename, abs_path)
+                    else:
+                        self._storage.copy_to(backup.backup_filename, abs_path, preserve_metadata=False)
                     restored.append(abs_path)
                     _logger.info("FileHistory: restored %s to step %d (v%d)", abs_path, step_number, backup.version)
             except Exception as exc:
@@ -378,7 +383,10 @@ class FileHistoryManager:
 
         phash = _path_hash(file_path)
         filename = f"{phash}@v{version}"
-        self._storage.copy_from(file_path, filename)
+        if self._preserve_metadata:
+            self._storage.copy_from(file_path, filename)
+        else:
+            self._storage.copy_from(file_path, filename, preserve_metadata=False)
 
         return FileHistoryBackup(
             backup_filename=filename,

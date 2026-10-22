@@ -63,7 +63,8 @@ def main():
             from agentloom.runtimes.pi.credentials import bind_pi_credentials
             model_config = private.pop("model_config", None)
             credentials = private.pop("credentials", {})
-            with bind_harness_credentials(credentials), bind_harness_model_config(model_config), bind_pi_credentials(private.pop("pi_credentials", None)):
+            from agentloom.execution.storage import bind_file_copy_metadata
+            with bind_file_copy_metadata(False), bind_harness_credentials(credentials), bind_harness_model_config(model_config), bind_pi_credentials(private.pop("pi_credentials", None)):
                 module, name = descriptor["factory"].split(":", 1)
                 factory = getattr(importlib.import_module(module), name)
                 result = factory(descriptor["payload"], descriptor["bundle"], descriptor["context"])

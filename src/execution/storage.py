@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -17,6 +18,27 @@ from typing import Any, BinaryIO
 _DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _COPY_CHUNK_BYTES = 1024 * 1024
+
+
+_FILE_COPY_METADATA = ContextVar("file_copy_metadata", default=True)
+
+
+@contextmanager
+def bind_file_copy_metadata(enabled: bool):
+    """Declare the trusted execution boundary's metadata capability.
+
+    Sandboxed runs retain content and creation mode without requesting chmod or
+    timestamp mutation. Ordinary runs preserve the existing copy2 contract.
+    """
+    token = _FILE_COPY_METADATA.set(enabled)
+    try:
+        yield
+    finally:
+        _FILE_COPY_METADATA.reset(token)
+
+
+def file_copy_metadata_supported() -> bool:
+    return _FILE_COPY_METADATA.get()
 
 
 def _write_all(fd: int, payload: bytes) -> None:
@@ -596,7 +618,7 @@ class SecureDirectory:
             os.close(source_parent_fd)
             os.close(destination_parent_fd)
 
-    def copy_from(self, source: str | Path, relative: str | Path) -> None:
+    def copy_from(self, source: str | Path, relative: str | Path, *, preserve_metadata: bool = True) -> None:
         parent_fd, name = self._open_parent(relative, create=True)
         temporary = f".{name}.{uuid.uuid4().hex}.tmp"
         source_fd = -1
@@ -616,11 +638,12 @@ class SecureDirectory:
             destination_fd = os.open(
                 temporary,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW,
-                0o600,
+                0o600 if preserve_metadata else stat.S_IMODE(source_stat.st_mode),
                 dir_fd=parent_fd,
             )
             _copy_fd(source_fd, destination_fd)
-            _apply_copied_metadata(destination_fd, source_stat)
+            if preserve_metadata:
+                _apply_copied_metadata(destination_fd, source_stat)
             os.fsync(destination_fd)
             os.close(destination_fd)
             destination_fd = -1
@@ -641,7 +664,7 @@ class SecureDirectory:
                 pass
             os.close(parent_fd)
 
-    def copy_to(self, relative: str | Path, destination: str | Path) -> None:
+    def copy_to(self, relative: str | Path, destination: str | Path, *, preserve_metadata: bool = True) -> None:
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)
         source_parent_fd = -1
@@ -675,7 +698,8 @@ class SecureDirectory:
                 dir_fd=target_parent_fd,
             )
             _copy_fd(source_fd, destination_fd)
-            _apply_copied_metadata(destination_fd, source_stat)
+            if preserve_metadata:
+                _apply_copied_metadata(destination_fd, source_stat)
             os.fsync(destination_fd)
             os.close(destination_fd)
             destination_fd = -1
