@@ -97,6 +97,7 @@ def test_historical_stream_reuses_real_library_without_business_memory_or_base_p
                     "context/library/harnesses/2020-01-01/harness/applications/mixed/prompts/business.md",
                 ))
         if role == "compose":
+            plan.append(("read", {"path": "context/harness/applications/mixed/prompts/business.md"}))
             plan.append(("write", {"path": "context/harness/applications/mixed/prompts/business.md", "content": "COMPOSED"}))
         if len(tools) < len(plan):
             name, arguments = plan[len(tools)]
@@ -127,7 +128,7 @@ def test_historical_stream_reuses_real_library_without_business_memory_or_base_p
                        "feedback": {"mode": "development_score", "partition": "train-a",
                                     "evaluator": "applications.mixed.driver:Evaluator"}}
 
-        def execute(name, task_id, *, mode="parallel", feedback="development_score", partition="train-a", evaluator="Evaluator", stream="one"):
+        def execute(name, task_id, *, mode="parallel", feedback="development_score", partition="train-a", evaluator="Evaluator", stream="one", task_ids=None):
             policy = HarnessingPolicy.model_validate({**base_policy,
                 "recursion": {"mode": mode, "k": 1},
                 "feedback": ({"mode": "development_score", "partition": partition,
@@ -136,7 +137,7 @@ def test_historical_stream_reuses_real_library_without_business_memory_or_base_p
             request = replace(original,
                 task={"goal": "ORIGINAL_TASK", "evidence_cutoff": task_id + "T00:00:00Z"},
                 driver_options={"delivery": str(tmp_path / (name + "-delivery.json"))},
-                harness_stream={"id": stream, "task_ids": ["2020-01-01", "2020-01-02"],
+                harness_stream={"id": stream, "task_ids": task_ids or ["2020-01-01", "2020-01-02"],
                                 "task_id": task_id, "root": str(stream_root)})
             return run_application(request, policy=policy, state_root=roots, experiment_id=name,
                                    environment={"PATH": os.environ.get("PATH", os.defpath)})
@@ -164,7 +165,7 @@ def test_historical_stream_reuses_real_library_without_business_memory_or_base_p
             ("evaluator", {"evaluator": "EvaluatorB"}),
             ("stream", {"stream": "other"}),
         ):
-            isolated = execute(name, "2020-01-02", **overrides)
+            isolated = execute(name, "2020-01-02", task_ids=["2020-01-02"], **overrides)
             assert isolated.status == "completed", isolated.to_dict()
             assert list(isolated.library["entries"]) == ["2020-01-02"]
             assert not list((roots / name / "roles").glob("*/workspace/context/library/INDEX.md"))
@@ -176,6 +177,18 @@ def test_historical_stream_reuses_real_library_without_business_memory_or_base_p
         assert all(trial.acceptance["hidden"] == "denied" for trial in second.trials)
         assert len(business_requests) == 28
         before = len(requests)
+        skipped = execute("skipped-prior", "2020-01-02", stream="empty-with-prior")
+        assert skipped.status == "failed"
+        assert "cannot skip an earlier task" in " ".join(skipped.errors)
+        assert len(requests) == before
+        rebound = execute("rebound-inputs", "2020-01-02")
+        assert rebound.status == "failed"
+        assert "different frozen inputs" in " ".join(rebound.errors)
+        assert len(requests) == before
+        reordered = execute("reordered-stream", "2020-01-02", task_ids=["2020-01-02", "2020-01-01"])
+        assert reordered.status == "failed"
+        assert len(requests) == before
+        assert first_entry.read_bytes() == first_bytes
         resumed = run_application(
             replace(original, task={"goal": "ORIGINAL_TASK", "evidence_cutoff": "2020-01-02T00:00:00Z"},
                     driver_options={"delivery": str(tmp_path / "second-delivery.json")},
