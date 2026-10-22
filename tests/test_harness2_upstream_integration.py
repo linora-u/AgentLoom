@@ -1,6 +1,8 @@
 """Behavior of the narrow vendored-core extensions, without model credentials."""
 
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from dataclasses import replace
@@ -17,6 +19,14 @@ class UpstreamIntegrationTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+
+    def test_vendored_release_assets_match_provenance(self):
+        script = (Path(__file__).resolve().parents[1]
+                  / "third_party/harness2/scripts/check_provenance.py")
+        result = subprocess.run(
+            [sys.executable, str(script)], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_pi_file_session_harvest_cache_and_interrupt(self):
         source = self.root / "evidence"
