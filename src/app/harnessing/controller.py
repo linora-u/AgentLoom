@@ -9,7 +9,7 @@ import importlib
 import json
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -182,6 +182,7 @@ class ImprovementController:
         self.events, self.stop = events, stop_token
         self.environment, self.model_config = environment, model_config
         self.credentials = dict(credentials or {})
+        self._execution_bindings = nullcontext
         self.model_profile_id = ""
         self.public_models = {}
         if library is not None:
@@ -243,9 +244,10 @@ class ImprovementController:
         if not retry_incomplete:
             options["retry_incomplete"] = False
         try:
-            if managed_orchestration:
-                return execute_managed_orchestration(bundle, context, factory, json_value(payload), **options)
-            return execute_isolated(bundle, context, factory, json_value(payload), **options)
+            with self._private_bindings():
+                if managed_orchestration:
+                    return execute_managed_orchestration(bundle, context, factory, json_value(payload), **options)
+                return execute_isolated(bundle, context, factory, json_value(payload), **options)
         except BaseException as error:
             # H2 returns/raises only after its owner closes. Salvage persisted
             # observations even if the process died before a driver receipt.
@@ -391,7 +393,7 @@ class ImprovementController:
         from agentloom.config.config import bind_harness_model_config
         from agentloom.config.private_bindings import bind_harness_credentials
 
-        with bind_harness_model_config(self.model_config), bind_harness_credentials(self.credentials):
+        with self._execution_bindings(), bind_harness_model_config(self.model_config), bind_harness_credentials(self.credentials):
             yield
 
     def _validate(self, project, app):
@@ -577,10 +579,17 @@ class ImprovementController:
                 raise ValueError("Completed result output differs from its selected receipt")
             return ApplicationExecutionResult.from_dict(old)
         self.prepare()
+        from agentloom.config.private_bindings import capture_harness_bindings
         from agentloom.runtimes.pi.credentials import bind_pi_credentials, capture_pi_credentials
 
-        with bind_pi_credentials(capture_pi_credentials(self.model_config)):
-            return self._run_prepared()
+        with bind_pi_credentials(capture_pi_credentials(self.model_config)), self._private_bindings():
+            # Upstream owns its executor threads. Re-enter only this prepared
+            # controller's authorized capabilities at each execution boundary.
+            self._execution_bindings = capture_harness_bindings()
+            try:
+                return self._run_prepared()
+            finally:
+                self._execution_bindings = nullcontext
 
     def _run_prepared(self):
         from .upstream import run_method
