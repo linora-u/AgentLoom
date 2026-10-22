@@ -66,6 +66,7 @@ def main():
     from agentloom.config.private_bindings import consume_harness_bindings
     from agentloom.execution.durability_scope import bind_durability_boundary
     from agentloom.execution.process_scope import bind_managed_process_scope
+    from agentloom.execution.storage import bind_file_copy_metadata
 
     from .authorization import assert_current_attempt, bind_attempt_authorization
 
@@ -74,7 +75,7 @@ def main():
     # it. Never grant the whole Durable job directory writable to an Agent.
     result_fd = os.open(job / "result.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600) if boundary else None
     try:
-        with bind_managed_process_scope(), bind_attempt_authorization(job, descriptor["invocation_id"]), consume_harness_bindings(), (bind_durability_boundary(Path(boundary["context"]["root"])) if boundary else nullcontext()):
+        with bind_managed_process_scope(), bind_attempt_authorization(job, descriptor["invocation_id"]), consume_harness_bindings(), (bind_durability_boundary(Path(boundary["context"]["root"])) if boundary else nullcontext()), (bind_file_copy_metadata(False) if boundary else nullcontext()):
             if boundary:
                 _install_harness_boundary(boundary, job)
             # Factory imports/construction are part of the isolated invocation,
