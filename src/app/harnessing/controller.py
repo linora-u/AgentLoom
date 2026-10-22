@@ -214,7 +214,7 @@ class ImprovementController:
             library_view=self.library_view if role else (),
         )
 
-    def _process(self, bundle, context, factory, payload, *, timeout=None):
+    def _process(self, bundle, context, factory, payload, *, timeout=None, retry_incomplete=True):
         from .process import execute_isolated, execute_managed_orchestration
 
         # A trusted Python driver may delegate mandatory isolation to managed
@@ -239,6 +239,8 @@ class ImprovementController:
         }
         if self.model_config is not None:
             options["model_config"] = self.model_config
+        if not retry_incomplete:
+            options["retry_incomplete"] = False
         try:
             if managed_orchestration:
                 return execute_managed_orchestration(bundle, context, factory, json_value(payload), **options)
@@ -256,13 +258,13 @@ class ImprovementController:
                 unknown = self.store.read("unmeasured-operations.json", {})
                 attempt = len(tuple((context.root / "process/attempts").glob("*")))
                 key = f"{context.trial_id}:{attempt}"
-                unknown[key] = {
+                unknown.setdefault(key, {
                     "operation_id": context.trial_id,
                     "attempt": attempt,
                     "factory": factory,
                     "error_type": type(error).__name__,
                     "usage": "unknown",
-                }
+                })
                 self.store.write("unmeasured-operations.json", unknown)
             if isinstance(error, InterruptedError):
                 raise ExperimentStopped(str(error)) from error

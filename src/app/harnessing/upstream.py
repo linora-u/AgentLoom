@@ -177,6 +177,8 @@ class PiTransport:
         self.controller = controller
 
     def __call__(self, cwd, mission, system, timeout, *, label):
+        from .process import IncompleteOperation
+
         controller = self.controller
         controller._check_stop()
         role = _role_of(label)
@@ -189,21 +191,28 @@ class PiTransport:
             key = base_key + ".t" + str(attempt)
             context = controller._context(key, controller.base, role=True)
             previous = context.root / "process/result.json"
-            if not previous.exists() or json.loads(previous.read_text()).get("result", {}).get("status") == "completed":
+            if previous.exists() and json.loads(previous.read_text()).get("result", {}).get("status") != "completed":
+                attempt += 1
+                continue
+            workspace = context.workspace_root
+            workspace.mkdir(parents=True, exist_ok=True)
+            # Managed operation identity survives a transport/controller crash;
+            # completed child receipts retain their original edited workspace.
+            if not (context.root / "process/input.json").exists():
+                if (cwd / "context").is_dir():
+                    shutil.copytree(cwd / "context", workspace / "context", dirs_exist_ok=True)
+                (workspace / "MISSION.md").write_text((system + "\n\n" if system else "") + mission)
+            payload = {"role": role, "stage": key, "definition": getattr(controller.policy.roles, role),
+                       "mission": mission, "system": system}
+            controller._emit("role.started", stage=key, role=role)
+            try:
+                result = controller._process(controller.base, context, "agentloom.app.harnessing.roles:execute_role",
+                    payload, timeout=timeout, retry_incomplete=False)
                 break
-            attempt += 1
-        workspace = context.workspace_root
-        workspace.mkdir(parents=True, exist_ok=True)
-        # Managed operation identity survives a transport/controller crash; the
-        # upstream temporary directory is never part of that identity.
-        if not (context.root / "process/input.json").exists():
-            if (cwd / "context").is_dir():
-                shutil.copytree(cwd / "context", workspace / "context", dirs_exist_ok=True)
-            (workspace / "MISSION.md").write_text((system + "\n\n" if system else "") + mission)
-        payload = {"role": role, "stage": key, "definition": getattr(controller.policy.roles, role),
-                   "mission": mission, "system": system}
-        controller._emit("role.started", stage=key, role=role)
-        result = controller._process(controller.base, context, "agentloom.app.harnessing.roles:execute_role", payload, timeout=timeout)
+            except IncompleteOperation:
+                # Upstream starts each retry from its fresh baseline context.
+                # Do not launch a new model session over failed partial edits.
+                attempt += 1
         receipt = result.get("receipt", {})
         controller._usage(receipt.get("usage_observations", ()))
         record = {"stage": key, "role": role, "label": label, "status": result.get("status"),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -288,6 +289,66 @@ def controlled_stop(payload, bundle, context):
     assert json.loads((context.root / "process/attempts/000001/cleanup.json").read_text())["physical_exit_confirmed"]
     assert execute_isolated(bundle, context, "applications.sample.operations:controlled_stop", {}, timeout=10) == {"recovered": True}
     assert len(list((context.root / "process/attempts").iterdir())) == 2
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Actual controller death and managed child exit")
+@pytest.mark.parametrize("receipt_change", ["none", "identity", "malformed", "partial"])
+def test_controller_death_reuses_only_complete_matching_child_receipt(project, tmp_path, receipt_change):
+    from agentloom.app.harnessing.process import IsolatedExecutionError
+    root, app = project
+    (app / "operations.py").write_text('''
+from pathlib import Path
+def completed(payload, bundle, context):
+    path = Path(context['root']) / 'output/invocations'
+    count = int(path.read_text()) + 1 if path.exists() else 1
+    path.write_text(str(count))
+    return {'completed_invocation': count}
+''')
+    bundle = snapshot_application(root, app, tmp_path / "bundles")
+    context = Context(tmp_path / "trial", bundle.candidate_id)
+    script = '''
+import os, sys
+from pathlib import Path
+from agentloom.app.harnessing import process
+from agentloom.app.harnessing.snapshot import load_bundle
+atomic = process._atomic
+def crash_before_parent_commit(path, value):
+    if path.name == 'result.json' and path.parent.name == 'process':
+        os._exit(91)
+    atomic(path, value)
+process._atomic = crash_before_parent_commit
+bundle = load_bundle(Path(sys.argv[1]))
+context = {'root':sys.argv[2], 'candidate_id':bundle.candidate_id,
+           'experiment_id':'experiment', 'trial_id':'trial', 'task_snapshot_id':'task'}
+process.execute_isolated(bundle, context, 'applications.sample.operations:completed', {}, timeout=10)
+'''
+    controller = subprocess.run([sys.executable, "-c", script, str(bundle.root), str(context.root)],
+        capture_output=True, text=True, timeout=20)
+    assert controller.returncode == 91, controller.stderr
+    job = context.root / "process"
+    assert not (job / "result.json").exists()
+    child = job / "attempts/000001/result.json"
+    value = json.loads(child.read_text())
+    assert value["result"] == {"completed_invocation": 1}
+    assert json.loads((child.parent / "cleanup.json").read_text())["physical_exit_confirmed"]
+    if receipt_change == "partial":
+        child.write_text('{"identity":')
+    elif receipt_change != "none":
+        if receipt_change == "identity":
+            value["identity"] = "different-operation"
+        else:
+            value["result"] = []
+        child.write_text(json.dumps(value))
+        with pytest.raises(IsolatedExecutionError, match="identity|JSON mapping"):
+            execute_isolated(bundle, context, "applications.sample.operations:completed", {}, timeout=10)
+        assert (context.root / "output/invocations").read_text() == "1"
+        assert len(list((job / "attempts").iterdir())) == 1
+        return
+    result = execute_isolated(bundle, context, "applications.sample.operations:completed", {}, timeout=10)
+    expected = 2 if receipt_change == "partial" else 1
+    assert result == {"completed_invocation": expected}
+    assert (context.root / "output/invocations").read_text() == str(expected)
+    assert len(list((job / "attempts").iterdir())) == expected
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Real managed Host kernel enforcement and anonymous forwarding")

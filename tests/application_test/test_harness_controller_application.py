@@ -135,6 +135,8 @@ def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
         ("parallel", 1, "pi", False, False, "stop_after_final"),
         ("parallel", 1, "smolagents", False, False, "development_score"),
         ("parallel", 1, "pi", False, False, "evaluation_recovery"),
+        ("parallel", 1, "pi", False, False, "role_commit_recovery"),
+        ("parallel", 1, "pi", False, False, "role_timeout"),
         ("parallel", 1, "pi", False, False, "unscorable"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 2, "pi", False, False, "normal"),
@@ -163,6 +165,30 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     requests_by_role = []
     harness = HarnessModel("applications/mixed/prompts/business.md", scenario=scenario,
                            feedback=scenario in {"development_score", "evaluation_recovery", "unscorable"})
+    if scenario == "role_commit_recovery":
+        from agentloom.app.harnessing import process
+        atomic = process._atomic
+        interrupted_commit = False
+        def lose_controller_before_role_commit(path, value):
+            nonlocal interrupted_commit
+            if not interrupted_commit and path.name == "result.json" and path.parent.name == "process" and "roles" in path.parts:
+                interrupted_commit = True
+                raise KeyboardInterrupt("controlled controller loss before role result commit")
+            return atomic(path, value)
+        monkeypatch.setattr(process, "_atomic", lose_controller_before_role_commit)
+    if scenario == "role_timeout":
+        from agentloom.app.harnessing import process
+        execute = process._execute
+        harness.pause = Event()
+        def timeout_first_role(bundle, context, factory, payload, **options):
+            if factory.endswith(":execute_role") and payload["role"] == "general" and payload["stage"].endswith(".t1"):
+                options["timeout"] = 5
+                try:
+                    return execute(bundle, context, factory, payload, **options)
+                finally:
+                    harness.pause.set()
+            return execute(bundle, context, factory, payload, **options)
+        monkeypatch.setattr(process, "_execute", timeout_first_role)
 
     if (mode, k, runtime, custom_roles, scenario) == ("parallel", 2, "pi", False, "normal"):
         # Identical independent compositions must share one immutable bundle
@@ -314,6 +340,13 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                     and event.get("trial_id", "").startswith(("agg", "c")) else None) if scenario == "stop_after_final" else None,
         )
         assert result.experiment_id == "preallocated-experiment"
+        if scenario == "role_commit_recovery":
+            assert result.status == "stopped", result.to_dict()
+            assert harness.sessions["general"] == 1
+            assert requests_by_role.count("business") == 1
+            result = run_application(request, state_root=tmp_path / "experiments",
+                environment=environment, resume_id=result.experiment_id)
+            assert harness.sessions["general"] == 1, "Completed durable Pi role was paid for again"
         if scenario == "evaluation_recovery":
             assert result.status == "partial", result.to_dict()
             assert "Controlled evaluator failure" in "\n".join(result.errors)
@@ -393,15 +426,22 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         }
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
         assert requests_by_role.count("business") == 4 * k + (scenario == "stop_and_resume")
-        assert harness.sessions["general"] == harness.sessions["domain"] == k
+        assert harness.sessions["general"] == k + (scenario == "role_timeout")
+        assert harness.sessions["domain"] == k
         assert harness.sessions["compose"] == (2 * k if scenario in {"invalid_edits", "unsafe_tools"} else k)
         assert harness.sessions["select"] == (k > 1)
         assert harness.sessions["reflect"] == (2 if scenario == "reflection_error" else 1)
         # Built-in roles now use Pi even when business execution uses smol.
         # This fixture's Pi adapter does not report every usage dimension.
         assert result.usage["complete"] is False
-        measured_requests = len(requests) - (2 if scenario == "reflection_error" else 0)
-        assert result.usage["total_tokens"] == 70 * measured_requests
+        if scenario == "role_timeout":
+            # Killing a role before its Runtime closes can leave earlier HTTP
+            # usage unreported. Keep the operation unknown rather than infer
+            # usage from this test server's fulfilled requests.
+            assert 0 < result.usage["total_tokens"] < 70 * len(requests)
+        else:
+            measured_requests = len(requests) - (2 if scenario == "reflection_error" else 0)
+            assert result.usage["total_tokens"] == 70 * measured_requests
         if scenario == "reflection_error":
             failed = [role for role in result.roles if role["role"] == "reflect"]
             assert len(failed) == 2 and all(role["status"] == "failed" for role in failed)
@@ -411,6 +451,14 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             observed = role_receipt["receipt"]["usage_observations"]
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
+        if scenario == "role_timeout":
+            retries = sorted((state / "roles").glob("pi.inv1.*"))
+            assert [path.name.rsplit(".", 1)[-1] for path in retries] == ["t1", "t2"]
+            assert all(json.loads(path.read_text())["physical_exit_confirmed"]
+                for path in retries[0].glob("process/attempts/*/cleanup.json"))
+            assert (retries[0] / "workspace/context/harness/applications/mixed/prompts/business.md").read_text() == "FAILED-ATTEMPT-EDIT"
+            assert (retries[1] / "workspace/context/harness/applications/mixed/prompts/business.md").read_text() == "BASE"
+            assert result.usage["unmeasured_operations"]
         if scenario == "large_evidence":
             assert any(role == "general" and path.endswith("large.md") for role, _name, path in harness.reads)
             assert all(len(json.dumps(item).encode()) < 512 * 1024 for item in requests)

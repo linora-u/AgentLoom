@@ -6,7 +6,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Barrier, Lock, Thread
+from threading import Barrier, Event, Lock, Thread
 from typing import Any, NamedTuple
 
 import yaml
@@ -23,6 +23,11 @@ class ProviderFailure(NamedTuple):
     """A controlled external HTTP error selected by the actual request."""
     status: int
     message: str
+
+
+class ProviderPause(NamedTuple):
+    """Hold one HTTP connection until its client has been stopped."""
+    release: Event
 
 
 def assert_closed_output_schema(schema: dict) -> None:
@@ -69,6 +74,9 @@ def model_service(
                 if on_request is not None:
                     on_request(request, dict(self.headers))
                 answer = program(request)
+                if isinstance(answer, ProviderPause):
+                    answer.release.wait(timeout=20)
+                    return
                 if isinstance(answer, ProviderFailure):
                     self.send_response(answer.status)
                     self.send_header('Content-Type', 'application/json')

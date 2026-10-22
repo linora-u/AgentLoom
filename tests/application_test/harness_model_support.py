@@ -41,6 +41,7 @@ class HarnessModel:
         self.reads = []
         self.seen_feedback = []
         self.candidate_override = None
+        self.pause = None
 
     def __call__(self, request):
         role = role_of(request)
@@ -51,6 +52,19 @@ class HarnessModel:
         messages = [message for message in request["messages"] if message["role"] == "tool"]
         if not messages:
             self.sessions[role] += 1
+        if self.scenario == "role_timeout" and role == "general":
+            plan = [("read", {"path": "context/harness/" + self.prompt_path})]
+            if self.sessions[role] == 1:
+                plan.append(("write", {"path": "context/harness/" + self.prompt_path,
+                                       "content": "FAILED-ATTEMPT-EDIT"}))
+            if len(messages) < len(plan):
+                name, arguments = plan[len(messages)]
+                return [(f"timeout-{len(messages)}", name, arguments)]
+            if self.sessions[role] == 1:
+                from tests.application_test.mixed_runtime_support import ProviderPause
+                return ProviderPause(self.pause)
+            assert "BASE" in text(messages[0]) and "FAILED-ATTEMPT-EDIT" not in text(messages[0])
+            return "<notes>GENERAL-NOTE-142: fresh baseline after a failed role.</notes>"
         if role == "reflect" and self.scenario == "reflection_error":
             from tests.application_test.mixed_runtime_support import ProviderFailure
             return ProviderFailure(400, "Controlled reflection transport failure")
