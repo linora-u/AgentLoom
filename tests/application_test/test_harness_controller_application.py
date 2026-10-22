@@ -144,6 +144,7 @@ def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 2, "pi", False, False, "normal"),
         ("parallel", 1, "pi", False, False, "large_evidence"),
+        ("parallel", 1, "pi", False, False, "skill_edit"),
         ("parallel", 1, "pi", False, False, "reflection_error"),
         ("parallel", 1, "pi", False, False, "reflection_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
@@ -166,6 +167,9 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     scenario,
 ):
     requests_by_role = []
+    skill_relative = "applications/mixed/skills/business-behavior/SKILL.md"
+    skill_baseline = "---\nname: business-behavior\ndescription: Read the business behavior marker.\n---\nBASE-SKILL\n"
+    skill_composed = skill_baseline.replace("BASE-SKILL", "COMPOSED-SKILL")
     harness = HarnessModel("applications/mixed/prompts/business.md", scenario=scenario,
                            feedback=scenario in {"development_score", "evaluation_recovery", "unscorable"})
     if scenario == "role_commit_recovery":
@@ -217,7 +221,24 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
         assert all(tool["function"]["name"] != "expose_private" for tool in request.get("tools", []))
         if scenario == "registry_tools" and len(requests_by_role) == 3:
             assert any(tool["function"]["name"] == "read_file" for tool in request.get("tools", []))
-        result = {"fact": "FACT-123", "variant": "COMPOSED" if "COMPOSED" in system else "BASE"}
+        if scenario == "skill_edit":
+            import re
+            from html import unescape
+
+            from tests.application_test.harness_model_support import text
+
+            assert "BASE-SKILL" not in system and "COMPOSED-SKILL" not in system
+            locations = re.findall(r"<location>([^<]+/skills/business-behavior/SKILL\.md)</location>", system)
+            assert len(locations) == 1, system
+            tool_results = [message for message in request["messages"] if message["role"] == "tool"]
+            if not tool_results:
+                return [("read-declared-skill", "read", {"path": unescape(locations[0])})]
+            skill_content = text(tool_results[-1])
+            assert "COMPOSED-SKILL" in skill_content or "BASE-SKILL" in skill_content, skill_content
+            variant = "COMPOSED" if "COMPOSED-SKILL" in skill_content else "BASE"
+        else:
+            variant = "COMPOSED" if "COMPOSED" in system else "BASE"
+        result = {"fact": "FACT-123", "variant": variant}
         requests_by_role.append("business")
         return finish(request, result) if any(
             tool["function"]["name"] == "final_answer" for tool in request.get("tools", [])
@@ -269,6 +290,16 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 },
             },
         )
+        if scenario == "skill_edit":
+            import yaml
+
+            skill = root / skill_relative
+            skill.parent.mkdir(parents=True)
+            skill.write_text(skill_baseline)
+            worker = yaml.safe_load((app / "workflows/worker.yaml").read_text())
+            worker.update(skills={"paths": ["skills/business-behavior"]}, tools=[{"name": "read"}])
+            write_yaml(app / "workflows/worker.yaml", worker)
+            harness.candidate_override = (skill_relative, skill_composed)
         if scenario in {"unsafe_tools", "registry_tools"}:
             import yaml
             worker = yaml.safe_load((app / "workflows/worker.yaml").read_text())
@@ -505,6 +536,32 @@ run_application(ApplicationRequest.from_dict(value['request']),
             observed = role_receipt["receipt"]["usage_observations"]
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
+        if scenario == "skill_edit":
+            assert {trial.trial_id: trial.output["variant"] for trial in result.trials} == {
+                "base1": "BASE", "inv1": "BASE", "dom1": "BASE", "agg1": "COMPOSED"}
+            selected = next(trial for trial in result.trials if trial.trial_id == result.selected_trial_id)
+            assert result.selected_candidate_id == selected.candidate_id
+            assert result.output == selected.output
+            assert (root / skill_relative).read_text() == skill_baseline
+            for trial in result.trials:
+                bundle = state / "bundles" / trial.candidate_id.removeprefix("sha256:") / "project"
+                expected = skill_composed if trial.trial_id == "agg1" else skill_baseline
+                assert (bundle / skill_relative).read_text() == expected
+                assert (bundle / "applications/mixed/prompts/business.md").read_text() == "BASE"
+                run_dir = Path(trial.runs[0]["manifest_path"]).parent
+                records = [event["details"]["record"] for line in (run_dir / "audit/runtime_events.jsonl").read_text().splitlines()
+                           if (event := json.loads(line))["kind"] == "tool"]
+                assert len(records) == 1
+                assert records[0]["input"] == {"path": str(bundle / skill_relative)}
+                assert records[0]["tool_name"] == "read" and records[0]["status"] == "completed"
+                assert expected.strip() in json.dumps(records[0]["output"], ensure_ascii=False).replace("\\n", "\n")
+            compose = next(role for role in result.roles if role["role"] == "compose")
+            run_dir = Path(compose["receipt"]["run"]["manifest_path"]).parent
+            records = [event["details"]["record"] for line in (run_dir / "audit/runtime_events.jsonl").read_text().splitlines()
+                       if (event := json.loads(line))["kind"] == "tool"]
+            assert {(record["tool_name"], record["status"]) for record in records
+                    if record["input"].get("path") == "context/harness/" + skill_relative} == {
+                        ("read", "completed"), ("write", "completed")}
         if scenario == "failed_role_commit_recovery":
             failed = [role for role in result.roles if role["role"] == "general" and role["status"] == "failed"]
             assert len(failed) == 1 and failed[0]["receipt"]["usage_observations"]
