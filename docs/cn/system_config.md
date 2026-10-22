@@ -84,13 +84,15 @@ harnessing:
 ```
 
 示例角色文件须先创建；路径不得绝对定位、穿越目录或经过符号链接，实际定义也会校验。
-开发评分示例为 `feedback: {mode: development_score, evaluator: news_outcome, partition: development}`；
+开发评分示例为 `feedback: {mode: development_score, evaluator: applications.example.evaluation:Evaluator, partition: development}`；
 评价器和分区可以分别由项目默认和应用覆盖提供，合并后必须完整。对照模式不使用这些评分引用。
 
 每个源先校验字段和类型，即使策略关闭或其值随后被覆盖，错误配置仍会报错。
 `scope`、`trigger`、`budget`、`selection`、`adoption` 和旧草案 `agents` 均不是支持字段。
 有效策略可通过 `app.harnessing_policy` 查看，嵌套值同样冻结；配置快照的 `layers`
 继续保留未合并源值、来源文件和所属目录。项目角色默认中的相对路径同样由最终 Application 绑定。
+
+角色全部使用 Pi；省略 `roles` 即使用内置定义，无须创建五份 YAML。自定义角色的模型和工具配置可复用，方法任务、文件编辑与文本输出合同由上游核心控制。完整执行、实验 Library 和新版恢复合同见 [Harness 使用说明](harnessing.md)。
 
 ## redaction — 内容脱敏
 
