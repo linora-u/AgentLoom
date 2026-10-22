@@ -38,6 +38,7 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
     from agentloom.config.config import UnifiedConfig, bind_config, load_project_config
     from agentloom.execution.concurrency import WorkItem
     from agentloom.execution.trace.task_context import bind_root_run, require_root_run_state
+
     from .snapshot import load_bundle
     from .usage import read_run_usage
 

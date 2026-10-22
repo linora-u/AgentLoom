@@ -8,7 +8,6 @@ from __future__ import annotations
 import importlib
 import threading
 import uuid
-from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -19,7 +18,6 @@ from .models import (
     ExecutionReceipt,
     PreparedInvocation,
     TrialContext,
-    UsageObservation,
     bind_trial_context,
     current_trial_context,
     fingerprint,
@@ -439,7 +437,7 @@ class ImprovementController:
                 raise ValueError(f"Application driver lacks required {method} capability")
         if self.policy.feedback.mode == "development_score":
             load_driver(self.policy.feedback.evaluator)
-        from .upstream import method_identity, evaluator_identity
+        from .upstream import evaluator_identity, method_identity
         self.store.immutable("method.json", method_identity())
         self.store.immutable("evaluator.json", evaluator_identity(self.policy.feedback.evaluator))
         self.store.immutable("request.json", self.request)
@@ -518,7 +516,7 @@ class ImprovementController:
         self.memory_snapshot = view["memory_snapshot"]
 
     def run(self):
-        from .upstream import method_identity, evaluator_identity
+        from .upstream import evaluator_identity, method_identity
         old_method = self.store.read("method.json")
         if self.store.read("request.json") is not None and old_method != method_identity():
             raise ValueError("Incompatible Harness method archive; create a new experiment")

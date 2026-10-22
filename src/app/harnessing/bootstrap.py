@@ -37,8 +37,8 @@ def main():
     os.set_inheritable(0, True)
     # Scope metadata is itself an anonymous authenticated bootstrap pipe. The
     # trusted execution module validates/consumes it before OS restrictions.
-    from agentloom.execution.process_scope import bind_managed_process_scope
     from agentloom.execution.durability_scope import bind_durability_boundary
+    from agentloom.execution.process_scope import bind_managed_process_scope
     with bind_managed_process_scope(guardian_entry=Path(descriptor["guardian_entry"])), bind_durability_boundary(Path(descriptor["context"]["root"])):
         module_path = Path(__file__).with_name("isolation.py")
         module_spec = importlib.util.spec_from_file_location("_agentloom_harness_isolation", module_path)

@@ -5,7 +5,6 @@ import json
 import re
 import shutil
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +18,7 @@ METHOD_REVISION = "harness2-1cfe254-agentloom-v2"
 
 def method_identity():
     import hashlib
+
     import harness2.core
     sources = {}
     for root, prefix in ((Path(harness2.core.__file__).parent, "upstream"), (Path(__file__).parent, "adapter")):
@@ -384,6 +384,7 @@ class ApplicationAdapter:
 @contextmanager
 def _stream_library(controller, adapter, mode):
     import fcntl
+
     from harness2.core.library import Library
     stream = json_value(controller.request.harness_stream)
     if stream:
