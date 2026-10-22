@@ -9,6 +9,7 @@ from agentloom.app.harnessing.controller import run_application
 from agentloom.app.harnessing.models import ApplicationRequest
 from agentloom.app.harnessing.policy import HarnessingPolicy
 
+from tests.application_test.harness_model_support import role_of
 from tests.application_test.mixed_runtime_support import (
     ModelReply,
     ProviderFailure,
@@ -48,32 +49,29 @@ def test_complete_application_rejects_authenticated_provider_echo_before_first_w
 
     def program(request):
         assert canary not in json.dumps(request)
-        system = str(request["messages"][0]["content"])
-        if "Extract only supported reusable experiences" in system:
-            answer = {"experiences": []}
-        elif "Compose one coherent complete Application" in system:
+        role = role_of(request)
+        if role == "reflect":
+            return "NO_ENTRY"
+        if role == "compose":
+            if not any(message["role"] == "tool" for message in request["messages"]):
+                return [("read-before-edit", "read", {"path": "context/harness/applications/mixed/prompts/root.md"})]
             # Use the actual header received by this provider, not a prompt.
             credential = authenticated[-1]
             composed.append(request)
             if channel == "error":
                 return ProviderFailure(400, "Rejected provider detail: " + credential)
             if channel == "envelope_model":
-                safe = {"edits": [], "rationale": "Keep the baseline"}
-                reply = finish(request, json.dumps(safe) if runtime == "pi" else safe)
-                return ModelReply(reply, "tool_calls" if isinstance(reply, list) else "stop", response_model=credential)
+                return ModelReply("<notes>KEEP_BASE</notes>", "stop", response_model=credential)
             if channel == "thought":
-                safe = {"edits": [], "rationale": "Keep the baseline"}
-                reply = finish(request, json.dumps(safe) if runtime == "pi" else safe)
-                return ModelReply(reply, "tool_calls" if isinstance(reply, list) else "stop", credential)
+                return ModelReply("<notes>KEEP_BASE</notes>", "stop", credential)
             if channel == "nested_tool":
-                return [("echo", "final_answer", {"answer": {"id": {credential: "echo"}}})]
-            answer = {"edits": [{"path": "applications/mixed/prompts/root.md", "content": credential}],
-                      "rationale": "Controlled provider echo"}
-        elif "domain-specific working methods" in system or "general problem-solving" in system:
-            answer = {"edits": [], "rationale": "Keep the baseline"}
-        else:
-            answer = "BUSINESS-COMPLETE"
-        return finish(request, json.dumps(answer) if runtime == "pi" and isinstance(answer, dict) else answer)
+                return [("echo", "write", {"path": "context/harness/applications/mixed/prompts/root.md",
+                                          "content": "public", "nested": {credential: "echo"}})]
+            return [("echo", "write", {"path": "context/harness/applications/mixed/prompts/root.md",
+                                      "content": credential})]
+        if role in {"general", "domain"}:
+            return f"<notes>{role}: KEEP_BASE; no supported edit.</notes>"
+        return finish(request, "BUSINESS-COMPLETE")
 
     with model_service(program, on_request=authenticate) as (url, requests):
         root = tmp_path / "project"
@@ -93,7 +91,8 @@ def test_complete_application_rejects_authenticated_provider_echo_before_first_w
         roles = {}
         for role in ("general", "domain", "compose", "select", "reflect"):
             value = yaml.safe_load((resources / f"{role}.yaml").read_text())
-            value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text(), tools=[])
+            assert value["agent_runtime"] == "pi"
+            assert "output_schema" not in value
             roles[role] = f"workflows/role_{role}.yaml"
             write_yaml(app / roles[role], value)
         request = ApplicationRequest("mixed", root, app,
@@ -103,14 +102,15 @@ def test_complete_application_rejects_authenticated_provider_echo_before_first_w
                                  state_root=tmp_path / "experiments", environment={"PATH": os.environ["PATH"]})
     assert result.status == "completed", result.to_dict()
     assert len(composed) == 2  # Existing bounded role attempts, no native retry loop.
-    assert len(requests) == 9
+    assert len(requests) == 11  # Four business Trials, two proposals, two read+attack sessions, reflection.
     failures = [role for role in result.roles if role["role"] == "compose"]
     assert failures and all(role["status"] == "failed" for role in failures)
     if channel != "error":
         assert result.usage["total_tokens"] == len(requests) * 70
     state = tmp_path / "experiments" / result.experiment_id
     assert_no_private_artifacts(state, canary)
-    cleanup = list(state.glob("roles/final*.edit*/process/attempts/*/cleanup.json"))
+    cleanup = [path for role in failures
+               for path in (state / "roles" / role["stage"]).glob("process/attempts/*/cleanup.json")]
     assert len(cleanup) == 2
     assert all(json.loads(path.read_text())["physical_exit_confirmed"] for path in cleanup)
     assert canary not in json.dumps(result.to_dict())
@@ -125,12 +125,11 @@ def test_complete_application_worker_rejects_mcp_credential_echo_without_repeati
 
     def program(request):
         assert canary not in json.dumps(request)
-        system = str(request["messages"][0]["content"])
-        if "Extract only supported reusable experiences" in system:
-            return json.dumps({"experiences": []})
-        if any(marker in system for marker in ("Compose one coherent complete Application",
-                "domain-specific working methods", "general problem-solving")):
-            return json.dumps({"edits": [], "rationale": "Keep the baseline"})
+        role = role_of(request)
+        if role == "reflect":
+            return "NO_ENTRY"
+        if role in {"general", "domain", "compose"}:
+            return f"<notes>{role}: KEEP_BASE; no supported edit.</notes>"
         if request["model"] == "worker":
             workers.append(request)
             return [("mcp-once", "mcp__fixture__authorized", {})]
@@ -199,6 +198,11 @@ def test_complete_pi_application_rejects_large_split_native_output_before_sdk_sp
 
     def program(request):
         assert canary not in json.dumps(request)
+        role = role_of(request)
+        if role == "reflect":
+            return "NO_ENTRY"
+        if role in {"general", "domain", "compose"}:
+            return f"<notes>{role}: KEEP_BASE; no supported edit.</notes>"
         return [("native-once", "bash", {"command": command})]
 
     with model_service(program) as (url, requests):
@@ -220,24 +224,37 @@ def test_complete_pi_application_rejects_large_split_native_output_before_sdk_sp
             state_root=tmp_path / "experiments", environment={"PATH": os.environ["PATH"]})
     state = tmp_path / "experiments" / result.experiment_id
     assert result.status == "failed"
-    assert len(requests) == 1
-    assert result.usage["total_tokens"] == 70
+    business_requests = [request for request in requests if role_of(request) is None]
+    assert len(business_requests) == 4  # Independent Trials; never replay an uncertain call within one Trial.
+    assert len(requests) == 7  # Four business calls and three upstream authoring sessions.
+    assert result.usage["total_tokens"] == len(requests) * 70
+    assert result.delivery == {} and result.selected_trial_id == ""
+    assert all(not trial.eligible for trial in result.trials)
     markers = list(state.rglob("native-executed"))
-    assert len(markers) == 1 and markers[0].read_text() == "1"
+    assert len(markers) == 4 and all(path.read_text() == "1" for path in markers)
     journals = [json.loads(path.read_text()) for path in state.rglob("*.json")
                 if path.name != "manifest.json" and '"credential_echo"' in path.read_text()]
     assert any(row.get("state") == "uncertain" for row in journals)
+    for trial in result.trials:
+        assert len(list((state / "trials" / trial.trial_id).rglob("native-executed"))) == 1
     assert not list(state.rglob("pi-output-*.log"))
     assert_no_private_artifacts(state, canary)
-    cleanup = next(state.glob("trials/base1/process/attempts/*/cleanup.json"))
-    assert json.loads(cleanup.read_text())["physical_exit_confirmed"]
+    cleanup = list(state.glob("trials/*/process/attempts/*/cleanup.json"))
+    assert len(cleanup) == 4
+    assert all(json.loads(path.read_text())["physical_exit_confirmed"] for path in cleanup)
 
 
 def test_complete_application_rejects_mcp_discovery_before_model_request(tmp_path):
     import sys
 
     canary = "MCP-DISCOVERY-BOUND-PRIVATE-CANARY-136"
-    with model_service(lambda request: finish(request, "UNREACHABLE")) as (url, requests):
+
+    def program(request):
+        role = role_of(request)
+        assert role in {"general", "domain", "compose"}, "MCP discovery must reject before any business model invocation"
+        return f"<notes>{role}: KEEP_BASE; no supported edit.</notes>"
+
+    with model_service(program) as (url, requests):
         root = tmp_path / "project"
         definition = project(root, url, supervisor="smolagents", worker="smolagents")
         app = definition.parents[1]
@@ -263,5 +280,12 @@ server.run(transport='stdio')
         result = run_application(request, policy=HarnessingPolicy.model_validate({"enabled": True}),
             state_root=tmp_path / "experiments", environment={"PATH": os.environ["PATH"]})
     assert result.status == "failed"
-    assert requests == []
-    assert_no_private_artifacts(tmp_path / "experiments" / result.experiment_id, canary)
+    assert len(requests) == 3
+    assert all(role_of(request) in {"general", "domain", "compose"} for request in requests)
+    assert result.delivery == {} and result.selected_trial_id == ""
+    assert len(result.trials) == 4 and all(not trial.eligible for trial in result.trials)
+    state = tmp_path / "experiments" / result.experiment_id
+    assert_no_private_artifacts(state, canary)
+    cleanup = list(state.glob("trials/*/process/attempts/*/cleanup.json"))
+    assert len(cleanup) == 4
+    assert all(json.loads(path.read_text())["physical_exit_confirmed"] for path in cleanup)
