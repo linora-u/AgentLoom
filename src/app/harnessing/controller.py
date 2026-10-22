@@ -523,11 +523,12 @@ class ImprovementController:
     def _run_prepared(self):
         from .upstream import run_method
 
-        selected, delivery, reason, library_result = None, {}, "", {}
+        selected, delivery, reason, library_result, method_report = None, {}, "", {}, {}
         status = "failed"
         try:
             self._check_stop()
             method = run_method(self)
+            method_report = method.to_dict()
             self.errors.extend(method.errors)
             selection = method.selections.get(method.mode, {})
             if not selection.get("ok"):
@@ -563,7 +564,7 @@ class ImprovementController:
             reason, delivery,
             tuple(sorted(self.trials, key=lambda receipt: receipt.trial_id)),
             tuple(sorted(self.role_receipts, key=lambda receipt: receipt["stage"])),
-            self._usage(()), tuple(self.errors), library_result,
+            self._usage(()), tuple(self.errors), library_result, method_report,
         )
         self.store.write("result.json", result)
         self._emit("experiment.completed", result=result)

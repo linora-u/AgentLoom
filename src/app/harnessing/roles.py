@@ -50,7 +50,7 @@ def execute_role(payload: dict, bundle: dict, context: dict) -> dict:
         with bind_root_run(trial.trial_id):
             require_root_run_state().get_or_create_memory_snapshot(lambda: "")
             definition = role_definition(archived, payload["role"], payload.get("definition", ""))
-            definition["system_prompt"] = payload["system"]
+            definition["system_prompt"] = payload["system"] or "Follow the complete upstream method instructions supplied in the task. Read MISSION.md when needed."
             definition = YamlAgentFactory._prepare_agent_config(definition)
             # RuntimeDefinition.project_root supplies the native tool cwd. The
             # frozen role/model definition has already been loaded above.

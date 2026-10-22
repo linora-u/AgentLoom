@@ -147,6 +147,7 @@ class PiTransport:
         record = {"stage": key, "role": role, "label": label, "status": result.get("status"),
                   "output": result.get("output", ""), "receipt": receipt}
         with controller._mutex:
+            controller.store.write(f"roles/{key}/receipt.json", record)
             controller.role_receipts.append(record)
         if result.get("status") != "completed":
             return "", 0.0, str(result.get("error", "Pi role failed"))
@@ -240,7 +241,7 @@ class ApplicationAdapter:
 
     def delivered(self, run_dir):
         try:
-            return self._receipt(run_dir).eligible
+            return self._receipt(run_dir).eligible and self.artifacts_intact(run_dir)
         except (OSError, ValueError):
             return False
 
@@ -364,6 +365,12 @@ def run_method(controller):
                 controller.trials.append(receipt)
                 controller.bundles[receipt.trial_id] = load_bundle(controller.store.root / "bundles" / receipt.candidate_id.split(":", 1)[1])
                 controller._usage(receipt.usage)
+        records = {item["stage"]: item for item in controller.role_receipts}
+        for path in sorted((controller.store.root / "roles").glob("*/receipt.json")):
+            record = json.loads(path.read_text())
+            records[record["stage"]] = record
+            controller._usage(record.get("receipt", {}).get("usage_observations", ()))
+        controller.role_receipts = list(records.values())
         result.mode = mode
         result.library_result = {"submitted": int(adapter.task_id in library.entries()),
                                  "entries": library.entries(), "path": str(library.dir)}

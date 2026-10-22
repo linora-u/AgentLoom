@@ -216,10 +216,11 @@ class ApplicationExecutionResult(Serializable):
     usage: Mapping[str, Any] = field(default_factory=dict)
     errors: tuple[str, ...] = ()
     library: Mapping[str, Any] = field(default_factory=dict)
+    method: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         object.__setattr__(self, "output", frozen(self.output))
-        for name in ("delivery", "usage", "library"):
+        for name in ("delivery", "usage", "library", "method"):
             object.__setattr__(self, name, frozen(getattr(self, name)))
         object.__setattr__(self, "roles", tuple(frozen(item) for item in self.roles))
         object.__setattr__(self, "trials", tuple(item if isinstance(item, ExecutionReceipt)
