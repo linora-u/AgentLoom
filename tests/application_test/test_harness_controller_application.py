@@ -476,18 +476,23 @@ run_application(ApplicationRequest.from_dict(value['request']),
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
         assert requests_by_role.count("business") == 4 * k + (scenario == "stop_and_resume")
         assert harness.sessions["general"] == k + (scenario in {"role_timeout", "failed_role_commit_recovery"})
-        assert harness.sessions["domain"] == k
+        if scenario == "failed_role_commit_recovery":
+            # The real controller can die while its parallel peer is still
+            # running. That peer may need a fresh session after owned cleanup.
+            assert k <= harness.sessions["domain"] <= k + 1
+        else:
+            assert harness.sessions["domain"] == k
         assert harness.sessions["compose"] == (2 * k if scenario in {"invalid_edits", "unsafe_tools"} else k)
         assert harness.sessions["select"] == (k > 1)
         assert harness.sessions["reflect"] == (2 if scenario == "reflection_error" else 1)
         # Built-in roles now use Pi even when business execution uses smol.
         # This fixture's Pi adapter does not report every usage dimension.
         assert result.usage["complete"] is False
-        if scenario == "role_timeout":
-            # Killing a role before its Runtime closes can leave earlier HTTP
-            # usage unreported. Keep the operation unknown rather than infer
-            # usage from this test server's fulfilled requests.
-            assert 0 < result.usage["total_tokens"] < 70 * len(requests)
+        if scenario in {"role_timeout", "failed_role_commit_recovery"}:
+            # Killing a role or its parallel peer before the Runtime closes
+            # can leave HTTP usage unreported. Preserve unknown operations
+            # rather than infer usage from this server's fulfilled requests.
+            assert 0 < result.usage["total_tokens"] <= 70 * len(requests)
         else:
             measured_requests = len(requests) - (2 if scenario == "reflection_error" else 0)
             assert result.usage["total_tokens"] == 70 * measured_requests
@@ -503,6 +508,16 @@ run_application(ApplicationRequest.from_dict(value['request']),
         if scenario == "failed_role_commit_recovery":
             failed = [role for role in result.roles if role["role"] == "general" and role["status"] == "failed"]
             assert len(failed) == 1 and failed[0]["receipt"]["usage_observations"]
+            for observed in failed[0]["receipt"]["usage_observations"]:
+                restored = next(item for item in result.usage["observations"]
+                    if (item["invocation_id"], item["attempt_id"]) == (observed["invocation_id"], observed["attempt_id"]))
+                assert restored["total_tokens"] == observed["total_tokens"] == 70
+            if harness.sessions["domain"] > k:
+                assert any(item["operation_id"].startswith("pi.dom1.")
+                    for item in result.usage["unmeasured_operations"])
+            from agentloom.execution.managed_process import recover_owned_process
+            assert all(recover_owned_process(resource).observe()["physical_exit_confirmed"]
+                for resource in (state / "roles").glob("*/process/attempts/*/resource"))
         if scenario == "role_timeout":
             retries = sorted((state / "roles").glob("pi.inv1.*"))
             assert [path.name.rsplit(".", 1)[-1] for path in retries] == ["t1", "t2"]
