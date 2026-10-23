@@ -1,20 +1,16 @@
 """One persistent improvement loop around a finite, complete Application task.
 
-Business execution and improvement roles use the same physical process boundary.
-The controller owns decisions; a candidate never owns its judge or task contract.
+Harness² owns method decisions. This adapter owns frozen inputs, trusted business
+execution, physical lifecycle, usage observations and idempotent publication.
 """
 from __future__ import annotations
 
 import importlib
-import random
+import json
 import threading
 import uuid
-from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
-from contextvars import copy_context
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import (
@@ -23,14 +19,16 @@ from .models import (
     ExecutionReceipt,
     PreparedInvocation,
     TrialContext,
-    UsageObservation,
     bind_trial_context,
     current_trial_context,
     fingerprint,
     json_value,
 )
-from .roles import candidate_files
 from .store import ExperimentStore
+
+
+class EvaluationPending(KeyboardInterrupt):
+    """Resume the trusted evaluator without repeating completed business work."""
 
 
 class ExperimentStopped(KeyboardInterrupt):
@@ -184,9 +182,11 @@ class ImprovementController:
         self.events, self.stop = events, stop_token
         self.environment, self.model_config = environment, model_config
         self.credentials = dict(credentials or {})
+        self._execution_bindings = nullcontext
         self.model_profile_id = ""
         self.public_models = {}
-        self.library = library
+        if library is not None:
+            raise ValueError("Custom curated Harness libraries are replaced by the upstream experiment Library; use harness_stream")
         self.trials, self.role_receipts, self.errors = [], [], []
         self.bundles, self.receipts, self.evaluations = {}, {}, {}
         self._mutex = threading.RLock()
@@ -216,20 +216,24 @@ class ImprovementController:
             library_view=self.library_view if role else (),
         )
 
-    def _process(self, bundle, context, factory, payload):
+    def _process(self, bundle, context, factory, payload, *, timeout=None, retry_incomplete=True):
         from .process import execute_isolated, execute_managed_orchestration
 
-        # These are the only two trusted boundaries. Keep the fixed News
-        # adapter choice explicit rather than obscuring private inputs and
-        # returned public data behind a dynamically selected callable.
-        managed_orchestration = (
-            factory == "agentloom.app.harnessing.controller:execute_trial"
-            and self.request.driver == "news_agent.runtime.harnessing:NewsApplicationDriver"
-        )
+        # A trusted Python driver may delegate mandatory isolation to managed
+        # Hosts. Candidate YAML cannot opt out of the complete-task boundary.
+        managed_orchestration = (factory == "agentloom.app.harnessing.controller:execute_trial"
+            and getattr(self.driver, "execution_boundary", "isolated") == "managed_hosts")
+        if managed_orchestration:
+            validator = getattr(self.driver, "validate_managed_execution", None)
+            if not callable(validator):
+                raise ValueError("Managed-host execution requires a trusted driver validator")
+            with self._private_bindings():
+                validator(self.invocation, bundle)
 
         self._check_stop()
         options = {
             "stop": self.stop,
+            "timeout": timeout,
             "read_paths": self.invocation.request.input_paths,
             "environment": self.environment,
             "denied_paths": self.request.hidden_paths,
@@ -237,10 +241,13 @@ class ImprovementController:
         }
         if self.model_config is not None:
             options["model_config"] = self.model_config
+        if not retry_incomplete:
+            options["retry_incomplete"] = False
         try:
-            if managed_orchestration:
-                return execute_managed_orchestration(bundle, context, factory, json_value(payload), **options)
-            return execute_isolated(bundle, context, factory, json_value(payload), **options)
+            with self._private_bindings():
+                if managed_orchestration:
+                    return execute_managed_orchestration(bundle, context, factory, json_value(payload), **options)
+                return execute_isolated(bundle, context, factory, json_value(payload), **options)
         except BaseException as error:
             # H2 returns/raises only after its owner closes. Salvage persisted
             # observations even if the process died before a driver receipt.
@@ -254,13 +261,13 @@ class ImprovementController:
                 unknown = self.store.read("unmeasured-operations.json", {})
                 attempt = len(tuple((context.root / "process/attempts").glob("*")))
                 key = f"{context.trial_id}:{attempt}"
-                unknown[key] = {
+                unknown.setdefault(key, {
                     "operation_id": context.trial_id,
                     "attempt": attempt,
                     "factory": factory,
                     "error_type": type(error).__name__,
                     "usage": "unknown",
-                }
+                })
                 self.store.write("unmeasured-operations.json", unknown)
             if isinstance(error, InterruptedError):
                 raise ExperimentStopped(str(error)) from error
@@ -273,6 +280,36 @@ class ImprovementController:
             summary["unmeasured_operations"] = [unknown[key] for key in sorted(unknown)]
             summary["complete"] = summary["complete"] and not unknown
             return summary
+
+    def _register_trial(self, receipt, bundle=None):
+        """Register only a receipt matching the authoritative completed stage."""
+        record = self.store.read(self.store._stage_name(receipt.trial_id))
+        if not record or record.get("status") != "completed" or record.get("result") != receipt.to_dict():
+            raise ValueError("Trial receipt differs from its completed host execution record")
+        with self._mutex:
+            previous = self.receipts.get(receipt.trial_id)
+            if previous is not None:
+                if previous != receipt:
+                    raise ValueError("Registered Trial receipt changed")
+                return receipt
+            if bundle is None:
+                from .snapshot import load_bundle
+                bundle = load_bundle(self.store.root / "bundles" / receipt.candidate_id.split(":", 1)[1])
+            if receipt.candidate_id != bundle.candidate_id:
+                raise ValueError("Trial receipt belongs to another candidate bundle")
+            self.trials.append(receipt)
+            self.receipts[receipt.trial_id], self.bundles[receipt.trial_id] = receipt, bundle
+            self._usage(receipt.usage)
+        return receipt
+
+    def restore_trial(self, run_dir):
+        """Read cached host evidence through the same registration boundary."""
+        run_dir = Path(run_dir).resolve()
+        receipt = ExecutionReceipt.from_dict(json.loads((run_dir / "receipt.json").read_text()))
+        expected = self.store.root / "trials" / receipt.trial_id
+        if run_dir != expected.resolve() or not run_dir.is_relative_to(self.store.root / "trials"):
+            raise ValueError("Trial receipt escapes its owned execution state")
+        return self._register_trial(receipt)
 
     def _trial(self, key, bundle):
         self._check_stop()
@@ -297,19 +334,37 @@ class ImprovementController:
             receipt = ExecutionReceipt.from_dict(result)
             if receipt.trial_id != key or receipt.candidate_id != bundle.candidate_id:
                 raise ValueError("Physical trial returned a different identity")
+            import hashlib
+            artifacts = []
+            for raw in receipt.artifacts:
+                artifact = json_value(raw)
+                if "path" in artifact:
+                    path = Path(artifact["path"])
+                    if not path.resolve().is_relative_to(context.root) or not path.is_file() or path.is_symlink():
+                        raise ValueError("Trial artifact is missing or escapes its owned execution state")
+                    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                    if artifact.get("sha256", actual).removeprefix("sha256:") != actual:
+                        raise ValueError("Trial artifact changed before its execution receipt was committed")
+                    artifact["sha256"] = actual
+                artifacts.append(artifact)
+            receipt = replace(receipt, artifacts=tuple(artifacts))
             self.store.finish(key, receipt)
-        with self._mutex:
-            self.trials.append(receipt)
-            self.receipts[key], self.bundles[key] = receipt, bundle
-        self._usage(receipt.usage)
+        if receipt.trial_id != key or receipt.candidate_id != bundle.candidate_id:
+            raise ValueError("Physical trial returned a different identity")
+        self._register_trial(receipt, bundle)
         self._emit("trial.completed", trial_id=key, status=receipt.status, accepted=receipt.accepted)
         if self.policy.feedback.mode == "development_score":
-            self._evaluate(key, receipt)
+            try:
+                self._evaluate(key, receipt)
+            except Exception as error:
+                raise EvaluationPending(f"Development evaluator requires recovery for {key}: {error}") from error
         return receipt
 
     def _evaluate(self, key, receipt):
         evaluation_key = "evaluation." + key
         reference = self.policy.feedback.evaluator
+        from .upstream import evaluator_identity
+        self.store.immutable("evaluator.json", evaluator_identity(reference))
         partition = self.policy.feedback.partition or ""
         record = self.store.begin(
             evaluation_key,
@@ -326,276 +381,19 @@ class ImprovementController:
                 raise ValueError("Development evaluator must return a JSON mapping")
             if result.get("partition", partition) != partition:
                 raise ValueError("Evaluator returned a different data partition")
+            from .upstream import normalize_development_feedback
+            self._usage(result.get("usage", ()))
+            normalize_development_feedback(result, self.policy.feedback)
             self.store.finish(evaluation_key, result)
         self.evaluations[key] = result
         self._usage(result.get("usage", ()))
-
-    def _evidence(self, current, *, pool=()):
-        evidence = {
-            "objective": self.invocation.objective,
-            "request": self.invocation.request.task,
-            "inputs": self.invocation.inputs,
-            "acceptance": self.invocation.acceptance,
-            "feedback": self.policy.feedback.mode,
-            "files": candidate_files(current),
-            "baseline": [
-                self._render_receipt(self.receipts[key]) for key in sorted(self.receipts) if key.startswith("base")
-            ],
-            "library": self.library_view,
-            "pool": [
-                {
-                    "label": key,
-                    "files": candidate_files(self.bundles[key]),
-                    "execution": self._render_receipt(self.receipts[key]),
-                }
-                for key in pool
-            ],
-        }
-        return json_value(evidence)
-
-    def _render_receipt(self, receipt):
-        renderer = getattr(self.driver, "evidence", None)
-        value = (
-            renderer(self.invocation, receipt)
-            if renderer
-            else {
-                "trial_id": receipt.trial_id,
-                "status": receipt.status,
-                "output": receipt.output,
-                "accepted": receipt.accepted,
-                "acceptance": receipt.acceptance,
-                "error": receipt.error,
-            }
-        )
-        value = json_value(value)
-        if self.policy.feedback.mode == "development_score":
-            value = {"execution": value, "development_evaluation": self.evaluations.get(receipt.trial_id)}
-        return value
-
-    def _role(self, key, role, bundle, evidence):
-        self._check_stop()
-        # Improvement role definitions are controller policy, frozen at the
-        # task base. Application edits never rewrite their own selector/judge.
-        bundle = self.base
-        definition = getattr(self.policy.roles, role)
-        payload = {"stage": key, "role": role, "definition": definition, "evidence": evidence}
-        context = self._context(key, bundle, role=True)
-        record = self.store.begin(key, {"context": context, "payload": payload, "bundle": bundle.to_dict()})
-        if record["status"] == "completed":
-            result = record["result"]
-        else:
-            self._emit("role.started", stage=key, role=role)
-            result = self._process(bundle, context, "agentloom.app.harnessing.roles:execute_role", payload)
-            self.store.finish(key, result)
-        with self._mutex:
-            self.role_receipts.append({"stage": key, "role": role, **result})
-        actual = result.get("receipt", {})
-        invocation_id = actual.get("invocation_id")
-        if actual.get("usage_observations"):
-            self._usage(actual["usage_observations"])
-        elif invocation_id:
-            usage = actual.get("usage", {})
-            self._usage(
-                (
-                    UsageObservation(
-                        invocation_id=invocation_id,
-                        input_tokens=usage.get("input_tokens"),
-                        output_tokens=usage.get("output_tokens"),
-                        total_tokens=usage.get("total_tokens"),
-                        complete=False,
-                        duration_seconds=actual.get("duration_seconds"),
-                    ),
-                )
-            )
-        self._emit("role.completed", stage=key, role=role, status=result.get("status"))
-        self._check_stop()
-        if result.get("status") != "completed":
-            raise ValueError(f"{role} failed: {result.get('error', 'no output')}")
-        return result["output"], actual
-
-    def _reflection(self, bundle, evidence):
-        """Repair invalid role output once without replaying accepted business work."""
-        error = ""
-        for key in ("reflection", "reflection.retry1"):
-            try:
-                # Retain corrective feedback with complete execution evidence;
-                # the new role stage keeps the original rejected output intact.
-                feedback = {"previous_error": error, "evidence_refs": sorted(self.receipts)} if error else {}
-                output, receipt = self._role(key, "reflect", bundle, {**feedback, **evidence})
-                if any(set(item.get("evidence_refs", ())) - set(self.receipts)
-                       for item in output.get("experiences", [])):
-                    error = "Reflection references unknown execution evidence; use only supplied IDs: " + ", ".join(sorted(self.receipts))
-                    # Older controllers persisted a library intent before this
-                    # validation. Reject that unfinished intent, retaining its
-                    # original inputs and the completed invalid role receipt.
-                    pending = self.store.read("stages/library.json")
-                    if (pending and pending["status"] == "running"
-                            and pending["inputs"].get("reflection") == output):
-                        self.store.finish("library", {"error": error}, status="rejected")
-                    raise ValueError(error)
-                return output, receipt, "library" if key == "reflection" else "library.retry1"
-            except Exception as exc:
-                if getattr(exc, "category", "") == "infrastructure":
-                    raise
-                error = f"{type(exc).__name__}: {exc}"
-        raise ValueError(error)
-
-    def _edit(self, label, role, current, evidence):
-        from .snapshot import derive_candidate, load_bundle
-
-        record = self.store.begin(
-            "candidate." + label, {"parent": current.candidate_id, "role": role, "evidence": evidence}
-        )
-        if record["status"] == "completed":
-            bundle = load_bundle(Path(record["result"]["root"]))
-            bundle.verify()
-            return bundle
-        error = ""
-        for attempt in (1, 2):
-            self._check_stop()
-            try:
-                output, _receipt = self._role(
-                    f"{label}.edit{attempt}",
-                    role,
-                    current,
-                    {**evidence, **({"previous_error": error} if error else {})},
-                )
-                changes = output.get("edits")
-                if not isinstance(changes, Mapping):
-                    raise ValueError("Role must return an explicit edit mapping")
-                with self._private_bindings():
-                    bundle = derive_candidate(
-                        current,
-                        changes,
-                        self.store.root / "bundles",
-                        editable=self.policy.editable,
-                        validate=self._validate,
-                    )
-                self.store.finish(
-                    "candidate." + label,
-                    {
-                        "root": str(bundle.root),
-                        "candidate_id": bundle.candidate_id,
-                        "rationale": output.get("rationale", ""),
-                        "inherited": False,
-                    },
-                )
-                return bundle
-            except Exception as exc:
-                if getattr(exc, "category", "") == "infrastructure":
-                    raise
-                error = f"{type(exc).__name__}: {exc}"
-        # Upstream edit-stage fallback inherits the current configuration,
-        # but the resulting probe/final still runs as a fresh full trial.
-        self.store.finish(
-            "candidate." + label,
-            {"root": str(current.root), "candidate_id": current.candidate_id, "inherited": True, "error": error},
-        )
-        return current
-
-    def _independent(self, functions):
-        # Trusted in-memory credential capabilities must cross controller
-        # worker threads before each H2 anonymous child pipe is constructed.
-        jobs = [(copy_context(), function) for function in functions]
-        with ThreadPoolExecutor(max_workers=min(2, len(jobs))) as pool:
-            return list(pool.map(lambda job: job[0].run(job[1]), jobs))
-
-    def _parallel(self, base, k):
-        common = self._evidence(base)
-        jobs = [(f"{role}{index}", role) for index in range(1, k + 1) for role in ("general", "domain")]
-        self._propose_and_probe(jobs, base, common)
-        labels = [label for label, _ in jobs]
-        evidence = self._evidence(base, pool=labels)
-        finals = [f"final{index}" for index in range(1, k + 1)]
-        composed = self._independent(
-            [lambda label=label: self._edit(label, "compose", base, evidence) for label in finals]
-        )
-        self._independent(
-            [lambda label=label, bundle=bundle: self._trial(label, bundle) for label, bundle in zip(finals, composed)]
-        )
-        return finals
-
-    def _sequential(self, base, k):
-        current, history, finals = base, [], []
-        for index in range(1, k + 1):
-            common = self._evidence(current, pool=history)
-            jobs = [(f"{role}{index}", role) for role in ("general", "domain")]
-            self._propose_and_probe(jobs, current, common)
-            history.extend(label for label, _ in jobs)
-            label = f"final{index}"
-            current = self._edit(label, "compose", current, self._evidence(current, pool=history))
-            self._trial(label, current)
-            history.append(label)
-            finals.append(label)
-        return finals
-
-    def _propose_and_probe(self, jobs, parent, evidence):
-        proposed = self._independent(
-            [lambda label=label, role=role: self._edit(label, role, parent, evidence) for label, role in jobs]
-        )
-        self._independent(
-            [lambda label=label, bundle=bundle: self._trial(label, bundle)
-             for (label, _), bundle in zip(jobs, proposed)]
-        )
-
-    def _select(self, finals):
-        self._check_stop()
-        eligible = [key for key in finals if self.receipts[key].eligible]
-        if not eligible:
-            raise ValueError("No composed final satisfies the complete business delivery contract")
-        labels = sorted(eligible)
-        random.Random(
-            fingerprint([self.invocation.task_snapshot_id, self.policy.recursion.mode, self.policy.recursion.k])
-        ).shuffle(labels)
-        choices = {f"C{index}": label for index, label in enumerate(labels, 1)}
-        intent = {"eligible": choices, "receipts": [self.receipts[key] for key in labels]}
-        record = self.store.begin("selection", intent)
-        if record["status"] == "completed":
-            result = record["result"]
-        elif self.policy.recursion.k == 1:
-            result = {"chosen": labels[0], "reason": "single accepted composed final; no ranking call", "trivial": True}
-            self.store.finish("selection", result)
-        else:
-            output, _receipt = self._role(
-                "selection.rank",
-                "select",
-                self.base,
-                {
-                    "objective": self.invocation.objective,
-                    "acceptance": self.invocation.acceptance,
-                    "inputs": self.invocation.inputs,
-                    "feedback": self.policy.feedback.mode,
-                    "candidates": {
-                        anonymous: self._selection_evidence(self.receipts[label])
-                        for anonymous, label in choices.items()
-                    },
-                },
-            )
-            if output.get("chosen_id") not in choices:
-                raise ValueError("Selector chose an unavailable final")
-            result = {"chosen": choices[output["chosen_id"]], "reason": output["reason"], "trivial": False}
-            self.store.finish("selection", result)
-        return result
-
-    def _selection_evidence(self, receipt):
-        # Only blinded output/acceptance/allowed evaluation, without branch or
-        # runtime identifiers. Trusted driver evidence may include artifact paths.
-        value = {
-            "status": receipt.status,
-            "output": receipt.output,
-            "accepted": receipt.accepted,
-            "acceptance": receipt.acceptance,
-        }
-        if self.policy.feedback.mode == "development_score":
-            value["development_evaluation"] = self.evaluations.get(receipt.trial_id)
-        return json_value(value)
 
     @contextmanager
     def _private_bindings(self):
         from agentloom.config.config import bind_harness_model_config
         from agentloom.config.private_bindings import bind_harness_credentials
 
-        with bind_harness_model_config(self.model_config), bind_harness_credentials(self.credentials):
+        with self._execution_bindings(), bind_harness_model_config(self.model_config), bind_harness_credentials(self.credentials):
             yield
 
     def _validate(self, project, app):
@@ -673,6 +471,9 @@ class ImprovementController:
                 raise ValueError(f"Application driver lacks required {method} capability")
         if self.policy.feedback.mode == "development_score":
             load_driver(self.policy.feedback.evaluator)
+        from .upstream import evaluator_identity, method_identity
+        self.store.immutable("method.json", method_identity())
+        self.store.immutable("evaluator.json", evaluator_identity(self.policy.feedback.evaluator))
         self.store.immutable("request.json", self.request)
         self.store.immutable("policy.json", _policy_dict(self.policy))
         base_record = self.store.read("base.json")
@@ -738,38 +539,23 @@ class ImprovementController:
 
         with self._private_bindings():
             preflight_roles(self.base, self.policy)
-        if self.library is None:
-            from agentloom.config.config import UnifiedConfig, bind_config, load_project_config
-
-            from .library import HarnessLibrary
-
-            # Resource/default settings are frozen. The memory store remains
-            # the original trusted project's store, outside all Trial copies.
-            with self._private_bindings():
-                config = load_project_config(self.base.project_root)
-            config = UnifiedConfig(config.raw, self.request.project_root, config.llm)
-            with bind_config(config):
-                self.library = HarnessLibrary(self.request.application_id, agent_config=config.raw)
-        view = self.store.read("library-view.json")
+        # Business memory is a frozen host input. Experiment experience is the
+        # upstream Library, supplied only to improver workspaces.
+        view = self.store.read("memory-view.json")
         if view is None:
-            feedback, partition = self.policy.feedback.mode, self.policy.feedback.partition or ""
-            entries = (
-                self.library.view(
-                    feedback=feedback, partition=partition, cutoff=str(self.invocation.data.get("cutoff", ""))
-                )
-                if self.library
-                else ()
-            )
-            # Explicit reference text is fixed here; role/business Runtime
-            # injection must never re-read the shared live MemoryStore.
             snapshot = getattr(self.driver, "memory_snapshot", lambda invocation: "")(self.invocation)
             if not isinstance(snapshot, str):
                 raise ValueError("Driver memory snapshot must be fixed text")
-            view = {"entries": entries, "memory_snapshot": snapshot}
-            self.store.immutable("library-view.json", view)
-        self.library_view, self.memory_snapshot = tuple(view["entries"]), view["memory_snapshot"]
+            view = self.store.immutable("memory-view.json", {"memory_snapshot": snapshot})
+        self.memory_snapshot = view["memory_snapshot"]
 
     def run(self):
+        from .upstream import evaluator_identity, method_identity
+        old_method = self.store.read("method.json")
+        if self.store.read("request.json") is not None and old_method != method_identity():
+            raise ValueError("Incompatible Harness method archive; create a new experiment")
+        if self.store.read("request.json") is not None and self.store.read("evaluator.json") != evaluator_identity(self.policy.feedback.evaluator):
+            raise ValueError("Development evaluator identity changed; create a new experiment")
         old = self.store.read("result.json")
         if old and old["status"] == "completed":
             from .snapshot import load_bundle
@@ -784,72 +570,58 @@ class ImprovementController:
             selected = self.store.root / "bundles" / old["selected_candidate_id"].split(":", 1)[1]
             if load_bundle(selected).candidate_id != old["selected_candidate_id"]:
                 raise ValueError("Completed result candidate identity changed")
+            from .upstream import artifacts_intact
+            receipt = next((ExecutionReceipt.from_dict(item) for item in old["trials"]
+                            if item["trial_id"] == old["selected_trial_id"]), None)
+            if receipt is None or not receipt.eligible or not artifacts_intact(receipt):
+                raise ValueError("Completed result selected artifacts are missing or changed")
+            if json_value(receipt.output) != old["output"]:
+                raise ValueError("Completed result output differs from its selected receipt")
             return ApplicationExecutionResult.from_dict(old)
         self.prepare()
+        from agentloom.config.private_bindings import capture_harness_bindings
         from agentloom.runtimes.pi.credentials import bind_pi_credentials, capture_pi_credentials
 
-        with bind_pi_credentials(capture_pi_credentials(self.model_config)):
-            return self._run_prepared()
+        with bind_pi_credentials(capture_pi_credentials(self.model_config)), self._private_bindings():
+            # Upstream owns its executor threads. Re-enter only this prepared
+            # controller's authorized capabilities at each execution boundary.
+            self._execution_bindings = capture_harness_bindings()
+            try:
+                return self._run_prepared()
+            finally:
+                self._execution_bindings = nullcontext
 
     def _run_prepared(self):
-        selected, delivery, reason, library_result = None, {}, "", {}
+        from .upstream import run_method
+
+        selected, delivery, reason, library_result, method_report = None, {}, "", {}, {}
         status = "failed"
         try:
             self._check_stop()
-            k = self.policy.recursion.k
-            for index in range(1, k + 1):
-                self._trial(f"base{index}", self.base)
-            if not any(receipt.status == "completed" for receipt in self.trials):
-                raise ValueError("No baseline execution produced usable task evidence")
-            finals = (
-                self._parallel(self.base, k)
-                if self.policy.recursion.mode == "parallel"
-                else self._sequential(self.base, k)
-            )
-            choice = self._select(finals)
-            selected = self.receipts[choice["chosen"]]
-            reason = choice["reason"]
+            method = run_method(self)
+            method_report = method.to_dict()
+            self.errors.extend(method.errors)
+            selection = method.selections.get(method.mode, {})
+            if not selection.get("ok"):
+                raise ValueError("Upstream selection failed: " + str(selection.get("error", "no eligible final")))
+            label = selection.get("chosen_label", "")
+            selected = self.receipts.get(label)
+            if selected is None or not selected.eligible:
+                raise ValueError("Upstream selected a missing, unaccepted or uncleaned Trial")
+            reason = str(selection.get("why", ""))
             self._check_stop()
             decision_id = fingerprint([self.experiment_id, selected.trial_id, selected.candidate_id])
             publication = self.store.begin("publication", {"selected": selected, "decision_id": decision_id})
             if publication["status"] == "completed":
                 delivery = publication["result"]
             else:
-                self._check_stop()
                 delivery = json_value(self.driver.publish(self.invocation, selected, decision_id))
                 self.store.finish("publication", delivery)
+            library_result = method.library_result
             status = "completed"
-            try:
-                evidence = self._evidence(self.bundles[selected.trial_id], pool=sorted(self.receipts))
-                evidence.update(
-                    selected_trial=selected.trial_id, selection_reason=reason, evidence_refs=sorted(self.receipts)
-                )
-                output, reflection_receipt, library_key = self._reflection(self.bundles[selected.trial_id], evidence)
-                entry = self.store.begin(library_key, {"selected": selected, "reflection": output})
-                if entry["status"] == "completed":
-                    library_result = entry["result"]
-                else:
-                    experiences = output.get("experiences", [])
-                    library_result = (
-                        self.library.submit(
-                            experiences,
-                            selected=selected,
-                            bundle=self.bundles[selected.trial_id],
-                            invocation=self.invocation,
-                            experiment_id=self.experiment_id,
-                            reflection_run_id=reflection_receipt.get("root_run_id")
-                            or reflection_receipt.get("run", {}).get("run_id", ""),
-                            feedback=self.policy.feedback.mode,
-                            partition=self.policy.feedback.partition or "",
-                            available_at=datetime.now(timezone.utc).isoformat(),
-                        )
-                        if self.library
-                        else {"submitted": 0}
-                    )
-                    self.store.finish(library_key, library_result)
-            except Exception as error:
-                self.errors.append(f"Reflection/library failed after delivery: {type(error).__name__}: {error}")
-                status = "partial"
+        except EvaluationPending as error:
+            self.errors.append(str(error))
+            status = "partial"
         except (KeyboardInterrupt, ExperimentStopped) as error:
             self.errors.append(str(error) or "Application experiment stopped")
             status = "stopped"
@@ -857,19 +629,13 @@ class ImprovementController:
             self.errors.append(f"{type(error).__name__}: {error}")
             status = "partial" if delivery else "failed"
         result = ApplicationExecutionResult(
-            self.experiment_id,
-            self.invocation.task_snapshot_id,
-            status,
+            self.experiment_id, self.invocation.task_snapshot_id, status,
             selected.output if selected else None,
-            selected.trial_id if selected else "",
-            selected.candidate_id if selected else "",
-            reason,
-            delivery,
+            selected.trial_id if selected else "", selected.candidate_id if selected else "",
+            reason, delivery,
             tuple(sorted(self.trials, key=lambda receipt: receipt.trial_id)),
             tuple(sorted(self.role_receipts, key=lambda receipt: receipt["stage"])),
-            self._usage(()),
-            tuple(self.errors),
-            library_result,
+            self._usage(()), tuple(self.errors), library_result, method_report,
         )
         self.store.write("result.json", result)
         self._emit("experiment.completed", result=result)

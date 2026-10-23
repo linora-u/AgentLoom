@@ -87,7 +87,7 @@ harnessing:
 Role paths are Application-relative, including inherited project defaults.
 Absolute paths, traversal, symlinks and invalid Agent definitions are rejected.
 For development feedback use, for example,
-`feedback: {mode: development_score, evaluator: news_outcome, partition: development}`.
+`feedback: {mode: development_score, evaluator: applications.example.evaluation:Evaluator, partition: development}`.
 Project and Application sources may provide separate parts of these references;
 the composed policy must contain both. Contrastive feedback does not use them.
 
@@ -96,6 +96,8 @@ values. Unknown fields and removed draft fields such as `scope`, `trigger`,
 `budget`, `selection`, `adoption` and `agents` fail explicitly. Inspect the frozen
 effective policy through `app.harnessing_policy`; configuration snapshot `layers`
 retain unmerged values, source files and declaring roots for provenance.
+
+All improvement roles use Pi. Omit `roles` to use built-ins; five new YAML files are unnecessary. Custom roles retain model and tool configuration; the upstream core owns method instructions, file edits and textual output. See the [complete execution and Library contract](../cn/harnessing.md).
 
 ## redaction — Content Redaction
 

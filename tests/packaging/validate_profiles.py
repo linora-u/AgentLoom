@@ -6,14 +6,14 @@ Ticket 14 must rerun this on its final candidate after tickets 10 and 12.
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tarfile
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -92,7 +92,7 @@ def validate(output, profiles, node):
         command(profile + "-check", ["uv", "pip", "check", "--python", python])
         results = []
 
-        def run_case(case):
+        def run_case(case, *, profile=profile, python=python, runtime=runtime, code_tools=code_tools):
             workspace = output / (profile + "-" + case)
             command(profile + "-" + case, [python, "-I", probe, "--profile", runtime,
                                           "--case", case, "--workspace", workspace,
@@ -106,9 +106,9 @@ def validate(output, profiles, node):
             command(profile + "-sdk-install", [python, "-I", "-m", "agentloom", "runtime", "install", "pi"])
             command(profile + "-sdk-idempotent", [python, "-I", "-m", "agentloom", "runtime", "install", "pi"])
             results.extend(run_case(case) for case in ("stale_bridge", "missing_asset"))
-            cases = (("no_tools", "read", "mcp", "memory", "goal")
+            cases = (("no_tools", "read", "mcp", "memory", "goal", "harness")
                      if code_tools else ("help", "missing_yaml", "missing_smol", "no_tools", "read",
-                                         "mcp", "memory", "goal", "provider_failure", "child_failure"))
+                                         "mcp", "memory", "goal", "provider_failure", "child_failure", "harness"))
         else:
             cases = ("help", "missing_yaml", "smol_read", "shipped_yaml", "mcp", "memory", "goal")
         with ThreadPoolExecutor(max_workers=3) as pool:

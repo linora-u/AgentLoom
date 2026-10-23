@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/google-research/harness2",
+  "revision": "1cfe254e8d25b15f37048c3730134686abe60335",
+  "license": "Apache-2.0",
+  "method_integration": "agentloom-application-v2"
+}

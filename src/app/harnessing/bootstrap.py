@@ -37,8 +37,8 @@ def main():
     os.set_inheritable(0, True)
     # Scope metadata is itself an anonymous authenticated bootstrap pipe. The
     # trusted execution module validates/consumes it before OS restrictions.
-    from agentloom.execution.process_scope import bind_managed_process_scope
     from agentloom.execution.durability_scope import bind_durability_boundary
+    from agentloom.execution.process_scope import bind_managed_process_scope
     with bind_managed_process_scope(guardian_entry=Path(descriptor["guardian_entry"])), bind_durability_boundary(Path(descriptor["context"]["root"])):
         module_path = Path(__file__).with_name("isolation.py")
         module_spec = importlib.util.spec_from_file_location("_agentloom_harness_isolation", module_path)
@@ -49,8 +49,12 @@ def main():
         if descriptor["execution_boundary"] == "trial":
             isolation.enforce_isolation(spec)
         elif descriptor["execution_boundary"] == "managed_host":
-            if descriptor["factory"] != "agentloom.app.harnessing.controller:execute_trial" or descriptor["payload"].get("driver") != "news_agent.runtime.harnessing:NewsApplicationDriver":
+            if descriptor["factory"] != "agentloom.app.harnessing.controller:execute_trial":
                 raise ValueError("Unrecognized trusted managed Host driver")
+            module, symbol = descriptor["payload"]["driver"].split(":", 1)
+            driver = getattr(importlib.import_module(module), symbol)
+            if getattr(driver, "execution_boundary", "isolated") != "managed_hosts" or not callable(getattr(driver, "validate_managed_execution", None)):
+                raise ValueError("Managed Host lacks a trusted execution capability")
         else:
             raise ValueError("Unrecognized trusted execution boundary")
         try:
@@ -59,7 +63,8 @@ def main():
             from agentloom.runtimes.pi.credentials import bind_pi_credentials
             model_config = private.pop("model_config", None)
             credentials = private.pop("credentials", {})
-            with bind_harness_credentials(credentials), bind_harness_model_config(model_config), bind_pi_credentials(private.pop("pi_credentials", None)):
+            from agentloom.execution.storage import bind_file_copy_metadata
+            with bind_file_copy_metadata(False), bind_harness_credentials(credentials), bind_harness_model_config(model_config), bind_pi_credentials(private.pop("pi_credentials", None)):
                 module, name = descriptor["factory"].split(":", 1)
                 factory = getattr(importlib.import_module(module), name)
                 result = factory(descriptor["payload"], descriptor["bundle"], descriptor["context"])

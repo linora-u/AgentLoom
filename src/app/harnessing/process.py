@@ -22,6 +22,10 @@ class IsolatedExecutionError(RuntimeError):
     category = "infrastructure"
 
 
+class IncompleteOperation(IsolatedExecutionError):
+    """The prior owner exited without a durable completed operation result."""
+
+
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
@@ -44,28 +48,32 @@ def _context_dict(context):
     return {key: str(item) if isinstance(item, Path) else item for key, item in value.items()}
 
 
-def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None, credentials: Mapping | None = None) -> dict:
+def execute_isolated(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None, credentials: Mapping | None = None, retry_incomplete: bool = True) -> dict:
     """Execute ``factory(payload, bundle_descriptor, context_descriptor)`` once.
 
     Private model config crosses only the child's anonymous stdin pipe and is
     consumed/closed before factory import. It never enters identity or disk.
     Repeated calls with a completed identical operation reuse its result.
     """
-    return _execute(bundle, context, factory, payload, stop=stop, timeout=timeout, read_paths=read_paths, denied_paths=denied_paths, environment=environment, model_config=model_config, credentials=credentials, boundary="trial")
+    return _execute(bundle, context, factory, payload, stop=stop, timeout=timeout, read_paths=read_paths, denied_paths=denied_paths, environment=environment, model_config=model_config, credentials=credentials, retry_incomplete=retry_incomplete, boundary="trial")
 
 
 def execute_managed_orchestration(bundle: CandidateBundle, context, factory: str, payload: Mapping, *, stop: threading.Event | None = None, timeout: float | None = None, read_paths: Sequence[Path] = (), denied_paths: Sequence[Path] = (), environment: Mapping[str, str] | None = None, model_config: Mapping | None = None, credentials: Mapping | None = None) -> dict:
-    """Fixed news orchestration whose actual Agents run in isolated Hosts.
+    """Trusted orchestration whose actual Agents run in mandatory isolated Hosts.
 
-    This internal seam is not selectable in YAML. It cannot run roles or an
-    arbitrary driver; every NewsHost must install the frozen mandatory policy.
+    This capability belongs to the immutable Python driver, never candidate YAML.
+    Improvement roles cannot select it.
     """
-    if factory != "agentloom.app.harnessing.controller:execute_trial" or payload.get("driver") != "news_agent.runtime.harnessing:NewsApplicationDriver":
-        raise ValueError("Trusted orchestration is restricted to the built-in managed news driver")
+    if factory != "agentloom.app.harnessing.controller:execute_trial":
+        raise ValueError("Managed orchestration only executes the trusted complete-task driver")
+    from .controller import load_driver
+    driver = load_driver(payload.get("driver", ""))
+    if getattr(driver, "execution_boundary", "isolated") != "managed_hosts" or not callable(getattr(driver, "validate_managed_execution", None)):
+        raise ValueError("Managed orchestration lacks its trusted execution capability")
     return _execute(bundle, context, factory, payload, stop=stop, timeout=timeout, read_paths=read_paths, denied_paths=denied_paths, environment=environment, model_config=model_config, credentials=credentials, boundary="managed_host")
 
 
-def _execute(bundle, context, factory, payload, *, stop=None, timeout=None, read_paths=(), denied_paths=(), environment=None, model_config=None, credentials=None, boundary):
+def _execute(bundle, context, factory, payload, *, stop=None, timeout=None, read_paths=(), denied_paths=(), environment=None, model_config=None, credentials=None, retry_incomplete=True, boundary):
     from agentloom.execution.managed_process import launch_owned_process, recover_owned_process
 
     preflight_isolation()
@@ -113,15 +121,40 @@ def _execute(bundle, context, factory, payload, *, stop=None, timeout=None, read
         if input_path.exists():
             if json.loads(input_path.read_text()) != input_value:
                 raise ValueError("Trial operation identity already belongs to different input")
-            for resource in sorted((job / "attempts").glob("*/resource")):
+            exited_attempts = []
+            for attempt in sorted((job / "attempts").glob("*")):
+                resource = attempt / "resource"
                 if not (resource / "description.json").exists():
+                    if (resource.parent / "result.json").exists():
+                        raise IsolatedExecutionError("Isolated attempt result lacks its physical ownership receipt")
                     continue
                 previous = recover_owned_process(resource)
                 if not previous.observe()["physical_exit_confirmed"]:
                     previous.request_stop()
                     previous.wait_exited(timeout=20)
+                exited_attempts.append(resource.parent)
             if result_path.exists():
                 return _result(result_path, identity)
+            # The child fsyncs its receipt before the controller publishes the
+            # canonical result. Recover that narrow durable window only after
+            # all owned resources exited, without repeating completed work.
+            for previous in reversed(exited_attempts):
+                launch = json.loads((previous / "launch.json").read_text())
+                if any(launch.get(key) != value for key, value in input_value.items()):
+                    raise IsolatedExecutionError("Isolated attempt belongs to another operation input")
+                try:
+                    value = json.loads((previous / "result.json").read_text())
+                except (FileNotFoundError, json.JSONDecodeError):
+                    # Bootstrap opens this file before executing the factory;
+                    # an interrupted write is not a committed model result.
+                    continue
+                value = _validate_result(value, identity)
+                if "error" in value:
+                    continue  # Preserve failed attempts for normal reconciliation.
+                _atomic(result_path, value)
+                return value["result"]
+            if not retry_incomplete:
+                raise IncompleteOperation("Prior isolated operation exited without a completed result")
         else:
             _atomic(input_path, input_value)
         attempts = job / "attempts"
@@ -188,14 +221,26 @@ def _result(path, identity):
         value = json.loads(path.read_text())
     except (ValueError, OSError) as error:
         raise IsolatedExecutionError("Isolated operation has no complete JSON receipt; inspect its stderr receipt") from error
-    if value.get("identity") != identity:
-        raise IsolatedExecutionError("Isolated operation result has another identity")
+    value = _validate_result(value, identity)
     if "error" in value:
         error = value["error"]
         frames = error.get("frames", [])
         location = f" at {frames[-1]['file']}:{frames[-1]['line']}" if frames else ""
         raise IsolatedExecutionError("Isolated operation failed: " + error["type"] + ": " + error["message"] + location)
-    result = value.get("result")
-    if not isinstance(result, dict):
+    return value["result"]
+
+
+def _validate_result(value, identity):
+    if not isinstance(value, dict) or value.get("identity") != identity:
+        raise IsolatedExecutionError("Isolated operation result has another identity")
+    if "error" in value:
+        error = value["error"]
+        if ("result" in value or not isinstance(error, dict)
+                or not all(isinstance(error.get(key), str) for key in ("type", "message"))
+                or not isinstance(error.get("frames", []), list)
+                or any(not isinstance(frame, dict) or not isinstance(frame.get("file"), str)
+                       or type(frame.get("line")) is not int for frame in error.get("frames", []))):
+            raise IsolatedExecutionError("Isolated operation has a malformed error receipt")
+    elif not isinstance(value.get("result"), dict):
         raise IsolatedExecutionError("Isolated operation must return a JSON mapping")
-    return result
+    return value

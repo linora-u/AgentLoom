@@ -1,93 +1,205 @@
-"""Curated records stay reviewed and partitioned; business memory excludes them."""
+"""The public complete-task boundary owns ordered experiment Library visibility."""
+from __future__ import annotations
 
-from agentloom.app.harnessing.library import HarnessLibrary
-from agentloom.app.harnessing.snapshot import snapshot_application
-from agentloom.app.harnessing.models import ApplicationRequest, PreparedInvocation, ExecutionReceipt
+import json
+import os
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+import yaml
+from agentloom.app.harnessing.controller import run_application
+from agentloom.app.harnessing.models import ApplicationRequest
+from agentloom.app.harnessing.policy import HarnessingPolicy
+
+from tests.application_test.harness_model_support import advertised_context_paths, role_of, text
+from tests.application_test.mixed_runtime_support import model_service, project, write_yaml
+from tests.application_test.test_harness_controller_application import DRIVER, real_isolation  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("real_isolation")
 
 
-def test_reviewed_library_has_archives_and_cannot_leak_into_ordinary_memory(tmp_path):
+LESSON = "LIBRARY-LESSON-142"
+
+
+def _normalized(request):
+    """Present either provider's actual request to the controlled model program."""
+    if "messages" in request:
+        return request
+    messages = [{"role": "system", "content": request.get("instructions", "")}]
+    for item in request.get("input", ()):
+        if item.get("type") == "function_call_output":
+            messages.append({"role": "tool", "content": item.get("output", "")})
+        elif item.get("role"):
+            messages.append(item)
+    return {**request, "messages": messages}
+
+
+def _application(tmp_path, url, monkeypatch, *, adapter="openai_chat"):
     root = tmp_path / "project"
-    app = root / "applications/sample"
-    (root / "config").mkdir(parents=True)
-    (root / "config/system.yaml").write_text("{}")
-    (app / "prompts").mkdir(parents=True)
-    (app / "prompts/main.md").write_text("FULL ARCHIVED HARNESS REFERENCE")
-    bundle = snapshot_application(root, app, tmp_path / "bundles")
-    config = {"application_id": "sample", "self_learning": {"enabled": True}}
-    library = HarnessLibrary("sample", db_path=tmp_path / "memory.db", agent_config=config)
-    for key, mode, partition, available in [
-        ("CONTRASTIVE", "contrastive", "", "2026-10-18T00:00:00+00:00"),
-        ("DEVA", "development_score", "train-a", "2026-10-18T00:00:00+00:00"),
-        ("DEVB", "development_score", "train-b", "2026-10-18T00:00:00+00:00"),
-        ("FUTURE", "contrastive", "", "2026-10-22T00:00:00+00:00"),
-    ]:
-        value = library.memory.add_typed(
-            "app",
-            kind="experience",
-            memory_key="harness:" + key,
-            payload={
-                "trigger": key,
-                "symptom": "Missing observed evidence",
-                "action": "Read source",
-                "verification": "Observed original evidence",
-            },
-            scope_id="sample",
-            agent_config=config,
-            provenance=(
-                {
-                    "kind": "harness_experiment",
-                    "feedback": mode,
-                    "partition": partition,
-                    "available_at": available,
-                    "candidate_root": str(bundle.root),
-                    "candidate_id": bundle.candidate_id,
-                },
-            ),
+    project(root, url, supervisor="pi", worker="pi")
+    app = root / "applications/mixed"
+    (app / "driver.py").write_text(DRIVER + "\nclass EvaluatorB(Evaluator):\n    pass\n")
+    (app / "prompts").mkdir()
+    (app / "prompts/business.md").write_text("BASE")
+    models = yaml.safe_load((root / "config/model.yaml").read_text())
+    for profile in models["model"].values():
+        if isinstance(profile, dict):
+            profile["adapter"] = adapter
+    write_yaml(root / "config/model.yaml", models)
+    write_yaml(app / "workflows/worker.yaml", {
+        "name": "business", "agent_runtime": "pi", "model_type": "worker",
+        "description": "Return a frozen supplied fact.", "task": "ORIGINAL_TASK: return fact.",
+        "system_prompt": {"path": "prompts/business.md"}, "tools": [], "toolsets": [],
+        "input_schema": {"type": "object", "properties": {"fact": {"type": "string"}},
+                         "required": ["fact"], "additionalProperties": False},
+        "output_schema": {"type": "object", "properties": {"fact": {"type": "string"}, "variant": {"type": "string"}},
+                          "required": ["fact", "variant"], "additionalProperties": False},
+    })
+    fact, hidden = tmp_path / "fact.txt", tmp_path / "heldout.txt"
+    fact.write_text("FACT-123")
+    hidden.write_text("HIDDEN-CANARY")
+    monkeypatch.syspath_prepend(str(root))
+    for key in tuple(sys.modules):
+        if key.startswith("applications.mixed"):
+            del sys.modules[key]
+    return ApplicationRequest("mixed", root, app, "applications.mixed.driver:Driver",
+                              task="ORIGINAL_TASK", input_paths=(fact,), hidden_paths=(hidden,),
+                              driver_options={"delivery": str(tmp_path / "delivery.json")})
+
+
+def test_historical_stream_reuses_real_library_without_business_memory_or_base_promotion(
+    tmp_path, monkeypatch,
+):
+    phase = {"expect_library": False, "task_id": "2020-01-01"}
+    read_evidence = []
+    business_requests = []
+
+    def program(raw):
+        request = _normalized(raw)
+        role = role_of(request)
+        if role is None:
+            body = json.dumps(request)
+            assert LESSON not in body
+            assert "harnesses/2020-01-01" not in body
+            business_requests.append(request)
+            system = text(request["messages"][0])
+            return json.dumps({"fact": "FACT-123", "variant": "COMPOSED" if "COMPOSED" in system else "BASE"})
+        tools = [item for item in request["messages"] if item.get("role") == "tool"]
+        paths = advertised_context_paths(request)
+        current = [path for path in paths if path.startswith("context/harness/") and path.endswith("/prompts/business.md")]
+        library = [path for path in paths if path.startswith("context/library/")]
+        plan = [("read", {"path": "context/task.md"})]
+        if role == "general":
+            assert len(current) == 1
+            plan.append(("read", {"path": current[0]}))
+            assert bool(library) == phase["expect_library"]
+            if phase["expect_library"]:
+                experience = [path for path in library if path.endswith("/EXPERIENCE.md")]
+                adopted = [path for path in library if "/harness/" in path and path.endswith("/prompts/business.md")]
+                assert experience and adopted
+                plan.extend(("read", {"path": path}) for path in [*experience, *adopted])
+        if role == "compose":
+            assert len(current) == 1
+            plan.append(("read", {"path": current[0]}))
+            plan.append(("write", {"path": current[0], "content": "COMPOSED"}))
+        if len(tools) < len(plan):
+            name, arguments = plan[len(tools)]
+            return [(f"{role}-{len(tools)}", name, arguments)]
+        evidence = "\n".join(text(item) for item in tools)
+        assert "Permission denied" not in evidence
+        if role == "general":
+            assert "BASE" in text(tools[1]), "Each task must start from its declared base"
+            if phase["expect_library"]:
+                assert LESSON in evidence and "COMPOSED" in text(tools[-1])
+                read_evidence.append(evidence)
+            else:
+                assert LESSON not in evidence
+        if role == "reflect":
+            return ("<edits>component: business prompt\nchange: explicit output procedure\n"
+                    "observed: BASE became COMPOSED in the final execution\nverdict: helped</edits>\n"
+                    f"<experience>\ncue: {LESSON}\nlesson: Make the recurring output procedure explicit.\n"
+                    "evidence: The changed business-prompt component changed the final variant.\n"
+                    "confidence: high for the controlled fixture\n</experience>")
+        return f"<notes>{role}: used current task evidence.</notes>"
+
+    with model_service(program) as (url, requests):
+        original = _application(tmp_path, url, monkeypatch)
+        roots = tmp_path / "experiments"
+        stream_root = tmp_path / "stream-library"
+        base_policy = {"enabled": True, "recursion": {"mode": "parallel", "k": 1},
+                       "feedback": {"mode": "development_score", "partition": "train-a",
+                                    "evaluator": "applications.mixed.driver:Evaluator"}}
+
+        def execute(name, task_id, *, mode="parallel", feedback="development_score", partition="train-a", evaluator="Evaluator", stream="one", task_ids=None):
+            policy = HarnessingPolicy.model_validate({**base_policy,
+                "recursion": {"mode": mode, "k": 1},
+                "feedback": ({"mode": "development_score", "partition": partition,
+                              "evaluator": "applications.mixed.driver:" + evaluator}
+                             if feedback == "development_score" else {"mode": "contrastive"})})
+            request = replace(original,
+                task={"goal": "ORIGINAL_TASK", "evidence_cutoff": task_id + "T00:00:00Z"},
+                driver_options={"delivery": str(tmp_path / (name + "-delivery.json"))},
+                harness_stream={"id": stream, "task_ids": task_ids or ["2020-01-01", "2020-01-02"],
+                                "task_id": task_id, "root": str(stream_root)})
+            return run_application(request, policy=policy, state_root=roots, experiment_id=name,
+                                   environment={"PATH": os.environ.get("PATH", os.defpath)})
+
+        first = execute("first", "2020-01-01")
+        assert first.status == "completed", first.to_dict()
+        assert first.library["submitted"] == 1
+        first_entry = Path(first.library["path"]) / "harnesses/2020-01-01/EXPERIENCE.md"
+        assert LESSON in first_entry.read_text()
+        first_bytes = first_entry.read_bytes()
+        phase.update(expect_library=True, task_id="2020-01-02")
+        second = execute("second", "2020-01-02")
+        assert second.status == "completed", second.to_dict()
+        assert len(read_evidence) == 1
+        assert second.library["path"] == first.library["path"]
+        assert list(second.library["entries"]) == ["2020-01-01", "2020-01-02"]
+        assert next(trial for trial in second.trials if trial.trial_id == "base1").output["variant"] == "BASE"
+        assert second.output["variant"] == "COMPOSED"
+        phase["expect_library"] = False
+        paths = {first.library["path"]}
+        for name, overrides in (
+            ("mode", {"mode": "sequential"}),
+            ("feedback", {"feedback": "contrastive"}),
+            ("partition", {"partition": "train-b"}),
+            ("evaluator", {"evaluator": "EvaluatorB"}),
+            ("stream", {"stream": "other"}),
+        ):
+            isolated = execute(name, "2020-01-02", task_ids=["2020-01-02"], **overrides)
+            assert isolated.status == "completed", isolated.to_dict()
+            assert list(isolated.library["entries"]) == ["2020-01-02"]
+            assert not list((roots / name / "roles").glob("*/workspace/context/library/INDEX.md"))
+            assert isolated.library["path"] not in paths
+            paths.add(isolated.library["path"])
+            # A different stream's retain must never delete this stream's entries.
+            assert first_entry.read_bytes() == first_bytes
+        assert original.application_root.joinpath("prompts/business.md").read_text() == "BASE"
+        assert all(trial.acceptance["hidden"] == "denied" for trial in second.trials)
+        assert len(business_requests) == 28
+        before = len(requests)
+        skipped = execute("skipped-prior", "2020-01-02", stream="empty-with-prior")
+        assert skipped.status == "failed"
+        assert "cannot skip an earlier task" in " ".join(skipped.errors)
+        assert len(requests) == before
+        rebound = execute("rebound-inputs", "2020-01-02")
+        assert rebound.status == "failed"
+        assert "different frozen inputs" in " ".join(rebound.errors)
+        assert len(requests) == before
+        reordered = execute("reordered-stream", "2020-01-02", task_ids=["2020-01-02", "2020-01-01"])
+        assert reordered.status == "failed"
+        assert len(requests) == before
+        assert first_entry.read_bytes() == first_bytes
+        resumed = run_application(
+            replace(original, task={"goal": "ORIGINAL_TASK", "evidence_cutoff": "2020-01-02T00:00:00Z"},
+                    driver_options={"delivery": str(tmp_path / "second-delivery.json")},
+                    harness_stream={"id": "one", "task_ids": ["2020-01-01", "2020-01-02"],
+                                    "task_id": "2020-01-02", "root": str(stream_root)}),
+            policy=HarnessingPolicy.model_validate(base_policy), state_root=roots, resume_id="second",
+            environment={"PATH": os.environ.get("PATH", os.defpath)},
         )
-        assert value["ok"]
-    assert library.memory.add_typed(
-        "app",
-        kind="fact",
-        memory_key="ordinary:fact",
-        payload={"text": "NORMAL BUSINESS FACT"},
-        scope_id="sample",
-        agent_config=config,
-    )["ok"]
-    contrastive = library.view(feedback="contrastive", cutoff="2026-10-20T00:00:00+00:00")
-    assert len(contrastive) == 1 and contrastive[0]["payload"]["trigger"] == "CONTRASTIVE"
-    assert (
-        contrastive[0]["harnesses"][0]["files"]["applications/sample/prompts/main.md"]
-        == "FULL ARCHIVED HARNESS REFERENCE"
-    )
-    development = library.view(feedback="development_score", partition="train-a")
-    assert len(development) == 1 and development[0]["payload"]["trigger"] == "DEVA"
-    snapshot = library.memory.snapshot_for_prompt(agent_config=config)
-    assert "NORMAL BUSINESS FACT" in snapshot
-    assert not any(key in snapshot for key in ("CONTRASTIVE", "DEVA", "DEVB", "FUTURE"))
-    listed = library.memory.handle_tool_action("list", scope="app", scope_id="sample", agent_config=config)
-    assert [item["memory_key"] for item in listed["items"]] == ["ordinary:fact"]
-    request = ApplicationRequest("sample", root, app, "app:Driver", task="original facts")
-    invocation = PreparedInvocation(request, "Original task", {}, {})
-    receipt = ExecutionReceipt("final1", bundle.candidate_id, "completed", accepted=True, cleanup_complete=True)
-    proposed = library.submit(
-        [
-            {
-                "trigger": "new task",
-                "symptom": "missing source",
-                "action": "inspect source",
-                "verification": "source read succeeded",
-                "evidence_refs": ["final1"],
-            }
-        ],
-        selected=receipt,
-        bundle=bundle,
-        invocation=invocation,
-        experiment_id="experiment",
-        reflection_run_id="root-reflection",
-        feedback="contrastive",
-        available_at="2026-10-19T00:00:00+00:00",
-    )
-    assert proposed["submitted"] == 1
-    assert proposed["candidates"][0]["ok"]
-    assert proposed["candidates"][0]["state"] != "active_confirmed"
-    assert all(item["payload"]["trigger"] != "new task" for item in library.view(feedback="contrastive"))
+        assert resumed.status == "completed", resumed.to_dict()
+        assert len(requests) == before

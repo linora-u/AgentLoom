@@ -6,6 +6,7 @@ import yaml
 from agentloom.app.runner import execute_app
 from agentloom.config.config import bind_config, load_project_config
 
+from tests.application_test.harness_model_support import HarnessModel
 from tests.application_test.mixed_runtime_support import finish, model_service, project, tool_messages, write_yaml
 
 
@@ -14,6 +15,7 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
     from agentloom.runtimes.pi.credentials import bind_pi_credentials
 
     counts = []
+    harness = HarnessModel("applications/mixed/prompts/root.md", composed="COMPOSED-ROOT")
     private_canaries = (
         "fixture-key", "MCP-ARGV-PRIVATE-CANARY", "DOTENV-PRIVATE-CANARY",
         "PRIVATE-OAUTH-CANARY-136", "PRIVATE-REFRESH-CANARY-136",
@@ -26,17 +28,11 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
 
     def program(request):
         assert all(canary not in json.dumps(request) for canary in private_canaries)
+        answer = harness(request)
+        if answer is not None:
+            return answer
         system = str(request["messages"][0]["content"])
-        if "Extract only supported reusable experiences" in system:
-            value, role = {"experiences": []}, "reflect"
-        elif "Compose one coherent complete Application" in system:
-            value, role = {"edits": [{"path": "applications/mixed/prompts/root.md", "content": "COMPOSED-ROOT"}],
-                           "rationale": "Use the independent evidence."}, "compose"
-        elif "domain-specific working methods" in system:
-            value, role = {"edits": [], "rationale": "No further changes."}, "domain"
-        elif "general problem-solving" in system:
-            value, role = {"edits": [], "rationale": "No further changes."}, "general"
-        elif request["model"] == "worker":
+        if request["model"] == "worker":
             counts.append("worker")
             return finish(request, "INDEPENDENT-EVIDENCE")
         else:
@@ -45,8 +41,6 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             assert "INDEPENDENT-EVIDENCE" in tool_messages(request)[-1]["content"]
             counts.append("business")
             return finish(request, "COMPOSED-RESULT" if "COMPOSED-ROOT" in system else "BASE-RESULT")
-        counts.append(role)
-        return json.dumps(value)  # Built-in improvement roles use Pi for both business runtimes.
 
     with model_service(program, on_request=authenticate) as (url, requests):
         definition = project(tmp_path, url, supervisor=runtime, worker=runtime)
@@ -72,9 +66,9 @@ def test_enabled_supervisor_executes_and_adopts_final_with_workers_and_recovers(
             result = execute_app(definition, file_logging=False, event_sink=events.append)
             assert result.output == "COMPOSED-RESULT"
             assert result.harnessing.status == "completed", result.harnessing.to_dict()
-            assert result.harnessing.selected_trial_id.startswith("final")
+            assert result.harnessing.selected_trial_id.startswith("agg")
             compose = next(role for role in result.harnessing.roles if role["role"] == "compose")
-            assert compose["output"]["edits"] == {"applications/mixed/prompts/root.md": "COMPOSED-ROOT"}
+            assert "revised -> working instruction" in compose["output"]
             assert all(canary not in json.dumps(result.harnessing.to_dict()) for canary in private_canaries)
             selected = next(trial for trial in result.harnessing.trials
                             if trial.trial_id == result.harnessing.selected_trial_id)

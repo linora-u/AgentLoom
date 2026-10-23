@@ -7,6 +7,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import psutil
 import pytest
 from agentloom.app import Application
 from agentloom.execution.concurrency import WorkItem
@@ -149,7 +150,42 @@ def test_resume_rejects_live_scope_even_after_upstream_cancel_status(batch_proje
         old = execution.worker("workflows/worker.yaml").submit(WorkItem("old", {"value": 1, "action": "held"}))
         with consumer(root, application, namespace, case) as process:
             wait_for(lambda: any(e["event"] == "cleanup_entered" for e in events(case)), process)
-            execution.cancel(old.workflow_id)
+            native = json.loads((case / "native-old.json").read_text())
+            observation = execution.resource_status(old.workflow_id)[0]
+            job = namespace / "jobs" / old.workflow_id / observation["invocation_id"]
+            descriptor = job / "resource/description.json"
+            resource = json.loads(descriptor.read_text())
+            identity = resource["anchor"]
+            anchor = psutil.Process(identity["pid"])
+            assert anchor.create_time() == identity["creation"]
+            # The host's held close callback cannot block an external SIGKILL.
+            # Pause its exact guardian so cancel cannot finish physical drain
+            # before resume checks the real, still-live native scope.
+            anchor.suspend()
+            try:
+                wait_for(lambda: anchor.status() == psutil.STATUS_STOPPED, process)
+                execution.cancel(old.workflow_id)
+                assert execution.status(old.workflow_id).status == "CANCELLED"
+                assert process_alive(native) and process_alive(identity)
+                observation = execution.resource_status(old.workflow_id)[0]
+                assert not observation["physical_exit_confirmed"]
+                assert not (job / "resource/exited.json").exists()
+                error = observation["cleanup_error"]
+                assert error["phase"] == "cancel_request"
+                assert error["error_type"] == "ResourceCleanupError"
+                assert error["message"] == "Native cleanup acknowledgement remains unconfirmed"
+                assert any(item["error_type"] == "TimeoutError" for item in error["exception_chain"])
+                with pytest.raises(ResourceOwnershipError, match="drain"):
+                    execution.resume(old.workflow_id)
+                assert process_alive(native) and anchor.status() == psutil.STATUS_STOPPED
+            finally:
+                try:
+                    assert json.loads(descriptor.read_text()) == resource
+                    assert anchor.create_time() == identity["creation"]
+                finally:
+                    anchor.resume()  # psutil also rejects a reused PID.
+            wait_for(lambda: execution.resource_status(old.workflow_id)[0]["physical_exit_confirmed"], process)
+            wait_for(lambda: execution.resource_status(old.workflow_id)[0]["exit_receipt_persisted"], process)
+            assert not process_alive(native) and not process_alive(identity)
             assert execution.status(old.workflow_id).status == "CANCELLED"
-            with pytest.raises(ResourceOwnershipError, match="drain"):
-                execution.resume(old.workflow_id)
+        assert process.returncode == 0

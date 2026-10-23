@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import py_compile
+import shutil
 import socket
 import stat
 import subprocess
@@ -630,13 +631,15 @@ def test_trusted_launcher_creation_is_exclusive(tmp_path: Path) -> None:
     assert loom.stat().st_ino == original_inode
 
 
+@pytest.mark.parametrize("vendored_harness", [False, True])
 def test_runtime_layout_accepts_current_distribution_package_mappings(
-    tmp_path: Path,
+    tmp_path: Path, vendored_harness: bool,
 ) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project.scripts]\nloom = "agentloom.__main__:main"\n'
         '[tool.setuptools.package-dir]\n'
-        'agentloom = "src"\n',
+        'agentloom = "src"\n'
+        + ('harness2 = "third_party/harness2/harness2"\n' if vendored_harness else ''),
         encoding="utf-8",
     )
 
@@ -748,9 +751,84 @@ def test_mapped_canonical_capsule_launcher_executes_only_approved_source(
         assert "was invalid" in completed.stderr
 
 
+@pytest.mark.parametrize("shadow", [
+    None, "installed", "root_shadow", "source_symlink", "parent_symlink", "init_symlink",
+])
+def test_current_capsule_launcher_binds_only_the_approved_vendored_harness(
+    tmp_path: Path, shadow: str | None,
+) -> None:
+    root = tmp_path / "capsule"
+    python = root / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(Path(sys.executable).resolve())
+    (root / "pyproject.toml").write_text(
+        '[project.scripts]\nloom = "agentloom.__main__:main"\n'
+        '[tool.setuptools.package-dir]\nagentloom = "src"\n'
+        'harness2 = "third_party/harness2/harness2"\n', encoding="utf-8",
+    )
+    source = root / "src"
+    source.mkdir()
+    (source / "__init__.py").write_text("", encoding="utf-8")
+    (source / "__main__.py").write_text(
+        'import sys\nfrom pathlib import Path\n'
+        'def main():\n'
+        '    assert "harness2.core.schedule" not in sys.modules\n'
+        '    from harness2.core import schedule\n'
+        f'    expected = Path({str(root)!r}) / "third_party/harness2/harness2/core/schedule.py"\n'
+        '    assert Path(schedule.__file__).resolve() == expected\n'
+        '    assert not any(n == "src" or n.startswith("src.") for n in sys.modules)\n'
+        '    print(schedule.mode_token("parallel"))\n    return 0\n', encoding="utf-8",
+    )
+    harness = root / "third_party/harness2/harness2"
+    shutil.copytree(REPO_ROOT / "third_party/harness2/harness2", harness,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    imported = outside / "untrusted-imported"
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env["PYTHONNOUSERSITE"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPYCACHEPREFIX"] = str(capsule_module._private_pycache_prefix(root))
+    if shadow in {"installed", "root_shadow"}:
+        package = (outside if shadow == "installed" else root) / "harness2"
+        package.mkdir()
+        (package / "__init__.py").write_text(
+            f'from pathlib import Path\nPath({str(imported)!r}).touch()\n', encoding="utf-8",
+        )
+        if shadow == "installed":
+            env["PYTHONPATH"] = str(outside)
+    elif shadow in {"source_symlink", "parent_symlink"}:
+        target = harness if shadow == "source_symlink" else harness.parent
+        target.rename(outside / "vendored")
+        target.symlink_to(outside / "vendored", target_is_directory=True)
+    elif shadow == "init_symlink":
+        initialization = harness / "__init__.py"
+        initialization.rename(outside / "vendored-init.py")
+        initialization.symlink_to(outside / "vendored-init.py")
+    launcher = capsule_module._write_trusted_loom_launcher(root, python)
+    completed = subprocess.run(
+        [str(launcher)], cwd=outside, env=env, capture_output=True, text=True, check=False,
+    )
+
+    assert not imported.exists()
+    if shadow is None:
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == "agg"
+    else:
+        assert completed.returncode != 0
+        assert "capsule harness2" in completed.stderr
+        assert "was invalid" in completed.stderr
+
+
 @pytest.mark.parametrize("mapping", [
     'agentloom = "../src"', 'agentloom = "/mutable/src"', 'agentloom = "src/app"',
     'agentloom = "src"\nother = "src"', 'src = "src"', '"" = "src"',
+    'agentloom = "src"\nharness2 = "../harness2"',
+    'agentloom = "src"\nharness2 = "/mutable/harness2"',
+    'agentloom = "src"\nharness2 = "third_party/harness2"',
+    'agentloom = "src"\nharness2 = "third_party/harness2/harness2"\nother = "src"',
+    'harness2 = "third_party/harness2/harness2"',
 ])
 def test_trusted_launcher_rejects_unsupported_source_mappings(tmp_path: Path, mapping: str) -> None:
     root = tmp_path / "capsule"
@@ -782,9 +860,11 @@ def test_trusted_launcher_rejects_drifted_project_entrypoint(tmp_path: Path) -> 
     assert not (python.parent / "loom").exists()
 
 
+@pytest.mark.parametrize("mapped_source_only", [False, True], ids=["installed-source", "dependency-only"])
 def test_descriptor_checks_the_locked_dependency_only_environment(
     tmp_path: Path,
     monkeypatch,
+    mapped_source_only: bool,
 ) -> None:
     uv = tmp_path / "uv"
     uv.write_text("trusted uv\n", encoding="utf-8")
@@ -805,6 +885,11 @@ def test_descriptor_checks_the_locked_dependency_only_environment(
     monkeypatch.setattr(capsule_module, "_git_metadata_paths", lambda _: [tmp_path])
     monkeypatch.setattr(capsule_module, "_git_metadata_is_isolated", lambda _: True)
     monkeypatch.setattr(capsule_module, "active_capsule_bootstrap_issues", lambda _: [])
+    if mapped_source_only:
+        find_spec = capsule_module.importlib.util.find_spec
+        monkeypatch.setattr(capsule_module.importlib.util, "find_spec", lambda name: (
+            None if name == "agentloom" else find_spec(name)
+        ))
     monkeypatch.setenv(
         "PYTHONPYCACHEPREFIX",
         "/private/ephemeral-capsule-a/.venv/.agentloom-pycache",
@@ -1074,6 +1159,7 @@ def test_historical_commit_cannot_supply_an_older_runner(
     trusted_files = (
         "applications/memory_feature_validation/scripts/run_memory_review_campaign.py",
         "src/__init__.py",
+        "third_party/harness2/harness2/__init__.py",
         "config/system.yaml",
         "pyproject.toml",
         "uv.lock",
@@ -1085,6 +1171,10 @@ def test_historical_commit_cannot_supply_an_older_runner(
     commit = _commit_all(repo, "trusted control plane")
 
     assert trusted_control_plane_matches(repo, commit) is True
+    harness = repo / "third_party/harness2/harness2/__init__.py"
+    harness.write_text("historical harness drift\n", encoding="utf-8")
+    assert trusted_control_plane_matches(repo, commit) is False
+    _git(repo, "checkout", "--", harness.relative_to(repo).as_posix())
     runner = (
         repo
         / "applications"
@@ -1105,6 +1195,8 @@ def test_historical_commit_cannot_supply_an_older_runner(
     for relative in (
         "applications/__init__.py",
         "applications/memory_feature_validation.py",
+        "harness2/__init__.py",
+        "harness2.py",
     ):
         parent_shadow = repo / relative
         parent_shadow.parent.mkdir(parents=True, exist_ok=True)

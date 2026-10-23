@@ -1,6 +1,6 @@
 # 完整 Application 的 Harness 改进
 
-在应用的 `config/system.yaml` 中启用后，一次完整任务会实际运行原方案、探索方案和组合方案。Supervisor 工作流与接入了完整任务驱动的程序应用使用同一个控制器；`Application.open()` 只打开生命周期，Worker 或 subagent 调用沿用所属 Trial。
+在应用的 `config/system.yaml` 中启用后，一次完整任务会实际运行原方案、探索方案和组合方案。Supervisor 工作流与接入了完整任务驱动的程序应用调用同一份固定版本的 Harness² 核心；`Application.open()` 只打开生命周期，Worker 或 subagent 调用沿用所属 Trial。
 
 ```yaml
 harnessing:
@@ -24,29 +24,30 @@ harnessing:
   #   reflect: workflows/worker_agents/reflect.yaml
 ```
 
-这些是 AgentLoom 的配置契约。通用改进、领域改进、Probe、Compose、有限递归、final 选择和反思借鉴 Harness²；开发评分、Application 配置与多 Agent 执行适配由 AgentLoom 提供。`k` 控制探索规模；选择、反思、评价和重试另计用量，现有单次调用超时和输出限制继续有效。
+这些是 AgentLoom 的配置契约。通用改进、领域改进、Probe、Compose、有限递归、final 选择、反思及 Library 直接复用项目中固定版本的 Harness²；开发评分、Application 配置与多 Agent 执行适配由 AgentLoom 提供。`k` 控制探索规模；选择、反思、评价和重试另计用量，现有单次调用超时和输出限制继续有效。
 
 五个内置改进角色均使用 Pi，复用已安装的 Pi SDK 和现有认证；模型取应用生效的
 `model.default_model_type`。业务 Worker 的 `agent_runtime` 与 `model_type` 仍由各自 YAML 声明。
 应用无须重复定义五份角色 YAML；只有确实需要定制角色时才配置 `roles`。
 
-内置角色可通过 Pi 的只读 `read` 工具读取本次隔离工作区。大型执行证据写入
-`harness-evidence/original.json`，模型接收索引路径而不是把全部正文放进桥接输入帧。
-索引保留全部字段；长文本按顺序分片，并记录字符数和 SHA-256，可完整还原。
-角色使用 `read` 的 `offset`、`limit` 分页查看索引及所需正文。自定义角色继续接收原有
-`evidence` 对象，工具与输入契约由其普通 Worker YAML 声明。
-大型证据的输入同时提供冻结的 `resource_root`；逻辑资源路径相对此目录解析，
-历史执行记录中的宿主机路径不能用来替代本次快照。
+Pi 角色直接使用 `read`、`edit`、`write` 修改各自隔离工作区内的
+`context/harness/`，由上游采集文件树，经过 Application 校验后封存并试跑。
+任务材料位于 `context/source/`；轨迹、产物、差异、提案与组合 notes、历史 Library
+分别组织。角色先读取导航和所需文件，大文件可以分页读取，避免整份快照进入一次模型输入。
+原始证据仍归档保留；上游对单条 observation 的截断不代表模型已经读完原文。
+Skill 的 references、脚本和二进制 assets 按声明依赖完整保留。
 
-自定义角色使用与内置角色相同的输入输出契约：输入为包含 `evidence` 的对象；五种角色的输出如下。
+自定义 YAML 保留 Pi、模型、调用参数与工具能力配置；方法主体和输出语法由上游提供。
+输入是包含 `mission` 字符串的对象，输出是原始文本。提案与组合直接修改文件并解释依据，
+选择输出上游规定的匿名 choice，反思输出逐项编辑效果和一条有效经验或 `NO_ENTRY`。
+不再返回整文件 `edits` JSON，也不使用旧角色的严格输出 schema。恢复旧方法归档会明确拒绝，
+须保留旧档并新建实验，不会自动重新执行业务。
 
-| 角色 | 输出 |
-| --- | --- |
-| `general`、`domain`、`compose` | `{"edits": [{"path": "applications/example/prompts/task.md", "content": "完整的新文件内容"}], "rationale": "依据执行证据说明修改原因"}` |
-| `select` | `{"chosen_id": "C1", "reason": "选择理由"}`；ID 必须来自给定 final 池。 |
-| `reflect` | `{"experiences": [{"trigger": "触发条件", "symptom": "现象", "action": "行动", "verification": "验证证据", "evidence_refs": ["给定证据引用"]}]}`；证据不足时返回空数组。 |
-
-`edits` 必须是数组；每项只包含 `path`、`content`，路径是项目内规范相对路径且不能重复。`content` 为完整 UTF-8 文本，`null` 表示删除允许删除的已有资源；不修改时使用 `edits: []`。框架先校验角色输出，再转换为内部文件修改映射，继续执行原有资源权限、凭据和整应用校验。所有输出对象都声明固定字段、完整 `required` 与 `additionalProperties: false`，符合 [OpenAI 严格结构化输出的对象约束](https://developers.openai.com/api/docs/guides/structured-outputs)；自定义 YAML 应复用对应内置角色的 `output_schema`。不接受旧的动态路径字典格式。
+`development_score` 在每个完整 Trial 后调用可信评价器，允许的开发指标另存为
+`context/development_feedback/` 中的证据文件；选择阶段使用与产物相同的匿名编号。
+评价器需要返回分区、`scored` 或 `unscorable` 状态、数值 `metrics` 和非负 `sample_count`；
+缺少样本不等于零分，评价失败可恢复评分且不重复业务执行。隐藏验证与测试证据的访问检查仍生效。
+两种反馈模式共享同一个方法核心，不因开发分更高而绕过完整业务验收。
 
 ## 执行与恢复
 
@@ -84,9 +85,21 @@ recovered = execute_app(
 
 只有实际执行且通过业务验收的组合 final 能进入选择池。`k=1` 直接采用唯一合格 final，`k>1` 调用选择 Agent；没有合格 final 或选择失败时明确失败。Compose 可以保留基础配置，但该配置仍须重新完整执行才能成为 final。
 
-`completed` 表示本次执行、交付及后续步骤完成。交付后反思失败会保留交付并报告 `partial`。采用表示选中了本次交付内容；是否优于原方案，需要另外检查比较证据。后续任务从应用声明的基础配置开始；有证据的反思通过现有 Curated Memory 审核流程提交，经验库只作为改进器的参考。
+`completed` 表示方法、业务验收及发布完成。普通反思调用失败或 `NO_ENTRY` 不形成经验，
+保留已选业务交付；证据构造、泄漏检查或持久化错误按真实方法状态报告。
+实验回执的 `method` 包含上游阶段、fallback、选择、经验和 logical ledger，
+可区分主动保留原配置与异常继承配置。采用不代表相对原方案已经改善。
+
+有效经验连同采用配置直接进入上游实验 Library，不经 Curated Memory 审核。
+跨任务调用方使用 `ApplicationRequest.harness_stream` 显式绑定 `id`、有序 `task_ids`、
+当前 `task_id` 和可信状态目录 `root`。同流仅提供当前任务之前的有效经验；
+历史任务顺序不与经验生成的现实时间比较。Library 和缓存区分应用、流、递归方式、k、反馈分区、
+评价器与核心版本。不同实验不会共用可被 `retain` 删除的库根。
+后续任务仍从声明的 base 开始参考 Library，不自动修改源 YAML、Git 或默认配置。
 
 实验回执区分 Task、候选、Trial、实际 Run 和调用尝试，保留已知 token、耗时、失败与缺报。累计 usage 按调用和尝试对账；没有计量证据的字段保持未知。恢复先核对既有进程和业务回执，业务完成后用量缺报不会触发业务重跑。
+
+控制器退出前若子进程已持久化完整且身份一致的完成回执，恢复会在确认物理退出后复用该结果及候选文件。超时或终止留下的空、截断回执不会当成完成结果；改进角色的新尝试使用新的工作区，失败尝试的文件与用量记录继续保留。业务执行仍通过原驱动核对已提交状态后恢复。
 
 恢复使用归档的应用策略、项目默认配置、资源和事实。未完成任务只按既有私有引用重新绑定当前凭据；已完成任务核验归档后直接复用回执。默认入口仍从项目运行配置定位实验目录；该定位配置损坏或位置变化时，程序入口须显式提供原 `state_root`，无需新增实验索引。
 
@@ -94,7 +107,7 @@ recovered = execute_app(
 
 当前启用能力要求 Linux Landlock ABI 6+ 与 libseccomp。运行前检测真实能力；未验证的平台明确拒绝启用。普通应用继续使用既有执行方式。
 
-候选固定资源与框架代码只读；每个 Trial 分离业务状态、Runtime、产物和会话。新闻程序的可信编排在外层受管进程执行，各实际 NewsHost 在加载 Agent、模型或工具前强制安装同一 Trial 的访问限制。完整物理退出由外层受管资源回执确认。
+候选固定资源与框架代码只读；每个 Trial 分离业务状态、Runtime、产物和会话。声明并通过可信驱动校验的受管编排在外层进程执行，其实际 Agent Host 须在加载 Agent、模型或工具前强制安装同一 Trial 的访问限制。完整物理退出由外层受管资源回执确认。
 
 内容相同的候选共享不可变快照。并行提案同时提交相同快照时，框架核验并复用已提交的版本，
 不因此重新调用改进模型；各候选的业务试跑仍独立执行。

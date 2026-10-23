@@ -15,9 +15,9 @@ jobs:
     name: Python tests
     if: github.repository == 'linora-u/AgentLoom'
     runs-on: ubuntu-latest
-    # Complete Application/real OS isolation regressions extend the existing
-    # suite beyond its former 20-minute execution window.
-    timeout-minutes: 40
+    # Upstream complete-task and native session matrices execute full Application
+    # trials with real OS isolation, requiring a longer full-suite window.
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository

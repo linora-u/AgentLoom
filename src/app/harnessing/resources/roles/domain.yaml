@@ -1,29 +1,20 @@
 name: harness_domain
 agent_runtime: pi
-description: Propose domain-specific improvements to the complete Application harness.
-task: Read the supplied evidence and return a complete explicit resource edit set.
-tools: [{name: read}, {name: loom_retrieve_context}]
+description: "Run the upstream Harness\xB2 domain session."
+task: '{mission}'
+tools:
+- name: read
+- name: edit
+- name: write
 toolsets: []
 default_toolsets: []
-self_learning: {enabled: false}
+self_learning:
+  enabled: false
 input_schema:
   type: object
   properties:
-    evidence: {type: object}
-  required: [evidence]
-  additionalProperties: false
-output_schema:
-  type: object
-  properties:
-    edits:
-      type: array
-      items:
-        type: object
-        properties:
-          path: {type: string}
-          content: {type: [string, 'null']}
-        required: [path, content]
-        additionalProperties: false
-    rationale: {type: string}
-  required: [edits, rationale]
+    mission:
+      type: string
+  required:
+  - mission
   additionalProperties: false

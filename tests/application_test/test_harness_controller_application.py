@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-import re
+import subprocess
 import sys
 from pathlib import Path
 from threading import Barrier, Event, Thread
@@ -15,8 +15,8 @@ from agentloom.app.harnessing.isolation import IsolationUnavailable, preflight_i
 from agentloom.app.harnessing.models import ApplicationRequest
 from agentloom.app.harnessing.policy import HarnessingPolicy
 
+from tests.application_test.harness_model_support import HarnessModel
 from tests.application_test.mixed_runtime_support import (
-    assert_closed_output_schema,
     finish,
     model_service,
     project,
@@ -70,7 +70,7 @@ class Driver:
         receipt = ExecutionReceipt(context.trial_id, bundle.candidate_id,
             'completed' if outcome.status == 'success' else 'failed', output,
             accepted=outcome.status == 'success' and output.get('fact') == 'FACT-123' and not (
-                invocation.request.driver_options.get('reject_final') and context.trial_id.startswith('final')),
+                invocation.request.driver_options.get('reject_final') and context.trial_id.startswith(('agg', 'c'))),
             acceptance={'hidden': hidden, 'fixed_fact': fact}, runs=(run,),
             usage=read_run_usage(Path(run['manifest_path']).parent),
             cleanup_complete=not outcome.cleanup_errors)
@@ -99,8 +99,16 @@ class Driver:
 
 class Evaluator:
     def evaluate(self, invocation, receipt, partition):
-        return {'partition': partition, 'value': len(receipt.output.get('fact', '')),
-                'explanation': 'DEV-CONFIGURED-SCORE', 'usage': []}
+        marker = invocation.request.driver_options.get('evaluation_failure_marker')
+        if marker and not Path(marker).exists():
+            Path(marker).write_text('evaluation failed after business completion')
+            raise RuntimeError('Controlled evaluator failure')
+        if invocation.request.driver_options.get('unscorable'):
+            return {'partition': partition, 'status': 'unscorable',
+                    'metrics': {}, 'sample_count': 0, 'usage': []}
+        return {'partition': partition, 'status': 'scored',
+                'metrics': {'DEV-CONFIGURED-SCORE': len(receipt.output.get('fact', ''))},
+                'sample_count': 1, 'usage': []}
 """
 
 
@@ -127,14 +135,22 @@ def test_new_identity_and_resume_identity_are_mutually_exclusive(tmp_path):
         ("parallel", 1, "smolagents", False, False, "stop_after_final"),
         ("parallel", 1, "pi", False, False, "stop_after_final"),
         ("parallel", 1, "smolagents", False, False, "development_score"),
+        ("parallel", 1, "pi", False, False, "evaluation_recovery"),
+        ("parallel", 1, "pi", False, False, "role_commit_recovery"),
+        ("parallel", 1, "pi", False, False, "failed_role_commit_recovery"),
+        ("parallel", 1, "pi", False, False, "role_timeout"),
+        ("parallel", 1, "pi", False, False, "cached_receipt_mismatch"),
+        ("parallel", 1, "pi", False, False, "unscorable"),
         ("parallel", 2, "smolagents", False, False, "selector_invalid"),
         ("parallel", 2, "pi", False, False, "normal"),
         ("parallel", 1, "pi", False, False, "large_evidence"),
-        ("parallel", 1, "pi", False, False, "reflection_recovery"),
+        ("parallel", 1, "pi", False, False, "skill_edit"),
+        ("parallel", 1, "pi", False, False, "resource_discovery"),
+        ("parallel", 2, "pi", False, False, "context_discovery"),
+        ("parallel", 1, "pi", False, False, "reflection_error"),
         ("parallel", 1, "pi", False, False, "reflection_invalid"),
         ("parallel", 1, "smolagents", False, False, "final_rejected"),
         ("parallel", 1, "smolagents", False, False, "invalid_edits"),
-        ("parallel", 1, "pi", True, False, "duplicate_edits"),
         ("parallel", 1, "smolagents", False, False, "unsafe_tools"),
         ("parallel", 1, "smolagents", False, False, "registry_tools"),
         ("parallel", 1, "smolagents", False, True, "normal"),
@@ -153,7 +169,40 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
     scenario,
 ):
     requests_by_role = []
-    evidence_reads = []
+    from uuid import uuid4
+
+    skill_scenarios = {"skill_edit", "resource_discovery", "context_discovery"}
+    skill_name = "business-behavior" + ("-" + uuid4().hex if scenario in {"resource_discovery", "context_discovery"} else "")
+    skill_relative = f"applications/mixed/skills/{skill_name}/SKILL.md"
+    skill_baseline = f"---\nname: {skill_name}\ndescription: Read the business behavior marker.\n---\nBASE-SKILL\n"
+    skill_composed = skill_baseline.replace("BASE-SKILL", "COMPOSED-SKILL")
+    skill_probe = skill_baseline.replace("BASE-SKILL", "PROBE-SKILL")
+    harness = HarnessModel("applications/mixed/prompts/business.md", scenario=scenario,
+                           feedback=scenario in {"development_score", "evaluation_recovery", "unscorable", "context_discovery"})
+    if scenario == "role_commit_recovery":
+        from agentloom.app.harnessing import process
+        atomic = process._atomic
+        interrupted_commit = False
+        def lose_controller_before_role_commit(path, value):
+            nonlocal interrupted_commit
+            if not interrupted_commit and path.name == "result.json" and path.parent.name == "process" and "roles" in path.parts:
+                interrupted_commit = True
+                raise KeyboardInterrupt("controlled controller loss before role result commit")
+            return atomic(path, value)
+        monkeypatch.setattr(process, "_atomic", lose_controller_before_role_commit)
+    if scenario == "role_timeout":
+        from agentloom.app.harnessing import process
+        execute = process._execute
+        harness.pause = Event()
+        def timeout_first_role(bundle, context, factory, payload, **options):
+            if factory.endswith(":execute_role") and payload["role"] == "general" and payload["stage"].endswith(".t1"):
+                options["timeout"] = 5
+                try:
+                    return execute(bundle, context, factory, payload, **options)
+                finally:
+                    harness.pause.set()
+            return execute(bundle, context, factory, payload, **options)
+        monkeypatch.setattr(process, "_execute", timeout_first_role)
 
     if (mode, k, runtime, custom_roles, scenario) == ("parallel", 2, "pi", False, "normal"):
         # Identical independent compositions must share one immutable bundle
@@ -170,111 +219,38 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
 
         monkeypatch.setattr(os, "rename", concurrent_candidate_commit)
 
-    def message_text(message):
-        content = message["content"]
-        if isinstance(content, str):
-            return content
-        return "".join(part.get("text", "") for part in content if isinstance(part, dict))
-
     def program(request):
-        if custom_roles and runtime == "pi" and request["model"] == "supervisor":
-            contract = request["response_format"]["json_schema"]
-            assert contract["strict"] is True
-
-            assert_closed_output_schema(contract["schema"])
+        answer = harness(request)
+        if answer is not None:
+            return answer
+        assert request["model"] == "worker"
         system = str(request["messages"][0]["content"])
-        if request["model"] == "worker":
-            assert all(tool["function"]["name"] != "expose_private" for tool in request.get("tools", []))
-            if scenario == "registry_tools" and len([role for role in requests_by_role if role == "business"]) == 3:
-                assert any(tool["function"]["name"] == "read_file" for tool in request.get("tools", []))
-            result = {"fact": "FACT-123", "variant": "COMPOSED" if "COMPOSED" in system else "BASE"}
-            role = "business"
-        elif "Extract only supported reusable experiences" in system:
-            result, role = {"experiences": []}, "reflect"
-            if scenario == "reflection_invalid" or (
-                scenario == "reflection_recovery" and requests_by_role.count("reflect") == 0
-            ):
-                result = {"experiences": [{"trigger": "task", "symptom": "unsupported historical claim",
-                    "action": "do not import historical document claims", "verification": "not established",
-                    "evidence_refs": ["reviews/old-benchmark.json", "base1", "final1"]}]}
-            elif scenario == "reflection_recovery":
-                assert "Reflection references unknown execution evidence" in json.dumps(request)
-        elif "Select the deliverable that best satisfies" in system:
-            result, role = {"chosen_id": "C1", "reason": "Uses the required frozen fact."}, "select"
-        elif "Compose one coherent complete Application" in system:
-            result, role = {
-                "edits": [{"path": "applications/mixed/prompts/business.md", "content": "COMPOSED"}],
-                "rationale": "Retain fixed fact and compose inspected probes.",
-            }, "compose"
-        elif "domain-specific working methods" in system:
-            result, role = {"edits": [], "rationale": "No supported domain edit."}, "domain"
-        elif "general problem-solving" in system:
-            result, role = {"edits": [], "rationale": "No supported general edit."}, "general"
-        else:
-            raise AssertionError(system[:300])
-        if scenario == "large_evidence" and role == "general":
+        assert all(tool["function"]["name"] != "expose_private" for tool in request.get("tools", []))
+        if scenario == "registry_tools" and len(requests_by_role) == 3:
+            assert any(tool["function"]["name"] == "read_file" for tool in request.get("tools", []))
+        if scenario in skill_scenarios:
+            import re
+            from html import unescape
+
+            from tests.application_test.harness_model_support import text
+
+            assert all(marker + "-SKILL" not in system for marker in ("BASE", "PROBE", "COMPOSED"))
+            locations = re.findall(r"<location>([^<]+/skills/[^/<]+/SKILL\.md)</location>", system)
+            assert len(locations) == 1, system
             tool_results = [message for message in request["messages"] if message["role"] == "tool"]
             if not tool_results:
-                task = next(message_text(message) for message in request["messages"]
-                            if message["role"] == "user" and "Input data (JSON):\n" in message_text(message))
-                evidence = json.loads(task.split("Input data (JSON):\n", 1)[1])["evidence"]
-                resource_root = Path(evidence["resource_root"])
-                assert resource_root != root
-                assert resource_root.name == "project" and resource_root.parent.parent.name == "bundles"
-                evidence_reads.append("index")
-                return [("read-index", "read", {"path": evidence["evidence_file"]})]
-            if len(tool_results) == 1:
-                ref = re.search(r"ctx_[0-9a-f]{32}", message_text(tool_results[0]))
-                assert ref is not None
-                assert any(tool["function"]["name"] == "loom_retrieve_context"
-                           for tool in request["tools"])
-                evidence_reads.append("retrieve-index")
-                return [("retrieve-index", "loom_retrieve_context", {"ref": ref.group()})]
-            if len(tool_results) == 2:
-                index_text = message_text(tool_results[1])
-                assert "next_offset=none" in index_text
-                index = json.loads(index_text.split("\n", 1)[1])
-                parts = index["files"]["applications/mixed/prompts/large.md"]["harness_text_parts"]
-                evidence_reads.append("tail")
-                return [("read-tail", "read", {
-                    "path": parts["path_template"].format(index=parts["count"] - 1)})]
-            assert "END-OF-COMPLETE-EVIDENCE" in message_text(tool_results[-1])
-        if scenario == "selector_invalid" and role == "select":
-            result["chosen_id"] = "BASE"
-        if scenario == "invalid_edits" and role in {"general", "domain", "compose"}:
-            result["edits"] = [{"path": "applications/mixed/driver.py", "content": "forbidden fixed business code change"}]
-        if scenario == "duplicate_edits" and role in {"general", "domain", "compose"}:
-            result["edits"] = [{"path": "applications/mixed/prompts/business.md", "content": text}
-                               for text in ("AMBIGUOUS-FIRST", "AMBIGUOUS-LAST")]
-        if scenario == "normal" and mode == "parallel" and role == "compose":
-            result["edits"].extend([
-                {"path": "applications/mixed/prompts/added.md", "content": "NEW RESOURCE"},
-                {"path": "applications/mixed/prompts/obsolete.md", "content": None},
-            ])
-        if scenario in {"unsafe_tools", "registry_tools"} and role in {"general", "domain", "compose"}:
-            import yaml
-
-            worker = yaml.safe_load((app / "workflows/worker.yaml").read_text())
-            if scenario == "unsafe_tools":
-                module, function = {
-                    "general": ("agentloom.config.private_bindings", "resolve_bound_credentials"),
-                    "domain": ("builtins", "eval"),
-                    "compose": ("agentloom.config.config", "current_harness_model_config"),
-                }[role]
-                worker["tools"] = [{"name": "expose_private", "module": module, "function": function}]
-            elif role == "compose":
-                worker["tools"] = [{"name": "read_file"}]
-            result["edits"] = [{"path": "applications/mixed/workflows/worker.yaml", "content": yaml.safe_dump(worker)}]
-        if role != "business":
-            assert "HIDDEN-CANARY" not in json.dumps(request)
-            if scenario == "development_score":
-                assert "DEV-CONFIGURED-SCORE" in json.dumps(request)
-        requests_by_role.append(role)
-        return (
-            finish(request, result)
-            if any(t["function"]["name"] == "final_answer" for t in request.get("tools", []))
-            else json.dumps(result)
-        )
+                return [("read-declared-skill", "read", {"path": unescape(locations[0])})]
+            skill_content = text(tool_results[-1])
+            variants = [marker for marker in ("BASE", "PROBE", "COMPOSED") if marker + "-SKILL" in skill_content]
+            assert len(variants) == 1, skill_content
+            variant = variants[0]
+        else:
+            variant = "COMPOSED" if "COMPOSED" in system else "BASE"
+        result = {"fact": "FACT-123", "variant": variant}
+        requests_by_role.append("business")
+        return finish(request, result) if any(
+            tool["function"]["name"] == "final_answer" for tool in request.get("tools", [])
+        ) else json.dumps(result)
 
     with model_service(program) as (url, requests):
         root = tmp_path / "project"
@@ -296,7 +272,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             # A real Application may contain a multi-megabyte reference file.
             # Every built-in Pi role must still execute, rather than silently
             # inheriting the base after its JSONL bridge rejects the input.
-            (app / "prompts/large.md").write_text("x" * (9 * 1024 * 1024) + "END-OF-COMPLETE-EVIDENCE")
+            (app / "prompts/large.md").write_text(("中文证据😀 " + "x" * 1000 + "\n") * 9000 + "END-OF-COMPLETE-EVIDENCE\n")
         write_yaml(
             app / "workflows/worker.yaml",
             {
@@ -322,6 +298,24 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 },
             },
         )
+        if scenario in skill_scenarios:
+            import yaml
+
+            skill = root / skill_relative
+            skill.parent.mkdir(parents=True)
+            skill.write_text(skill_baseline)
+            worker = yaml.safe_load((app / "workflows/worker.yaml").read_text())
+            worker.update(skills={"paths": [f"skills/{skill_name}"]}, tools=[{"name": "read"}])
+            write_yaml(app / "workflows/worker.yaml", worker)
+            if scenario == "skill_edit":
+                harness.candidate_override = (skill_relative, skill_composed)
+        if scenario in {"unsafe_tools", "registry_tools"}:
+            import yaml
+            worker = yaml.safe_load((app / "workflows/worker.yaml").read_text())
+            worker["tools"] = ([{"name": "expose_private", "module": "agentloom.config.private_bindings",
+                                "function": "resolve_bound_credentials"}]
+                               if scenario == "unsafe_tools" else [{"name": "read_file"}])
+            harness.candidate_override = ("applications/mixed/workflows/worker.yaml", yaml.safe_dump(worker))
         roles = {}
         if custom_roles:
             import yaml
@@ -329,7 +323,7 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             resources = Path(__file__).parents[2] / "src/app/harnessing/resources/roles"
             for role in ("general", "domain", "compose", "select", "reflect"):
                 value = yaml.safe_load((resources / f"{role}.yaml").read_text())
-                value.update(agent_runtime=runtime, system_prompt=(resources / f"{role}.md").read_text(), tools=[])
+                value.update(agent_runtime="pi", tools=[{"name": name} for name in ("read", "write", "edit")])
                 path = app / "workflows" / f"role_{role}.yaml"
                 write_yaml(path, value)
                 roles[role] = f"workflows/role_{role}.yaml"
@@ -355,10 +349,12 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
                 "crash_after_completion": crash_after_completion,
                 "reject_final": scenario == "final_rejected",
                 "stop_before_receipt": scenario == "stop_and_resume",
+                "evaluation_failure_marker": str(tmp_path / "evaluation.marker") if scenario == "evaluation_recovery" else None,
+                "unscorable": scenario == "unscorable",
             },
         )
         values = {"enabled": True, "recursion": {"mode": mode, "k": k}, "roles": roles}
-        if scenario == "development_score":
+        if harness.feedback:
             values["feedback"] = {
                 "mode": "development_score",
                 "partition": "development-a",
@@ -380,60 +376,83 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
 
             stopper = Thread(target=stop_after_actual_business, daemon=True)
             stopper.start()
-        result = run_application(
-            request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
-            experiment_id="preallocated-experiment",
-            events=(lambda event: stop.set() if event["event"] == "trial.completed"
-                    and event.get("trial_id") == "final1" else None) if scenario == "stop_after_final" else (
-                        (lambda event: stop.set() if event["event"] == "role.completed"
-                         and event.get("stage") == "reflection" else None)
-                        if scenario == "reflection_recovery" else None),
-        )
+        if scenario == "failed_role_commit_recovery":
+            script = '''
+import json, os, sys
+from pathlib import Path
+from agentloom.app.harnessing import process
+from agentloom.app.harnessing.controller import run_application
+from agentloom.app.harnessing.models import ApplicationRequest
+from agentloom.app.harnessing.policy import HarnessingPolicy
+atomic = process._atomic
+def crash_after_failed_role_commit(path, value):
+    atomic(path, value)
+    if (path.name == 'result.json' and path.parent.name == 'process'
+            and 'roles' in path.parts and value.get('result', {}).get('status') == 'failed'):
+        os._exit(91)
+process._atomic = crash_after_failed_role_commit
+value = json.load(sys.stdin)
+run_application(ApplicationRequest.from_dict(value['request']),
+    policy=HarnessingPolicy.model_validate(value['policy']), state_root=Path(value['state_root']),
+    environment=value['environment'], experiment_id='preallocated-experiment')
+'''
+            controller = subprocess.run([sys.executable, "-c", script], input=json.dumps({
+                "request": request.to_dict(), "policy": policy.model_dump(mode="json"),
+                "state_root": str(tmp_path / "experiments"), "environment": environment}),
+                env={**os.environ, "PYTHONPATH": os.pathsep.join([str(root), os.environ.get("PYTHONPATH", "")])},
+                capture_output=True, text=True, timeout=30)
+            assert controller.returncode == 91, controller.stderr
+            orphan = next((tmp_path / "experiments/preallocated-experiment/roles").glob("*/process/result.json"))
+            assert json.loads(orphan.read_text())["result"]["status"] == "failed"
+            assert not (orphan.parent.parent / "receipt.json").exists()
+            result = run_application(request, state_root=tmp_path / "experiments", environment=environment,
+                resume_id="preallocated-experiment")
+        else:
+            result = run_application(
+                request, policy=policy, state_root=tmp_path / "experiments", environment=environment, stop_token=stop,
+                experiment_id="preallocated-experiment",
+                events=(lambda event: stop.set() if event["event"] == "trial.completed"
+                        and event.get("trial_id", "").startswith(("agg", "c")) else None) if scenario in {"stop_after_final", "cached_receipt_mismatch"} else None,
+            )
         assert result.experiment_id == "preallocated-experiment"
-        if scenario == "reflection_recovery":
-            from agentloom.app.harnessing.store import ExperimentStore
-
-            assert result.status == "stopped" and result.delivery
-            state = tmp_path / "experiments" / result.experiment_id
-            reflection_path = state / "stages/reflection.json"
-            original_reflection = reflection_path.read_bytes()
-            bad_output = json.loads(original_reflection)["result"]["output"]
-            selected = next(t for t in result.trials if t.trial_id == result.selected_trial_id)
-            # Reproduce the persisted intent from an older controller that
-            # validated references only after beginning library submission.
-            store = ExperimentStore(state)
-            store.begin("library", {"selected": selected, "reflection": bad_output})
-            store.close()
-            publication = (state / "stages/publication.json").read_bytes()
-            business_calls = requests_by_role.count("business")
-            stop.clear()
+        if scenario == "role_commit_recovery":
+            assert result.status == "stopped", result.to_dict()
+            assert harness.sessions["general"] == 1
+            assert requests_by_role.count("business") == 1
             result = run_application(request, state_root=tmp_path / "experiments",
-                environment=environment, resume_id=result.experiment_id, stop_token=stop)
-            assert result.status == "completed", result.to_dict()
-            assert reflection_path.read_bytes() == original_reflection
-            assert (state / "stages/publication.json").read_bytes() == publication
-            assert requests_by_role.count("business") == business_calls == 4
-            assert json.loads((state / "stages/library.json").read_text())["status"] == "rejected"
-            assert json.loads((state / "stages/library.retry1.json").read_text())["status"] == "completed"
-        if scenario == "reflection_invalid":
-            assert result.status == "partial" and result.delivery
-            assert all(t.accepted for t in result.trials)
-            assert requests_by_role.count("reflect") == 2
-            assert requests_by_role.count("business") == 4
-            calls = len(requests)
-            recovered = run_application(request, state_root=tmp_path / "experiments",
                 environment=environment, resume_id=result.experiment_id)
-            assert recovered.status == "partial" and len(requests) == calls
-            assert not list((tmp_path / "experiments" / result.experiment_id / "stages").glob("library*.json"))
-            return
-        if scenario == "stop_after_final":
+            assert harness.sessions["general"] == 1, "Completed durable Pi role was paid for again"
+        if scenario == "evaluation_recovery":
+            assert result.status == "partial", result.to_dict()
+            assert "Controlled evaluator failure" in "\n".join(result.errors)
+            assert requests_by_role.count("business") == 1
+            assert not harness.sessions
+            assert not (tmp_path / "delivery.json").exists()
+            result = run_application(request, state_root=tmp_path / "experiments",
+                environment=environment, resume_id=result.experiment_id)
+            assert requests_by_role.count("business") == 4
+        if scenario in {"stop_after_final", "cached_receipt_mismatch"}:
             assert result.status == "stopped", result.to_dict()
             assert len(result.trials) == 4
             assert not result.delivery and not (tmp_path / "delivery.json").exists()
-            assert requests_by_role.count("reflect") == requests_by_role.count("select") == 0
+            assert harness.sessions["reflect"] == harness.sessions["select"] == 0
             assert not (tmp_path / "experiments" / result.experiment_id / "stages/publication.json").exists()
             business_calls = requests_by_role.count("business")
             assert business_calls == 4
+            if scenario == "cached_receipt_mismatch":
+                receipt_path = tmp_path / "experiments" / result.experiment_id / "trials/inv1/receipt.json"
+                changed = json.loads(receipt_path.read_text())
+                changed["output"] = {"fact": "TAMPERED-NONSELECTED-RECEIPT"}
+                receipt_path.write_text(json.dumps(changed))
+                calls = len(requests)
+                stop.clear()
+                rejected = run_application(request, state_root=tmp_path / "experiments",
+                    environment=environment, resume_id=result.experiment_id, stop_token=stop)
+                assert rejected.status == "failed", rejected.to_dict()
+                assert "Trial receipt differs from its completed host execution record" in "\n".join(rejected.errors)
+                assert not rejected.delivery and not (tmp_path / "delivery.json").exists()
+                assert len(requests) == calls and requests_by_role.count("business") == business_calls
+                return
             (app / "workflows/worker.yaml").write_text("invalid: [")
             (app / "prompts/business.md").write_text("LIVE-MUTATION")
             (root / "config/system.yaml").write_text("invalid: [")
@@ -479,75 +498,156 @@ def test_public_complete_task_executes_upstream_schedule_and_recovers_without_mo
             )
             assert requests_by_role.count("business") == 4 * k
         if scenario in {"selector_invalid", "final_rejected"}:
-            assert result.status == "failed", result.to_dict()
+            assert result.status in {"failed", "partial"}, result.to_dict()
             assert len(result.trials) == 4 * k
             assert any(t.trial_id.startswith("base") and t.eligible for t in result.trials)
             assert not result.selected_trial_id and result.output is None
             assert not (tmp_path / "delivery.json").exists()
-            assert requests_by_role.count("reflect") == 0
-            assert requests_by_role.count("select") == (scenario == "selector_invalid")
+            assert harness.sessions["reflect"] == 0
+            assert harness.sessions["select"] == (scenario == "selector_invalid")
             return
         assert result.status == "completed", result.to_dict()
         assert len(result.trials) == 4 * k
-        assert result.selected_trial_id.startswith("final")
+        assert result.selected_trial_id.startswith(("agg", "c"))
         assert result.output == {
             "fact": "FACT-123",
-            "variant": "BASE" if scenario in {"invalid_edits", "duplicate_edits", "unsafe_tools", "registry_tools"} else "COMPOSED",
+            "variant": "BASE" if scenario in {"invalid_edits", "unsafe_tools", "registry_tools"} else "COMPOSED",
         }
         assert all(t.acceptance["hidden"] == "denied" for t in result.trials)
         assert requests_by_role.count("business") == 4 * k + (scenario == "stop_and_resume")
-        edits = 2 * k if scenario in {"invalid_edits", "duplicate_edits", "unsafe_tools"} else k
-        assert requests_by_role.count("general") == requests_by_role.count("domain") == edits
-        assert requests_by_role.count("compose") == edits
-        assert requests_by_role.count("select") == (k > 1)
-        assert requests_by_role.count("reflect") == (2 if scenario == "reflection_recovery" else 1)
-        if not custom_roles:
-            assert sum(item["model"] == "improvement" for item in requests) == sum(
-                role != "business" for role in requests_by_role) + len(evidence_reads)
+        assert harness.sessions["general"] == k + (scenario in {"role_timeout", "failed_role_commit_recovery"})
+        if scenario == "failed_role_commit_recovery":
+            # The real controller can die while its parallel peer is still
+            # running. That peer may need a fresh session after owned cleanup.
+            assert k <= harness.sessions["domain"] <= k + 1
+        else:
+            assert harness.sessions["domain"] == k
+        assert harness.sessions["compose"] == (2 * k if scenario in {"invalid_edits", "unsafe_tools"} else k)
+        assert harness.sessions["select"] == (k > 1)
+        assert harness.sessions["reflect"] == (2 if scenario == "reflection_error" else 1)
         # Built-in roles now use Pi even when business execution uses smol.
         # This fixture's Pi adapter does not report every usage dimension.
         assert result.usage["complete"] is False
-        assert result.usage["total_tokens"] == 70 * len(requests)
+        if scenario in {"role_timeout", "failed_role_commit_recovery"}:
+            # Killing a role or its parallel peer before the Runtime closes
+            # can leave HTTP usage unreported. Preserve unknown operations
+            # rather than infer usage from this server's fulfilled requests.
+            assert 0 < result.usage["total_tokens"] <= 70 * len(requests)
+        else:
+            measured_requests = len(requests) - (2 if scenario == "reflection_error" else 0)
+            assert result.usage["total_tokens"] == 70 * measured_requests
+        if scenario == "reflection_error":
+            failed = [role for role in result.roles if role["role"] == "reflect"]
+            assert len(failed) == 2 and all(role["status"] == "failed" for role in failed)
+            assert all(not item["complete"] for role in failed for item in role["receipt"]["usage_observations"])
+            assert result.library["submitted"] == 0
         for role_receipt in result.roles:
             observed = role_receipt["receipt"]["usage_observations"]
             assert observed and all(item["attempt_id"] for item in observed)
         state = tmp_path / "experiments" / result.experiment_id
-        if scenario == "large_evidence":
-            import hashlib
+        if scenario in skill_scenarios:
+            for trial in result.trials:
+                expected_variant = ("COMPOSED" if trial.trial_id.startswith("agg") else
+                                    "PROBE" if scenario == "context_discovery" and trial.trial_id.startswith(("inv", "dom")) else "BASE")
+                assert trial.output["variant"] == expected_variant
+            selected = next(trial for trial in result.trials if trial.trial_id == result.selected_trial_id)
+            assert result.selected_candidate_id == selected.candidate_id
+            assert result.output == selected.output
+            assert (root / skill_relative).read_text() == skill_baseline
+            for trial in result.trials:
+                bundle = state / "bundles" / trial.candidate_id.removeprefix("sha256:") / "project"
+                expected = (skill_composed if trial.trial_id.startswith("agg") else
+                            skill_probe if scenario == "context_discovery" and trial.trial_id.startswith(("inv", "dom")) else skill_baseline)
+                assert (bundle / skill_relative).read_text() == expected
+                assert (bundle / "applications/mixed/prompts/business.md").read_text() == "BASE"
+                run_dir = Path(trial.runs[0]["manifest_path"]).parent
+                records = [event["details"]["record"] for line in (run_dir / "audit/runtime_events.jsonl").read_text().splitlines()
+                           if (event := json.loads(line))["kind"] == "tool"]
+                assert len(records) == 1
+                assert records[0]["input"] == {"path": str(bundle / skill_relative)}
+                assert records[0]["tool_name"] == "read" and records[0]["status"] == "completed"
+                assert expected.strip() in json.dumps(records[0]["output"], ensure_ascii=False).replace("\\n", "\n")
+            for role in result.roles:
+                if role["role"] not in ({"general", "domain", "compose"} if scenario in {"resource_discovery", "context_discovery"} else {"compose"}):
+                    continue
+                run_dir = Path(role["receipt"]["run"]["manifest_path"]).parent
+                records = [event["details"]["record"] for line in (run_dir / "audit/runtime_events.jsonl").read_text().splitlines()
+                           if (event := json.loads(line))["kind"] == "tool"]
+                expected = {("read", "completed")}
+                if role["role"] == "compose" or scenario == "context_discovery":
+                    expected.add(("write" if scenario == "skill_edit" else "edit", "completed"))
+                assert {(record["tool_name"], record["status"]) for record in records
+                        if record["input"].get("path") == "context/harness/" + skill_relative} == expected
+                if scenario in {"resource_discovery", "context_discovery"}:
+                    assert all(record["status"] == "completed" for record in records)
+                    assert any(record["tool_name"] == "read" and "BASE-SKILL" in json.dumps(record["output"])
+                               for record in records if record["input"].get("path") == "context/harness/" + skill_relative)
+        if scenario == "context_discovery":
+            import re
 
-            assert evidence_reads == ["index", "retrieve-index", "tail"]
-            assert all(role["status"] == "completed" for role in result.roles)
-            evidence_root = state / "roles/general1.edit1/workspace/harness-evidence"
-            index = json.loads((evidence_root / "index.json").read_text())
-            value = index["files"]["applications/mixed/prompts/large.md"]
-            parts = value["harness_text_parts"]
-            restored = "".join(Path(parts["path_template"].format(index=i)).read_text()
-                               for i in range(parts["count"]))
-            assert restored == (app / "prompts/large.md").read_text()
-            assert hashlib.sha256(restored.encode()).hexdigest() == value["sha256"]
+            for role in result.roles:
+                operation = state / "roles" / role["stage"]
+                workspace = operation / "workspace"
+                mission = (workspace / "MISSION.md").read_text()
+                advertised = re.findall(r"^- `(context/[^`\n]+)`$", mission, re.M)
+                assert advertised == sorted(path.relative_to(workspace).as_posix()
+                    for path in (workspace / "context").rglob("*") if path.is_file())
+                payload = json.loads((operation / "process/input.json").read_text())["payload"]
+                assert mission == (payload["system"] + "\n\n" if payload["system"] else "") + payload["mission"]
+                run_dir = Path(role["receipt"]["run"]["manifest_path"]).parent
+                records = [event["details"]["record"] for line in (run_dir / "audit/runtime_events.jsonl").read_text().splitlines()
+                           if (event := json.loads(line))["kind"] == "tool"]
+                assert all(record["status"] == "completed" for record in records)
+                reads = {record["input"]["path"] for record in records if record["tool_name"] == "read"}
+                assert reads <= set(advertised)
+                if role["role"] in {"compose", "reflect"}:
+                    assert all(any(path.startswith(prefix) for path in reads) for prefix in (
+                        "context/pool/", "context/decisions/", "context/development_feedback/", "context/source/"))
+                if role["role"] == "select":
+                    anonymous = {path.rsplit("/", 1)[-1].removesuffix(".md")
+                                 for path in reads if path.startswith("context/candidates/")}
+                    assert len(anonymous) == k
+                    assert anonymous == {path.rsplit("/", 1)[-1].removesuffix(".json")
+                                         for path in reads if path.startswith("context/development_feedback/")}
+                    assert not any(path.startswith(("context/pool/", "context/decisions/")) for path in advertised)
+                if role["role"] == "reflect":
+                    assert "context/adoption.json" in reads
+                    assert any(path.startswith("context/base_harness/") for path in reads)
+        if scenario == "failed_role_commit_recovery":
+            failed = [role for role in result.roles if role["role"] == "general" and role["status"] == "failed"]
+            assert len(failed) == 1 and failed[0]["receipt"]["usage_observations"]
+            for observed in failed[0]["receipt"]["usage_observations"]:
+                restored = next(item for item in result.usage["observations"]
+                    if (item["invocation_id"], item["attempt_id"]) == (observed["invocation_id"], observed["attempt_id"]))
+                assert restored["total_tokens"] == observed["total_tokens"] == 70
+            if harness.sessions["domain"] > k:
+                assert any(item["operation_id"].startswith("pi.dom1.")
+                    for item in result.usage["unmeasured_operations"])
+            from agentloom.execution.managed_process import recover_owned_process
+            assert all(recover_owned_process(resource).observe()["physical_exit_confirmed"]
+                for resource in (state / "roles").glob("*/process/attempts/*/resource"))
+        if scenario == "role_timeout":
+            retries = sorted((state / "roles").glob("pi.inv1.*"))
+            assert [path.name.rsplit(".", 1)[-1] for path in retries] == ["t1", "t2"]
+            assert all(json.loads(path.read_text())["physical_exit_confirmed"]
+                for path in retries[0].glob("process/attempts/*/cleanup.json"))
+            assert (retries[0] / "workspace/context/harness/applications/mixed/prompts/business.md").read_text() == "FAILED-ATTEMPT-EDIT"
+            assert (retries[1] / "workspace/context/harness/applications/mixed/prompts/business.md").read_text() == "BASE"
+            assert result.usage["unmeasured_operations"]
+        if scenario == "large_evidence":
+            assert any(role == "general" and path.endswith("large.md") for role, _name, path in harness.reads)
             assert all(len(json.dumps(item).encode()) < 512 * 1024 for item in requests)
         assert (state / "stages/publication.json").exists()
-        if scenario == "normal" and mode == "parallel":
-            candidate = json.loads((state / "stages/candidate.final1.json").read_text())["result"]
-            prompts = Path(candidate["root"]) / "project/applications/mixed/prompts"
-            assert (prompts / "business.md").read_text() == "COMPOSED"
-            assert (prompts / "added.md").read_text() == "NEW RESOURCE"
-            assert not (prompts / "obsolete.md").exists()
-        if scenario == "duplicate_edits":
-            for label in ("general1", "domain1", "final1"):
-                candidate = json.loads((state / f"stages/candidate.{label}.json").read_text())["result"]
-                assert candidate["inherited"]
-                assert "each path only once" in candidate["error"]
-        if scenario == "unsafe_tools":
-            for label in ("general1", "domain1", "final1"):
-                candidate = json.loads((state / f"stages/candidate.{label}.json").read_text())["result"]
-                assert candidate["inherited"]
-                assert "unapproved Python tool binding" in candidate["error"]
-            assert all("fixture-key" not in json.dumps(item) for item in requests)
-        if scenario == "development_score":
+        if scenario == "normal":
+            selected = next(trial for trial in result.trials if trial.trial_id == result.selected_trial_id)
+            assert selected.candidate_id != next(trial for trial in result.trials if trial.trial_id == "base1").candidate_id
+        if harness.feedback:
             evaluations = list((state / "stages").glob("evaluation.*.json"))
             assert len(evaluations) == 4 * k
+            assert {"general", "domain", "compose", "reflect"} <= set(harness.seen_feedback)
             assert all(json.loads(path.read_text())["result"]["partition"] == "development-a" for path in evaluations)
+            if scenario == "unscorable":
+                assert all(json.loads(path.read_text())["result"]["status"] == "unscorable" for path in evaluations)
         assert "fixture-key" not in "\n".join(p.read_text() for p in state.rglob("input.json"))
         fact.write_text("LIVE INPUT MUTATION")
         (root / "config/system.yaml").write_text("invalid: [")

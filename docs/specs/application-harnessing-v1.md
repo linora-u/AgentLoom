@@ -2,6 +2,8 @@
 
 规格日期：2026-10-20。状态：已实现并完成本地验收（2026-10-21）；范围、证据和限制见[验收报告](application-harnessing-v1-acceptance.md)。PR 审查与必需 CI 状态以交付记录为准。
 
+2026-10-22 后续重构已单列为 [Harness² 核心复用与新闻接入 v2](application-harnessing-upstream-reuse-v2.md)。该规格要求替换重复方法实现，并同时迁移开发评分扩展；尚未实施。本文保留首版历史合同与验收记录，后续开发中冲突的方法说明以 v2 为准。
+
 本规范沿用 AgentLoom 领域术语、ADR-0001 的持久执行约束、ADR-0003 的受管资源生命周期，以及 ADR-0004 的完整应用改进决定。
 
 ## Problem Statement

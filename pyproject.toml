@@ -115,11 +115,13 @@ include-package-data = true
 
 [tool.setuptools.package-dir]
 agentloom = "src"
+harness2 = "third_party/harness2/harness2"
 
 [tool.setuptools.package-data]
 agentloom = ["**/*.yaml", "**/*.yml", "**/*.j2", "**/*.md", "**/*.scm",
     "runtimes/pi/bridge-v*.schema.json", "runtimes/pi/bridge/*.json", "runtimes/pi/bridge/*.ts",
     "runtimes/pi/bridge/PI-LICENSE.txt"]
+harness2 = ["LICENSE", "UPSTREAM.json", "PATCHES.md"]
 
 [tool.setuptools.exclude-package-data]
 agentloom = ["**/node_modules/**", "**/dist/**", "**/.agentloom-install.*"]
