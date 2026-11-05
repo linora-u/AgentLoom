@@ -41,6 +41,8 @@ let nativeIncomplete = false;
 let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
 let reportTier: ((identity: Obj, attempt: number, tier: string) => void) | undefined;
 let outputCorrection = false;
+let terminalToolRecord: Obj | undefined;
+const terminalSubmission = (): Obj | undefined => terminalToolRecord;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
@@ -195,7 +197,8 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   const identity = (callId: string, nativeParentId?: string | null) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
-  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence, privacy.enabled ? privacy.contains : undefined);
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence, privacy.enabled ? privacy.contains : undefined,
+    record => {if (!terminalToolRecord || terminalToolRecord.status !== "completed") terminalToolRecord = record;});
   const extra = s.extra_completion_params || {};
   const searchMode = subscription ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
@@ -218,6 +221,13 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   enableInstructionOnlyTurns(created);
+  const finishTurn = created.agent.finishTurn;
+  created.agent.finishTurn = async (context, signal) => {
+    const decision = await finishTurn?.(context, signal);
+    // Settle the whole batch, including mixed/duplicate calls, before ending.
+    // Do not abort a successfully committed tool or request a final model turn.
+    return terminalToolRecord ? {action: "end" as const} : decision || undefined;
+  };
   await created.bindExtensions({onError: () => created.agent.abort()});
   configureModel(created, s, p.model.request_headers, async () => {
     await persistence!.save();
@@ -279,6 +289,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
 }
 
 async function run(frame: Frame, abort: AbortController) {
+  terminalToolRecord = undefined;
   const p = frame.payload;
   outputCorrection = false;
   let seq = 0;
@@ -384,7 +395,7 @@ async function run(frame: Frame, abort: AbortController) {
       last = finalMessage();
       return true;
     };
-    while (last?.role === "assistant" && last.stopReason !== "error") {
+    while (!terminalToolRecord && last?.role === "assistant" && last.stopReason !== "error") {
       if (outputValidator && last.stopReason === "length") {
         outputBudgetExhausted = true;
         outputValidationReason = "model output token limit";
@@ -431,19 +442,23 @@ async function run(frame: Frame, abort: AbortController) {
     }
     if (nativeIncomplete || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
-    const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
+    const submitted = terminalSubmission();
+    const state = submitted ? (submitted.status === "completed" ? "success" : "failed") :
+      last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       outputBudgetExhausted ? "max_steps_error" :
       last.stopReason === "length" ? "max_steps_error" : "success";
     const outputText = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
     const citedText = state === "success" && sources.size && !outputValidator ? outputText + "\n\nSources:\n" +
       [...sources].map(([url, title]) => `- [${title.replace(/[\[\]\r\n]/g, " ")}](<${url}>)`).join("\n") : outputText;
-    const output = outputValidator && state === "success" ? JSON.parse(outputText) : citedText;
+    const output = submitted?.status === "completed" ? submitted.output :
+      outputValidator && state === "success" ? JSON.parse(outputText) : citedText;
     if (state === "success") await persistence!.save("complete");
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? providerError(last?.role === "assistant" ? last.errorMessage : undefined) :
+      error: state === "failed" ? (submitted ? {category: "tool", message: submitted.error?.message || "Terminal tool failed", retryable: false}
+        : providerError(last?.role === "assistant" ? last.errorMessage : undefined)) :
         outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch (error) {
     const interrupted = abort.signal.aborted;

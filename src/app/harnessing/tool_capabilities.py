@@ -13,7 +13,6 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import yaml
-
 from agentloom.config.yaml_loader import UniqueKeySafeLoader
 
 
@@ -42,6 +41,11 @@ def _tools(source: str, document: Mapping):
     for tool in tools:
         if not isinstance(tool, Mapping) or not isinstance(tool.get("name"), str) or not tool["name"].strip():
             raise ValueError(f"Invalid tool capability declaration: {source}")
+        if "factory" in tool:
+            factory = tool["factory"]
+            if not isinstance(factory, Mapping) or set(factory) != {"module", "function"} or set(tool) != {"name", "factory"}:
+                raise ValueError(f"Invalid tool factory capability declaration: {source}")
+            tool = {**tool, **factory}
         if "module" in tool or "function" in tool:
             if not all(isinstance(tool.get(key), str) and tool[key].strip() for key in ("module", "function")):
                 raise ValueError(f"Custom tool requires an exact module/function binding: {source}")

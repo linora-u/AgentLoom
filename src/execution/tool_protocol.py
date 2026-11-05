@@ -12,6 +12,9 @@ from agentloom.self_learning.redaction import redact_value
 TOOL_CALL_RAW_KEY = "agentloom_tool_call"
 TOOL_RESULT_RAW_KEY = "agentloom_tool_result"
 MODEL_OUTPUT_METADATA_KEY = "agentloom_model_output"
+# Trusted gateways may end an invocation after a settled tool batch. This is
+# host control metadata, never a model argument or a tool's returned JSON.
+TERMINAL_TOOL_METADATA_KEY = "agentloom_terminal"
 
 ToolCallStatus = Literal[
     "completed",

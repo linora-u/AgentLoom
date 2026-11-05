@@ -164,6 +164,15 @@ class AgentConfigNormalizer:
             if tool_name in seen_names:
                 raise ValueError(f"Duplicate tool name: {tool_name}")
             seen_names.add(tool_name)
+            if "factory" in tool_config:
+                factory = tool_config["factory"]
+                if not isinstance(factory, dict) or set(factory) != {"module", "function"}:
+                    raise ValueError(f"Tool '{tool_name}' factory must contain exactly module and function")
+                if any(not isinstance(factory[key], str) or not factory[key].strip() for key in factory):
+                    raise ValueError(f"Tool '{tool_name}' factory references must be nonempty strings")
+                if set(tool_config) != {"name", "factory"}:
+                    raise ValueError(f"Tool '{tool_name}' factory cannot be combined with function references or fixed_args")
+                continue
             if "module" in tool_config or "function" in tool_config:
                 if "module" not in tool_config or "function" not in tool_config:
                     raise ValueError(
@@ -214,7 +223,7 @@ class AgentConfigNormalizer:
             resolve_toolsets(raw_toolsets)
 
         for tool_config in config.get("tools") or []:
-            if "module" in tool_config and "function" in tool_config:
+            if "factory" in tool_config or "module" in tool_config and "function" in tool_config:
                 continue
             spec = get_tool_spec(tool_config["name"])
             fixed_args = dict(tool_config.get("fixed_args") or {})

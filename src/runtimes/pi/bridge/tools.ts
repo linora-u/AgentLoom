@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, type ExtensionFactory, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { BridgeToolCoordinator, type BridgeInvoke, type Identity, type Obj } from "./tool-coordinator.js";
 
-export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, identity: Identity, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void, persistence: SessionPersistence, containsPrivate?: (value: unknown) => boolean) {
+export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, identity: Identity, canUseTools: () => boolean, serialTools: string[], agentDir: string, failRun: () => void, persistence: SessionPersistence, containsPrivate?: (value: unknown) => boolean, onTerminal?: (record: Obj) => void) {
   const context = new BridgeToolCoordinator({manifest, cwd, invoke, identity, canUseTools, serialTools,
     persistence});
   const tools: ToolDefinition<any, any>[] = manifest.map(entry => {
@@ -27,6 +27,13 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
           } catch (error) {failRun(); throw error;}
           const record = completed.record;
           if (record.error?.kind === "credential_echo") failRun();
+          if (record.metadata?.agentloom_terminal === true) {
+            onTerminal?.(record);
+            return {content: [{type: "text" as const, text: record.status === "completed"
+              ? (typeof completed.model_output === "string" ? completed.model_output : JSON.stringify(completed.model_output))
+              : record.model_content || "AgentLoom tool failed"}],
+              details: {agentloom: record}, isError: record.status !== "completed", terminate: true};
+          }
           if (record.status !== "completed") throw new Error(record.model_content || "AgentLoom tool failed");
           return {content: [{type: "text" as const, text: typeof completed.model_output === "string" ? completed.model_output : JSON.stringify(completed.model_output)}],
             details: {agentloom: record}};
@@ -120,7 +127,11 @@ export function nativeTools(manifest: Obj[], cwd: string, invoke: BridgeInvoke, 
       await persistence.save();
       const permit = context.permit(key);
       if (permit?.platform) {
-        if (permit.rejection) return {block: true, reason: permit.rejection.model_content || "AgentLoom preparation rejected"};
+        if (permit.rejection) {
+          const terminal = permit.rejection.metadata?.agentloom_terminal === true;
+          if (terminal) onTerminal?.(permit.rejection);
+          return {block: true, reason: permit.rejection.model_content || "AgentLoom preparation rejected", terminate: terminal};
+        }
         if (isDeepStrictEqual(permit.arguments, input)) return;
       }
       if (!permit?.authorization || permit.authorization.tool.visible_name !== toolName ||
