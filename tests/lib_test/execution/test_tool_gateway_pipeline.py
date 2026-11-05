@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Lock
 from unittest.mock import patch
 
@@ -22,6 +22,7 @@ from agentloom.execution.trace import (
     ExplicitExecutionContext,
     bind_explicit_execution_context,
 )
+from jsonschema import Draft202012Validator
 
 
 def _binding(name: str, forward, *, schema=None) -> ToolBinding:
@@ -178,6 +179,157 @@ def test_gateway_blocks_unknown_and_invalid_arguments_with_same_id() -> None:
         "blocked",
         "final_decode",
     )
+
+
+@pytest.mark.parametrize(
+    ("schema_type", "value"),
+    [
+        ("object", '{"label": "valid object"}'),
+        ("array", '[{"label": "valid array"}]'),
+        ("object", '{"P1": {"prosody": "first", "prosody": "last"}}'),
+        ("array", '[{"caption": "first", "caption": "last"}]'),
+    ],
+    ids=["object", "array", "object-duplicate-key", "array-duplicate-key"],
+)
+def test_gateway_explicit_validator_rejects_json_container_strings(
+    schema_type: str, value: str,
+) -> None:
+    effects: list[object] = []
+    binding = _binding(
+        "submit", lambda value: effects.append(value),
+        schema={"value": {"type": schema_type}},
+    )
+    validator = Draft202012Validator(dict(binding.definition.parameters))
+    binding = replace(binding, input_validator=validator.validate)
+    arguments = {"value": value}
+    assert not validator.is_valid(arguments)
+
+    run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    record = _invoke(
+        AgentLoomToolGateway([binding]), run,
+        name="submit", arguments=arguments,
+    )
+
+    assert (record.status, record.stage) == ("blocked", "final_decode")
+    assert record.input == arguments
+    assert effects == []
+
+
+@pytest.mark.parametrize(
+    ("schema_type", "value"),
+    [
+        ("integer", "42"),
+        ("number", "1.2"),
+        ("boolean", "false"),
+        ("object", '{"label": "value"}'),
+        ("array", '[{"label": "value"}]'),
+    ],
+)
+def test_gateway_explicit_validator_rejects_hook_supplied_strings(
+    schema_type: str, value: str,
+) -> None:
+    effects: list[object] = []
+    binding = _binding(
+        "submit", lambda value: effects.append(value),
+        schema={"value": {"type": schema_type}},
+    )
+    binding = replace(
+        binding,
+        input_validator=Draft202012Validator(
+            dict(binding.definition.parameters),
+        ).validate,
+    )
+    arguments = {"value": value}
+    run = HookRun(
+        HookPlan(
+            (
+                HookHandler(
+                    HookEvent.PRE_TOOL_USE,
+                    "submit",
+                    lambda _context: HookResult(
+                        decision="modify", modified_input=arguments,
+                    ),
+                ),
+            ),
+        ),
+        local_run_id="local",
+        root_run_id="root",
+    )
+
+    record = _invoke(
+        AgentLoomToolGateway([binding]), run,
+        name="submit", arguments={"value": "replace via hook"},
+    )
+
+    assert (record.status, record.stage) == ("blocked", "final_decode")
+    assert record.input == arguments
+    assert effects == []
+
+
+@pytest.mark.parametrize(
+    ("schema_type", "value"),
+    [
+        ("integer", 42),
+        ("number", 1.2),
+        ("boolean", False),
+        ("object", {"label": "value"}),
+        ("array", [{"label": "value"}]),
+    ],
+)
+def test_gateway_explicit_validator_accepts_typed_values(
+    schema_type: str, value: object,
+) -> None:
+    binding = _binding(
+        "submit", lambda value: value,
+        schema={"value": {"type": schema_type}},
+    )
+    binding = replace(
+        binding,
+        input_validator=Draft202012Validator(
+            dict(binding.definition.parameters),
+        ).validate,
+    )
+    run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+
+    record = _invoke(
+        AgentLoomToolGateway([binding]), run,
+        name="submit", arguments={"value": value},
+    )
+
+    assert record.status == "completed"
+    assert record.input == {"value": value}
+    assert record.output == value
+    assert type(record.output) is type(value)
+
+
+@pytest.mark.parametrize(
+    ("schema_type", "value", "expected"),
+    [
+        ("integer", "42", 42),
+        ("number", "1.2", 1.2),
+        ("boolean", "false", False),
+        ("object", '{"label": "value"}', {"label": "value"}),
+        ("array", '[{"label": "value"}]', [{"label": "value"}]),
+    ],
+)
+def test_gateway_plain_tool_preserves_string_coercion(
+    schema_type: str, value: str, expected: object,
+) -> None:
+    binding = _binding(
+        "submit", lambda value: value,
+        schema={"value": {"type": schema_type}},
+    )
+    run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+
+    record = _invoke(
+        AgentLoomToolGateway([binding]), run,
+        name="submit", arguments={"value": value},
+    )
+
+    assert record.status == "completed"
+    assert record.input == {"value": expected}
+    assert record.output == expected
+    assert type(record.output) is type(expected)
 
 
 def test_gateway_rejects_duplicate_definitions_and_empty_call_id() -> None:

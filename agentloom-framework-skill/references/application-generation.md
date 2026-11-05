@@ -28,6 +28,8 @@ applications/<app_name>/
 
 模型路由、密钥、温度、重试、限流等写在项目或所属应用的 `config/model.yaml`，Agent 通过 `model_type` 选择。框架自动按模型名整条覆盖；应用未覆盖的项目模型仍可使用。
 
+创建目录前先执行 [`reuse-first.md`](reuse-first.md) 的复用门禁。Application 入口默认调用公开接口，不创建 `YamlConfiguredAgent` 子类、不覆盖 Tool Gateway、不包装 PI/smolagents Runtime，也不维护第二套 YAML 或模型配置加载。
+
 ## 文件生成顺序
 
 1. `workflows/<app_name>_agent.yaml`
@@ -54,6 +56,17 @@ Worker YAML 一律不写 `goal`。
 ```
 
 `<app_name>_app.py` 不是 Application 必需文件。只有当应用需要预处理/后处理、批量循环或 `file_logging`/`resume` 包装时，才创建入口脚本。任务只由 Agent YAML 的 `task` 提供。
+
+需要程序传入结构化 Worker 数据时，入口使用 `Application.open()` 与 Worker `invoke/map`。入口负责业务输入和结果，不负责创建 Agent、加载 YAML Tool、发送模型请求或实现运行生命周期：
+
+```python
+from agentloom.app.application import Application
+from agentloom.execution.concurrency.batch_models import WorkItem
+
+with Application.open("applications/<app_name>") as app:
+    worker = app.worker("workflows/worker_agents/<worker>.yaml")
+    outcome = worker.invoke(WorkItem("item-1", {"request": "..."}))
+```
 
 ```python
 #!/usr/bin/env python3
@@ -93,6 +106,9 @@ if __name__ == "__main__":
 - 函数名就是 YAML 中的 `function`。
 - docstring 是工具说明来源，必须写清输入输出。
 - 不要让 LLM 做文件遍历、CSV 解析、JSON 校验、批量循环、缓存写入这类确定性工作。
+- 普通函数的固定 Schema 用 `module/function`。Schema 需要依据本次 Worker 输入生成时，使用 YAML Tool factory 返回 `ToolBinding`，通过 `current_tool_factory_context()` 读取输入；不要为此创建 Agent 子类或覆盖 `_build_tool_gateway()`。
+- Tool 成功后应立即结束当前 Agent 时，设置 `ToolBinding.terminal_on_success=True`；不要用 Application 自定义 Gateway 改写终结语义。
+- Tool factory 只生成本次调用的定义和绑定。模型调用、错误投影、重试预算、PI 会话和运行收尾仍由 AgentLoom 管理。
 
 ## Skill 生成原则
 

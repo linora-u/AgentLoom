@@ -11,6 +11,17 @@
 | 输出 | 决定 README、产物路径、最终回答 | 不清楚就问“最终要看到什么” |
 | 验收标准 | 决定验证命令 | 没有验收标准就先定义最小可验证标准 |
 
+## 先过复用门禁
+
+需求明确后，先读 [`reuse-first.md`](reuse-first.md)，把每项能力映射到现有接口。扫描顺序固定为：
+
+1. Agent YAML 与 `config/model.yaml`、`config/system.yaml` 能否声明。
+2. `Application.open()`、Worker `invoke/map`、`worker_agents` 能否编排。
+3. 普通 Tool、Tool factory、`ToolBinding`、Hook 或 Skill 能否承载。
+4. 只有前三项都不能表达需求时，才把它列为框架缺口。
+
+Application 需要一个专业保存 Tool，不等于需要自定义 Agent 类或 Tool Gateway；运行时 Tool Schema 会随输入变化时，使用 Tool factory。模型配置格式不同但语义可由 `model.yaml` 表达时，迁移到标准配置，不在 Application 中维护第二套加载器。
+
 ## 路由表
 
 | 用户诉求 | 框架动作 | 落点 |
@@ -63,9 +74,11 @@ Skill 脚本应复用它；不要各自解析 YAML、维护字段白名单或推
 ## 功能落地顺序
 
 1. 确认目标和验收标准。
-2. 找相似现有 Application、Skill、Hook 或框架模块。
-3. 画出职责边界：Python Tool 做确定性，Agent 做推理。
-4. 选择单 Agent 或 Supervisor + Worker。
-5. 写对应文件：Application、Tool、Skill、Hook、框架源码或文档。
-6. 写 README/docs 的运行与验证记录。
-7. 运行校验，失败则修根因。
+2. 完成需求—现有接口映射，记录确实存在的框架缺口。
+3. 找相似现有 Application、Skill、Hook 或框架模块。
+4. 画出职责边界：Python Tool 做确定性，Agent 做推理，AgentLoom 管 YAML、模型、Runtime、Gateway 和生命周期。
+5. 选择单 Agent 或 Supervisor + Worker。
+6. 写对应文件：Application、Tool、Skill、Hook、框架源码或文档。
+7. 删除被新接口替代的临时 Adapter 和重复路径。
+8. 写 README/docs 的运行与验证记录。
+9. 运行校验，失败则修根因。

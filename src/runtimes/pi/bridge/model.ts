@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import * as zlib from "node:zlib";
 import { createAssistantMessageEventStream, type AssistantMessage, type Model, type Api } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { decodeJson, DuplicateJsonKeyError } from "./protocol.js";
 
 type Obj = Record<string, any>;
 
@@ -138,6 +139,17 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         source: budgetSource, input_token_reserve: settings.input_token_reserve ?? null,
         input_reserve_source: settings.input_reserve_source ?? null};
       let rawReason: string | undefined;
+      let argumentError: string | undefined;
+      const checkArguments = (value: unknown) => {
+        if (argumentError || typeof value !== "string") return;
+        try {decodeJson(value);} catch (error) {
+          if (error instanceof DuplicateJsonKeyError)
+            argumentError = containsPrivate(error.message) ? "Duplicate JSON key in tool arguments" : error.message;
+        }
+      };
+      const checkToolItem = (item: Obj | undefined) => {
+        if (item?.type === "function_call") checkArguments(item.arguments);
+      };
       const {reasoning_effort: reasoningEffort, reasoning_summary: reasoningSummary,
         web_search: _search, service_tier: _tier,
         extra_body: extraBody, ...samplingParams} = settings.extra_completion_params || {};
@@ -180,6 +192,10 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         },
         onProviderStreamEvent: async (data, selectedModel) => {
           const raw = data as Obj;
+          if (raw.type === "response.function_call_arguments.done") checkArguments(raw.arguments);
+          else if (raw.type === "response.output_item.done") checkToolItem(raw.item);
+          else if (["response.completed", "response.incomplete", "response.failed"].includes(raw.type))
+            for (const item of raw.response?.output || []) checkToolItem(item);
           const reason = raw.response?.incomplete_details?.reason ?? raw.choices?.[0]?.finish_reason;
           if (typeof reason === "string") rawReason = reason;
           if (subscription && ["response.output_item.done", "response.completed",
@@ -189,6 +205,16 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         },
       });
       const message = await stream.result();
+      // The SDK has decoded tool arguments, but its stream has not reached the
+      // Agent yet. Reject duplicate raw JSON keys before any tool can execute.
+      if (argumentError) {
+        const rejected = failedStream(model, false, argumentError, safeUsage(message.usage));
+        if (requestCaptured) {
+          responseAttempted = true;
+          await capture(permit.identity, attempt, "response", await rejected.result());
+        }
+        return rejected;
+      }
       const evidence = subscription ? searchEvidence(events) : undefined;
       // This wrapper has not returned its stream to the SDK yet. Reject before
       // model traces, tools, search evidence and native session persistence.

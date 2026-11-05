@@ -42,6 +42,7 @@ print(scan_app_structure('applications/<app_name>'))
   `input_schema` / `output_schema`。
 - `tools` 是否与 YAML `task` 动作匹配。
 - `agent_runtime`、`model_type`、所选基座的 `runtime_options` 是否合理。
+- `runtime_options.max_steps` 是否为严格正整数；PI 还需区分结束尝试预算与总步数。业务 Tool 是否误放轮次计数、修正次数或 Hook 步号控制。
 - Agent YAML 是否误写 LLM 参数、无效 `runtime_options.planning_interval` / `runtime_options.todo_mode`、非字符串 `runtime_options.prompt_template_path`、错误 `fixed_args` 或 `mcp_servers`。
 - Agent YAML 不得配置已退休的 `concurrency` / `worker_execution`；Worker policy 只配置在项目/Application system.yaml，所有 concurrency 值都为严格正整数。
 - 生成器不得输出旧顶层 smol 参数：运行时会静默忽略，不会替作者转换或拒绝。`todo_mode` 的 `"on"` / `"off"` 必须加引号。
@@ -97,6 +98,21 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 | ContextEngine / 压缩 | `applications/test_demo/workflows/test_tool_truncation_agent.yaml` 与 ContextRef Application 测试 |
 | shell 权限 / audit | `applications/test_shell_audit/*`、`applications/test_shell_allowlist_matrix/*` |
 | 多 Worker 调度 | `applications/mixed_runtime_validation`、`applications/test_demo/workflows/test_checkpoint_complex_supervisor.yaml` |
+| PI 最大步数 / 停止 / 修正预算 | `tests/pi_test/test_step_budget_application.py`，及受影响业务 Agent 的真实保存任务 |
+
+### PI 步数验证
+
+局部边界测试使用已安装的 PI SDK 和本地 HTTP 模型桩：
+
+```bash
+.venv/bin/python -m pytest tests/pi_test/test_step_budget_application.py -q
+```
+
+改动框架步数机制时，还需通过原生 Application 跑真实 LLM。使用受影响应用或隔离的验证 YAML，分别触发预算耗尽、同会话工具错误修正和提前成功；模型来自项目或应用的 `config/model.yaml`，按用户指定配置准备，不另造加载器。输出使用新目录；工具序列和整数参数明确标为测试资料。仓库中的模型桩测试不依赖未提交的本地应用。
+
+验收检查：上限为 2 时不发第 3 个对话请求；最后一步成功和提前保存仍正常交付；错误修正、结构化输出纠正和 Stop 继续不重置预算；同轮多个 Tool 计一步；独立 Worker 预算不串用；恢复保留已记录步数；原生 compact 不占对话步数。核对实际 HTTP 请求、response_id、Tool 结果和终结事件，预算耗尽必须为 `max_steps_error`，不能将正常保存误记为失败。
+
+静默应用没有 runtime log 时，按配置确认日志关闭，读取同一 Run 的 manifest、runtime events 和显式验证回执。修改桥接源码后先通过官方 `loom runtime install pi` 重建锁定 SDK，源码稳定后再开始回归，避免将构建指纹过期误判为业务失败。
 
 `applications/architecture_contract_validation` 通过原生结构化工具调用验证嵌套 Application 与拒绝场景。保留九类具名回归，包括区分空购物车与零金额非空购物车的 `zero_price`；50 项独立 oracle 不随生成结果放宽。最终 `test_report` 必须是最后一次 verifier 的真实 pytest 报告相对路径，写入前检查类型、当前身份和 JSON/JUnit/调用证据。多次调用同名 Worker 时，按当前任务的 call index、开始/完成事件和实际输入输出关联，并按 runtime 的 SHA-256 前缀规则重算 checkpoint 中 task_input 的哈希，不能只比较几个哈希字段；允许验证失败后的修复循环，不能固定选第一次调用，也不能用未来或其他任务的结果补齐证据。
 
@@ -118,7 +134,7 @@ find applications/<app_name>/agent_tools -name '*.py' -print0 2>/dev/null | xarg
 export AGENTLOOM_RUNTIME_ROOT=/tmp/agentloom-runtime-checkpoint
 ```
 
-只有在专门验证配置解析时，才在隔离 checkout 的项目根 `config/system.yaml` 修改 `runtime.root_dir`。`runtime`/`logging` 仍是 global-only，Application overlay 不能替代全局配置。执行前清理 `/tmp/agentloom-runtime-checkpoint`，验收结束后取消环境变量或恢复隔离 checkout 的配置。
+只有在专门验证配置解析时，才在隔离 checkout 的项目根 `config/system.yaml` 修改 `runtime.root_dir`。存储根和保留策略仍只允许全局配置；Application overlay 仅可覆盖 `logging` 和 `runtime.trace`。执行前清理 `/tmp/agentloom-runtime-checkpoint`，验收结束后取消环境变量或恢复隔离 checkout 的配置。
 
 必须验证的证据：
 

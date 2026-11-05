@@ -41,6 +41,11 @@ let nativeIncomplete = false;
 let reportSearch: ((identity: Obj, attempt: number, result: SearchEvidence) => void) | undefined;
 let reportTier: ((identity: Obj, attempt: number, tier: string) => void) | undefined;
 let outputCorrection = false;
+let terminalToolRecord: Obj | undefined;
+let stepLimit = 80;
+let completedSteps = 0;
+let stepBudgetExhausted = false;
+const terminalSubmission = (): Obj | undefined => terminalToolRecord;
 const seen = new Set<string>();
 const callbacks = new Map<string, {runId: string | null; method: string; resolve: (value: Obj) => void; reject: (error: Error) => void}>();
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");
@@ -175,7 +180,7 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     if (chatgpt && auth.source !== "OAuth")
       throw new Error("Pi ChatGPT subscription login is missing; authorize the OpenAI provider in Pi");
   }
-  const {max_stop_attempts: _maxStopAttempts, ...nativeSettings} = p.runtime_options;
+  const {max_stop_attempts: _maxStopAttempts, max_steps: _maxSteps, ...nativeSettings} = p.runtime_options;
   const settings = SettingsManager.inMemory({
     retry: {maxRetries: s.num_retries, baseDelayMs: s.retry_delay * 1000,
       maxAgentDelayMs: s.max_retry_delay * 1000,
@@ -195,7 +200,8 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
   const identity = (callId: string, nativeParentId?: string | null) => ({application_id: current!.frame.payload.application_id,
     task_id: current!.frame.payload.task_id, run_id: current!.frame.run_id, instance_id: instance, call_id: callId,
     native_session_id: manager.getSessionId(), native_parent_id: nativeParentId === undefined ? manager.getLeafId() : nativeParentId});
-  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence, privacy.enabled ? privacy.contains : undefined);
+  const selected = nativeTools(p.tools, p.cwd, invoke, identity, () => !finalDelivery, p.serial_tools, agentDir, () => {nativeIncomplete = true; session?.agent.abort();}, persistence, privacy.enabled ? privacy.contains : undefined,
+    record => {if (!terminalToolRecord || terminalToolRecord.status !== "completed") terminalToolRecord = record;});
   const extra = s.extra_completion_params || {};
   const searchMode = subscription ? (extra.web_search || "auto") : "off";
   const loader = new DefaultResourceLoader({cwd: p.cwd, agentDir, settingsManager: settings,
@@ -218,6 +224,34 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     noTools: "all", customTools: selected.tools,
     resourceLoader: loader, settingsManager: settings, sessionManager: manager});
   enableInstructionOnlyTurns(created);
+  const finishTurn = created.agent.finishTurn;
+  const prepareRequest = created.agent.prepareRequest;
+  created.agent.prepareRequest = async (context, signal) => {
+    // Conversational requests only: compaction has its own native model budget.
+    // This also covers SDK retry/continuation paths that skip finishTurn's end.
+    if (completedSteps >= stepLimit) {
+      stepBudgetExhausted = true;
+      throw new Error("PI runtime_options.max_steps exhausted before task completion");
+    }
+    return (await prepareRequest?.(context, signal)) || undefined;
+  };
+  created.agent.finishTurn = async (context, signal) => {
+    const decision = await finishTurn?.(context, signal);
+    // Settle the whole batch, including mixed/duplicate calls, before ending.
+    // Do not abort a successfully committed tool or request a final model turn.
+    if (terminalToolRecord) return {action: "end" as const};
+    // A natural final answer (including one on the last step) is still success.
+    // Preserve SDK error/length recovery and only end work that needs a next turn.
+    if (decision?.action === "end" ||
+        ["error", "aborted", "length"].includes(context.message.stopReason)) return decision || undefined;
+    if (completedSteps >= stepLimit && (decision?.action === "continue" ||
+        context.message.content.some(block => block.type === "toolCall") ||
+        created.agent.hasQueuedMessages())) {
+      stepBudgetExhausted = true;
+      return {action: "end" as const};
+    }
+    return decision || undefined;
+  };
   await created.bindExtensions({onError: () => created.agent.abort()});
   configureModel(created, s, p.model.request_headers, async () => {
     await persistence!.save();
@@ -279,7 +313,11 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
 }
 
 async function run(frame: Frame, abort: AbortController) {
+  terminalToolRecord = undefined;
   const p = frame.payload;
+  stepLimit = p.runtime_options.max_steps ?? 80;
+  completedSteps = 0;
+  stepBudgetExhausted = false;
   outputCorrection = false;
   let seq = 0;
   const event = (kind: string, payload: Obj) => write({version: 2, kind: "event", instance_id: frame.instance_id,
@@ -326,6 +364,7 @@ async function run(frame: Frame, abort: AbortController) {
       if (e.type === "auto_retry_start") event("model", {phase: "retry", attempt: e.attempt});
       if (e.type === "message_start" && e.message.role === "assistant") event("model", {phase: "started"});
       if (e.type === "message_end" && e.message.role === "assistant") {
+        completedSteps += 1;
         lastAssistant = e.message;
         if (e.message.content.some(block => block.type === "toolCall" && !p.tools.some((tool: Obj) => tool.visible_name === block.name))) {
           unavailableToolTurns += 1;
@@ -341,7 +380,7 @@ async function run(frame: Frame, abort: AbortController) {
         usage.cached_input_tokens += u.cacheRead;
         // SDK reasoning is an optional subset of output, never another total.
         usage.reasoning_tokens += u.reasoning ?? 0;
-        event("model", {phase: "completed", stop_reason: e.message.stopReason});
+        event("model", {phase: "completed", stop_reason: e.message.stopReason, step: completedSteps});
       }
     });
     const trigger = async (content: string | null, correction = false) => {
@@ -373,6 +412,10 @@ async function run(frame: Frame, abort: AbortController) {
     let last = finalMessage();
     let outputValidationReason = "invalid structured output";
     const correctOutput = async (message: string, disableTools = true): Promise<boolean> => {
+      if (completedSteps >= stepLimit) {
+        stepBudgetExhausted = true;
+        return false;
+      }
       if (disableTools) outputCorrection = true;
       terminalRejections += 1;
       if (last?.role === "assistant" && (last.stopReason === "length" ||
@@ -384,7 +427,7 @@ async function run(frame: Frame, abort: AbortController) {
       last = finalMessage();
       return true;
     };
-    while (last?.role === "assistant" && last.stopReason !== "error") {
+    while (!terminalToolRecord && !stepBudgetExhausted && last?.role === "assistant" && last.stopReason !== "error") {
       if (outputValidator && last.stopReason === "length") {
         outputBudgetExhausted = true;
         outputValidationReason = "model output token limit";
@@ -431,19 +474,25 @@ async function run(frame: Frame, abort: AbortController) {
     }
     if (nativeIncomplete || unavailableTool || abort.signal.aborted ||
         (last?.role === "assistant" && last.stopReason === "aborted")) throw new Error("Interrupted");
-    const state = last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
+    const submitted = terminalSubmission();
+    const state = submitted ? (submitted.status === "completed" ? "success" : "failed") :
+      stepBudgetExhausted ? "max_steps_error" :
+      last?.role !== "assistant" || last.stopReason === "error" ? "failed" :
       outputBudgetExhausted ? "max_steps_error" :
       last.stopReason === "length" ? "max_steps_error" : "success";
     const outputText = last?.role === "assistant" ? last.content.filter((b: Obj) => b.type === "text").map((b: Obj) => b.text).join("") : "";
     const citedText = state === "success" && sources.size && !outputValidator ? outputText + "\n\nSources:\n" +
       [...sources].map(([url, title]) => `- [${title.replace(/[\[\]\r\n]/g, " ")}](<${url}>)`).join("\n") : outputText;
-    const output = outputValidator && state === "success" ? JSON.parse(outputText) : citedText;
+    const output = stepBudgetExhausted ? null : submitted?.status === "completed" ? submitted.output :
+      outputValidator && state === "success" ? JSON.parse(outputText) : citedText;
     if (state === "success") await persistence!.save("complete");
     event("usage", usage);
     // Host emits the public terminal event only after its Stop gate.
     response(frame, {method: "run", state, terminal_rejections: terminalRejections,
       output, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: state === "failed" ? providerError(last?.role === "assistant" ? last.errorMessage : undefined) :
+      error: stepBudgetExhausted ? {category: "max_steps", message: "PI runtime_options.max_steps exhausted before task completion", retryable: false} :
+        state === "failed" ? (submitted ? {category: "tool", message: submitted.error?.message || "Terminal tool failed", retryable: false}
+        : providerError(last?.role === "assistant" ? last.errorMessage : undefined)) :
         outputBudgetExhausted ? {category: "output_validation", message: `Agent exhausted its execution budget after ${outputValidationReason}`, retryable: true} : null});
   } catch (error) {
     const interrupted = abort.signal.aborted;
@@ -451,9 +500,9 @@ async function run(frame: Frame, abort: AbortController) {
     const safeDetail = detail.startsWith("Pi Codex ") || detail.startsWith("Pi ChatGPT ") ||
       detail.startsWith("Incompatible Pi native checkpoint")
       ? detail.slice(0, 240) : "";
-    response(frame, {method: "run", state: interrupted ? "interrupted" : "failed", terminal_rejections: terminalRejections,
+    response(frame, {method: "run", state: interrupted ? "interrupted" : stepBudgetExhausted ? "max_steps_error" : "failed", terminal_rejections: terminalRejections,
       output: null, usage, artifacts: [], checkpoint: persistence?.latest ?? null,
-      error: {category: interrupted ? "interrupted" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : safeDetail || "Pi model request failed", retryable: false}});
+      error: {category: interrupted ? "interrupted" : stepBudgetExhausted ? "max_steps" : unavailableTool ? "output_validation" : nativeIncomplete ? "tool" : "provider", message: stepBudgetExhausted && !interrupted ? "PI runtime_options.max_steps exhausted before task completion" : unavailableTool ? "Pi model repeatedly requested an unavailable tool" : nativeIncomplete ? "Pi native execution could not be durably completed" : interrupted ? "Pi run interrupted" : safeDetail || "Pi model request failed", retryable: false}});
   } finally {
     rejectCallbacks();
     unsubscribe?.();

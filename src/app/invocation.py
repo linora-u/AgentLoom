@@ -399,7 +399,10 @@ class AgentInvocation:
 
         try:
             self._phase = "runtime_creation"
-            runtime_agent = owner.build_runtime()
+            from agentloom.app.tool_factory import bind_tool_factory_context
+
+            with bind_tool_factory_context(self.additional_args, agent_name=owner.name):
+                runtime_agent = owner.build_runtime()
             self._phase = "invocation"
             owner._bind_hook_message_sink(runtime_agent)
             ensure_workspace_mounted_once()

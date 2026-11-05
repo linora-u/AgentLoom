@@ -586,6 +586,18 @@ class YamlAgentFactory:
 
         for tool_config in raw_tools:
             tool_name = tool_config.get('name')
+            if "factory" in tool_config:
+                from agentloom.app.tool_factory import current_tool_factory_context
+
+                reference = tool_config["factory"]
+                factory_function = load_function(reference["module"], reference["function"])
+                binding = factory_function(current_tool_factory_context())
+                if not isinstance(binding, ToolBinding):
+                    raise TypeError(f"Tool factory '{tool_name}' must return a ToolBinding")
+                if binding.definition.name != tool_name:
+                    raise ValueError(f"Tool factory '{tool_name}' returned a different tool name")
+                _append_tool(binding, explicit_name=tool_name)
+                continue
             fixed_args = _get_fixed_tool_args(tool_config)
 
             # Check whether this is a dynamically loaded tool

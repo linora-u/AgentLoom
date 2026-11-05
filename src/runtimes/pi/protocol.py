@@ -152,7 +152,7 @@ RequestPayload = Annotated[
 class BridgeError(WireValue):
     category: Literal[
         "protocol", "configuration", "unsupported_capability", "provider", "tool",
-        "output_validation", "interrupted", "internal"
+        "output_validation", "max_steps", "interrupted", "internal"
     ]
     message: str
     retryable: bool = False

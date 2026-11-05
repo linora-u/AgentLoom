@@ -5,6 +5,7 @@ from agentloom.execution.agent_runtime import RuntimeCapabilities, RuntimeModelS
 
 SDK_VERSION = "1.0.0"
 BRIDGE_VERSION = 1
+DEFAULT_MAX_STEPS = 80
 CAPABILITIES = RuntimeCapabilities(
     True,
     True,
@@ -17,10 +18,13 @@ CAPABILITIES = RuntimeCapabilities(
 
 
 def validate_options(options: Mapping) -> None:
-    # The Stop gate belongs to AgentLoom; all SDK settings pass through unchanged.
+    # Execution and Stop budgets belong to AgentLoom, not the SDK Settings.
     value = options.get("max_stop_attempts", 3)
     if type(value) is not int or not 1 <= value <= 100:
         raise ValueError("pi runtime_options.max_stop_attempts must be an integer from 1 to 100")
+    value = options.get("max_steps", DEFAULT_MAX_STEPS)
+    if type(value) is not int or value < 1:
+        raise ValueError("pi runtime_options.max_steps must be a positive integer")
 
 
 def validate_model(model: RuntimeModelSelection) -> None:

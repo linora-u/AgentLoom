@@ -83,7 +83,7 @@ shell_settings:
 
 ## 必跑真实验证
 
-修改 shell 权限、审计、sandbox、路径安全、后台任务或 stall 逻辑时，不能只跑单测。至少选择相关真实 Application；在隔离 checkout 的全局 `config/system.yaml` 中把 `runtime.root_dir` 指向临时目录，例如 `/tmp/agentloom-runtime-shell-security`。`runtime` 是 global-only，不能用 Application overlay 代替。
+修改 shell 权限、审计、sandbox、路径安全、后台任务或 stall 逻辑时，不能只跑单测。至少选择相关真实 Application；在隔离 checkout 的全局 `config/system.yaml` 中把 `runtime.root_dir` 指向临时目录，例如 `/tmp/agentloom-runtime-shell-security`。存储根和保留策略仍只允许全局配置；Application overlay 仅可覆盖 `logging` 和 `runtime.trace`。
 
 文件日志默认开启且有界；只有验证关闭文件日志时才加 `--no-file-log`，不存在 `--log-to-file`。
 

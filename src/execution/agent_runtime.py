@@ -74,6 +74,7 @@ type RuntimeErrorCategory = Literal[
     "provider",
     "tool",
     "output_validation",
+    "max_steps",
     "interrupted",
     "internal",
 ]
@@ -83,6 +84,7 @@ RUNTIME_ERROR_CATEGORIES: tuple[RuntimeErrorCategory, ...] = (
     "provider",
     "tool",
     "output_validation",
+    "max_steps",
     "interrupted",
     "internal",
 )

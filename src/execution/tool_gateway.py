@@ -11,7 +11,7 @@ import time
 import types
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import RLock
 from types import MappingProxyType
 from typing import (
@@ -28,7 +28,7 @@ from typing import (
 from agentloom.execution.logging import get_logger
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.native_tools import ToolManifestEntry
-from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord
+from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, TERMINAL_TOOL_METADATA_KEY, ToolCallRecord
 
 logger = get_logger(__name__)
 
@@ -60,8 +60,11 @@ class ToolBinding:
     manifest_entry: ToolManifestEntry | None = None
     input_validator: ToolInputValidator | None = None
     recovery_descriptor: ToolRecoveryDescriptor | None = None
+    terminal_on_success: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.terminal_on_success) is not bool:
+            raise TypeError("terminal_on_success must be a boolean")
         properties = deepcopy(dict(self.inputs_schema))
         object.__setattr__(self, "inputs_schema", MappingProxyType(properties))
         if self.manifest_entry is not None and (
@@ -475,6 +478,7 @@ def bind_tool(
         output_normalizer=selected_normalizer,
         compression_source=compression_source,
         input_validator=input_validator,
+        terminal_on_success=getattr(tool, "_agentloom_terminal_on_success", False),
         manifest_entry=(
             ToolManifestEntry(
                 logical_name=catalog_spec.logical_name or catalog_spec.name,
@@ -643,13 +647,13 @@ def _strict_decode_tool_input(
 
     decoded = deepcopy(tool_input)
     schema = dict(binding.inputs_schema)
-    coerce_tool_parameters(decoded, schema)
     if binding.input_validator is not None:
-        # Protocol tools may carry references and open object schemas that
-        # cannot be represented by the Python callable's property metadata.
-        # Validate after Hooks but before guards, history, or side effects.
+        # An explicit validator owns the complete input contract, including
+        # types. Preserve the post-Hook values rather than silently coercing
+        # strings before validation, guards, history, or side effects.
         binding.input_validator(decoded)
         return decoded, _build_call_kwargs_from_input(binding.forward, decoded)
+    coerce_tool_parameters(decoded, schema)
     unknown = sorted(set(decoded) - set(schema))
     if unknown:
         raise _ToolInputContractError(
@@ -1308,9 +1312,11 @@ class AgentLoomToolGateway:
             hook_run=hook_run, call_id=call_id, tool_name=tool_name,
             arguments=arguments, inputs_schema=binding.inputs_schema,
             decode=lambda value: _strict_decode_tool_input(binding, value),
-            started_at=started_at,
+            started_at=started_at, coerce=binding.input_validator is None,
         )
         if isinstance(prepared, ToolCallRecord):
+            if binding.terminal_on_success and prepared.exception is not None and not isinstance(prepared.exception, ValueError):
+                return replace(prepared, metadata={**prepared.metadata, TERMINAL_TOOL_METADATA_KEY: True})
             return prepared
         effective_input, call_kwargs = prepared
         with self._close_lock:
@@ -1387,8 +1393,9 @@ class AgentLoomToolGateway:
                 ended_at=time.time(),
             )
             if isinstance(tool_error, BoundCredentialEcho):
-                from dataclasses import replace
                 failed = replace(failed, metadata={"effect_uncertain": True})
+            if binding.terminal_on_success and not isinstance(tool_error, ValueError):
+                failed = replace(failed, metadata={**failed.metadata, TERMINAL_TOOL_METADATA_KEY: True})
             self._record(hook_run, failed)
             if failed.status == "error":
                 _dispatch_tool_failure(
@@ -1436,7 +1443,6 @@ class AgentLoomToolGateway:
                     ended_at=time.time(),
                 )
                 if isinstance(output_error, BoundCredentialEcho):
-                    from dataclasses import replace
                     failed = replace(failed, metadata={"effect_uncertain": True})
                 self._record(hook_run, failed)
                 _dispatch_tool_failure(
@@ -1496,6 +1502,8 @@ class AgentLoomToolGateway:
             tool_response[TRUSTED_MEMORY_EVIDENCE_RESPONSE_KEY] = (
                 TrustedMemoryEvidenceEnvelope(trusted_evidence)
             )
+        if binding.terminal_on_success:
+            metadata[TERMINAL_TOOL_METADATA_KEY] = True
         completed = ToolCallRecord.completed(
             call_id=call_id,
             tool_name=tool_name,

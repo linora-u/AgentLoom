@@ -355,7 +355,7 @@ shell_settings:
 
 `runtime` defines the single framework-owned storage root and bounded retention. `logging` controls the console and the run-scoped file backend. Logger state is bound to the current run; it is not shared as a process-global output path.
 
-Both sections are global-only. Application-level `config/system.yaml` and Agent YAML containing either section are rejected, so a typo or misplaced override cannot silently fragment—or pretend to move—task discovery across runtime roots.
+Application-level `config/system.yaml` may override `logging` and `runtime.trace`. Runtime storage and retention settings remain project-only; an application cannot move task discovery to another runtime root. Agent YAML rejects both sections.
 
 An isolated subprocess or validation harness may set `AGENTLOOM_RUNTIME_ROOT`. It overrides the complete canonical runtime home—runs, checkpoints, sessions, learning, and `self_learning.db` move together; there is no self-learning-only root override.
 
