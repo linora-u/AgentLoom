@@ -714,6 +714,10 @@ AgentLoom 创建 Agent 时把 `agentloom.app.tool_factory.ToolFactoryContext`
 可选 `input_validator`。静态预检只校验声明，不执行工厂。`factory` 不能与
 `module`、`function`、`fixed_args` 混用。
 
+带 `input_validator` 的绑定在 Hook 前后保留原参数类型，跳过普通工具的字符串类型转换；
+完整 Schema 和实际参数校验由该绑定共同负责。PI 还在 Responses 原始工具参数进入
+执行前检查重复 JSON 键，拒绝本轮模型输出，不执行工具或静默保留末值。
+
 PI 支持 `ToolBinding(terminal_on_success=True, ...)`：成功工具批次结束后直接
 返回工具结果，不再请求模型生成完成声明。可修正的 `ValueError` 回到同一 Agent；
 其他异常结束为失败。同批调用全部处理完才结束。所有工具均为终结工具时，不自动

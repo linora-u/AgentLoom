@@ -713,6 +713,13 @@ complete `ToolDefinition.parameters`, executor, and optional `input_validator`.
 Static preflight validates the reference without executing the factory.
 `factory` cannot be combined with `module`, `function`, or `fixed_args`.
 
+A binding with `input_validator` preserves argument types before and after Hooks;
+it skips the generic string-to-container/numeric coercion used by ordinary tools.
+Publish the complete schema and let that validator own its executable contract.
+For Responses, PI also checks original function-call JSON before SDK-decoded
+arguments reach a tool. Duplicate keys reject the model turn, without executing
+the tool or silently keeping the last value.
+
 With the PI runtime, `ToolBinding(terminal_on_success=True, ...)` ends the Agent
 after a successful tool batch and returns the tool result directly. Expected
 `ValueError` validation failures return to the same Agent for correction;
