@@ -53,7 +53,7 @@ flowchart TD
 
 ### Runtime 存储归属
 
-`runtime` 与 `logging` 只能写在全局 `config/system.yaml`；Application 级 `config/system.yaml` 和 Agent YAML 不能移动 runtime root 或替换日志策略。这样，一个进程只有一套任务发现与保留边界。
+Application 级 `config/system.yaml` 可覆盖当前应用的 `logging` 和 `runtime.trace`。存储根与保留策略仍只允许写在项目级配置，一个进程保持同一套任务发现边界。Agent YAML 不允许覆盖 `runtime` 或 `logging`。
 
 隔离子进程可用 `AGENTLOOM_RUNTIME_ROOT` 覆盖整套 runtime home；该覆盖不会只移动 self-learning。
 

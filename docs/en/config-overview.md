@@ -63,7 +63,7 @@ Do not add a second retrieval path or a disable switch around ContextEngine. Lar
 
 ### Runtime storage ownership
 
-`runtime` and `logging` are global-only sections in `config/system.yaml`; Application-level `config/system.yaml` files and Agent YAML cannot move the runtime root or replace the logging policy. This preserves one task-discovery and retention boundary per process.
+Application `config/system.yaml` may override `logging` and `runtime.trace` for that application. Runtime storage and retention remain project-only, preserving one task-discovery boundary per process. Agent YAML cannot override `runtime` or `logging`.
 
 Isolated subprocesses may override the complete runtime home with `AGENTLOOM_RUNTIME_ROOT`; the override never moves self-learning alone.
 

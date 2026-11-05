@@ -369,7 +369,7 @@ shell_settings:
 
 `runtime` 定义框架唯一的存储根目录和有界保留策略；`logging` 控制控制台与 run-scoped 文件 backend。Logger 状态绑定当前 run，不再复用进程全局输出路径。
 
-这两个配置段只能写在全局 `config/system.yaml`。Application 级 `config/system.yaml` 或 Agent YAML 一旦包含任一配置段就会校验失败，避免错误位置的配置被静默忽略，让用户误以为任务发现已经移动到另一个 runtime root。
+Application 级 `config/system.yaml` 可覆盖当前应用的 `logging` 和 `runtime.trace`。存储根与保留策略仍只允许项目级配置，应用不能将任务发现移动到另一个 runtime root。Agent YAML 拒绝这两个配置段。
 
 隔离子进程或验证任务可设置 `AGENTLOOM_RUNTIME_ROOT`；它覆盖的是整个 canonical runtime home（runs、checkpoints、sessions、learning 与 `self_learning.db` 一起移动），不存在 self-learning 专用 root 覆盖。
 

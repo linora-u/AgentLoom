@@ -185,13 +185,11 @@ def _reject_application_global_only_keys(
     """
 
     filtered = dict(config_map or {})
-    disallowed = sorted(_GLOBAL_ONLY_TOP_LEVEL_KEYS.intersection(filtered))
-    if disallowed:
-        keys = ", ".join(disallowed)
+    runtime = filtered.get("runtime")
+    if "runtime" in filtered and (not isinstance(runtime, dict) or set(runtime) - {"trace"}):
         raise ValueError(
-            f"Unsupported global-only key(s) in {source_name}: {keys}. "
-            "Configure runtime and logging only in the project root "
-            "config/system.yaml."
+            f"Unsupported global-only runtime storage/retention key(s) in {source_name}. "
+            "Application runtime may override only trace; configure runtime storage in the project root config/system.yaml."
         )
     self_learning = filtered.get("self_learning")
     review = self_learning.get("review") if isinstance(self_learning, dict) else None
@@ -576,6 +574,9 @@ def extract_workflow_overlay(
     *,
     source_name: str = "workflow config",
 ) -> dict[str, Any]:
+    disallowed = sorted(_GLOBAL_ONLY_TOP_LEVEL_KEYS.intersection(config_map))
+    if disallowed:
+        raise ValueError(f"Unsupported global-only key(s) in Agent YAML {source_name}: {', '.join(disallowed)}. Use Application config/system.yaml for logging/trace policy.")
     if "harnessing" in config_map:
         raise ValueError(
             f"harnessing is not configurable in Agent YAML ({source_name}); "
