@@ -647,13 +647,13 @@ def _strict_decode_tool_input(
 
     decoded = deepcopy(tool_input)
     schema = dict(binding.inputs_schema)
-    coerce_tool_parameters(decoded, schema)
     if binding.input_validator is not None:
-        # Protocol tools may carry references and open object schemas that
-        # cannot be represented by the Python callable's property metadata.
-        # Validate after Hooks but before guards, history, or side effects.
+        # An explicit validator owns the complete input contract, including
+        # types. Preserve the post-Hook values rather than silently coercing
+        # strings before validation, guards, history, or side effects.
         binding.input_validator(decoded)
         return decoded, _build_call_kwargs_from_input(binding.forward, decoded)
+    coerce_tool_parameters(decoded, schema)
     unknown = sorted(set(decoded) - set(schema))
     if unknown:
         raise _ToolInputContractError(
@@ -1312,7 +1312,7 @@ class AgentLoomToolGateway:
             hook_run=hook_run, call_id=call_id, tool_name=tool_name,
             arguments=arguments, inputs_schema=binding.inputs_schema,
             decode=lambda value: _strict_decode_tool_input(binding, value),
-            started_at=started_at,
+            started_at=started_at, coerce=binding.input_validator is None,
         )
         if isinstance(prepared, ToolCallRecord):
             if binding.terminal_on_success and prepared.exception is not None and not isinstance(prepared.exception, ValueError):
