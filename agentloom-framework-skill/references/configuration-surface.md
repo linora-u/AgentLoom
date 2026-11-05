@@ -21,7 +21,7 @@
 
 | 配置面 | 写在哪里 | 用途 | 关键规则 |
 |---|---|---|---|
-| 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、skills、checkpoint 等系统行为 | `runtime`/`logging` 只在此处生效；其他字段参与 deep merge；列表整段替换 |
+| 全局系统配置 | `config/system.yaml` | runtime root、日志、工具、权限、shell、skills、checkpoint 等系统行为 | 存储根与保留策略只在此处生效；应用可覆盖日志和 Trace；字典 deep merge，列表整段替换 |
 | 项目模型配置 | `config/model.yaml` | 模型类型、密钥、网关、推理参数、限流、重试 | 独立于系统配置；应用可按模型名整条覆盖；通常被 `.gitignore` 忽略 |
 | 应用模型覆盖 | `applications/<app>/config/model.yaml` | 当前应用的模型及默认类型 | 同名模型整条替换，其他项目模型保留；Agent YAML 只选择模型类型 |
 | 应用级系统覆盖 | `applications/<app>/config/system.yaml` | 当前应用专属的系统行为覆盖 | 从 Agent YAML 路径向上找到最近 `workflows/`，其父目录即 app root |
@@ -35,7 +35,7 @@
 
 LLM 配置不参与这个链条。`model`、`llm`、`langfuse` 写进 `system.yaml` 或 Agent YAML 会被过滤并警告。
 
-`runtime` 与 `logging` 是 global-only：Application 级 `config/system.yaml` 和 Agent YAML 一旦包含任一顶层字段就会校验失败；必须删除并改到项目根 `config/system.yaml`。这样错误位置的配置不会被静默忽略。`checkpoint` 仍可由 Application 级 system overlay 调整，但不在 Agent YAML 白名单中。
+Application 级 `config/system.yaml` 可覆盖 `logging` 与 `runtime.trace`，只影响当前应用。`runtime.root_dir` 和保留策略仍只允许写在项目根 `config/system.yaml`；应用不能改变任务发现与存储边界。Agent YAML 不接受 `runtime`、`logging` 或 `checkpoint`；`checkpoint` 由项目或应用级 system 配置控制。
 
 `tools_mapping` 已移除；Supervisor 与 Worker 的共享预检和实际构建都拒绝此字段。Skill 不授予工具，应通过 Agent 的 `tools` / `toolsets` 配置能力。
 
@@ -73,20 +73,36 @@ task: |
 | `agent_runtime` | `smolagents` / `pi` | 必填。选择完整 Agent runtime；缺失或未注册值在预检阶段失败 |
 | `system_prompt` | `str` / `{path: str}` | 可选长期指令；路径相对当前 YAML |
 | `task` | `str` / `list[str]` | 必填；列表项在同一 Agent 会话中依次发送 |
-| `tools` | `list[dict]` | Agent 额外工具列表；预定义工具只写 `name`，动态工具写 `name/module/function` |
+| `tools` | `list[dict]` | 预定义工具写 `name`；普通动态工具写 `name/module/function`；任务专属 Schema 写 `name/factory` |
 | `model_type` | `str` | 选择 `config/model.yaml` 中定义的模型类型；缺失时使用 `model.default_model_type` |
 | `runtime_options.smart_summary` | `bool` | smol 智能摘要；默认 `true` |
 | `runtime_options.max_consecutive_model_errors` | 正整数 | smol 连续模型错误上限；默认 `5` |
-| `runtime_options.max_steps` | 正整数 | smolagents 最大步数；默认 80 |
-| `runtime_options.planning_interval` | 正整数或 `null` | 仅控制周期性 planning，与 Todo 解耦 |
-| `runtime_options.todo_mode` | `"auto"` / `"on"` / `"off"` | 当前任务进度跟踪；默认 `auto`，`on` 强提示多步骤任务先建 Todo，`off` 完全隐藏 |
+| `runtime_options.max_steps` | 正整数 | smolagents/PI 最大执行步数，默认 80；PI 一次完整模型回复及其工具批次计一步，达到上限仍未完成则失败 |
+| `runtime_options.max_stop_attempts` | 1–100 的整数 | PI 的结束尝试上限，默认 3；包括最终输出纠正及反复调用不可用工具，不代替总步数预算 |
+| `runtime_options.compaction` | 原生 PI mapping | PI 自动压缩设置，默认开启；可配置 `enabled/reserveTokens/keepRecentTokens`，与持久 Trace/checkpoint 开关独立 |
+| `runtime_options.planning_interval` | 正整数或 `null` | smol 周期性 planning，与 Todo 解耦 |
+| `runtime_options.todo_mode` | `"auto"` / `"on"` / `"off"` | smol 任务进度跟踪；默认 `auto`，`on` 强提示多步骤任务先建 Todo，`off` 完全隐藏 |
 | `runtime_options.prompt_template_path` | 非空字符串 | smol 系统 prompt 模板路径；不接受 mapping |
 | `skills` | `{paths: list[str]}` | 当前 Agent 的额外 Skill 发现目录 |
 | `goal` | `bool` 或 `{enabled: bool}` | 仅顶层 Supervisor；开启 continuation 和显式完成 |
 | `input_schema` | JSON Schema object | 仅 Worker；省略时 Tool 使用空参数对象 |
 | `output_schema` | JSON Schema | 任意 Agent；省略时返回普通文本，可描述任意 JSON 根值 |
 
-后端参数仅解释 `runtime_options`；旧顶层 smol 参数静默忽略，不转换、不拒绝。生成应用必须使用上面的 canonical 参数，`on` / `off` 必须加引号，`prompt_template_path` 必须是字符串。smol 专属参数不要复制到 Pi。
+后端参数仅解释 `runtime_options`；旧顶层 smol 参数静默忽略，不转换、不拒绝。`max_steps` 两个基座均支持，其他 smol 专属参数不要复制到 PI。`on` / `off` 必须加引号，`prompt_template_path` 必须是字符串。
+
+PI 的 `max_steps` 由 AgentLoom 通过原生 `finishTurn/prepareRequest` 执行，不能当作 SDK 的 Settings 参数透传，也不写进 `model.yaml`。最后一步已经保存成功或自然完成时正常交付；尚需继续则记录 `max_steps_error`，报 `category=max_steps`，不自动重开任务。错误修正和 Stop 继续共用当前调用预算，恢复保留已记录步数，独立 Worker 各自计数。原生 compact 的摘要请求不占对话步数。业务 Tool 只校验参数和业务，不读取框架步号或维护执行与修正预算。
+
+例如在当前 Agent 的 YAML 中限制步数并保留原生自动压缩：
+
+```yaml
+agent_runtime: pi
+runtime_options:
+  max_steps: 40
+  compaction:
+    enabled: true
+```
+
+默认值和原生参数的实际支持以 `src/runtimes/pi/metadata.py`、桥接代码及锁定 SDK 为准。目录扫描只展示当前 YAML 声明，最终是否生效须通过共享配置预检或实际运行核对。
 
 Agent 只接受 provider 原生结构化 tool calls。只要当前 Agent 有可用工具，
 AgentLoom 就发送结构化 tools schema；不会从 prose、XML 或 JSON 文本中猜测工具调用。
@@ -165,8 +181,8 @@ skills, tool_metadata, tool_output_limits
 | `context_engine` | 可逆上下文压缩：工具原文进本地 store，模型可见压缩预览和 `ContextRef` |
 | `skills` | `{paths: [...]}` 额外 Skill 发现目录 |
 | `hooks` | 独立直接 Shell Hook 与显式 `HOOK.yaml` Bundle |
-| `runtime` | 唯一 `.agentloom` root、run/artifact 保留天数和自动清理间隔；只允许全局配置 |
-| `logging` | `level/console_enabled/file_enabled/max_file_bytes/backup_count`；run-scoped 且只允许全局配置 |
+| `runtime` | 存储根与保留策略只允许全局配置；应用可覆盖 `trace` |
+| `logging` | `level/console_enabled/file_enabled/max_file_bytes/backup_count`；run-scoped，可由应用覆盖 |
 | `default_toolsets` | 默认加载 toolset 名列表 |
 | `toolsets` | Agent 级内置 toolset 覆盖，空列表表示无内置工具 |
 | `shell_settings` | shell 命令白名单、安全检查、sandbox、后台任务、audit log |
@@ -327,7 +343,7 @@ model:
 | `temperature` | 温度 |
 | `max_tokens` | 整数或 `"max"` |
 | `timeout` | 单次请求超时 |
-| `num_retries` | 框架自管重试次数 |
+| `num_retries` | 请求重试设置；PI 映射给原生 SDK，不限制 Agent 总步数 |
 | `retry_delay` / `max_retry_delay` | 指数退避参数 |
 | `extra_headers` | dict 或 JSON 字符串 headers |
 | `context_cache` | 是否注入 cache control |
@@ -335,7 +351,7 @@ model:
 | `requests_per_minute` | 模型类型级 RPM，用于限流与并发 auto |
 | 其他未知字段 | 收进 `extra_completion_params` 并透传给 `litellm.completion()` |
 
-未知字段透传适合 provider 特性，例如 `reasoning_effort`、`tool_choice`、`extra_body`。写之前要确认目标 endpoint 支持；不要把业务配置误塞进模型类型里。协议调用失败时原样向上抛出，不切换 adapter。
+未知字段透传适合 provider 特性，例如 `reasoning_effort`、`tool_choice`、`extra_body`。写之前要确认目标 endpoint 支持；Agent 的 `max_steps` 与 `max_stop_attempts` 放在 `runtime_options`，不放模型配置。协议调用失败时原样向上抛出，不切换 adapter。
 
 `langfuse` 目前只是配置模型预留，未接入自动 tracing；不要为了“完整”强行配置。
 

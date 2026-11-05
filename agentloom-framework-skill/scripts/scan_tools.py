@@ -301,9 +301,13 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
 
     model_type = data.get("model_type", "(未指定)")
     agent_runtime = data.get("agent_runtime", "(未指定)")
-    max_steps = data.get("max_steps", "(默认)")
-    planning_interval = data.get("planning_interval")
-    prompt_cfg = data.get("prompt")
+    runtime_options = data.get("runtime_options", {})
+    valid_runtime_options = isinstance(runtime_options, dict)
+    if not valid_runtime_options:
+        runtime_options = {}
+    max_steps = runtime_options.get("max_steps", "(本 YAML 未声明)")
+    planning_interval = runtime_options.get("planning_interval")
+    prompt_cfg = runtime_options.get("prompt_template_path")
     skills_cfg = data.get("skills")
     toolsets_cfg = data.get("toolsets", None)
 
@@ -335,7 +339,11 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
     lines.append(f"- **model_type**: {model_type}")
     lines.append(f"- **agent_runtime**: {agent_runtime}")
 
-    lines.append(f"- **max_steps**: {max_steps}")
+    lines.append(f"- **runtime_options.max_steps**: {max_steps}")
+    if not valid_runtime_options:
+        lines.append("- **runtime_options**: (无效配置，应为 mapping)")
+    if "max_stop_attempts" in runtime_options:
+        lines.append(f"- **runtime_options.max_stop_attempts**: {runtime_options['max_stop_attempts']}")
 
     if toolsets_cfg is not None:
         if isinstance(toolsets_cfg, list):
@@ -345,14 +353,14 @@ def _extract_agent_summary(agent_file: Path, role: str = "Agent") -> str:
         lines.append(f"- **toolsets 覆盖**: {value}")
 
     if planning_interval is not None:
-        lines.append(f"- **planning_interval**: {planning_interval}")
+        lines.append(f"- **runtime_options.planning_interval**: {planning_interval}")
 
     if prompt_cfg is not None:
         if isinstance(prompt_cfg, dict):
             prompt_path = prompt_cfg.get("path", str(prompt_cfg))
         else:
             prompt_path = str(prompt_cfg)
-        lines.append(f"- **prompt**: {prompt_path}")
+        lines.append(f"- **runtime_options.prompt_template_path**: {prompt_path}")
 
     if tool_names:
         lines.append(f"- **tools**: {', '.join(tool_names)}")

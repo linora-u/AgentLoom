@@ -401,11 +401,11 @@ task: |
 | `runtime_options.todo_mode` | `str` | "auto" | Smol task tracking; quote "on" / "off" |
 | `skills` | `list`/`dict`/`str` | Not set | Private skill package configuration. See [3.8](#38-skills--skill-package-configuration) |
 | `hooks` | `dict` | Not set | Independent direct Hooks and explicit Hook Bundles. See [Hooks](hooks.md) |
-| `runtime_options.max_steps` | `int` | `80` | Maximum execution steps. Agent is forcefully terminated when exceeded |
+| `runtime_options.max_steps` | positive `int` | `80` | Maximum execution steps for smolagents and PI. PI settles the last tool batch and fails if further work is required |
 
 ---
 
-The `runtime_options.*` fields above belong to smol. `smart_summary` accepts a bool and defaults to `true`; `max_consecutive_model_errors` accepts a positive integer and defaults to `5`. Pi has its own option schema.
+`max_steps` applies to both runtimes. With PI, one completed assistant reply and its tool calls count as one step. Corrections and blocked Stop continuations share the invocation budget; checkpoint resume keeps recorded steps. Success on the last step is accepted, while exhaustion before completion records `max_steps_error`. Native compaction has a separate budget. The other `runtime_options.*` fields above belong to smol. `smart_summary` accepts a bool and defaults to `true`; `max_consecutive_model_errors` accepts a positive integer and defaults to `5`. PI's other settings follow its native schema.
 
 ### 3.3 Supervisor-Specific Fields
 
@@ -690,6 +690,35 @@ tools:
 > **Important**: Dynamically loaded tools' descriptions are automatically extracted from the Python function's `__doc__` (Docstring). The `description` field in YAML, even if configured, is ignored by the framework. Write your documentation in the Python function directly.
 
 **Validation rules**: `module` and `function` must appear together; specifying only one raises an error.
+
+#### Invocation-scoped Tool factories
+
+For a schema that depends on the actual task, declare a factory instead of a
+function reference:
+
+```yaml
+tools:
+  - name: save_result
+    factory:
+      module: applications.my_app.agent_tools.factory
+      function: create_save_tool
+```
+
+The factory receives `agentloom.app.tool_factory.ToolFactoryContext` during
+Agent creation. Its `input` is a detached snapshot of the current invocation's
+additional arguments. `bindings` contains only dependencies explicitly supplied
+by the host with `bind_tool_factory_bindings(...)`; these do not enter the model
+prompt or persisted task input. Return a `ToolBinding` with the declared name,
+complete `ToolDefinition.parameters`, executor, and optional `input_validator`.
+Static preflight validates the reference without executing the factory.
+`factory` cannot be combined with `module`, `function`, or `fixed_args`.
+
+With the PI runtime, `ToolBinding(terminal_on_success=True, ...)` ends the Agent
+after a successful tool batch and returns the tool result directly. Expected
+`ValueError` validation failures return to the same Agent for correction;
+unexpected exceptions terminate as failures. A batch is settled before ending.
+Agents whose tools are all terminal do not receive an automatic
+`loom_retrieve_context` tool; ordinary Agents retain the existing behavior.
 
 ### 4.2 Complete Predefined Tool List
 

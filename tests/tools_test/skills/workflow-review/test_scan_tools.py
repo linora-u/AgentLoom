@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parents[4] / "agentloom-framework-skill/scripts/scan_tools.py"
 SPEC = importlib.util.spec_from_file_location("agentloom_scan_tools", SCRIPT)
 assert SPEC and SPEC.loader
@@ -113,3 +112,35 @@ def test_scan_is_read_only(application):
     extract_agent_prompts(str(worker))
     after = {p.relative_to(app): p.read_bytes() for p in app.rglob("*") if p.is_file()}
     assert after == before
+
+
+def test_scan_reports_runtime_options_instead_of_retired_top_level_fields(application):
+    supervisor, _ = application
+    supervisor.write_text(
+        supervisor.read_text()
+        + "max_steps: 999\nplanning_interval: 998\nprompt: retired-template.yaml\n"
+        + "runtime_options:\n"
+        + "  max_steps: 7\n"
+        + "  max_stop_attempts: 2\n"
+        + "  planning_interval: 3\n"
+        + "  prompt_template_path: prompts/current.yaml\n"
+    )
+    summary = scan_app_structure(str(supervisor.parents[1]))
+    assert "**runtime_options.max_steps**: 7" in summary
+    assert "**runtime_options.max_stop_attempts**: 2" in summary
+    assert "**runtime_options.planning_interval**: 3" in summary
+    assert "**runtime_options.prompt_template_path**: prompts/current.yaml" in summary
+    assert "999" not in summary and "998" not in summary and "retired-template" not in summary
+
+
+def test_scan_does_not_infer_effective_budget_when_yaml_does_not_declare_it(application):
+    supervisor, _ = application
+    summary = scan_app_structure(str(supervisor.parents[1]))
+    assert "**runtime_options.max_steps**: (本 YAML 未声明)" in summary
+
+
+def test_scan_reports_invalid_runtime_options_without_crashing(application):
+    supervisor, _ = application
+    supervisor.write_text(supervisor.read_text() + "runtime_options: [wrong]\n")
+    summary = scan_app_structure(str(supervisor.parents[1]))
+    assert "**runtime_options**: (无效配置，应为 mapping)" in summary

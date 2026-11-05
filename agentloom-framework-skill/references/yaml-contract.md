@@ -130,7 +130,9 @@ runtime_options:
   max_consecutive_model_errors: 5
 ```
 
-`prompt_template_path` 只接受非空字符串，不接受 `{path: ...}`；模板可省略，内置参考资源位于 `src/runtimes/smolagents/prompts/`。整数参数只接受正整数；`planning_interval` 还可省略或设 `null`。切换到 Pi 时删除 smol `runtime_options` 并按 Pi 契约配置，不能透传整份旧参数。
+`prompt_template_path` 只接受非空字符串，不接受 `{path: ...}`；模板可省略，内置参考资源位于 `src/runtimes/smolagents/prompts/`。整数参数只接受正整数；`planning_interval` 还可省略或设 `null`。切换到 PI 时可保留 `max_steps`，其他参数按 PI 契约配置，不能透传整份 smol 参数。
+
+PI 的 `runtime_options.max_steps` 默认 80。一轮模型回复及其工具批次计一步，原生 `finishTurn` 在本轮工具全部结束后判断是否停止。最后一步已经交付可正常成功；尚需继续而预算已满则记录 `max_steps_error` 并报实际预算耗尽。原生 `prepareRequest` 防止继续发请求，错误修正与 Stop 继续共用同一预算，恢复保留已记录步数。原生 compact 的摘要请求不计入对话步数。专业 Tool 内不放 `max_turns`、修正轮次数或读取 Hook 步号。
 
 ## 模型与配置
 
@@ -170,6 +172,27 @@ Tool 规则：
 
 - 预定义工具只写 `name`。
 - 动态工具必须同时写 `module` 和 `function`，docstring 是工具说明来源；YAML 里的 `description` 不会覆盖函数 docstring。
+- 参数 Schema 需要依据本次 Worker 输入生成时，使用 `factory`，且只能同时写 `name` 与 `factory`。工厂接收 `ToolFactoryContext`，必须返回同名 `ToolBinding`：
+
+```yaml
+tools:
+  - name: "save_design"
+    factory:
+      module: "applications.<app>.agent_tools.factory"
+      function: "create_save_design_tool"
+```
+
+```python
+from agentloom.app.tool_factory import ToolFactoryContext
+from agentloom.execution.tool_gateway import ToolBinding
+
+def create_save_design_tool(context: ToolFactoryContext) -> ToolBinding:
+    # context.input 是本次 Worker 输入的只读 JSON 快照。
+    # context.bindings 是宿主显式绑定、不会进入模型上下文的依赖。
+    ...
+```
+
+Tool factory 在当前 Agent Runtime 创建前执行；输入先经过 Worker `input_schema` 校验。精确 Schema、运行时依赖或 `terminal_on_success` 用这个接口表达，不要覆盖 Agent 的 Tool Gateway。
 - 需要锁定参数时用 `fixed_args`，必须是字典；被锁定的参数不会暴露给 LLM。
 
 ```yaml

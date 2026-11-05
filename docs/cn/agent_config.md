@@ -401,11 +401,11 @@ task: |
 | `runtime_options.todo_mode` | `str` | "auto" | smol 当前任务跟踪；"on" / "off" 必须加引号 |
 | `skills` | `list`/`dict`/`str` | 不设置 | 私有技能包配置。详见 [3.8](#38-skills--技能包配置) |
 | `hooks` | `dict` | 不设置 | 独立直接 Hook 与显式 Hook Bundle。详见 [Hooks](hooks.md) |
-| `runtime_options.max_steps` | `int` | `80` | 最大执行步数。超过后 Agent 强制终止 |
+| `runtime_options.max_steps` | 正整数 | `80` | smolagents 与 PI 的最大执行步数；PI 等本轮工具结束后判断，尚需继续则报预算耗尽 |
 
 ---
 
-以上 `runtime_options.*` 为 smol 专属参数；`smart_summary` 接受 bool，默认 `true`；`max_consecutive_model_errors` 接受正整数，默认 `5`。Pi 使用自己的 options，不能复制 smol 参数。
+`max_steps` 两个基座均支持。PI 一轮完整模型回复及其工具批次计一步，错误修正和 Stop 继续共用当前调用预算，恢复保留已记录步数。最后一步成功仍正常交付，尚需继续则记录 `max_steps_error` 并报预算耗尽。原生 compact 使用独立摘要预算。其他上述 `runtime_options.*` 字段属于 smol。`smart_summary` 接受 bool，默认 `true`；`max_consecutive_model_errors` 接受正整数，默认 `5`。PI 其他设置使用原生配置 Schema。
 
 ### 3.3 Supervisor 专属字段
 
@@ -694,6 +694,30 @@ tools:
 > **重要提示**：动态加载工具的描述信息会自动从 Python 函数的 `__doc__` (Docstring) 提取。YAML 中的 `description` 字段如果配置了也会被框架忽略。请直接在 Python 函数中写好文档注释。
 
 **校验规则**：`module` 和 `function` 必须成对出现，不能只写一个。
+
+#### 按本次输入创建 Tool
+
+工具 Schema 需要包含本次任务的固定键时，使用工厂：
+
+```yaml
+tools:
+  - name: save_result
+    factory:
+      module: applications.my_app.agent_tools.factory
+      function: create_save_tool
+```
+
+AgentLoom 创建 Agent 时把 `agentloom.app.tool_factory.ToolFactoryContext`
+交给工厂。`input` 是本次调用参数的独立快照；`bindings` 只包含调用方通过
+`bind_tool_factory_bindings(...)` 显式绑定的依赖，不进入模型 Prompt 或持久任务输入。
+工厂返回同名 `ToolBinding`，提供完整的 `ToolDefinition.parameters`、执行函数及
+可选 `input_validator`。静态预检只校验声明，不执行工厂。`factory` 不能与
+`module`、`function`、`fixed_args` 混用。
+
+PI 支持 `ToolBinding(terminal_on_success=True, ...)`：成功工具批次结束后直接
+返回工具结果，不再请求模型生成完成声明。可修正的 `ValueError` 回到同一 Agent；
+其他异常结束为失败。同批调用全部处理完才结束。所有工具均为终结工具时，不自动
+添加 `loom_retrieve_context`；普通 Agent 的行为保持原样。
 
 ### 4.2 全部预定义工具列表
 
