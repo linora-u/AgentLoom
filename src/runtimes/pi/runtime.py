@@ -28,7 +28,14 @@ from agentloom.execution.tool_gateway import PreparedToolGateway
 from agentloom.execution.trace import capture_explicit_execution_context
 from agentloom.runtimes.pi.auth import CodexLoginGate, open_login_browser, show_device_code
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
-from agentloom.runtimes.pi.metadata import BRIDGE_VERSION, CAPABILITIES, SDK_VERSION, validate_model, validate_options
+from agentloom.runtimes.pi.metadata import (
+    BRIDGE_VERSION,
+    CAPABILITIES,
+    DEFAULT_MAX_STEPS,
+    SDK_VERSION,
+    validate_model,
+    validate_options,
+)
 from agentloom.runtimes.pi.protocol import (
     PI_BRIDGE_PROTOCOL_VERSION,
     Handshake,
@@ -108,6 +115,7 @@ class PiRuntime:
         events = []
         runtime_attempt_id = uuid4().hex
         usage = RuntimeUsage()
+        completed_steps = 0
         definition = self.definition
         selection = definition.model_selection
         assert selection is not None
@@ -139,6 +147,9 @@ class PiRuntime:
                     pass
 
         def observe(event):
+            nonlocal completed_steps
+            if event.event == "model" and event.payload.get("phase") == "completed":
+                completed_steps += 1
             if event.event == "usage":
                 # Bridge usage is a cumulative snapshot for this run. Prefix
                 # completed Stop continuations without treating repeats as deltas.
@@ -174,6 +185,7 @@ class PiRuntime:
                         if not tool_is_concurrency_safe(tool.visible_name, execution.agent_config)]
         task = request.task
         max_stops = cast(int, definition.runtime_options.get("max_stop_attempts", 3))
+        max_steps = cast(int, definition.runtime_options.get("max_steps", DEFAULT_MAX_STEPS))
         run_id = request.run_id or uuid4().hex
         login_gate: CodexLoginGate | None = None
         cwd = str(Path(definition.project_root or ".").resolve())
@@ -214,7 +226,14 @@ class PiRuntime:
                                                      self.transport.instance_id, request.checkpoint_sink or (lambda _: None))
                 if request.checkpoint is not None:
                     try:
-                        plan = reconcile(protocol.store, protocol.store.load(request.checkpoint))
+                        bundle = protocol.store.load(request.checkpoint)
+                        # getEntries preserves old assistant entries across native
+                        # compaction. Resume continues the recorded invocation budget.
+                        completed_steps = sum(
+                            entry.get("type") == "message" and entry.get("message", {}).get("role") == "assistant"
+                            for entry in bundle["session"]["entries"]
+                        )
+                        plan = reconcile(protocol.store, bundle)
                         if native is not None:
                             for call in plan["bundle"]["calls"]:
                                 if call["owner"] == "runtime":
@@ -236,6 +255,12 @@ class PiRuntime:
                 remaining_terminal_attempts = max_stops - terminal_rejections
                 runtime_options = dict(definition.runtime_options)
                 runtime_options["max_stop_attempts"] = remaining_terminal_attempts
+                if completed_steps >= max_steps:
+                    raise AgentRuntimeError(
+                        f"PI runtime_options.max_steps={max_steps} exhausted before task completion",
+                        category="max_steps", retryable=False,
+                    )
+                runtime_options["max_steps"] = max_steps - completed_steps
                 wire_settings = dict(selection.settings)
                 wire_settings.pop("supports_structured_output", None)
                 from agentloom.config.private_bindings import harness_private_values
@@ -317,7 +342,7 @@ class PiRuntime:
                 elif goal_state is not None:
                     task = goal_continuation_prompt(goal_state)
                 attempt += 1
-            emit("terminal", {"state": result.state})
+            emit("terminal", {"state": result.state, "steps": completed_steps, "max_steps": max_steps})
             return AgentRuntimeResult(state=result.state, output=result.output, usage=usage, events=tuple(events),
                                       checkpoint=self._checkpoint)
         except KeyboardInterrupt:
@@ -329,7 +354,9 @@ class PiRuntime:
             emit("terminal", {"state": "interrupted"})
             raise
         except AgentRuntimeError as error:
-            emit("terminal", {"state": "interrupted" if error.category == "interrupted" else "failed", "category": error.category})
+            emit("terminal", {"state": "max_steps_error" if error.category == "max_steps" else
+                             "interrupted" if error.category == "interrupted" else "failed",
+                             "category": error.category, "steps": completed_steps, "max_steps": max_steps})
             raise
         finally:
             if native is not None:

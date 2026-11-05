@@ -120,7 +120,7 @@ Provider length truncation is retryable `output_validation` with raw reason,
 usage and budget evidence; retries do not silently raise the budget.
 
 `runtime_options` passes directly to `SettingsManager.inMemory`, except
-`max_stop_attempts`, which belongs to AgentLoom's Stop gate. Native settings
+`max_steps` and `max_stop_attempts`, which belong to AgentLoom's execution and Stop gates. Native settings
 override the mapped model-profile defaults. For example:
 
 ```yaml
@@ -223,6 +223,18 @@ in public errors because they may echo credentials or prompts.
 
 ## Lifecycle and limits
 
+- `runtime_options.max_steps` is a strict positive integer, default 80. One
+  completed assistant reply and all of its tool calls count as one step. Native
+  `finishTurn` settles the current tool batch before ending at the limit;
+  `prepareRequest` prevents another conversational request after exhaustion.
+  A successful terminal tool or natural final answer on the last step remains
+  success. Exhaustion before completion emits `max_steps_error` and raises a
+  non-retryable `AgentRuntimeError(category="max_steps")`.
+- Output corrections and blocked Stop continuations share the same invocation
+  budget. A checkpoint resume retains the recorded assistant-step count.
+  Separate Worker invocations have separate budgets. PI's native compaction
+  requests do not consume conversational steps and auto compaction stays enabled
+  unless explicitly disabled in the native settings.
 - Selected native and platform tools, Worker, Goal and compatible same-runtime
   checkpoint resume are enabled. Unselected tools fail immediately. Native
   grep/find/ls and optional professional writes remain unsupported; no implicit

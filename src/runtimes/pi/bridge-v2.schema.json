@@ -11,6 +11,7 @@
             "provider",
             "tool",
             "output_validation",
+            "max_steps",
             "interrupted",
             "internal"
           ],
