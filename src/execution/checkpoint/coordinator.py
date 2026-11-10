@@ -193,9 +193,8 @@ class CheckpointCoordinator:
             target.stop_all_worker_heartbeats()
             if target._context_engine is not None:
                 target._context_engine.close()
-        clear_current_context_engine(
-            target._context_engine if target is not None else None
-        )
+        if target is not None and target._context_engine is not None:
+            clear_current_context_engine(target._context_engine)
         if current is coord or coord is None:
             _current_coordinator.set(None)
 
@@ -204,11 +203,15 @@ class CheckpointCoordinator:
         effective_config: dict[str, Any] | None,
     ) -> None:
         if effective_config is None:
-            config = ContextEngineConfig.from_runtime()
             from agentloom.config import C
 
+            if C.get("runtime", {}).get("trace", {}).get("mode", "full") == "off":
+                return
+            config = ContextEngineConfig.from_runtime()
             checkpoint_config = C.get("checkpoint", {})
         else:
+            if effective_config.get("runtime", {}).get("trace", {}).get("mode", "full") == "off":
+                return
             config = ContextEngineConfig.from_mapping(
                 effective_config.get("context_engine", {})
             )

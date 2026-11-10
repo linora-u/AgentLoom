@@ -58,7 +58,14 @@ def sdk_node():
     from agentloom.runtimes.pi.environment import build_pi_subprocess_env
     from agentloom.runtimes.pi.install import find_node
 
-    return find_node(build_pi_subprocess_env())
+    env = build_pi_subprocess_env()
+    selected = find_node(env)
+    resolved = subprocess.run([selected, "-p", "process.execPath"], env=env,
+        capture_output=True, text=True, check=True, timeout=5).stdout.strip()
+    executable = Path(resolved)
+    if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
+        raise RuntimeError("Node process.execPath must identify an executable absolute path")
+    return str(executable.resolve())
 
 
 def until(predicate, *, timeout=15):

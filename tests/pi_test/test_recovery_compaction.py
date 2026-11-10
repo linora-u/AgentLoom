@@ -18,6 +18,8 @@ from agentloom.runtimes.pi.protocol import (
     Handshake,
     ModelPermit,
     ModelPrepare,
+    ModelResponse,
+    ModelResponseResult,
     ModelSelection,
     ModelTrace,
     ModelTraceResult,
@@ -27,7 +29,7 @@ from agentloom.runtimes.pi.protocol import (
 from agentloom.runtimes.pi.transport import PiTransport
 
 from tests.pi_test.test_application import change_model, model_service, project
-from tests.pi_test.test_process_lifecycle import assert_gone, start_cli
+from tests.pi_test.test_process_lifecycle import assert_gone, sdk_node, start_cli
 from tests.pi_test.test_recovery_application import audit, checkpoints, enable
 
 
@@ -39,8 +41,15 @@ def _is_compaction(request):
 def _sdk_pid(parent_pid):
     # Observe the real managed process, independent of PATH selection or a
     # launcher shim. The SDK has already reached HTTP when this is called.
-    processes = [process for process in psutil.Process(parent_pid).children(recursive=True)
-                 if any(argument.endswith("/pi/bridge/dist/index.js") for argument in process.cmdline())]
+    executable = sdk_node()
+    processes = []
+    for process in psutil.Process(parent_pid).children(recursive=True):
+        try:
+            if (os.path.realpath(process.exe()) == executable and
+                    any(argument.endswith("/pi/bridge/dist/index.js") for argument in process.cmdline())):
+                processes.append(process)
+        except psutil.NoSuchProcess:
+            continue
     assert len(processes) == 1, "Expected one managed Pi SDK process"
     return processes[0].pid
 
@@ -96,6 +105,9 @@ def test_continued_empty_task_does_not_recompact_without_new_context(tmp_path):
             events = []
 
             def permit(payload):
+                if isinstance(payload, ModelResponse):
+                    return ModelResponseResult(method="model_response", identity=payload.identity,
+                        attempt=payload.attempt, accepted=True)
                 if isinstance(payload, ModelTrace):
                     return ModelTraceResult(
                         method="model_trace", identity=payload.identity,

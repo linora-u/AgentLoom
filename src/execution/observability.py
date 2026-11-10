@@ -547,15 +547,17 @@ class TraceRecorder:
 
 @contextmanager
 def bind_trace_recorder(
-    context: RuntimeContext, *, exporter: TraceExporter | None = None,
-) -> Iterator[TraceRecorder]:
-    recorder = TraceRecorder(context, exporter=exporter)
+    context: RuntimeContext | None, *, exporter: TraceExporter | None = None,
+) -> Iterator[TraceRecorder | None]:
+    """Bind this Run's recorder, explicitly masking an outer recorder when off."""
+    recorder = TraceRecorder(context, exporter=exporter) if context is not None else None
     token = _CURRENT_RECORDER.set(recorder)
     try:
         yield recorder
     finally:
         _CURRENT_RECORDER.reset(token)
-        recorder.close()
+        if recorder is not None:
+            recorder.close()
 
 
 def get_current_trace_recorder() -> TraceRecorder | None:

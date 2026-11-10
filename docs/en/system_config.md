@@ -364,7 +364,7 @@ An isolated subprocess or validation harness may set `AGENTLOOM_RUNTIME_ROOT`. I
 | Parameter | Type | Default | Required | Description |
 |------|------|--------|------|------|
 | `runtime.root_dir` | `str` | `".agentloom"` | ❌ No | Only root for framework runtime state. Relative paths resolve from the project root; absolute paths are accepted |
-| `runtime.trace.mode` | `"full"` \| `"off"` | `"full"` | ❌ No | `full` persists complete Trace evidence; `off` keeps ContextRef and intermediate evidence only in a system temporary directory for the current Run and removes it when the Run exits |
+| `runtime.trace.mode` | `"full"` \| `"off"` | `"full"` | ❌ No | `full` persists complete Trace evidence; `off` disables Trace recording and automatic ContextRef storage |
 | `runtime.successful_run_retention_days` | `int` | `7` | ❌ No | Retention for completed run directories |
 | `runtime.failed_run_retention_days` | `int` | `30` | ❌ No | Retention for failed/interrupted run directories |
 | `runtime.artifact_retention_days` | `int` | `3` | ❌ No | Retention for raw `artifacts/` inside a retained run |
@@ -403,13 +403,15 @@ Automatic cleanup runs at most once per configured interval. `loom clean-runtime
 
 Persistent Agent recall uses `.agentloom/workspaces/agents/<application_id>/<agent_path>/`. Current-task Todo state uses `todos.json` inside the canonical checkpoint. Durable schedules and scheduler service state use `.agentloom/schedules/`. Every framework-owned runtime consumer follows the same `runtime.root_dir`; Application-owned output directories remain separate.
 
-`runtime.trace.mode: off` disables long-term persistence of model requests,
-responses, Tool payloads, and step Trace. Large Tool results still use a
-task-scoped system temporary directory so `ContextRef` paging works during
-execution. That directory is removed when the Run scope exits, including
-failure and interruption. DBOS state, checkpoints, process-exit receipts, Run
-manifests, and Application-owned output are not Trace and are unaffected. The
-manifest records the effective policy in `trace.mode` and `trace.persisted`.
+`runtime.trace.mode: off` disables model request/response and Tool payload
+tracing, including temporary Trace files and automatic ContextRef stores.
+Tools own saved content and pagination independently of this setting; see
+[Tool execution Context](tool_context.md). Runtime audit files retain identity,
+usage, and status metadata without Tool input/output bodies, and do not copy
+checkpoint task bodies into the Run audit. Original checkpoints, required
+native execution journals, process-exit receipts, Run manifests, and final
+results remain available. The manifest records the policy in `trace.mode` and
+`trace.persisted`.
 
 To verify a real attempt, read `manifest.json` and its referenced logs, audits, and artifacts; an exit code alone is not sufficient.
 

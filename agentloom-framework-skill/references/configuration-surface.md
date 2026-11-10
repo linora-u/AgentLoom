@@ -54,6 +54,27 @@ Agent-local `concurrency`/`worker_execution` 及 Supervisor batch policy 均拒�
 容量，返回输入顺序的 `BatchOutcome.outcomes`，作用域退出停止新任务并 drain 已启动任务。
 旧 `.batch()`/parallel launcher 仅是 deprecated TaskResult 适配器，无 RPM 推断或默认熔断。
 
+需要逐任务存储或精确 Schema 时，Tool factory 的 `ToolFactoryContext.item_id`
+提供实际 `WorkItem.id`。这个身份只供受信宿主使用，不自动进入模型输入。
+可用它索引 host-only bindings 中的逐任务依赖，再核对本次输入与可写范围；
+相同模型输入的任务也须有独立保存会话。单次 invoke 和 map 使用同一绑定规则，
+嵌套调用及错误结束后恢复外层身份。
+
+PI 动态工具可通过 `agentloom.execution.tool_context.current_tool_call_context()`
+读取当前工具调用的只读事实：`identity` 为实际原生调用身份，
+`assistant_tools` 为同一模型响应中的有序工具名，包含重复名称。
+该信息来自实际模型响应；准备与执行期间可读，离开调用返回 `None`。
+工具可以据此验证同回合动作约束，执行顺序仍由原生工具 metadata 管理。
+例如修改工具与结束工具同回合出现时，结束工具可拒绝批准，
+要求后续模型回合先复核真实修改结果；无需创建另一个 Tool Scheduler。
+
+工具执行依赖使用 `agentloom.execution.tool_context.ToolContext` 类型注解注入，
+该参数不进入模型 Schema。创建阶段的 `ToolFactoryContext` 与执行阶段分开；
+可信 bindings 由 Gateway 在创建时捕获，执行时通过 `ctx.bindings` 访问。
+大结果的保存和分页由工具负责。`runtime.trace.mode: off` 不创建临时 Trace、
+自动 ContextEngine 存储或隐式 ContextRef，也不自动追加读取工具。
+完整用法见 `docs/en/tool_context.md`。
+
 ## Agent YAML 可配置字段
 
 每个 Agent 必填：
@@ -195,7 +216,7 @@ skills, tool_metadata, tool_output_limits
 
 ### context_engine
 
-ContextEngine 默认开启并绑定当前 task 的 checkpoint store。配置只暴露常用阈值；不要新增“关闭开关”或第二套恢复路径。
+Trace 为 `full` 时，ContextEngine 自动绑定当前 task 的 checkpoint store；`off` 时不自动创建存储。配置只暴露常用阈值；工具显式管理结果保存，不新增 ContextEngine 开关或第二套恢复路径。
 
 ```yaml
 context_engine:

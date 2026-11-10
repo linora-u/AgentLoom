@@ -99,6 +99,7 @@ class ApplicationRunLifecycle:
         self._resumable = False
         self._runtime_events: list[RuntimeEvent] = []
         self._runtime_events_lock = RLock()
+        self._trace_enabled = True
         self._batch_records_lock = RLock()
 
     def initialize_run(self, runtime_context: Any, **manifest: Any) -> Any:
@@ -186,9 +187,7 @@ class ApplicationRunLifecycle:
     def bind_services(self, runtime_context: Any, effective_config: dict, *,
                       file_logging: bool | None = None, trace_exporter: Any = None):
         """Own the shared Run context, trace, logger and redaction bindings."""
-        import tempfile
         from contextlib import ExitStack
-        from pathlib import Path
         from types import SimpleNamespace
 
         from agentloom.config.redaction import bind_redaction_policy
@@ -201,7 +200,6 @@ class ApplicationRunLifecycle:
         )
         from agentloom.execution.observability import RunTrace, bind_trace_recorder
         from agentloom.execution.presentation import StepPresenter
-        from agentloom.execution.context import RuntimeContext
         builder = LoggingConfigBuilder().apply_mapping(effective_config.get('logging', {}), source='effective logging config')
         from agentloom.app.invocation import bind_runtime_event_sink
         from agentloom.config.config import get_config
@@ -209,19 +207,9 @@ class ApplicationRunLifecycle:
         trace_mode = str(
             effective_config.get("runtime", {}).get("trace", {}).get("mode", "full")
         )
+        self._trace_enabled = trace_mode == "full"
         with ExitStack() as stack:
-            trace_context = runtime_context
-            if trace_mode == "off":
-                temporary_root = Path(stack.enter_context(
-                    tempfile.TemporaryDirectory(prefix="agentloom-trace-")
-                ))
-                trace_context = RuntimeContext(
-                    root_dir=temporary_root,
-                    application_id=runtime_context.application_id,
-                    task_id=runtime_context.task_id,
-                    run_id=runtime_context.run_id,
-                )
-                trace_exporter = None
+            trace_context = runtime_context if trace_mode == "full" else None
             stack.enter_context(bind_workspace_project(get_config().agent_root))
             stack.enter_context(bind_redaction_policy(effective_config))
             stack.enter_context(bind_run_context(runtime_context))
@@ -232,16 +220,17 @@ class ApplicationRunLifecycle:
             backend = initialize_run_logger(
                 runtime_context, logging_builder=builder, file_logging=file_logging
             )
-            recorder.attach_presenter(
-                StepPresenter(backend, RunTrace(recorder.storage, runtime_context.run_id))
-            )
+            if recorder is not None:
+                recorder.attach_presenter(
+                    StepPresenter(backend, RunTrace(recorder.storage, runtime_context.run_id))
+                )
             stack.enter_context(bind_logger_backend(backend, context=runtime_context))
             yield SimpleNamespace(
                 recorder=recorder,
                 logger_backend=backend,
                 log=get_logger(backend, __name__),
                 trace_mode=trace_mode,
-                trace_dir=trace_context.trace_dir,
+                trace_dir=trace_context.trace_dir if trace_context is not None else None,
             )
 
     @property
@@ -474,6 +463,7 @@ class ApplicationRunLifecycle:
                     has_result=True,
                     event_start_offset=finalization.event_start_offset,
                     runtime_events=self.runtime_events_snapshot(),
+                    trace_enabled=self._trace_enabled,
                     manifest_updates=finalization.manifest_updates,
                 )
             else:
@@ -486,6 +476,7 @@ class ApplicationRunLifecycle:
                         has_result=False,
                         event_start_offset=finalization.event_start_offset,
                         runtime_events=self.runtime_events_snapshot(),
+                        trace_enabled=self._trace_enabled,
                         manifest_updates=finalization.manifest_updates,
                     )
                 except Exception as exc:
@@ -752,6 +743,7 @@ def _persist_run_observability(
     has_result: bool,
     event_start_offset: int | None,
     runtime_events: tuple[RuntimeEvent, ...] = (),
+    trace_enabled: bool = True,
     manifest_updates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Copy terminal task evidence into the immutable Run directory."""
@@ -782,7 +774,7 @@ def _persist_run_observability(
     if runtime_events:
         runtime_event_size = runtime_context.atomic_write_run_file_chunks(
             runtime_context.audit_dir / "runtime_events.jsonl",
-            _runtime_event_chunks(runtime_events),
+            _runtime_event_chunks(runtime_events, trace_enabled=trace_enabled),
         )
         manifest_updates.update(
             runtime_events_artifact="audit/runtime_events.jsonl",
@@ -808,6 +800,9 @@ def _persist_run_observability(
             goal=goal,
             goal_artifact="audit/goal.json",
         )
+
+    if not trace_enabled:
+        return manifest_updates
 
     try:
         runtime_context.atomic_write_run_file_chunks(
@@ -844,7 +839,35 @@ def _persist_run_observability(
     return manifest_updates
 
 
-def _runtime_event_chunks(events: tuple[RuntimeEvent, ...]):
+def _runtime_event_details(event: RuntimeEvent) -> dict[str, Any]:
+    """Keep execution metadata, without another copy of Model or Tool bodies."""
+    common = {"instance_id", "hook_run_id", "local_run_id", "root_run_id", "attempt_id", "sequence", "root_agent"}
+    by_kind = {
+        "run": {"phase", "state", "status"},
+        "model": {"phase", "item_count", "response_id", "attempt", "steps", "max_steps"},
+        "tool": {"call_id", "name", "tool_name", "status", "owner", "provider"},
+        "checkpoint": {"progress"},
+        "usage": {"input_tokens", "output_tokens", "total_tokens", "cached_input_tokens", "reasoning_tokens", "usage_complete"},
+        "terminal": {"state", "category", "retryable", "steps", "max_steps"},
+    }
+    details = {key: value for key, value in event.details.items()
+               if key in common | by_kind.get(event.kind, set())
+               and (value is None or isinstance(value, (str, bool, int, float)))}
+    record = event.details.get("record")
+    if event.kind == "tool" and isinstance(record, Mapping):
+        fields = {"call_id", "tool_name", "status", "started_at", "ended_at"}
+        safe_record = {key: value for key, value in record.items() if key in fields
+                       and (value is None or isinstance(value, (str, bool, int, float)))}
+        error = record.get("error")
+        if isinstance(error, Mapping):
+            safe_record["error"] = {key: value for key, value in error.items()
+                                    if key in {"kind", "stage", "category", "retryable"}
+                                    and (value is None or isinstance(value, (str, bool, int, float)))}
+        details["record"] = safe_record
+    return details
+
+
+def _runtime_event_chunks(events: tuple[RuntimeEvent, ...], *, trace_enabled: bool = True):
     for event in events:
         yield (
             json.dumps(
@@ -854,7 +877,7 @@ def _runtime_event_chunks(events: tuple[RuntimeEvent, ...]):
                     "application_id": event.application_id,
                     "task_id": event.task_id,
                     "run_id": event.run_id,
-                    "details": dict(event.details),
+                    "details": dict(event.details) if trace_enabled else _runtime_event_details(event),
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),

@@ -68,8 +68,13 @@ _SAMPLE_YAML_NO_WORKFLOW = textwrap.dedent("""\
 @pytest.fixture(autouse=True)
 def _isolated_model_profiles(tmp_path, monkeypatch):
     import agentloom.config.config as config_module
+
     from tests.config_test_support import unit_config
-    monkeypatch.setattr(config_module, "_ACTIVE_CONFIG", unit_config(tmp_path))
+    config = unit_config(tmp_path)
+    # These transaction tests inspect complete audit artifacts; Trace off is
+    # exercised separately with explicit assertions that body copies are absent.
+    config.raw.setdefault("runtime", {})["trace"] = {"mode": "full"}
+    monkeypatch.setattr(config_module, "_ACTIVE_CONFIG", config)
 
 
 def _fake_c(tmp_path: Path):

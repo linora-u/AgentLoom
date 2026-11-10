@@ -24,13 +24,12 @@ from agentloom.execution.native_tools import (
     NativeExecutionOutcome,
     NativeJournalEntry,
     NativePreparation,
-    NativeResultCapture,
     NativePrepareRequest,
+    NativeResultCapture,
     ToolManifestEntry,
 )
 from agentloom.execution.tool_gateway import (
     ToolEvidenceExtractor,
-    _compress_tool_result,
     _EvidenceCarrier,
     _prepare_tool_input,
     _validate_schema_value,
@@ -263,8 +262,8 @@ class NativeToolHost:
             if load_exclude_paths(tool.logical_name) or load_exclude_paths(tool.visible_name):
                 raise ValueError("Native query exclusion mapping is not verified; refusing execution")
         if tool.operation == "shell":
-            from agentloom.execution.tool_governance.shell.validator import validate_command
             from agentloom.execution.tool_governance.shell.sandbox import SandboxManager
+            from agentloom.execution.tool_governance.shell.validator import validate_command
             assert tool.command_parameter is not None
             command = arguments.get(tool.command_parameter)
             if not isinstance(command, str) or not command.strip():
@@ -296,9 +295,9 @@ class NativeToolHost:
             if entry.state != "authorized":
                 raise ValueError("Native authorization already consumed or cancelled")
             try:
-                from agentloom.execution.tool_gateway import _build_runtime_context
-                from agentloom.execution.hooks.types import HookEvent
                 from agentloom.execution.hooks.path_validators import enforce_core_tool_guard
+                from agentloom.execution.hooks.types import HookEvent
+                from agentloom.execution.tool_gateway import _build_runtime_context
                 context = _build_runtime_context(
                     self._hook, event=HookEvent.PRE_TOOL_USE,
                     tool_name=expected.tool.visible_name, tool_input=dict(expected.final_arguments),
@@ -409,12 +408,10 @@ class NativeToolHost:
                 compressible = json.dumps(raw_output, ensure_ascii=False, indent=2)
             if outcome.status == "completed" and isinstance(compressible, str):
                 try:
-                    from agentloom.execution.context_engine.runtime import get_active_context_engine
                     from agentloom.execution.observability import (
                         TraceStorageError,
                         get_current_trace_recorder,
                     )
-                    engine = get_active_context_engine()
                     source = f"native:{grant.tool.provider}:{grant.identity.call_id}"
                     recorder = get_current_trace_recorder()
                     if recorder is not None:
@@ -422,12 +419,10 @@ class NativeToolHost:
                             compressible, tool_name=grant.tool.visible_name,
                             source=source, call_id=grant.identity.call_id,
                         )
-                    elif capture is not None and len(json.dumps(output).encode()) > 262144 and engine is not None:
-                        compressed = engine.capture_tool_result(compressible, tool_name=grant.tool.visible_name,
-                            source=source, max_preview_chars=16384) or compressible
                     else:
-                        compressed = _compress_tool_result(tool_name=grant.tool.visible_name,
-                            source=source, result=compressible)
+                        # Storage and pagination belong to the selected tool.
+                        # Without Trace, do not silently retain another copy.
+                        compressed = compressible
                     if isinstance(output, dict) and isinstance(output.get("content"), list):
                         if compressed != compressible:
                             output = {"content": [{"type": "text", "text": compressed}]}

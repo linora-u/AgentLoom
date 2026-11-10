@@ -59,6 +59,11 @@ def ensure_task_context_engine(effective_config: dict) -> Iterator[ContextEngine
 
     from .config import ContextEngineConfig
 
+    if effective_config.get("runtime", {}).get("trace", {}).get("mode", "full") == "off":
+        with bind_task_context_engine(None):
+            yield None
+        return
+
     current = _current_context_engine.get()
     context = get_current_run_context()
     if current is not None or context is None:

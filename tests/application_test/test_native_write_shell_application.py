@@ -9,10 +9,18 @@ from agentloom.execution.model_protocol import FunctionCallItem, MessageItem, Mo
 from tests.application_test.native_write_shell_support import SCENARIOS, external_write_runtime, planned_calls, verify_native, write_application
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
-def test_application_governs_native_mutation_and_shell(tmp_path, scenario):
+@pytest.mark.parametrize("trace_mode", ["full", "off"])
+def test_application_governs_native_mutation_and_shell(tmp_path, scenario, trace_mode, monkeypatch):
     config = tmp_path / "config"
     config.mkdir()
-    (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(tmp_path / "runtime")}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "default_toolsets": []}))
+    (config / "system.yaml").write_text(yaml.safe_dump({"runtime": {"root_dir": str(tmp_path / "runtime"), "trace": {"mode": trace_mode}}, "checkpoint": {"enabled": False}, "self_learning": {"enabled": False}, "default_toolsets": []}))
+    storage_attempts = []
+    if trace_mode == "off":
+        from agentloom.execution.context_engine.engine import ContextEngine
+        def forbid_storage(*args, **kwargs):
+            storage_attempts.append(True)
+            raise AssertionError("Trace off must not retain native tool text in ContextEngine")
+        monkeypatch.setattr(ContextEngine, "capture_tool_result", forbid_storage)
     (config / "model.yaml").write_text("model:\n  default_model_type: test\n  test: {model: fixture, adapter: openai_chat}\n  summary: {model: fixture, adapter: openai_chat}\n")
     workflow, marker = write_application(tmp_path, "write_case", "test", scenario)
     plan = planned_calls(workflow.parent.parent / "files", scenario, marker)
@@ -29,3 +37,8 @@ def test_application_governs_native_mutation_and_shell(tmp_path, scenario):
     with external_write_runtime(lambda _: Model(), observations), bind_config(load_project_config(tmp_path)):
         result = execute_app(workflow, file_logging=False)
     verify_native(scenario, observations[result.run.run_id], marker)
+    if trace_mode == "off":
+        assert storage_attempts == []
+        assert result.run.trace_dir is None
+        assert not (tmp_path / "runtime/traces").exists()
+        assert not (tmp_path / "runtime/context_store").exists()

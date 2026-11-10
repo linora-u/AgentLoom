@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model
 
 PI_BRIDGE_PROTOCOL_VERSION = 2
 NonEmpty = Annotated[str, Field(min_length=1)]
-Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare", "model_trace", "session_checkpoint"]
+Method = Literal["handshake", "run", "snapshot", "cancel", "close", "tool_prepare", "tool_settle", "tool_dispatch", "platform_invoke", "model_prepare", "model_response", "model_trace", "session_checkpoint"]
 
 
 class WireValue(BaseModel):
@@ -130,6 +130,26 @@ class ModelTrace(WireValue):
     sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
 
 
+class ModelToolCall(WireValue):
+    id: NonEmpty
+    name: NonEmpty
+
+
+class ModelResponse(WireValue):
+    """Runtime call facts, independent of optional Model body tracing."""
+
+    method: Literal["model_response"]
+    identity: NativeCallIdentity
+    attempt: Annotated[int, Field(ge=0)]
+    tool_calls: list[ModelToolCall]
+
+    @model_validator(mode="after")
+    def unique_calls(self):
+        if len({call.id for call in self.tool_calls}) != len(self.tool_calls):
+            raise ValueError("Model response tool call IDs must be unique")
+        return self
+
+
 class PlatformInvoke(WireValue):
     method: Literal["platform_invoke"]
     identity: NativeCallIdentity
@@ -145,7 +165,7 @@ class PlatformPrepare(WireValue):
 
 
 RequestPayload = Annotated[
-    Handshake | Run | Snapshot | Cancel | Close | Prepare | Dispatch | Settle | PlatformInvoke | PlatformPrepare | ModelPrepare | ModelTrace | SessionCheckpoint, Field(discriminator="method")
+    Handshake | Run | Snapshot | Cancel | Close | Prepare | Dispatch | Settle | PlatformInvoke | PlatformPrepare | ModelPrepare | ModelResponse | ModelTrace | SessionCheckpoint, Field(discriminator="method")
 ]
 
 
@@ -259,7 +279,15 @@ class ModelPermit(WireValue):
     method: Literal["model_prepare"]
     identity: NativeCallIdentity
     state: Literal["work", "final", "denied"]
+    trace_enabled: bool = True
     agent_context: list[str] = Field(default_factory=list, repr=False)
+
+
+class ModelResponseResult(WireValue):
+    method: Literal["model_response"]
+    identity: NativeCallIdentity
+    attempt: Annotated[int, Field(ge=0)]
+    accepted: Literal[True]
 
 
 class ModelTraceResult(WireValue):
@@ -283,7 +311,7 @@ class PlatformPrepared(WireValue):
 
 
 ResultPayload = Annotated[
-    HandshakeResult | RunResult | SnapshotResult | ControlResult | PrepareResult | SettleResult | PlatformResult | PlatformPrepared | ModelPermit | ModelTraceResult | SessionCheckpointResult,
+    HandshakeResult | RunResult | SnapshotResult | ControlResult | PrepareResult | SettleResult | PlatformResult | PlatformPrepared | ModelPermit | ModelResponseResult | ModelTraceResult | SessionCheckpointResult,
     Field(discriminator="method"),
 ]
 
@@ -311,7 +339,7 @@ class Request(Envelope):
             else self.payload.outcome.identity
             if isinstance(self.payload, Settle)
             else self.payload.identity
-            if isinstance(self.payload, (PlatformInvoke, PlatformPrepare, ModelPrepare, ModelTrace))
+            if isinstance(self.payload, (PlatformInvoke, PlatformPrepare, ModelPrepare, ModelResponse, ModelTrace))
             else None
         )
         if identity is not None and (identity.run_id != self.run_id or identity.instance_id != self.instance_id):
@@ -335,7 +363,7 @@ class Response(Envelope):
                 raise ValueError("Run-scoped response requires run_id")
             identity = (
                 self.payload.identity
-                if isinstance(self.payload, (SettleResult, ModelPermit, ModelTraceResult))
+                if isinstance(self.payload, (SettleResult, ModelPermit, ModelResponseResult, ModelTraceResult))
                 else self.payload.authorization.identity
                 if isinstance(self.payload, PrepareResult) and self.payload.authorization is not None
                 else None

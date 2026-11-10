@@ -11,7 +11,8 @@ import time
 import types
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from functools import partial
 from threading import RLock
 from types import MappingProxyType
 from typing import (
@@ -28,6 +29,7 @@ from typing import (
 from agentloom.execution.logging import get_logger
 from agentloom.execution.model_protocol import ToolDefinition
 from agentloom.execution.native_tools import ToolManifestEntry
+from agentloom.execution.tool_context import ToolContext, bind_tool_context, claim_tool_call_context
 from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, TERMINAL_TOOL_METADATA_KEY, ToolCallRecord
 
 logger = get_logger(__name__)
@@ -61,6 +63,7 @@ class ToolBinding:
     input_validator: ToolInputValidator | None = None
     recovery_descriptor: ToolRecoveryDescriptor | None = None
     terminal_on_success: bool = False
+    context_parameter: str | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         if type(self.terminal_on_success) is not bool:
@@ -85,6 +88,13 @@ class ToolBinding:
             value = getattr(self, name)
             if value is not None and not callable(value):
                 raise TypeError(f"ToolBinding {name} must be callable or None")
+        context_parameter = _tool_context_parameter(self.forward)
+        if context_parameter is not None:
+            if context_parameter in self.inputs_schema or _schema_declares_parameter(
+                self.definition.parameters, context_parameter
+            ):
+                raise ValueError("Injected ToolContext parameter must not appear in the Tool schema")
+            object.__setattr__(self, "context_parameter", context_parameter)
 
 
 class _ToolInputContractError(ValueError):
@@ -241,13 +251,13 @@ def _callable_schema(
     parameter_descriptions: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
     signature = _get_effective_signature(forward)
-    try:
-        resolved_hints = get_type_hints(forward)
-    except (NameError, TypeError):
-        resolved_hints = {}
+    resolved_hints = _callable_type_hints(forward)
     properties: dict[str, Any] = {}
     required: list[str] = []
+    context_parameter = _tool_context_parameter(forward)
     for name, parameter in signature.parameters.items():
+        if name == context_parameter:
+            continue
         if parameter.kind in {
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
@@ -505,6 +515,87 @@ def _get_effective_signature(forward_callable: ToolForward) -> inspect.Signature
     return signature
 
 
+def _tool_context_parameter(forward: ToolForward) -> str | None:
+    signature = _get_effective_signature(forward)
+    hints = _callable_type_hints(forward)
+    selected = [
+        parameter for name, parameter in signature.parameters.items()
+        if hints.get(name, parameter.annotation) is ToolContext
+    ]
+    if len(selected) > 1:
+        raise TypeError("Tool callable may declare only one ToolContext parameter")
+    if not selected:
+        return None
+    parameter = selected[0]
+    if parameter.kind not in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY,
+    }:
+        raise TypeError("ToolContext parameter must accept a keyword argument")
+    return parameter.name
+
+
+def _callable_type_hints(forward: ToolForward) -> dict[str, Any]:
+    target = forward
+    while isinstance(target, partial):
+        target = target.func
+    if not inspect.isroutine(target):
+        target = target.__init__ if isinstance(target, type) else target.__call__
+    target = inspect.unwrap(target)
+    try:
+        return get_type_hints(target)
+    except (NameError, TypeError):
+        # One unknown business annotation must not hide a resolvable host
+        # parameter. Keep the old unknown-type schema behavior for that field.
+        namespace = getattr(target, "__globals__", {})
+        resolved = {}
+        for name, annotation in getattr(target, "__annotations__", {}).items():
+            holder = type("_ToolAnnotation", (), {"__annotations__": {name: annotation}})
+            try:
+                resolved[name] = get_type_hints(holder, globalns=namespace, localns=namespace)[name]
+            except (NameError, TypeError):
+                if name != "return" and re.search(r"\bToolContext\b", str(annotation)):
+                    raise TypeError(
+                        "Cannot resolve ToolContext annotation; import its type in the callable's module"
+                    ) from None
+        return resolved
+
+
+def _schema_declares_parameter(schema: Mapping[str, Any], name: str) -> bool:
+    from referencing import Registry, Resource
+    from referencing.jsonschema import DRAFT202012
+
+    resource = Resource.from_contents(dict(schema), default_specification=DRAFT202012)
+    resolver = Registry().resolver_with_root(resource)
+
+    def declares(candidate, current, visited):
+        if not isinstance(candidate, Mapping) or id(candidate) in visited:
+            return False
+        visited = visited | {id(candidate)}
+        if name in candidate.get("properties", {}) or name in candidate.get("required", []):
+            return True
+        for keyword in ("$ref", "$dynamicRef"):
+            reference = candidate.get(keyword)
+            if reference is None:
+                continue
+            if not isinstance(reference, str) or (reference and not reference.startswith("#")):
+                raise ValueError("ToolContext schema references must resolve within the Tool schema")
+            try:
+                resolved = current.lookup(reference)
+            except Exception as error:
+                raise ValueError("ToolContext schema reference cannot be resolved") from error
+            if declares(resolved.contents, resolved.resolver, visited):
+                return True
+        return any(
+            declares(branch, current.in_subresource(Resource.from_contents(
+                dict(branch), default_specification=DRAFT202012,
+            )), visited)
+            for keyword in ("anyOf", "oneOf", "allOf")
+            for branch in candidate.get(keyword, []) if isinstance(branch, Mapping)
+        )
+
+    return declares(schema, resolver, frozenset())
+
+
 def _schema_type_names(schema: Mapping[str, Any]) -> tuple[str, ...]:
     raw = schema.get("type")
     names: tuple[str, ...]
@@ -607,6 +698,14 @@ def _build_call_kwargs_from_input(
     tool_input: dict[str, Any],
 ) -> dict[str, Any]:
     signature = _get_effective_signature(forward_callable)
+    context_parameter = _tool_context_parameter(forward_callable)
+    if context_parameter is not None:
+        if context_parameter in tool_input:
+            raise _ToolInputContractError("ToolContext is supplied by the host, not Tool arguments")
+        signature = signature.replace(parameters=[
+            parameter for name, parameter in signature.parameters.items()
+            if name != context_parameter
+        ])
     parameters = signature.parameters
     accepts_kwargs = any(
         parameter.kind == inspect.Parameter.VAR_KEYWORD
@@ -646,6 +745,8 @@ def _strict_decode_tool_input(
     from agentloom.execution.hooks.type_coercion import coerce_tool_parameters
 
     decoded = deepcopy(tool_input)
+    if binding.context_parameter is not None and binding.context_parameter in decoded:
+        raise _ToolInputContractError("ToolContext is supplied by the host, not Tool arguments")
     schema = dict(binding.inputs_schema)
     if binding.input_validator is not None:
         # An explicit validator owns the complete input contract, including
@@ -825,6 +926,7 @@ class _PreparedToolExecution:
     binding: ToolBinding
     hook_run: Any
     started_at: float
+    dispatch_owner: object
 
 
 @runtime_checkable
@@ -1163,6 +1265,12 @@ class AgentLoomToolGateway:
         *,
         resource_closers: Iterable[ToolResourceCloser] = (),
     ) -> None:
+        from agentloom.app.tool_factory import get_current_tool_factory_context
+
+        factory_context = get_current_tool_factory_context()
+        self._context_bindings = factory_context.bindings if factory_context is not None else MappingProxyType({})
+        self._context_item_id = factory_context.item_id if factory_context is not None else None
+        self._context_agent_name = factory_context.agent_name if factory_context is not None else None
         by_name: dict[str, ToolBinding] = {}
         for binding in bindings:
             if not isinstance(binding, ToolBinding):
@@ -1308,6 +1416,8 @@ class AgentLoomToolGateway:
                 stage="input_validation",
                 started_at=started_at,
             )
+        dispatch_owner = object()
+        claim_tool_call_context(call_id, dispatch_owner)
         prepared = _transform_tool_input(
             hook_run=hook_run, call_id=call_id, tool_name=tool_name,
             arguments=arguments, inputs_schema=binding.inputs_schema,
@@ -1329,7 +1439,7 @@ class AgentLoomToolGateway:
             handle = PreparedToolCall(call_id, tool_name, effective_input)
             self._prepared[handle] = _PreparedToolExecution(
                 call_id, tool_name, effective_input, deepcopy(call_kwargs),
-                binding, hook_run, started_at,
+                binding, hook_run, started_at, dispatch_owner,
             )
         return handle
 
@@ -1352,6 +1462,7 @@ class AgentLoomToolGateway:
         effective_input, call_kwargs = execution.arguments, execution.call_kwargs
         binding, hook_run = execution.binding, execution.hook_run
         started_at = execution.started_at
+        native_context = claim_tool_call_context(call_id, execution.dispatch_owner)
         rejection = _guard_tool_input(
             hook_run=hook_run, call_id=call_id, tool_name=tool_name,
             effective_input=effective_input, inputs_schema=binding.inputs_schema,
@@ -1376,7 +1487,17 @@ class AgentLoomToolGateway:
             if self._closed:
                 from agentloom.execution.tool_protocol import ToolPolicyBlockedError
                 raise ToolPolicyBlockedError("Tool Gateway closed during setup")
-            raw_result = binding.forward(**call_kwargs)
+            context = ToolContext(
+                call_id=call_id, tool_name=tool_name,
+                item_id=self._context_item_id, agent_name=self._context_agent_name,
+                bindings=self._context_bindings,
+                identity=native_context.identity if native_context is not None else None,
+                assistant_tools=native_context.assistant_tools if native_context is not None else (),
+            )
+            with bind_tool_context(context):
+                if binding.context_parameter is not None:
+                    call_kwargs = {**call_kwargs, binding.context_parameter: context}
+                raw_result = binding.forward(**call_kwargs)
             from agentloom.execution.model_privacy import reject_private_content
             reject_private_content(raw_result)
         except Exception as tool_error:
@@ -1477,9 +1598,7 @@ class AgentLoomToolGateway:
                         source=source, call_id=call_id,
                     )
                 else:
-                    model_output = _compress_tool_result(
-                        tool_name=tool_name, source=source, result=projection_text,
-                    )
+                    model_output = projection_text
                 if model_output != projection_text:
                     metadata[MODEL_OUTPUT_METADATA_KEY] = model_output
             except TraceStorageError:

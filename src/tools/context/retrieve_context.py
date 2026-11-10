@@ -22,8 +22,11 @@ def _retrieve_durable(ref: str, query: str, offset: int, limit: int) -> str:
     context = get_current_run_context()
     if context is None:
         return "No active Task; durable context refs require a running Application."
+    recorder = get_current_trace_recorder()
     try:
-        with RunTrace(SecureDirectory(context.trace_dir, create=False), context.run_id) as trace:
+        storage = recorder.storage.duplicate() if recorder is not None else SecureDirectory(context.trace_dir, create=False)
+        run_id = recorder.context.run_id if recorder is not None else context.run_id
+        with RunTrace(storage, run_id) as trace:
             metadata = trace.reference_metadata(ref)
             producer = metadata.get("agent_path")
             reader = capture_explicit_execution_context().runtime_agent_path
@@ -43,7 +46,6 @@ def _retrieve_durable(ref: str, query: str, offset: int, limit: int) -> str:
                     f"total_bytes={page.total_bytes} next_offset={page.next_offset if page.next_offset is not None else 'none'}]\n"
                     + "\n".join(f"byte_offset={position} {excerpt}" for position, excerpt in page.matches)
                 )
-            recorder = get_current_trace_recorder()
             budget_limit = (
                 recorder.context_page_byte_limit()
                 if recorder is not None else MAX_DURABLE_CONTEXT_PAGE_BYTES

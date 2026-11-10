@@ -258,8 +258,10 @@ async function createSession(p: Obj, event: (kind: string, payload: Obj) => void
     const requestIdentity = identity(`model:${randomUUID()}`);
     const permit = await invoke({method: "model_prepare", identity: requestIdentity});
     if (!isDeepStrictEqual(permit.identity, requestIdentity)) throw new Error("Invalid model permission identity");
+    if (typeof permit.trace_enabled !== "boolean") throw new Error("Invalid model trace permission");
     finalDelivery = permit.state === "final";
-    return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity};
+    return {state: permit.state, agent_context: permit.agent_context, identity: requestIdentity,
+      trace_enabled: permit.trace_enabled};
   }, agentDir, invoke, {codex, chatgpt},
   (identity, attempt, result) => reportSearch?.(identity, attempt, result),
   (identity, attempt, tier) => reportTier?.(identity, attempt, tier), privacy.contains);
