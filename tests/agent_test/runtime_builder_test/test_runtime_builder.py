@@ -515,9 +515,11 @@ def _append_hook_handler(agent, event, callback, *, source="test"):
     agent._hook_plan = HookPlan((*agent._hook_plan.handlers, HookHandler(event, "*", callback, source=source)))
 
 
+@pytest.mark.parametrize("trace_mode", ["off", "full"])
 def test_runtime_definition_contains_complete_neutral_runtime_input(
     monkeypatch,
     tmp_path,
+    trace_mode,
 ):
     model_binding = _model_binding(
         max_tokens=64_000,
@@ -547,6 +549,10 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     agent._effective_agent_config = {
         **agent._effective_agent_config,
         "runtime_options": {"prompt_template_path": "prompts/custom.yaml", "planning_interval": 3},
+        "runtime": {
+            **agent._effective_agent_config["runtime"],
+            "trace": {"mode": trace_mode},
+        },
     }
 
     @tool
@@ -581,10 +587,8 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     assert definition.project_root == str(tmp_path)
     assert definition.runtime_options["max_consecutive_model_errors"] == 7
     assert definition.metadata == {}
-    assert tuple(item.name for item in definition.tool_gateway.definitions) == (
-        "proof",
-        "loom_retrieve_context",
-    )
+    expected_names = ("proof",) if trace_mode == "off" else ("proof", "loom_retrieve_context")
+    assert tuple(item.name for item in definition.tool_gateway.definitions) == expected_names
 
 
 def test_each_invocation_builds_and_closes_a_fresh_runtime(monkeypatch):
@@ -2360,7 +2364,8 @@ def test_goal_tools_are_absent_when_goal_mode_is_disabled(monkeypatch, goal):
     assert agent._build_runtime_tools(agent._role_profile()) == []
 
 
-def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
+@pytest.mark.parametrize("trace_mode", ["off", "full"])
+def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch, trace_mode):
     agent = DummyGoalAgent(
         config={
             "name": "goal-runtime",
@@ -2373,11 +2378,21 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
         logger=DummyLoggerBackend(),
     )
     monkeypatch.setattr(agent, "get_all_tools", lambda agent_type: [])
+    agent._effective_agent_config = {
+        **agent._effective_agent_config,
+        "runtime": {
+            **agent._effective_agent_config["runtime"],
+            "trace": {"mode": trace_mode},
+        },
+    }
 
     gateway = agent._build_tool_gateway()
     names = {tool.name for tool in gateway.definitions}
 
-    assert names == {"get_goal", "update_goal", "loom_retrieve_context"}
+    expected_names = {"get_goal", "update_goal"}
+    if trace_mode == "full":
+        expected_names.add("loom_retrieve_context")
+    assert names == expected_names
     assert {entry.owner for entry in gateway.manifest} == {"platform"}
 
 
