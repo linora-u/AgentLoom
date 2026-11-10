@@ -156,7 +156,7 @@ default_toolsets, toolsets, mcp_servers, self_learning, hooks
 
 Worker 的有效配置由 Worker YAML 自己重建，不继承 Supervisor 的权限覆盖；需要相同路径权限或 shell 权限时，Worker YAML 或应用级 `config/system.yaml` 也要写。
 
-`context_engine` 只建议覆盖 `min_chars` / `preview_max_chars`。ContextEngine 默认启用并使用 task-scoped store；不要在 Agent YAML 里设计关闭开关或第二套恢复路径。
+`context_engine` 只建议覆盖 `min_chars` / `preview_max_chars`。Trace 为 `full` 时自动使用 task-scoped store；`off` 时不自动创建存储。工具需要保存结果时显式管理，不要在 Agent YAML 里新增 ContextEngine 开关或第二套恢复路径。
 
 ## 三种 Agent-Tool 路径
 
@@ -189,10 +189,15 @@ from agentloom.execution.tool_gateway import ToolBinding
 def create_save_design_tool(context: ToolFactoryContext) -> ToolBinding:
     # context.input 是本次 Worker 输入的只读 JSON 快照。
     # context.bindings 是宿主显式绑定、不会进入模型上下文的依赖。
+    # context.item_id 是实际 WorkItem.id，仅供宿主索引逐任务依赖。
     ...
 ```
 
 Tool factory 在当前 Agent Runtime 创建前执行；输入先经过 Worker `input_schema` 校验。精确 Schema、运行时依赖或 `terminal_on_success` 用这个接口表达，不要覆盖 Agent 的 Tool Gateway。
+
+执行工具时，可在 Python callable 声明 `ctx: ToolContext` 参数，
+由框架注入本次调用身份和可信依赖；模型参数 Schema 不包含该参数。
+工厂创建上下文与工具执行上下文分别管理生命周期，详见 `docs/en/tool_context.md`。
 - 需要锁定参数时用 `fixed_args`，必须是字典；被锁定的参数不会暴露给 LLM。
 
 ```yaml

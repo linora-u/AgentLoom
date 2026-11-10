@@ -335,6 +335,11 @@
           "title": "State",
           "type": "string"
         },
+        "trace_enabled": {
+          "default": true,
+          "title": "Trace Enabled",
+          "type": "boolean"
+        },
         "agent_context": {
           "items": {
             "type": "string"
@@ -368,6 +373,71 @@
         "identity"
       ],
       "title": "ModelPrepare",
+      "type": "object"
+    },
+    "ModelResponse": {
+      "additionalProperties": false,
+      "description": "Runtime call facts, independent of optional Model body tracing.",
+      "properties": {
+        "method": {
+          "const": "model_response",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "attempt": {
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "tool_calls": {
+          "items": {
+            "$ref": "#/$defs/ModelToolCall"
+          },
+          "title": "Tool Calls",
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "attempt",
+        "tool_calls"
+      ],
+      "title": "ModelResponse",
+      "type": "object"
+    },
+    "ModelResponseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "model_response",
+          "title": "Method",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/NativeCallIdentity"
+        },
+        "attempt": {
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "accepted": {
+          "const": true,
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "method",
+        "identity",
+        "attempt",
+        "accepted"
+      ],
+      "title": "ModelResponseResult",
       "type": "object"
     },
     "ModelSelection": {
@@ -411,6 +481,27 @@
         "request_headers"
       ],
       "title": "ModelSelection",
+      "type": "object"
+    },
+    "ModelToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ModelToolCall",
       "type": "object"
     },
     "ModelTrace": {
@@ -920,6 +1011,7 @@
               "close": "#/$defs/Close",
               "handshake": "#/$defs/Handshake",
               "model_prepare": "#/$defs/ModelPrepare",
+              "model_response": "#/$defs/ModelResponse",
               "model_trace": "#/$defs/ModelTrace",
               "platform_invoke": "#/$defs/PlatformInvoke",
               "platform_prepare": "#/$defs/PlatformPrepare",
@@ -965,6 +1057,9 @@
             },
             {
               "$ref": "#/$defs/ModelPrepare"
+            },
+            {
+              "$ref": "#/$defs/ModelResponse"
             },
             {
               "$ref": "#/$defs/ModelTrace"
@@ -1031,6 +1126,7 @@
                   "close": "#/$defs/ControlResult",
                   "handshake": "#/$defs/HandshakeResult",
                   "model_prepare": "#/$defs/ModelPermit",
+                  "model_response": "#/$defs/ModelResponseResult",
                   "model_trace": "#/$defs/ModelTraceResult",
                   "platform_invoke": "#/$defs/PlatformResult",
                   "platform_prepare": "#/$defs/PlatformPrepared",
@@ -1070,6 +1166,9 @@
                 },
                 {
                   "$ref": "#/$defs/ModelPermit"
+                },
+                {
+                  "$ref": "#/$defs/ModelResponseResult"
                 },
                 {
                   "$ref": "#/$defs/ModelTraceResult"

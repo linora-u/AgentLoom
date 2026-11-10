@@ -1,14 +1,37 @@
 """Validate Pi/host alignment before the SDK appends any recovered result."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from agentloom.execution.agent_runtime import AgentRuntimeError
 from agentloom.execution.native_journal import snapshot
 from agentloom.execution.native_tools import NativeCallIdentity
-from agentloom.execution.observability import RunTrace, get_current_trace_recorder
+from agentloom.execution.observability import RunTrace, TraceStorageError, get_current_trace_recorder
+from agentloom.execution.storage import SecureDirectory
 from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord
 from agentloom.runtimes.pi.checkpoint import PiCheckpointStore
+
+_RETAINED_CONTEXT_REF = re.compile(r"\[ContextRef ctx_[0-9a-f]{32}\b")
+
+
+def _verify_result_context_refs(store: PiCheckpointStore, trace: RunTrace | None, content: list) -> None:
+    """Check authoritative receipt references even before their Trace event commits."""
+    texts = [part["text"] for part in content
+             if part.get("type") == "text" and isinstance(part.get("text"), str)]
+    if trace is not None:
+        for text in texts:
+            trace.verify_model_content_refs(text)
+        return
+    if not any(_RETAINED_CONTEXT_REF.search(text) for text in texts):
+        return
+    try:
+        storage = SecureDirectory(store.runtime.trace_dir, create=False)
+    except OSError as exc:
+        raise TraceStorageError("Recovered Tool context requires an available prior Trace") from exc
+    with RunTrace(storage, store.runtime.run_id) as retained:
+        for text in texts:
+            retained.verify_model_content_refs(text)
 
 
 def _result(call: dict[str, Any], record: dict[str, Any] | None) -> dict[str, Any]:
@@ -130,12 +153,7 @@ def reconcile(store: PiCheckpointStore, bundle: dict[str, Any]) -> dict[str, Any
         if record is not None and (record["call_id"] != call_id or record["tool_name"] != call["tool_name"]):
             raise ValueError("Pi committed result identity mismatch")
         expected = _result(call, record)
-        if trace is not None:
-            # A native journal can commit before its required Tool trace event.
-            # Check its Model-visible references before restoring the SDK result.
-            for part in expected["content"]:
-                if part.get("type") == "text" and isinstance(part.get("text"), str):
-                    trace.verify_model_content_refs(part["text"])
+        _verify_result_context_refs(store, trace, expected["content"])
         existing = results.get(key)
         if existing is not None:
             if existing.get("toolName") != call["tool_name"] or existing.get("isError") != expected["isError"]:

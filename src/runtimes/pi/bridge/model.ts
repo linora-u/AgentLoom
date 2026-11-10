@@ -2,6 +2,7 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import * as zlib from "node:zlib";
 import { createAssistantMessageEventStream, type AssistantMessage, type Model, type Api } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -91,7 +92,8 @@ function safeUsage(usage: AssistantMessage["usage"]): AssistantMessage["usage"] 
 }
 
 export function configureModel(session: AgentSession, settings: Obj, headers: Obj,
-    prepare: () => Promise<{state: "work" | "final" | "denied"; agent_context: string[]; identity: Obj}>,
+    prepare: () => Promise<{state: "work" | "final" | "denied"; agent_context: string[];
+      identity: Obj; trace_enabled?: boolean}>,
     agentDir: string, invoke: (payload: Obj) => Promise<Obj>,
     provider: {codex: boolean; chatgpt: boolean} = {codex: false, chatgpt: false},
     reportSearch?: (identity: Obj, attempt: number, evidence: SearchEvidence) => void,
@@ -127,6 +129,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
     try {
       const permit = await prepare();
       identity = permit.identity;
+      const traceEnabled = permit.trace_enabled !== false;
       if (permit.state === "denied") return failedStream(model, false);
       const selectedContext = {...context,
         messages: permit.agent_context.length ? [...context.messages,
@@ -165,7 +168,7 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
         fetch: async (input, init) => {
           const request = new Request(input, init);
           const baseUrl = codex ? "https://chatgpt.com/backend-api" : settings.base_url || "https://api.openai.com/v1";
-          if (request.url.startsWith(baseUrl.replace(/\/$/, "") + "/") &&
+          if (traceEnabled && request.url.startsWith(baseUrl.replace(/\/$/, "") + "/") &&
               /\/(?:chat\/completions|responses)$/.test(new URL(request.url).pathname)) {
             let encoded = await readBounded(request.clone().body);
             if (request.headers.get("content-encoding") === "zstd") encoded = zlib.zstdDecompressSync(encoded);
@@ -186,8 +189,10 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
             ? ("max_completion_tokens" in outgoing ? "max_completion_tokens" : "max_tokens") : "max_output_tokens";
           for (const alias of ["max_tokens", "max_completion_tokens", "max_output_tokens"]) delete outgoing[alias];
           if (effectiveCap != null) outgoing[capField] = effectiveCap;
-          await capture(permit.identity, attempt, "request", outgoing);
-          requestCaptured = true;
+          if (traceEnabled) {
+            await capture(permit.identity, attempt, "request", outgoing);
+            requestCaptured = true;
+          }
           return outgoing;
         },
         onProviderStreamEvent: async (data, selectedModel) => {
@@ -255,6 +260,14 @@ export function configureModel(session: AgentSession, settings: Obj, headers: Ob
             ...(evidence.serviceTier ? {native_service_tier: evidence.serviceTier} : {})}
           : message);
       }
+      const toolCalls = ["error", "aborted"].includes(message.stopReason) ? []
+        : message.content.filter(part => part.type === "toolCall")
+          .map(part => ({id: part.id, name: part.name}));
+      const receipt = await invoke({method: "model_response", identity: permit.identity,
+        attempt, tool_calls: toolCalls});
+      if (receipt.method !== "model_response" || !receipt.accepted || receipt.attempt !== attempt
+          || !isDeepStrictEqual(receipt.identity, permit.identity))
+        throw new Error("Invalid Pi Model response acknowledgement");
       return stream;
     } catch (error) {
       if (requestCaptured && !responseAttempted && identity) {

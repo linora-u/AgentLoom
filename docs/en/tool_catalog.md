@@ -7,6 +7,9 @@ self-learning, Todo, or ContextEngine implementations.
 
 ## Runtime contract
 
+For host dependency injection and tool-owned content paging, see
+[Tool execution Context](tool_context.md).
+
 | Module | Owns | Must not own |
 |---|---|---|
 | `src/tools/catalog.py` | `ToolSpec`, toolset membership, descriptions, safety and output metadata, implementation references | Imports of concrete tool packages or runtime configuration |

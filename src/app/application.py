@@ -461,7 +461,8 @@ class Application:
                                 {},
                                 bool(effective.get("checkpoint", {}).get("cleanup_on_success", True)),
                                 services.log,
-                                record_final_answer=services.recorder.record_final_answer,
+                                record_final_answer=(services.recorder.record_final_answer
+                                                     if services.recorder is not None else None),
                             ),
                             ApplicationRunResources(
                                 None,
@@ -716,6 +717,7 @@ class BoundWorker:
         ``worker_outcome`` and optional ``worker_infrastructure_error``.
         Application closure waits for this invocation before root teardown.
         """
+        from agentloom.app.tool_factory import bind_tool_factory_work_item
         from agentloom.execution import get_current_run_context
 
         owner = self.owner
@@ -740,13 +742,14 @@ class BoundWorker:
                 owner._require_open()
                 owner._batches.add(control)
             _ACTIVE_BATCH_OWNER.set(owner)
-            outcome = owner._invoke_definition(
-                self._definition,
-                item,
-                index,
-                agent_factory=(lambda: agent_factory(deepcopy(self._definition), owner.logger))
-                if agent_factory is not None else None,
-            )
+            with bind_tool_factory_work_item(item.id):
+                outcome = owner._invoke_definition(
+                    self._definition,
+                    item,
+                    index,
+                    agent_factory=(lambda: agent_factory(deepcopy(self._definition), owner.logger))
+                    if agent_factory is not None else None,
+                )
             return outcome
         except InvocationControlError as interrupted:
             error = interrupted.error

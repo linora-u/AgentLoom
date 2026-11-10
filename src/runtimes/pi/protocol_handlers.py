@@ -16,6 +16,7 @@ from agentloom.execution.agent_runtime import (
 from agentloom.execution.goal import GoalCompleteError
 from agentloom.execution.native_tool_host import NativeToolHost
 from agentloom.execution.native_tools import NativeCallIdentity, NativeCommitAck, ToolManifestEntry
+from agentloom.execution.tool_context import ToolCallContext, bind_tool_call_context
 from agentloom.execution.tool_gateway import PreparedToolCall, PreparedToolGateway
 from agentloom.execution.tool_protocol import (
     MODEL_OUTPUT_METADATA_KEY,
@@ -28,6 +29,8 @@ from agentloom.runtimes.pi.protocol import (
     Dispatch,
     ModelPermit,
     ModelPrepare,
+    ModelResponse,
+    ModelResponseResult,
     ModelTrace,
     ModelTraceResult,
     PlatformInvoke,
@@ -99,12 +102,16 @@ class PiModelHandler:
         self._execution = execution
         self._hook = hook
         self._shared_goal = shared_goal
-        self._model_calls: set[str] = set()
+        self._model_calls: dict[str, NativeCallIdentity] = {}
+        self._model_responses: set[str] = set()
         self._trace_turns: dict[tuple[str, int], str] = {}
+        self._tool_batches: dict[tuple[str | None, str | None, str], tuple[str, tuple[str, ...]]] = {}
         self._step_number = 0
         self._lock = Lock()
 
     def handle(self, payload: ModelPrepare) -> ModelPermit:
+        from agentloom.execution.observability import get_current_trace_recorder
+
         identity = payload.identity
         with self._lock:
             if (
@@ -118,7 +125,7 @@ class PiModelHandler:
                 or identity.call_id in self._model_calls
             ):
                 raise AgentRuntimeError("Invalid Pi model protocol request identity", category="internal")
-            self._model_calls.add(identity.call_id)
+            self._model_calls[identity.call_id] = identity
         state = "work"
         if self._shared_goal is not None:
             try:
@@ -139,10 +146,35 @@ class PiModelHandler:
             method="model_prepare",
             identity=identity,
             state=state,
+            trace_enabled=get_current_trace_recorder() is not None,
             agent_context=self._hook.consume_pending_agent_context()
             if self._hook is not None and state != "denied"
             else [],
         )
+
+    def response(self, payload: ModelResponse) -> ModelResponseResult:
+        """Retain only dispatch facts needed by tools, never Model content."""
+        identity = payload.identity
+        if (
+            identity.application_id, identity.task_id, identity.run_id, identity.instance_id
+        ) != (
+            self._request.application_id or "standalone",
+            self._request.task_id or "standalone", self._run_id, self._instance_id,
+        ):
+            raise AgentRuntimeError("Invalid Pi Model response identity", category="internal")
+        keys = [(identity.native_session_id, identity.native_parent_id, call.id)
+                for call in payload.tool_calls]
+        names = tuple(call.name for call in payload.tool_calls)
+        with self._lock:
+            if self._model_calls.get(identity.call_id) != identity:
+                raise AgentRuntimeError("Pi Model response has no prepared turn", category="internal")
+            if identity.call_id in self._model_responses or any(key in self._tool_batches for key in keys):
+                raise AgentRuntimeError("Duplicate Pi Model response", category="internal")
+            self._model_responses.add(identity.call_id)
+            for key, call in zip(keys, payload.tool_calls, strict=True):
+                self._tool_batches[key] = (call.name, names)
+        return ModelResponseResult(method="model_response", identity=identity,
+                                   attempt=payload.attempt, accepted=True)
 
     def trace(self, payload: ModelTrace) -> ModelTraceResult:
         from agentloom.execution.observability import get_current_trace_recorder
@@ -158,10 +190,12 @@ class PiModelHandler:
         ):
             raise AgentRuntimeError("Invalid Pi Model trace identity", category="internal")
         with self._lock:
-            if identity.call_id not in self._model_calls:
+            if self._model_calls.get(identity.call_id) != identity:
                 raise AgentRuntimeError("Pi Model trace has no prepared turn", category="internal")
-        captured = read_model_capture(self._private_directory, payload.capture_id, payload.sha256)
         recorder = get_current_trace_recorder()
+        if recorder is None:
+            raise AgentRuntimeError("Pi Model tracing is disabled", category="internal")
+        captured = read_model_capture(self._private_directory, payload.capture_id, payload.sha256)
         key = (identity.call_id, payload.attempt)
         if recorder is not None:
             if payload.phase == "request":
@@ -201,6 +235,17 @@ class PiModelHandler:
             phase=payload.phase, accepted=True,
         )
 
+    def tool_call_context(self, identity: NativeCallIdentity, tool_name: str) -> ToolCallContext:
+        """Resolve tool batches from the actual native model response."""
+        key = (identity.native_session_id, identity.native_parent_id, identity.call_id)
+        with self._lock:
+            selected = self._tool_batches.get(key)
+        if selected is None:
+            raise AgentRuntimeError("Pi tool call has no matching assistant batch", category="internal")
+        if selected[0] != tool_name:
+            raise AgentRuntimeError("Pi tool name does not match assistant call", category="internal")
+        return ToolCallContext(identity=identity, assistant_tools=selected[1])
+
 
 class PiToolWorkGate:
     def __init__(self, shared_goal: Any) -> None:
@@ -224,6 +269,7 @@ class PiPlatformToolHandler:
         platform_entries: Mapping[str, ToolManifestEntry],
         checkpoint: PiCheckpointHandler,
         record_tool: Callable[[ToolCallRecord, ToolManifestEntry, NativeCallIdentity], None],
+        call_context: Callable[[NativeCallIdentity, str], ToolCallContext],
     ) -> None:
         self._request = request
         self._definition = definition
@@ -232,6 +278,7 @@ class PiPlatformToolHandler:
         self._platform_entries = dict(platform_entries)
         self._checkpoint = checkpoint
         self._record_tool = record_tool
+        self._call_context = call_context
         self._platform_calls: set[NativeCallIdentity] = set()
         self._platform_pending: dict[NativeCallIdentity, PreparedToolCall] = {}
         self._lock = Lock()
@@ -249,11 +296,12 @@ class PiPlatformToolHandler:
             ):
                 raise AgentRuntimeError("Invalid Pi platform protocol request identity or selection", category="internal")
             self._platform_calls.add(identity)
-        prepared = cast(PreparedToolGateway, self._definition.tool_gateway).prepare(
-            call_id=identity.call_id,
-            tool_name=payload.tool_name,
-            arguments=payload.arguments,
-        )
+        with bind_tool_call_context(self._call_context(identity, payload.tool_name)):
+            prepared = cast(PreparedToolGateway, self._definition.tool_gateway).prepare(
+                call_id=identity.call_id,
+                tool_name=payload.tool_name,
+                arguments=payload.arguments,
+            )
         if isinstance(prepared, ToolCallRecord):
             if prepared.status == "completed":
                 raise AgentRuntimeError("Pi preparation cannot report an executed tool", category="internal")
@@ -279,7 +327,8 @@ class PiPlatformToolHandler:
             raise AgentRuntimeError("Pi platform invocation does not match preparation", category="internal")
         if self._checkpoint.store is not None:
             self._checkpoint.store.start_platform(identity, payload.tool_name, payload.arguments)
-        record = cast(PreparedToolGateway, self._definition.tool_gateway).execute_prepared(pending)
+        with bind_tool_call_context(self._call_context(identity, payload.tool_name)):
+            record = cast(PreparedToolGateway, self._definition.tool_gateway).execute_prepared(pending)
         if self._checkpoint.store is not None:
             self._checkpoint.store.commit_platform(identity, record)
         self._record_tool(record, self._platform_entries[payload.tool_name], identity)
@@ -302,15 +351,18 @@ class PiNativeToolHandler:
         native_entries: tuple[ToolManifestEntry, ...],
         private_directory: Path,
         record_tool: Callable[[ToolCallRecord, ToolManifestEntry, NativeCallIdentity], None],
+        call_context: Callable[[NativeCallIdentity, str], ToolCallContext],
     ) -> None:
         self._native = native
         self._native_entries = native_entries
         self._private_directory = private_directory
         self._record_tool = record_tool
+        self._call_context = call_context
         self._emitted_commits: set[str] = set()
         self._lock = Lock()
 
     def prepare(self, payload: Prepare) -> PrepareResult:
+        self._call_context(payload.call.identity, payload.call.tool.visible_name)
         prepared = self._native.prepare(payload.call)
         if prepared.rejection is not None:
             self._record_tool(prepared.rejection, payload.call.tool, payload.call.identity)
@@ -400,12 +452,14 @@ class PiProtocolCoordinator:
             platform_entries=platform_entries,
             checkpoint=self.checkpoint,
             record_tool=record_tool,
+            call_context=self.model.tool_call_context,
         )
         self.native = None if native is None else PiNativeToolHandler(
             native=native,
             native_entries=native_entries,
             private_directory=private_directory,
             record_tool=record_tool,
+            call_context=self.model.tool_call_context,
         )
 
     @property
@@ -421,6 +475,8 @@ class PiProtocolCoordinator:
             return self.checkpoint.handle(payload)
         if isinstance(payload, ModelPrepare):
             return self.model.handle(payload)
+        if isinstance(payload, ModelResponse):
+            return self.model.response(payload)
         if isinstance(payload, ModelTrace):
             return self.model.trace(payload)
         self.gate.require_allowed(payload)

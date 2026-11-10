@@ -585,35 +585,245 @@ def test_multimegabyte_single_line_tool_result_remains_pageable(platform_project
             trace.read_page(ref, offset=size - len("终".encode()), limit=16)
 
 
-def test_trace_off_uses_task_temporary_storage_and_removes_it_after_run(platform_project):
-    _, workflow, programs, _, run = platform_project
+@pytest.mark.parametrize("checkpoint_enabled", [False, True])
+def test_trace_off_does_not_create_trace_or_context_storage(platform_project, monkeypatch, checkpoint_enabled):
+    root, workflow, programs, _, run = platform_project
     system_path = workflow.parents[3] / "config/system.yaml"
     system = yaml.safe_load(system_path.read_text())
     system["runtime"] = {"root_dir": "state/runtime", "trace": {"mode": "off"}}
+    system["checkpoint"] = {"enabled": checkpoint_enabled, "cleanup_on_success": False}
     system_path.write_text(yaml.safe_dump(system))
     payload = "temporary-context-" * 2000
-    observed = {}
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Trace off must not allocate a recorder or an automatic ContextEngine")
+
+    monkeypatch.setattr("agentloom.execution.observability.TraceRecorder.__init__", forbidden)
+    monkeypatch.setattr("agentloom.execution.context_engine.engine.ContextEngine.__init__", forbidden)
 
     def execute(definition, _request):
+        from agentloom.execution.context_engine.runtime import get_active_context_engine
+        from agentloom.execution.observability import get_current_trace_recorder
+
+        assert get_current_trace_recorder() is None
+        assert get_active_context_engine() is None
+        assert "loom_retrieve_context" not in {tool.name for tool in definition.tool_gateway.definitions}
         record = definition.tool_gateway.invoke(
             call_id="temporary-trace", tool_name="trace_payload", arguments={"value": payload},
         )
-        reference = re.search(r"ctx_[0-9a-f]{32}", record.model_content()).group()
-        from agentloom.execution.observability import get_current_trace_recorder
-        recorder = get_current_trace_recorder()
-        assert recorder is not None
-        observed["trace_dir"] = recorder.storage.path
-        from agentloom.execution.observability import RunTrace
-        with RunTrace(recorder.storage.duplicate(), recorder.context.run_id) as trace:
-            assert trace.read_text(reference) == payload
-        return "temporary trace complete"
+        assert record.status == "completed"
+        assert record.output == payload
+        assert record.model_content() == payload
+        return "trace disabled"
 
     programs["platform"] = execute
     result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
     manifest = json.loads(result.run.manifest_path.read_text())
     assert manifest["trace"] == {"mode": "off", "persisted": False}
     assert result.run.trace_dir is None
-    assert not observed["trace_dir"].exists()
+    assert not (root / "state/runtime/traces").exists()
+    assert not list((root / "state/runtime/checkpoints").rglob("context_store"))
+    from agentloom.app.application import Application
+    from agentloom.execution.observability import get_current_trace_recorder
+
+    with Application.open(root / "applications/platform", project_root=root, file_logging=False) as app:
+        assert get_current_trace_recorder() is None
+        assert app.run.trace_dir is None
+        standalone_manifest = app.run.manifest_path
+    assert json.loads(standalone_manifest.read_text())["status"] == "completed"
+    assert not (root / "state/runtime/traces").exists()
+    assert not list((root / "state/runtime/checkpoints").rglob("context_store"))
+
+
+def test_trace_off_masks_outer_recorder_and_engine_then_restores_them(platform_project):
+    from agentloom.execution.context import RuntimeContext
+    from agentloom.execution.context_engine.runtime import (
+        bind_task_context_engine,
+        ensure_task_context_engine,
+        get_active_context_engine,
+    )
+    from agentloom.execution.observability import bind_trace_recorder, get_current_trace_recorder
+
+    root, _, programs, _, run = platform_project
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    context = RuntimeContext(root / "outer", "outer", "task_outer", "run_outer")
+    outer_engine = object()
+
+    def execute(_definition, _request):
+        recorder = get_current_trace_recorder()
+        if system["runtime"]["trace"]["mode"] == "off":
+            assert recorder is None
+            assert get_active_context_engine() is None
+        else:
+            assert recorder is not None and recorder is not outer_recorder
+            assert get_active_context_engine() is not None and get_active_context_engine() is not outer_engine
+        return "nested run complete"
+
+    programs["platform"] = execute
+    with bind_trace_recorder(context) as outer_recorder, bind_task_context_engine(outer_engine):
+        with ensure_task_context_engine({"runtime": {"trace": {"mode": "off"}}}) as engine:
+            assert engine is None and get_active_context_engine() is None
+        assert get_active_context_engine() is outer_engine
+        for mode in ("off", "full"):
+            system["runtime"]["trace"] = {"mode": mode}
+            system_path.write_text(yaml.safe_dump(system))
+            assert run().output == "nested run complete"
+            assert get_current_trace_recorder() is outer_recorder
+            assert get_active_context_engine() is outer_engine
+
+
+def test_trace_off_does_not_claim_the_trace_presenter_printed_the_answer(platform_project):
+    root, _, programs, _, run = platform_project
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["runtime"]["trace"] = {"mode": "off"}
+    system["logging"] = {"console_enabled": True, "level": "INFO"}
+    system_path.write_text(yaml.safe_dump(system))
+    programs["platform"] = lambda _definition, _request: "answer for the CLI"
+    result = run()
+    assert result.output == "answer for the CLI"
+    assert result.final_answer_presented is False
+
+
+@pytest.mark.parametrize("trace_mode", ["off", "full"])
+def test_runtime_audit_keeps_usage_without_tool_bodies_when_trace_is_off(platform_project, trace_mode):
+    from agentloom.app.application import current_run_app
+    from agentloom.app.harnessing.usage import read_run_usage
+    from agentloom.execution.agent_runtime import RuntimeEvent
+
+    root, _, programs, _, run = platform_project
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["runtime"]["trace"] = {"mode": trace_mode}
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system_path.write_text(yaml.safe_dump(system))
+    body = "BODY_RETAINED_BY_TOOL_" * 2000
+    observed = []
+
+    def execute(definition, request):
+        record = definition.tool_gateway.invoke(
+            call_id="audit-call", tool_name="trace_payload", arguments={"value": body},
+        )
+        assert record.status == "completed"
+        details = [
+            ("tool", {"record": record.to_dict(), "arguments": body, "result": body}),
+            ("tool", {"record": {"call_id": "failed-call", "tool_name": "trace_payload", "status": "error",
+                                  "input": {"value": body}, "output": body, "metadata": {"model_content": body},
+                                  "error": {"kind": "tool_execution_error", "stage": "tool_execution", "message": body}}}),
+            ("model", {"phase": "completed", "body": body, "messages": [{"content": body}]}),
+            ("usage", {"input_tokens": 8, "output_tokens": 3, "total_tokens": 11, "usage_complete": False}),
+            ("usage", {"input_tokens": 13, "output_tokens": 7, "total_tokens": 20, "usage_complete": True}),
+            ("terminal", {"state": "success", "steps": 1}),
+        ]
+        for sequence, (kind, values) in enumerate(details):
+            request.event_sink(RuntimeEvent(
+                kind=kind, application_id=request.application_id, task_id=request.task_id, run_id=request.run_id,
+                details={**values, "instance_id": "audit-instance", "attempt_id": "audit-attempt", "sequence": sequence},
+            ))
+        observed.extend(current_run_app().lifecycle.runtime_events_snapshot())
+        return "official application result"
+
+    programs["platform"] = execute
+    result = run(tools=[{"name": "trace_payload", "module": __name__, "function": "trace_payload"}])
+    audit_path = result.run.run_dir / "audit/runtime_events.jsonl"
+    audit = [json.loads(line) for line in audit_path.read_text().splitlines()]
+    tools = [event["details"]["record"] for event in audit if event["kind"] == "tool"]
+    assert tools[0]["call_id"] == "audit-call" and tools[0]["status"] == "completed"
+    assert any(event.kind == "tool" and event.details["record"].get("input") == {"value": body}
+               for event in observed)
+    if trace_mode == "off":
+        assert body not in audit_path.read_text()
+        assert not {"input", "output", "metadata"}.intersection(tools[0])
+        assert tools[1]["error"] == {"kind": "tool_execution_error", "stage": "tool_execution"}
+    else:
+        assert tools[0]["input"] == {"value": body}
+        assert tools[1]["error"]["message"] == body
+    usage, = read_run_usage(result.run.run_dir)
+    assert (usage.input_tokens, usage.output_tokens, usage.total_tokens, usage.complete) == (13, 7, 20, True)
+    assert json.loads((result.run.run_dir / "artifacts/result.json").read_text()) == "official application result"
+    checkpoint = root / "state/runtime/checkpoints/platform" / result.run.task_id
+    assert json.loads((checkpoint / "task_tree.json").read_text())["result"] == "official application result"
+    for filename in ("task_tree.json", "task_events.jsonl"):
+        assert (result.run.run_dir / "audit" / filename).exists() is (trace_mode == "full")
+
+
+@pytest.mark.parametrize("first_trace", ["off", "full"])
+def test_checkpoint_can_resume_with_trace_off_without_new_trace_writes(platform_project, first_trace):
+    root, _, programs, _, run = platform_project
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system["runtime"]["trace"] = {"mode": first_trace}
+    system_path.write_text(yaml.safe_dump(system))
+    payload = "checkpoint-context-" * 2000
+
+    def execute(definition, request):
+        if request.checkpoint is None:
+            record = definition.tool_gateway.invoke(
+                call_id="before-interrupt", tool_name="trace_payload", arguments={"value": payload},
+            )
+            assert record.status == "completed"
+            request.checkpoint_sink(RuntimeCheckpointEnvelope(
+                runtime_id="platform-fixture", runtime_version="fixture", state_schema_version=1,
+                payload={"ready": True}, task_id=request.task_id, run_id=request.run_id, progress=1,
+            ))
+            raise KeyboardInterrupt("save checkpoint")
+        return "resumed without trace writes"
+
+    programs["platform"] = execute
+    selected = [{"name": "trace_payload", "module": __name__, "function": "trace_payload"}]
+    with pytest.raises(ApplicationRunInterrupted) as stopped:
+        run(tools=selected)
+    trace_root = root / "state/runtime/traces"
+    before = {path.relative_to(trace_root): path.read_bytes() for path in trace_root.rglob("*") if path.is_file()}
+    system["runtime"]["trace"] = {"mode": "off"}
+    system_path.write_text(yaml.safe_dump(system))
+    result = run(resume_task_id=stopped.value.run.task_id, tools=selected)
+    assert result.output == "resumed without trace writes"
+    assert result.run.trace_dir is None
+    after = {path.relative_to(trace_root): path.read_bytes() for path in trace_root.rglob("*") if path.is_file()}
+    assert after == before
+    if first_trace == "off":
+        assert not trace_root.exists()
+
+
+@pytest.mark.parametrize("damage", ["missing_manifest", "missing_trace", "corrupt_reference"])
+def test_trace_off_resume_rejects_unverifiable_prior_trace(platform_project, damage):
+    root, _, programs, _, run = platform_project
+    system_path = root / "config/system.yaml"
+    system = yaml.safe_load(system_path.read_text())
+    system["checkpoint"] = {"enabled": True, "cleanup_on_success": False}
+    system_path.write_text(yaml.safe_dump(system))
+
+    def execute(definition, request):
+        record = definition.tool_gateway.invoke(
+            call_id="before-interrupt", tool_name="trace_payload", arguments={"value": "retained-" * 6000},
+        )
+        assert "[ContextRef " in record.model_content()
+        request.checkpoint_sink(RuntimeCheckpointEnvelope(
+            runtime_id="platform-fixture", runtime_version="fixture", state_schema_version=1,
+            payload={"ready": True}, task_id=request.task_id, run_id=request.run_id, progress=1,
+        ))
+        raise KeyboardInterrupt("save checkpoint")
+
+    programs["platform"] = execute
+    selected = [{"name": "trace_payload", "module": __name__, "function": "trace_payload"}]
+    with pytest.raises(ApplicationRunInterrupted) as stopped:
+        run(tools=selected)
+    previous = stopped.value.run
+    if damage == "missing_manifest":
+        previous.manifest_path.unlink()
+    elif damage == "missing_trace":
+        previous.trace_dir.rename(previous.trace_dir.with_name(previous.trace_dir.name + "-missing"))
+    else:
+        reference = next((previous.trace_dir / "refs").glob("ctx_*.json"))
+        reference.write_text("{}")
+    system["runtime"]["trace"] = {"mode": "off"}
+    system_path.write_text(yaml.safe_dump(system))
+    programs["platform"] = lambda _definition, _request: pytest.fail("Invalid history must stop before execution")
+    with pytest.raises(ApplicationRunError):
+        run(resume_task_id=previous.task_id, tools=selected)
 
 
 def test_application_fails_when_required_tool_trace_cannot_be_written(platform_project, monkeypatch):

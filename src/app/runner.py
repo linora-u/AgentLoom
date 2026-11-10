@@ -103,6 +103,48 @@ def _configured_run_log_path(runtime_context: Any, logger_backend: Any) -> Path 
     return canonical_path if configured_path == canonical_path else None
 
 
+def _verify_resume_context_refs(runtime_context: Any, tree: dict, recorder: Any) -> None:
+    """Verify retained references without creating a Trace for an off attempt."""
+    from dataclasses import replace
+
+    from agentloom.execution.observability import RunTrace
+    from agentloom.execution.storage import SecureDirectory
+
+    if recorder is not None:
+        RunTrace(recorder.storage, runtime_context.run_id).verify_committed_context_refs()
+        return
+    attempts = tree.get("runs")
+    if not isinstance(attempts, list) or not attempts:
+        raise ValueError("Cannot resume with Trace disabled: prior Run metadata is unavailable")
+    traced = []
+    for attempt in attempts:
+        if not isinstance(attempt, dict) or not isinstance(attempt.get("run_id"), str):
+            raise ValueError("Cannot resume with Trace disabled: invalid prior Run identity")
+        previous = replace(runtime_context, run_id=attempt["run_id"])
+        try:
+            with SecureDirectory(previous.run_dir, create=False) as storage:
+                manifest = storage.read_json("manifest.json")
+        except (OSError, ValueError) as exc:
+            raise ValueError("Cannot resume with Trace disabled: prior Run manifest is unavailable") from exc
+        if (manifest.get("application_id"), manifest.get("task_id"), manifest.get("run_id")) != (
+                previous.application_id, previous.task_id, previous.run_id):
+            raise ValueError("Cannot resume with Trace disabled: prior Run manifest identity changed")
+        if manifest.get("trace") == {"mode": "full", "persisted": True}:
+            traced.append(previous.run_id)
+        elif manifest.get("trace") != {"mode": "off", "persisted": False}:
+            raise ValueError("Cannot resume with Trace disabled: prior Trace metadata is unavailable")
+    if traced:
+        try:
+            storage = SecureDirectory(runtime_context.trace_dir, create=False)
+        except OSError as exc:
+            raise ValueError("Cannot resume with Trace disabled: prior Trace is unavailable") from exc
+        with RunTrace(storage, runtime_context.run_id) as trace:
+            for prior_run_id in traced:
+                if not RunTrace(storage, prior_run_id).events():
+                    raise ValueError("Cannot resume with Trace disabled: prior Trace events are unavailable")
+            trace.verify_committed_context_refs()
+
+
 def _emit_lifecycle_event(
     event_sink: RunEventSink | None,
     event: RunEvent,
@@ -432,9 +474,8 @@ def _execute_app(
 
         with lifecycle.bind_services(runtime_context, effective_config, file_logging=file_logging, trace_exporter=trace_exporter) as services:
             recorder, logger_backend = services.recorder, services.logger_backend
-            from agentloom.execution.observability import RunTrace
             console = getattr(logger_backend, "console", None)
-            final_answer_presented = console is not None and bool(
+            final_answer_presented = recorder is not None and console is not None and bool(
                 getattr(console, "console_enabled", True)
             ) and isinstance(getattr(logger_backend, "level", None), AgentLoomLogLevel) and (
                 logger_backend.level <= AgentLoomLogLevel.INFO
@@ -548,7 +589,7 @@ def _execute_app(
                                 f"Checkpoint {task_id} is not resumable "
                                 f"(status={tree_status}); start a new task instead"
                             )
-                        RunTrace(recorder.storage, run_id).verify_committed_context_refs()
+                        _verify_resume_context_refs(runtime_context, tree, recorder)
                         persisted_goal = checkpoint_mgr.load_goal(task_id)
                         current_goal = normalize_goal_config(
                             config,
@@ -659,7 +700,7 @@ def _execute_app(
                             cleanup_on_success=cleanup_on_success,
                             log=log,
                             task_tree_cleanup_max_bytes=_TASK_TREE_CLEANUP_MAX_BYTES,
-                            record_final_answer=recorder.record_final_answer,
+                            record_final_answer=recorder.record_final_answer if recorder is not None else None,
                         ),
                         ApplicationRunResources(
                             supervisor=supervisor,
