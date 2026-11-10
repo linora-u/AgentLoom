@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from threading import Barrier, Lock
 from unittest.mock import MagicMock, patch
 
 import pytest
+from agentloom.execution.context import RuntimeContext
 from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.execution.hooks.types import Blocked
+from agentloom.execution.observability import RunTrace, bind_trace_recorder
 from agentloom.execution.tool_gateway import AgentLoomToolGateway
-from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
+from agentloom.execution.tool_protocol import MODEL_OUTPUT_METADATA_KEY, ToolCallRecord, ToolPolicyBlockedError
 from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
 from agentloom.execution.trusted_memory_evidence import (
     TRUSTED_MEMORY_EVIDENCE_ATTR,
@@ -162,9 +165,13 @@ def test_gateway_without_retrieval_tool_keeps_large_result_in_full() -> None:
     engine.compress_tool_result.assert_not_called()
 
 
-def test_gateway_compresses_only_model_projection_for_retriever() -> None:
+@pytest.mark.parametrize("trace_mode", ["off", "full"])
+def test_gateway_compresses_only_model_projection_for_retriever(tmp_path, trace_mode) -> None:
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    runtime = RuntimeContext(tmp_path / "runtime", "app", "task_one", "run_one")
     engine = MagicMock()
+    engine.config.min_chars = 32_768
+    engine.config.preview_max_chars = 2_048
     engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
     raw = "x" * 60_000
     gateway = AgentLoomToolGateway.from_tools(
@@ -180,24 +187,42 @@ def test_gateway_compresses_only_model_projection_for_retriever() -> None:
             return_value=engine,
         ),
         _bind(run),
+        bind_trace_recorder(runtime if trace_mode == "full" else None) as recorder,
     ):
         record = gateway.invoke(
             call_id="large-call",
             tool_name="large_tool",
             arguments={},
         )
+        if trace_mode == "full":
+            assert recorder is not None
+            match = re.match(r"\[ContextRef (ctx_[0-9a-f]{32})\b", record.model_content())
+            assert match is not None
+            assert len(record.model_content()) < len(raw)
+            with RunTrace(recorder.storage.duplicate(), runtime.run_id) as trace:
+                assert trace.read_text(match[1]) == raw
+        else:
+            assert recorder is None
+            assert record.model_output() == raw
+            assert record.model_content() == raw
+            assert MODEL_OUTPUT_METADATA_KEY not in record.metadata
+            assert not runtime.root_dir.exists()
 
     assert record.output == raw
     assert record.direct_result() == raw
-    assert record.model_content() == "[ContextRef ctx_123] preview"
-    engine.compress_tool_result.assert_called_once()
+    engine.compress_tool_result.assert_not_called()
 
 
-def test_gateway_serializes_structured_model_projection_deterministically() -> None:
+@pytest.mark.parametrize("trace_mode", ["off", "full"])
+def test_gateway_serializes_structured_model_projection_deterministically(tmp_path, trace_mode) -> None:
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
+    runtime = RuntimeContext(tmp_path / "runtime", "app", "task_one", "run_one")
     engine = MagicMock()
+    engine.config.min_chars = 32_768
+    engine.config.preview_max_chars = 2_048
     engine.compress_tool_result.return_value = "[ContextRef ctx_json] preview"
-    raw = {"z": ["payload" * 100], "a": 1}
+    raw = {"z": ["payload" * 10_000], "a": 1}
+    serialized = '{"a":1,"z":["' + ("payload" * 10_000) + '"]}'
     gateway = AgentLoomToolGateway.from_tools(
         [
             _tool("structured_tool", raw),
@@ -211,18 +236,30 @@ def test_gateway_serializes_structured_model_projection_deterministically() -> N
             return_value=engine,
         ),
         _bind(run),
+        bind_trace_recorder(runtime if trace_mode == "full" else None) as recorder,
     ):
         record = gateway.invoke(
             call_id="structured-call",
             tool_name="structured_tool",
             arguments={},
         )
+        if trace_mode == "full":
+            assert recorder is not None
+            match = re.match(r"\[ContextRef (ctx_[0-9a-f]{32})\b", record.model_content())
+            assert match is not None
+            assert len(record.model_content()) < len(serialized)
+            with RunTrace(recorder.storage.duplicate(), runtime.run_id) as trace:
+                assert trace.read_text(match[1]) == serialized
+        else:
+            assert recorder is None
+            assert record.model_output() == raw
+            assert record.model_content() == serialized
+            assert MODEL_OUTPUT_METADATA_KEY not in record.metadata
+            assert not runtime.root_dir.exists()
 
     assert record.output == raw
-    assert record.model_output() == "[ContextRef ctx_json] preview"
-    assert engine.compress_tool_result.call_args.args[0] == (
-        '{"a":1,"z":["' + ("payload" * 100) + '"]}'
-    )
+    assert record.direct_result() == raw
+    engine.compress_tool_result.assert_not_called()
 
 
 def test_structured_model_content_has_stable_key_order() -> None:
