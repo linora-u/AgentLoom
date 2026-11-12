@@ -42,7 +42,7 @@ class Pending:
 
 
 class PiTransport:
-    def __init__(self, instance_id: str):
+    def __init__(self, instance_id: str, *, installation: tuple[str, Path] | None = None):
         # The child has a private HOME. Preserve only the path to Pi's own
         # credential store so its SDK can read and refresh the saved login.
         pi_agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or Path.home() / ".pi" / "agent").expanduser().resolve()
@@ -52,11 +52,15 @@ class PiTransport:
         # AgentLoom's other tools may prepend their bundled Node 18. Select a
         # compatible executable without mutating the process-wide PATH.
         try:
-            node = find_node(env)
-            entry = installed_pi_entry(node=node)
+            if installation is None:
+                node = find_node(env)
+                entry = installed_pi_entry(node=node)
+            else:
+                node, entry = installation
         except RuntimeError as exc:
             raise AgentRuntimeError(str(exc), category="configuration") from None
         self.instance_id = instance_id
+        self._resource_instance_id = instance_id
         self._lock = RLock()
         self._termination_lock = Lock()
         self._terminated = False
@@ -96,6 +100,16 @@ class PiTransport:
         self._reader = Thread(target=self._read, name=f"pi-reader-{self.process.pid}", daemon=True)
         self._reader.start()
         register_resource(f"pi:{self.process.pid}", self.close, instance_id=instance_id)
+
+    def begin_invocation(self, instance_id: str) -> None:
+        """Rebind an idle batch process; the next wire Run must start a fresh session."""
+        with self._lock:
+            if self._failure is not None:
+                raise self._failure
+            if self._closed or self._closing or self._pending:
+                raise AgentRuntimeError("Pi bridge is not idle", category="internal")
+            self.instance_id = instance_id
+            self._callbacks.clear()
 
     @property
     def private_directory(self) -> Path:

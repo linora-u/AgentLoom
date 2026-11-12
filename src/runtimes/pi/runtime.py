@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from threading import RLock
 from typing import cast
 from uuid import uuid4
 
@@ -80,27 +81,42 @@ class PiRuntime:
         if any(tool.owner != "runtime" for tool in definition.tool_manifest) and not isinstance(definition.tool_gateway, PreparedToolGateway):
             raise AgentRuntimeError("Pi platform tools require preparation before execution", category="unsupported_capability")
         self._checkpoint: RuntimeCheckpointEnvelope | None = None
-        self.transport = PiTransport(definition.instance_id or uuid4().hex)
+        from agentloom.runtimes.pi.batch import acquire_transport
+
+        lease = acquire_transport(definition)
+        self._pool = lease[0] if lease else None
+        self._closed = False
+        self._close_lock = RLock()
+        self._transport_released = False
+        self._reusable = False
+        self._has_session = False
+        self.transport = lease[1] if lease else PiTransport(definition.instance_id or uuid4().hex)
         try:
-            response = self.transport.request(Handshake(
-                method="handshake",
-                protocol_version=PI_BRIDGE_PROTOCOL_VERSION,
-                bridge_version=BRIDGE_VERSION,
-                native_tool_contract=1,
-            ), timeout=15)
-            result = response.payload
-            if (not isinstance(result, HandshakeResult)
-                    or result.protocol_version != PI_BRIDGE_PROTOCOL_VERSION
-                    or result.bridge_version != BRIDGE_VERSION
-                    or result.sdk_version != SDK_VERSION
-                    or result.capabilities != self.capabilities):
-                raise AgentRuntimeError("Pi bridge SDK or capabilities mismatch", category="configuration")
+            if lease:
+                self.transport.begin_invocation(definition.instance_id or self.transport.instance_id)
+            if not lease or not lease[2]:
+                self._handshake()
         except BaseException:
-            self.transport.close()
+            self.close()
             raise
         from agentloom.execution.resources import register_resource
-        register_resource(f"pi-runtime:{self.transport.instance_id}", self.close,
-                          instance_id=self.transport.instance_id)
+        logical_instance = definition.instance_id or self.transport.instance_id
+        register_resource(f"pi-runtime:{logical_instance}", self.close, instance_id=logical_instance)
+
+    def _handshake(self):
+        response = self.transport.request(Handshake(
+            method="handshake",
+            protocol_version=PI_BRIDGE_PROTOCOL_VERSION,
+            bridge_version=BRIDGE_VERSION,
+            native_tool_contract=1,
+        ), timeout=15)
+        result = response.payload
+        if (not isinstance(result, HandshakeResult)
+                or result.protocol_version != PI_BRIDGE_PROTOCOL_VERSION
+                or result.bridge_version != BRIDGE_VERSION
+                or result.sdk_version != SDK_VERSION
+                or result.capabilities != self.capabilities):
+            raise AgentRuntimeError("Pi bridge SDK or capabilities mismatch", category="configuration")
 
     def snapshot(self) -> RuntimeCheckpointEnvelope:
         if self._checkpoint is None:
@@ -108,6 +124,10 @@ class PiRuntime:
         return self._checkpoint
 
     def run(self, request: AgentRuntimeRequest) -> AgentRuntimeResult:
+        with self._close_lock:
+            if self._closed or self._transport_released:
+                raise AgentRuntimeError("Pi invocation is closed", category="interrupted")
+            self._reusable = False
         missing = request.requirements.unsupported_by(self.capabilities)
         if missing:
             raise AgentRuntimeError("Unsupported Pi request capabilities: " + ", ".join(missing),
@@ -134,7 +154,7 @@ class PiRuntime:
         def emit(kind, details):
             event = RuntimeEvent(kind=kind, application_id=request.application_id, task_id=request.task_id,
                                  run_id=request.run_id, details={**details,
-                                     "instance_id": self.transport.instance_id, "hook_run_id": execution.local_run_id,
+                                     "instance_id": definition.instance_id or self.transport.instance_id, "hook_run_id": execution.local_run_id,
                                      "local_run_id": execution.local_run_id, "attempt_id": runtime_attempt_id,
                                      "sequence": len(events),
                                      "root_run_id": execution.root_run_id,
@@ -199,7 +219,7 @@ class PiRuntime:
             request=request,
             definition=definition,
             run_id=run_id,
-            instance_id=self.transport.instance_id,
+            instance_id=definition.instance_id or self.transport.instance_id,
             private_directory=self.transport.private_directory,
             execution=execution,
             hook=hook,
@@ -216,7 +236,7 @@ class PiRuntime:
             if execution.local_run_id == execution.root_run_id:
                 close_run_resources()
             else:
-                close_instance_resources(self.transport.instance_id)
+                close_instance_resources(definition.instance_id or self.transport.instance_id)
 
         try:
             if request.checkpoint_sink is not None or request.checkpoint is not None or request.requirements.checkpoint_resume:
@@ -277,7 +297,8 @@ class PiRuntime:
                     output_contract=wire_output_contract,
                     skills=[Skill(name=skill.name, description=skill.description, location=str(skill.location))
                             for skill in definition.skills],
-                    continue_session=request.continue_session or attempt > 0, record_task=request.record_task,
+                    continue_session=(request.continue_session and self._has_session) or attempt > 0,
+                    record_task=request.record_task,
                     additional_args=additional_args, checkpoint_enabled=protocol.store is not None,
                     checkpoint=request.checkpoint if attempt == 0 else None)
                 if attempt == 0 and selection.protocol == "openai_codex_responses":
@@ -286,6 +307,7 @@ class PiRuntime:
                 try:
                     response = self.transport.request(wire, run_id=run_id, observe=observe, callback=protocol.handle,
                                                       cancel_callbacks=cancel_callbacks)
+                    self._has_session = True
                 finally:
                     if login_gate is not None:
                         login_gate.release(failed=True)
@@ -343,6 +365,7 @@ class PiRuntime:
                     task = goal_continuation_prompt(goal_state)
                 attempt += 1
             emit("terminal", {"state": result.state, "steps": completed_steps, "max_steps": max_steps})
+            self._reusable = result.state == "success"
             return AgentRuntimeResult(state=result.state, output=result.output, usage=usage, events=tuple(events),
                                       checkpoint=self._checkpoint)
         except KeyboardInterrupt:
@@ -364,16 +387,26 @@ class PiRuntime:
             protocol.close()
 
     def close(self):
-        errors = []
-        try:
-            self.transport.close()
-        except BaseException as error:
-            errors.append(error)
-        try:
-            self.definition.tool_gateway.close()
-        except BaseException as error:
-            errors.append(error)
-        if len(errors) == 1:
-            raise errors[0]
-        if errors:
-            raise BaseExceptionGroup("Pi Runtime cleanup failed", errors)
+        with self._close_lock:
+            if self._closed:
+                return
+            errors = []
+            if not self._transport_released:
+                try:
+                    if self._pool is None:
+                        self.transport.close()
+                    else:
+                        self._pool.release(self.transport, self._reusable)
+                    self._transport_released = True
+                except BaseException as error:
+                    errors.append(error)
+            try:
+                self.definition.tool_gateway.close()
+            except BaseException as error:
+                errors.append(error)
+            if not errors:
+                self._closed = True
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise BaseExceptionGroup("Pi Runtime cleanup failed", errors)

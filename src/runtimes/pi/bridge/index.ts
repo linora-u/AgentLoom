@@ -525,7 +525,14 @@ async function accept(frame: Frame) {
     return;
   }
   if (frame.version !== 2 || frame.kind !== "request" || !frame.request_id?.startsWith("host:") ||
-      !frame.instance_id || (instance && instance !== frame.instance_id) || seen.has(frame.request_id)) throw new Error();
+      !frame.instance_id || seen.has(frame.request_id)) throw new Error();
+  if (instance && instance !== frame.instance_id) {
+    // A pooled process may switch logical Agents only between complete Runs.
+    // Continuations and outstanding callbacks retain their original identity.
+    if (current || callbacks.size || frame.payload?.method !== "run" || frame.payload.continue_session !== false)
+      throw new Error();
+    instance = frame.instance_id;
+  }
   if (closing) throw new Error();
   seen.add(frame.request_id);
   const p = frame.payload;

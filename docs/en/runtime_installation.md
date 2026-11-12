@@ -118,6 +118,23 @@ Pi, MCP and tool resources by default, including when concurrency is one.
 Factories and trusted Python dependencies remain in the caller. Each map keeps
 its own concurrency limit; persistence is explicit through `app.durable()`.
 
+For Pi workers without native Shell tools, one map reuses at most its concurrency
+limit of bridge processes. Node/SDK installation identity is checked once, lazily,
+in the batch owner's native scope. Each WorkItem still creates a fresh SDK session
+with its own instructions, tool factory bindings, history, execution budget and
+invocation identity. Stop continuation stays in that task's session. Processes are
+retired when the map drains, including cancellation; a failed invocation is not
+retried and its process is not reused. Nested direct invocations and workers with
+native Shell tools retain their individual process cleanup boundary. Separate map
+calls do not share a process pool.
+
+A Node version/ABI probe timeout or failure is reported as a probe error, with
+its operation and executable, rather than as a missing SDK. A failed version
+probe does not silently select a different Node ABI. Installation metadata I/O
+errors retain their error type and errno; missing or incompatible installed
+assets still require the explicit installer. No dependency check installs,
+retries or changes the runtime's model/step budgets during a Worker invocation.
+
 The resource owner uses the installed Python and psutil. It references OpenClaw
 source mechanisms and does not install, execute or package OpenClaw. The former
 `loom runtime install execution-owner` command returns a diagnostic error.

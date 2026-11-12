@@ -85,21 +85,24 @@ def _fingerprint(bridge: Path) -> str:
     return digest.hexdigest()
 
 
-def _node_abi(node: str, env: dict[str, str]) -> str:
+def _node_probe(node: str, arguments: list[str], env: dict[str, str], operation: str):
     try:
-        probe = _probe(
-            [node, "-p", "process.versions.modules"],
-            env=env,
-            capture_output=True,
-            timeout=5,
-            text=True,
-            check=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise RuntimeError("Cannot inspect the selected Node.js runtime.") from None
-    abi = probe.stdout.strip()
-    if not abi:
-        raise RuntimeError("Cannot inspect the selected Node.js runtime.")
+        return _probe([node, *arguments], env=env, capture_output=True, timeout=5, text=True, check=True)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"Pi Node.js {operation} probe timed out after 5 seconds: {node}") from error
+    except subprocess.CalledProcessError as error:
+        # Provider/npm output can contain credentials; report only the exit code.
+        raise RuntimeError(f"Pi Node.js {operation} probe exited with code {error.returncode}: {node}") from error
+    except OSError as error:
+        raise RuntimeError(f"Cannot start Pi Node.js {operation} probe (errno={error.errno}): {node}") from error
+    except subprocess.SubprocessError as error:
+        raise RuntimeError(f"Pi Node.js {operation} probe failed ({type(error).__name__}): {node}") from error
+
+
+def _node_abi(node: str, env: dict[str, str]) -> str:
+    abi = _node_probe(node, ["-p", "process.versions.modules"], env, "ABI").stdout.strip()
+    if not abi.isdecimal():
+        raise RuntimeError(f"Pi Node.js ABI probe returned an invalid ABI: {node}")
     return abi
 
 
@@ -128,7 +131,7 @@ def _ready(runtime_root: Path, identity: dict[str, str]) -> bool:
             and all((bridge / "dist" / source.with_suffix(".js").name).is_file()
                     for source in bridge.glob("*.ts"))
         )
-    except (OSError, ValueError, KeyError, TypeError):
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
         return False
 
 
@@ -148,8 +151,10 @@ def installed_pi_entry(
         identity = _identity(source_bridge, node=node, env=env)
         if _ready(runtime_root, identity):
             return runtime_root / "bridge" / "dist" / "index.js"
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
-        pass
+    except OSError as error:
+        raise RuntimeError(f"Cannot read Pi installation metadata ({type(error).__name__}, errno={error.errno})") from error
+    except (ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f"Cannot read Pi build metadata ({type(error).__name__})") from error
     raise RuntimeError("Pi SDK is not installed or its build is stale/incomplete. Run loom runtime install pi (uv run --locked loom runtime install pi in a checkout).")
 
 
@@ -161,18 +166,14 @@ def find_node(env: dict[str, str]) -> str:
         if candidate is None or candidate in inspected:
             continue
         inspected.add(candidate)
-        try:
-            probe = _probe([candidate, "--version"], env=env,
-                capture_output=True, timeout=5, text=True, check=True)
-            version = re.fullmatch(r"v(\d+)\.(\d+)\.\d+\s*", probe.stdout)
-            if version:
-                major, minor = int(version[1]), int(version[2])
-                compatible = (major, minor) >= (22, 19)
-                proxy_compatible = major >= 24 or (major == 22 and minor >= 21)
-                if compatible and (env.get("NODE_USE_ENV_PROXY") != "1" or proxy_compatible):
-                    return candidate
-        except (OSError, subprocess.SubprocessError):
-            continue
+        probe = _node_probe(candidate, ["--version"], env, "version")
+        version = re.fullmatch(r"v(\d+)\.(\d+)\.\d+\s*", probe.stdout)
+        if version:
+            major, minor = int(version[1]), int(version[2])
+            compatible = (major, minor) >= (22, 19)
+            proxy_compatible = major >= 24 or (major == 22 and minor >= 21)
+            if compatible and (env.get("NODE_USE_ENV_PROXY") != "1" or proxy_compatible):
+                return candidate
     if env.get("NODE_USE_ENV_PROXY") == "1":
         raise RuntimeError("Pi requires Node 22.21+ (22.x) or >=24 for environment proxy mode. Install a compatible Node.js runtime first.")
     raise RuntimeError("Pi requires Node >=22.19. Install a compatible Node.js runtime first.")
@@ -401,6 +402,10 @@ def pi_runtime_status(runtime_root: Path | None = None, *, source_bridge: Path |
         return {"runtime": "pi", "state": state, "root": str(runtime_root), "identity": identity}
     except RuntimeError as exc:
         return {"runtime": "pi", "state": "error", "root": str(runtime_root), "error": str(exc)}
+    except OSError as error:
+        return {"runtime": "pi", "state": "error", "root": str(runtime_root),
+                "error": f"Cannot read Pi installation metadata ({type(error).__name__}, errno={error.errno})"}
+
 
 
 def uninstall_pi(runtime_root: Path | None = None) -> str:
