@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from agentloom.execution.hooks import HookEvent, HookHandler, HookPlan, HookResult, HookRun
 from agentloom.execution.hooks.types import Blocked
+from agentloom.execution.observability import TraceRecorder
 from agentloom.execution.tool_gateway import AgentLoomToolGateway
 from agentloom.execution.tool_protocol import ToolCallRecord, ToolPolicyBlockedError
 from agentloom.execution.trace import bind_explicit_execution_context, capture_explicit_execution_context
@@ -162,10 +163,11 @@ def test_gateway_without_retrieval_tool_keeps_large_result_in_full() -> None:
     engine.compress_tool_result.assert_not_called()
 
 
-def test_gateway_compresses_only_model_projection_for_retriever() -> None:
+@pytest.mark.parametrize("trace_enabled", [True, False])
+def test_gateway_compresses_only_model_projection_for_retriever(trace_enabled) -> None:
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
-    engine = MagicMock()
-    engine.compress_tool_result.return_value = "[ContextRef ctx_123] preview"
+    recorder = MagicMock(spec=TraceRecorder)
+    recorder.project_tool_result.return_value = "[ContextRef ctx_123] preview"
     raw = "x" * 60_000
     gateway = AgentLoomToolGateway.from_tools(
         [
@@ -176,8 +178,8 @@ def test_gateway_compresses_only_model_projection_for_retriever() -> None:
 
     with (
         patch(
-            "agentloom.execution.context_engine.runtime.get_active_context_engine",
-            return_value=engine,
+            "agentloom.execution.observability.get_current_trace_recorder",
+            return_value=recorder if trace_enabled else None,
         ),
         _bind(run),
     ):
@@ -189,14 +191,21 @@ def test_gateway_compresses_only_model_projection_for_retriever() -> None:
 
     assert record.output == raw
     assert record.direct_result() == raw
-    assert record.model_content() == "[ContextRef ctx_123] preview"
-    engine.compress_tool_result.assert_called_once()
+    if trace_enabled:
+        assert record.model_content() == "[ContextRef ctx_123] preview"
+        recorder.project_tool_result.assert_called_once_with(
+            raw, tool_name="large_tool", source="tool_result:large_tool", call_id="large-call",
+        )
+    else:
+        assert record.model_content() == raw
+        recorder.project_tool_result.assert_not_called()
 
 
-def test_gateway_serializes_structured_model_projection_deterministically() -> None:
+@pytest.mark.parametrize("trace_enabled", [True, False])
+def test_gateway_serializes_structured_model_projection_deterministically(trace_enabled) -> None:
     run = HookRun(HookPlan(), local_run_id="local", root_run_id="root")
-    engine = MagicMock()
-    engine.compress_tool_result.return_value = "[ContextRef ctx_json] preview"
+    recorder = MagicMock(spec=TraceRecorder)
+    recorder.project_tool_result.return_value = "[ContextRef ctx_json] preview"
     raw = {"z": ["payload" * 100], "a": 1}
     gateway = AgentLoomToolGateway.from_tools(
         [
@@ -207,8 +216,8 @@ def test_gateway_serializes_structured_model_projection_deterministically() -> N
 
     with (
         patch(
-            "agentloom.execution.context_engine.runtime.get_active_context_engine",
-            return_value=engine,
+            "agentloom.execution.observability.get_current_trace_recorder",
+            return_value=recorder if trace_enabled else None,
         ),
         _bind(run),
     ):
@@ -219,10 +228,16 @@ def test_gateway_serializes_structured_model_projection_deterministically() -> N
         )
 
     assert record.output == raw
-    assert record.model_output() == "[ContextRef ctx_json] preview"
-    assert engine.compress_tool_result.call_args.args[0] == (
-        '{"a":1,"z":["' + ("payload" * 100) + '"]}'
-    )
+    serialized = '{"a":1,"z":["' + ("payload" * 100) + '"]}'
+    if trace_enabled:
+        assert record.model_output() == "[ContextRef ctx_json] preview"
+        recorder.project_tool_result.assert_called_once_with(
+            serialized, tool_name="structured_tool", source="tool_result:structured_tool", call_id="structured-call",
+        )
+    else:
+        assert record.model_output() == raw
+        assert record.model_content() == serialized
+        recorder.project_tool_result.assert_not_called()
 
 
 def test_structured_model_content_has_stable_key_order() -> None:
