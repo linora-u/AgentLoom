@@ -515,9 +515,20 @@ def _append_hook_handler(agent, event, callback, *, source="test"):
     agent._hook_plan = HookPlan((*agent._hook_plan.handlers, HookHandler(event, "*", callback, source=source)))
 
 
+@pytest.fixture(params=["full", "off"])
+def trace_mode(request):
+    from agentloom.config.config import bind_config
+
+    config = unit_config(Path(__file__).resolve().parents[3])
+    config.raw["runtime"]["trace"]["mode"] = request.param
+    with bind_config(config):
+        yield request.param
+
+
 def test_runtime_definition_contains_complete_neutral_runtime_input(
     monkeypatch,
     tmp_path,
+    trace_mode,
 ):
     model_binding = _model_binding(
         max_tokens=64_000,
@@ -581,10 +592,8 @@ def test_runtime_definition_contains_complete_neutral_runtime_input(
     assert definition.project_root == str(tmp_path)
     assert definition.runtime_options["max_consecutive_model_errors"] == 7
     assert definition.metadata == {}
-    assert tuple(item.name for item in definition.tool_gateway.definitions) == (
-        "proof",
-        "loom_retrieve_context",
-    )
+    expected_tools = ("proof", "loom_retrieve_context") if trace_mode == "full" else ("proof",)
+    assert tuple(item.name for item in definition.tool_gateway.definitions) == expected_tools
 
 
 def test_each_invocation_builds_and_closes_a_fresh_runtime(monkeypatch):
@@ -2360,7 +2369,7 @@ def test_goal_tools_are_absent_when_goal_mode_is_disabled(monkeypatch, goal):
     assert agent._build_runtime_tools(agent._role_profile()) == []
 
 
-def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
+def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch, trace_mode):
     agent = DummyGoalAgent(
         config={
             "name": "goal-runtime",
@@ -2377,7 +2386,10 @@ def test_goal_tools_are_added_only_for_enabled_root_supervisor(monkeypatch):
     gateway = agent._build_tool_gateway()
     names = {tool.name for tool in gateway.definitions}
 
-    assert names == {"get_goal", "update_goal", "loom_retrieve_context"}
+    expected_tools = {"get_goal", "update_goal"}
+    if trace_mode == "full":
+        expected_tools.add("loom_retrieve_context")
+    assert names == expected_tools
     assert {entry.owner for entry in gateway.manifest} == {"platform"}
 
 

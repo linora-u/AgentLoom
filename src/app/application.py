@@ -6,7 +6,7 @@ import hashlib
 import json
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from contextvars import ContextVar, copy_context
 from copy import deepcopy
 from pathlib import Path
@@ -502,8 +502,9 @@ class Application:
         with bind_config(self.project_config):
             try:
                 from agentloom.execution.managed_process import managed_attempt_scope
+                from agentloom.runtimes.pi.batch import invocation_transport_scope
 
-                with managed_attempt_scope(independent=True):
+                with managed_attempt_scope(independent=True), invocation_transport_scope():
                     agent = (
                         agent_factory()
                         if agent_factory is not None
@@ -593,6 +594,7 @@ class Application:
         input_validator: Callable[[Any], None] | None = None,
         definition_revision: str | None = None,
         config_revision: str | None = None,
+        runtime_id: str | None = None,
         failure_mode: str = "collect",
         stop_token: Any = None,
         event_sink: Callable[[BatchEvent], None] | None = None,
@@ -613,6 +615,7 @@ class Application:
                 input_validator=input_validator,
                 definition_revision=definition_revision,
                 config_revision=config_revision,
+                runtime_id=runtime_id,
                 failure_mode=failure_mode,
                 stop_token=stop_token,
                 event_sink=event_sink,
@@ -641,22 +644,25 @@ class Application:
                 self.lifecycle.register_batch_record(self.runtime_context, batch_id)
                 initial = False
 
+        from agentloom.runtimes.pi.batch import batch_transport_scope
+
         try:
-            return run_batch(
-                plan=plan,
-                batch_id=batch_id,
-                run_id=self.runtime_context.run_id,
-                worker_identity=worker_identity,
-                execution=execution,
-                control=control,
-                invoke=invoke,
-                persist=persist,
-                failure_mode=failure_mode,
-                stop_token=stop_token,
-                event_sink=event_sink,
-                definition_revision=definition_revision,
-                config_revision=config_revision,
-            )
+            with (batch_transport_scope(execution.concurrency) if runtime_id == "pi" else nullcontext()):
+                return run_batch(
+                    plan=plan,
+                    batch_id=batch_id,
+                    run_id=self.runtime_context.run_id,
+                    worker_identity=worker_identity,
+                    execution=execution,
+                    control=control,
+                    invoke=invoke,
+                    persist=persist,
+                    failure_mode=failure_mode,
+                    stop_token=stop_token,
+                    event_sink=event_sink,
+                    definition_revision=definition_revision,
+                    config_revision=config_revision,
+                )
         finally:
             _ACTIVE_BATCH_OWNER.reset(active)
             with self._condition:
@@ -810,6 +816,7 @@ class BoundWorker:
             items,
             worker_identity=self.identity,
             execution=execution,
+            runtime_id=self._definition.get("agent_runtime"),
             invoke=self._invoke,
             input_validator=self._input_validator,
             definition_revision=self.definition_revision,

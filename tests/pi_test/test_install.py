@@ -356,3 +356,54 @@ def test_install_runtime_command_is_discoverable_and_rejects_unknown_runtime():
     assert main.commands["runtime"].callback.__module__ == "agentloom.runtimes.pi.cli"
     assert "install" in runner.invoke(main, ["runtime", "--help"]).output
     assert runner.invoke(main, ["runtime", "install", "unknown"]).exit_code == 2
+
+
+def test_node_abi_timeout_is_not_misreported_as_missing_sdk(installation, monkeypatch):
+    from agentloom.runtimes.pi import install
+
+    def timeout(command, **options):
+        raise subprocess.TimeoutExpired(command, options['timeout'])
+
+    monkeypatch.setattr(install, '_probe', timeout)
+    monkeypatch.setattr(install, 'find_node', lambda env: '/fixture/node')
+    with pytest.raises(RuntimeError, match='ABI probe timed out') as raised:
+        install.installed_pi_entry(runtime_root(installation), source_bridge=source_bridge(installation))
+    assert isinstance(raised.value.__cause__, subprocess.TimeoutExpired)
+    status = install.pi_runtime_status(runtime_root(installation), source_bridge=source_bridge(installation))
+    assert status['state'] == 'error' and 'ABI probe timed out' in status['error']
+
+
+def test_node_version_probe_timeout_does_not_select_another_abi(monkeypatch):
+    from agentloom.runtimes.pi import install
+
+    commands = []
+    monkeypatch.setattr(install.os, 'get_exec_path', lambda env: ['/first', '/second'])
+    monkeypatch.setattr(install.shutil, 'which', lambda name, path: path + '/node')
+
+    def probe(command, **options):
+        commands.append(command)
+        if command[0] == '/first/node':
+            raise subprocess.TimeoutExpired(command, options['timeout'])
+        return subprocess.CompletedProcess(command, 0, 'v24.15.0\n', '')
+
+    monkeypatch.setattr(install, '_probe', probe)
+    with pytest.raises(RuntimeError, match='version probe timed out'):
+        install.find_node({})
+    assert commands == [['/first/node', '--version']]
+
+
+def test_unreadable_installation_metadata_is_not_reported_as_missing(installation, monkeypatch):
+    import errno
+
+    from agentloom.runtimes.pi import install
+
+    original = Path.read_text
+
+    def read_text(path, *args, **kwargs):
+        if path == runtime_root(installation) / install.READY_MANIFEST:
+            raise OSError(errno.EMFILE, 'fixture descriptor limit')
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', read_text)
+    with pytest.raises(RuntimeError, match='installation metadata.*errno=24'):
+        install.installed_pi_entry(runtime_root(installation), source_bridge=source_bridge(installation))
